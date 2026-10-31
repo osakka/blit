@@ -1,6 +1,6 @@
 # ADR 0187: Curvature and glow are presentation effects, drawn as the GPU presents
 
-- Status: accepted (2026-10-26, after the measurement below)
+- Status: accepted; in use since 0.2.28
 - Date: 2026-10-26
 - Scope: effects registry, GLES compositor, pointer input, effects API and
   settings, diagnostics

@@ -1,8 +1,8 @@
 # Effect testing
 
-Pane effects (ADR 0186, 0187) are renderer state, not terminal state. They are kept
-per pane in the settings document, keyed by output name and pane ordinal, and
-applied live:
+Pane effects (ADR 0186, 0187) are renderer state, not terminal state. They are
+kept per pane in the settings document, keyed by output name and pane ordinal,
+and applied live:
 
 ```json
 "effects": {
@@ -35,14 +35,16 @@ ruby tools/tests/pane_effects_gate.rb
 BLIT_GATE_BACKEND=gles ruby tools/tests/pane_effects_gate.rb
 ```
 
-Presentation effects and the switches (ADR 0187) are checked by
-`tools/tests/presentation_effects_gate.rb`, also on one display split 1x2.
+Presentation effects and the switches (ADR 0187; the animated ones, ADR 0188
+and 0190) are checked by `tools/tests/presentation_effects_gate.rb`, also on
+one display split 1x2. Both gates are in the renderer suite.
 
 On `gles` it checks:
 - **warp:** pane 1 is captured plain, then with curvature 100. Each sampled
   warped pixel is predicted from the plain capture with the shared warp and
   the shader's linear sampling, wherever the 2×2 texels it reads are one
-  colour (over 11,000 pixels); outside the tube it must be black;
+  colour (more than 5,000 must be compared); outside the tube it must be
+  black;
 - **glass scanlines:** with curvature and scanlines over a flat colour, every
   odd screen row is darkened by the shared rule and every even row is not.
   So they are drawn once, with no moiré and no flattening;

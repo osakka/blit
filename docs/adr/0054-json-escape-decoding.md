@@ -1,5 +1,7 @@
 # 0054 — Decode JSON string escapes at the API boundary
 
+- Status: accepted
+
 ## Context
 
 The terminal-input API accepts JSON strings that carry raw terminal control

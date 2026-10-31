@@ -1,8 +1,7 @@
 # ADR 0182: desktop video stays on the PTY
 
-- Status: accepted (the owner's decision, 2026-10-25). Proposed earlier the
-  same day as "desktop video off the PTY"; the file keeps its name so links
-  hold.
+- Status: superseded by ADR 0202
+- Note: proposed earlier the same day as "desktop video off the PTY"; the file keeps its name so links hold.
 - Date: 2026-10-25
 - Scope: Hibr desktop image transport, held sessions, ADR 0066, ADR 0166
 

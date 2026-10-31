@@ -7,7 +7,7 @@ contract, but may not redefine it.
 
 ## Schema-first workflow
 
-The schema is the source of truth for the public contract:
+To change the public contract:
 
 1. Define or change resources, commands, events, and errors in the schema.
 2. Review compatibility, examples, and behavior in documentation.
@@ -56,9 +56,10 @@ The initial schema should eventually cover:
 ## Transport independence
 
 The schema defines messages and semantics, not sockets, ports, framing, or
-serialization libraries. Candidate transports may include a Unix-domain local
-transport and a network transport, but those are implementation decisions until
-their security and operational requirements are documented.
+serialization libraries. A new transport is an implementation decision until
+its security and operational requirements are documented. The one local
+transport so far, picture frames passed by descriptor over a Unix socket, is
+documented in ADR 0202.
 
 ## Error model
 
@@ -91,7 +92,8 @@ Terminal text crosses the PTY boundary as UTF-8 and is represented internally
 as revisioned cells. Multi-output frame atomicity is defined at the scene
 commit boundary; physical scanout timing remains a capability/evidence
 question, not an excuse to weaken the state contract. Bitmap assets are
-supported only through explicitly bounded overlay/pixel-frame resources.
+supported only through explicitly bounded resources: overlays, pixel frames,
+terminal images and frames passed by descriptor.
 
 Future transport or encoding additions must preserve these resource semantics,
 be added to the schema and API guide together, and receive an ADR when they

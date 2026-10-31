@@ -1,6 +1,6 @@
 # ADR 0135: stable native desktop client names
 
-- Status: implemented/API-deployed550; native names verified, wallpaper restart acceptance pending
+- Status: accepted
 - Date: 2026-10-18
 - Issue: Blit#103 (Hibr#284)
 
@@ -18,7 +18,7 @@ new settings store or API resource is introduced.
 
 One helper supplies both launch paths. Owner UID, PID/start-time and native
 geometry checks remain mandatory. Refuse an occupied auxiliary native name;
-detect both repeated exact names (observed in installed Hibr0.99.250) and
+detect both repeated exact names (observed in installed Hibr 0.99.250) and
 `name#N` collision suffixes rather than associating an unrelated base client.
 No automatic fallback to another name and no second controller.
 

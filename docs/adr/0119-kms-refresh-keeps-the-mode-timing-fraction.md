@@ -1,6 +1,6 @@
 # ADR 0119: KMS refresh keeps the mode timing fraction
 
-- Status: accepted
+- Status: accepted; in use since 0.1.533
 - Date: 2026-10-17
 - Issue: [Blit #92](https://git.home.arpa/itdlabs/blit/issues/92)
 

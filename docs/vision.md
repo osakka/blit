@@ -40,7 +40,7 @@ is insufficient.
     pixel-oriented arcade/emulation sessions, with refresh-aware presentation
     and observable input latency.
 
-## Non-goals for the first release
+## Non-goals
 
 - A full X11 or Wayland compatibility layer.
 - A general-purpose desktop window manager or compositor.
@@ -53,7 +53,7 @@ is insufficient.
 - A claim that Kitty or sixel alone is a high-rate emulator frame transport;
   graphical emulation requires the bounded API-owned graphic canvas path.
 
-## Initial vocabulary
+## Vocabulary
 
 - **Server**: the long-lived blit process and its public API.
 - **Terminal session**: a managed PTY-backed process/session with input,

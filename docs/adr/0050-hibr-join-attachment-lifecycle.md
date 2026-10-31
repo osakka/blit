@@ -1,6 +1,6 @@
 # ADR 0050: Treat Hibr joins as failing attachments when their client exits
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

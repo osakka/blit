@@ -1,9 +1,9 @@
-# ADR0171: native font coverage precedes the wide bitmap
+# ADR 0171: native font coverage precedes the wide bitmap
 
+- Status: accepted
 - Date: 2026-10-21
-- Status: implemented; physical acceptance pending
 - Tracking: [118](https://git.home.arpa/itdlabs/blit/issues/118)
-- Refines ADR0062; preserves ADR0163 emoji presentation.
+- Refines ADR 0062; preserves ADR 0163 emoji presentation.
 
 ## Evidence and decision
 
@@ -29,4 +29,4 @@ the real wide font, U+2615 and the primary outline/colour reference at all
 still chooses Unifont. Native pixels are exact; existing SDL tolerances remain.
 Tests must name their actual backend/profile and must not be described as
 physical acceptance. Literal upstream question marks, unknown characters and
-missing branded artwork are separate investigation/delivery items in118.
+missing branded artwork are separate investigation/delivery items in 118.

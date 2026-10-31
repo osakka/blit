@@ -1,5 +1,7 @@
 # ADR 0094: Use Hibr module ABI for runtime compatibility
 
+- Status: accepted
+
 ## Context
 
 Hibr `--version` reports both a release version and a numeric module ABI. Hibr's

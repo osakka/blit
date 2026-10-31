@@ -1,6 +1,6 @@
 # ADR-0075: Pane grids are quantized inside physical pane regions
 
-Status: Accepted
+- Status: accepted; in use since 0.1.536
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR 0077: Hibr joins mirror one authoritative desktop
 
-- Status: superseded by [ADR 0078](0078-hibr-joins-are-independent-viewports.md)
+- Status: superseded by ADR 0078
 - Date: 2026-10-15
 - Scope: Hibr `desktop --join`, surface ownership, graphics, and input routing
 

@@ -1,9 +1,7 @@
 # ADR 0106: Changed KMS terminal views rebuild the scene
 
-## Status
-
-Superseded by [ADR 0108](0108-surface-local-kms-damage-boundary.md) —
-2026-10-17.
+- Status: superseded by ADR 0108
+- Note: superseded by [ADR 0108](0108-surface-local-kms-damage-boundary.md) on 2026-10-17.
 
 ## Decision
 

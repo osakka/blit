@@ -1,18 +1,18 @@
-# ADR0179: exact integer raster blending without per-channel division
+# ADR 0179: exact integer raster blending without per-channel division
 
-- Status: deployed in0.2.1 development canary; desktop performance acceptance pending
+- Status: accepted
 - Date: 2026-10-22
-- Scope: internal125/122; canonical raster compositor, no protocol/font change
+- Scope: internal 125/122; canonical raster compositor, no protocol/font change
 
 Native composition invokes the shared raster blend callback per glyph pixel.
-The TCC coverage branch emits six integer divisions, including coverage0/255.
+The TCC coverage branch emits six integer divisions, including coverage 0/255.
 This is confirmed work, not function-level attribution of live frame time.
 
-For8-bit channels and alpha, replace `(product+127)/255` with the exact
-bounded identity `((product+128)*257)>>16`. Products are0..65025; the largest
-intermediate fits unsigned32 bits. Keep one canonical production blender.
-Coverage0/255 can return the masked24-bit background/foreground directly.
-Do not apply an alpha0 shortcut to arbitrary premultiplied RGBA: existing
+For 8-bit channels and alpha, replace `(product+127)/255` with the exact
+bounded identity `((product+128)*257)>>16`. Products are 0..65025; the largest
+intermediate fits unsigned 32 bits. Keep one canonical production blender.
+Coverage 0/255 can return the masked 24-bit background/foreground directly.
+Do not apply an alpha 0 shortcut to arbitrary premultiplied RGBA: existing
 invalid-premultiplication saturation behaviour must also remain identical.
 Retain invalid glyph/coordinate/format returns, foreground-independent colour
 glyphs, source stride, clipping consumers and all antialiasing samples.

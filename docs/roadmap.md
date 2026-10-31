@@ -84,12 +84,31 @@ already be fixed.
 - Emoji sequences end to end in the terminal, not only in the raster (#110).
 - Arabic typography reviewed on screen (#119).
 - Solid window moves through Hibr using rectangle copy (#120).
+- Kitty keyboard Super events end to end with Hibr (#116, Hibr #326,
+  ADR 0169).
 
 ### 5. Housekeeping
 
 - The gate runner must stop cleanly on Ctrl+C (#106); one entry point and CI
   for the gates (#27); a GPU in the gate suite (#79).
 - Intermittent loss of fake input devices in a gate (#124).
+- Dead diagnostics: `pointer_cache_hits`/`misses` are reported but never
+  counted; `tools/diagnostics/verify-live-physical.sh` looks for
+  `graphics_changed=1` and `analyze-experience.py` for
+  `graphics_texture_uploads`, neither of which the server emits. Count them
+  or remove them.
+- Overlay `DELETE /v1/overlays/{id}` parses a bare number, so the
+  `overlay-N` id that create and list return matches nothing.
+- The stream's `pixel_frame_end` and `pixel_frame_hide` client messages have
+  no schema in the OpenAPI.
+- Rotation leftovers in diagnostics: `viewport_width/height` (always the
+  render size) and `scale_x/y` (always 1).
+- The live gates `physical_multi_display_gate.rb` and
+  `screenshot_nonblocking_gate.sh` send no bearer token, so they cannot pass
+  against an installed host.
+- `pty_input_echo.c --kitty-limits` sizes its uploads for 8 images; the store
+  holds 16 since 0.3.17.
+- `tools/tests/font_fallback_gate.c` is in no suite.
 - The QEMU visuals probe expects scanlines its staging no longer turns on
   (`tools/probes/ppm_assert.c --visuals`); give it an `effects` document.
 

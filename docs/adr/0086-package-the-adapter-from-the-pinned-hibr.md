@@ -1,5 +1,7 @@
 # ADR 0086: Package the adapter from the pinned Hibr checkout
 
+- Status: accepted
+
 ## Context
 
 `console-blit.so` is compiled against Hibr's module ABI. The TCC adapter gate

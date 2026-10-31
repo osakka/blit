@@ -1,10 +1,10 @@
 # ADR 0090: full-frame composition has an explicit workload budget
 
-> The OpenGLES2 cache policy in this ADR is superseded by [ADR 0099](0099-ping-pong-scene-cache-for-sdl-damage.md). The workload budget and deadline evidence remain required.
-
 - Status: accepted
 - Date: 2026-10-16
 - Scope: SDL composition timing, performance evidence, and scene-cache policy
+
+> The OpenGLES2 cache policy in this ADR is superseded by [ADR 0099](0099-ping-pong-scene-cache-for-sdl-damage.md). The workload budget and deadline evidence remain required.
 
 ## Context
 

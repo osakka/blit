@@ -1,6 +1,6 @@
 # ADR 0186: Effects are per pane, local, and drawn by both compositors
 
-- Status: accepted (the owner's decision, 2026-10-25)
+- Status: accepted
 - Date: 2026-10-25
 - Scope: effects API and settings, both KMS compositors, diagnostics
 - Replaces: the global `/v1/effects` scanlines effect

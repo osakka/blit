@@ -1,8 +1,6 @@
 # ADR-0027: Invalidate the cached scene on cursor visibility transitions
 
-## Status
-
-Accepted
+- Status: accepted
 
 ## Decision
 

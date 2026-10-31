@@ -1,445 +1,181 @@
-# hibr integration
+# Hibr integration
 
-For glyph selection and colour icons, use the [font developer reference](font-reference.md).
-It covers API discovery, complete generated categories, semantic mappings,
-width/UTF-8 rules and fallbacks without modifying Hibr core.
+How the Hibr desktop runs on Blit today. For glyphs and colour icons, see
+the [font and glyph reference](font-reference.md); for solid window moves,
+the [rectangle-copy contract](rectangle-copy.md).
 
-For opt-in solid window movement, see the
-[rectangle-copy contract](rectangle-copy.md). Standard DECCRA capability at
-Blit is not evidence that the complete Hibr/hold route supports forwarding it.
+## The boundary
 
-## Decision
+Blit is a standalone display server. Hibr is a program that runs in Blit's
+terminal sessions. Hibr's native console writes the desktop, Kitty images
+and Sixel to a PTY; Blit parses that stream exactly as it would Kitty's or
+xterm's ([ADR 0079](adr/0079-hibr-desktop-uses-the-native-pty-boundary.md)).
+Blit owns the monitors, input, panes and the API; Hibr owns its desktop,
+windows and session lifecycle.
 
-blit remains the standalone display server. The Hibr desktop is an external
-client of Blit's OpenAPI and WebSocket contracts. The `console-blit` Hibr
-module implements the existing `console`/`display` boundary for standalone
-programs that explicitly request an API-owned surface. It is a
-transport/provider adapter, not a desktop implementation. The packaged held
-desktop uses Hibr's native console and Blit's PTY terminal parser so hold
-clients receive the same stream as Kitty and xterm.
+```text
+ Hibr login screen, desktop, desktop --join      Hibr's Control Panel
+          │ PTY: text, Kitty, Sixel                       │ HTTP API
+          │ frame socket: pictures by memfd               │
+          ▼                                               ▼
+ ┌───────────────────────────── blit ──────────────────────────────┐
+ │ terminal emulator · panes per monitor · input · login manager    │
+ └───────────────────────────────┬──────────────────────────────────┘
+                                 │ DRM/KMS
+                                 ▼
+                             monitors
+```
 
-Blit starts terminal children with `DT_BIDI=on` and `HIBR_GFX=kitty` by
-default. This is intentional: Blit stores and draws cells in display order,
-so Hibr must perform right-to-left ordering, while Hibr's console still uses
-the Kitty graphics protocol. An API session may explicitly override either
-environment value when integrating a different terminal client.
+Blit's state is never linked into Hibr, and Hibr never becomes a second
+owner of display state, so other clients can use Blit without Hibr. Blit
+does not modify Hibr; it runs Hibr's installed commands through a few
+Blit-owned entry scripts in `/usr/share/blit/hibr/`.
 
-The login manager's authenticated `auth run` boundary starts the selected
-desktop with a clean environment. Therefore the Blit-owned
-`blit-session.hibr` entrypoint reasserts these defaults (and
-`COLORTERM=truecolor`) after authentication, while preserving explicit
-overrides. Without this boundary reassertion Hibr correctly falls back to
-half-block wallpaper even though the Blit PTY advertises Kitty support.
+The package is built against a pinned Hibr version and ABI
+(`packaging/HIBR_VERSION`, `packaging/HIBR_ABI`;
+[ADR 0094](adr/0094-hibr-abi-is-the-runtime-compatibility-contract.md)).
+`GET /v1/diagnostics/runtime` reports the pinned and running Hibr under
+`hibr_compatibility`.
 
-Blit implements the Kitty placement model: `x y w h` crop the image, `X Y`
-offset within the cell, `p` numbers up to 8 placements per image, and
-`a=d` supports the `a i c p q x y z` targets
+## Session environment
+
+Every program Blit starts gets `TERM=xterm-kitty`, `COLORTERM=truecolor`,
+`HIBR_GFX=kitty` and `DT_BIDI=on`. Blit stores and draws cells in display
+order, so Hibr does the right-to-left ordering; Hibr's console uses Kitty
+graphics. An API request may override either value. The full list of
+variables Blit sets is in [`blit(8)`](../man/blit.8). Those a Hibr
+maintainer meets most:
+
+- `BLIT_SESSION_ID`, `BLIT_SURFACE_ID`, `BLIT_PANE_ID` (when the session is
+  in a pane) and `BLIT_SERVER_PORT`: the session's identity.
+- `BLIT_VERSION`: the server's version, the same as `GET /v1/version`'s
+  `server_version`. Key Blit-only features on it: the battery and volume
+  icons (ADR 0196) need 0.2.38 or later. It is not `TERM_PROGRAM`, which
+  Hibr uses to name a display.
+- `BLIT_FRAME_SOCKET`, `BLIT_FRAME_TOKEN`: pictures by descriptor (below).
+- `BLIT_VTNR`: the virtual terminal Blit holds, for the login's seat.
+- `BLIT_SESSION_TOKEN` and `BLIT_API_TOKEN`: two different credentials,
+  used only by the optional adapter (below).
+
+Kitty placement follows the Kitty model: `x y w h` crop, `X Y` offset in
+the cell, up to 8 placements per image with `p`, and `a=d` with the
+`a i c p q x y z` targets
 ([ADR 0060](adr/0060-kitty-placements-source-rectangles-and-delete-targets.md)).
-Keys it does not implement are refused and reported in
-`graphics_diagnostics.last_error` rather than ignored. Hibr's emitter uses
-only whole-image display and the `I`/`A` deletes, which are unchanged.
-
-Blit's state engine must not be linked into hibr, and hibr must not become a
-second owner of display state. This preserves process isolation and lets other
-clients use blit without hibr.
+Keys Blit does not implement are refused and reported in
+`graphics_diagnostics.last_error`, not ignored. The
+[terminal reference](terminal.md) has the full protocol.
 
 ## Login manager
 
-Blit #83 adds one root-owned login boundary without changing Hibr. A packaged
-service with `BLIT_LOGIN_AUTOSTART=1` starts Blit's `blit-login.hibr` entrypoint
-through a Blit PTY. That entrypoint explicitly loads Hibr's `sys` module, then
-sources the installed `login/login.hibr`; Hibr performs PAM authentication and
-uses `auth run` to start the person's selected desktop or shell; Blit retains
-KMS, evdev, and the network API for the whole session.
+With `BLIT_LOGIN_AUTOSTART=1`, which the package sets, Blit starts Hibr's
+login screen on the first display
+([ADR 0083](adr/0083-blit-root-owned-hibr-login-manager.md)). The command is
+`/usr/bin/hibr /usr/share/blit/hibr/blit-login.hibr`. That script loads
+Hibr's `sys` module, sets `LG_SEAT=seat0` and `LG_VTNR` from `BLIT_VTNR` so
+the login is a local seat session, and sources Hibr's own
+`login/login.hibr`. Hibr does PAM, the screen and the choice of session;
+Blit keeps KMS, input and the API throughout.
 
-The resource is API-controlled:
+Hibr runs `LG_SESSIONCMD` as the signed-in user. Blit's hook,
+`blit-login-session.hibr`, starts either the user's shell or the held
+desktop, `blit-session.hibr --session=desktop --resume`, with
+`HIBR_SIGNEDIN=1` so a resumed desktop does not show its saver or lock
+again. Logout retires the login PTY and Blit starts a fresh login screen.
+
+Hibr clears the environment before the hook runs, so Blit learns who signed
+in another way. It passes the hook a private socket descriptor
+(`--blit-handoff-fd`) and a client name (`--blit-client-name`); the hook
+sends the chosen session kind, and Blit checks the sender's kernel
+credentials ([ADR 0125](adr/0125-authenticated-login-identity-handoff.md)).
+It then finds the named desktop client in Hibr's `hold list` and
+`hold clients`, as that user, and associates it with the login
+([ADR 0126](adr/0126-native-login-desktop-association.md)). The session then
+reports `hibr_desktop.role` as `primary`. If the handoff fails, sign-in
+still works; only the automatic joins below are off.
+
+The login screen is an API resource:
 
 ```sh
-curl --fail --request POST \
-  --header 'Content-Type: application/json' \
-  --data '{}' http://127.0.0.1:8080/v1/login
+curl --fail -X POST -H 'Content-Type: application/json' -d '{}' \
+  http://127.0.0.1:8080/v1/login     # start it, or move it to another pane
 curl --fail http://127.0.0.1:8080/v1/login
-curl --fail --request DELETE http://127.0.0.1:8080/v1/login
+curl --fail -X DELETE http://127.0.0.1:8080/v1/login
 ```
 
-Blit's `blit-login.hibr` is only the module-loading compatibility seam; it does
-not implement the login screen. Hibr's sourced script remains the source of
-truth for PAM, screen behavior, and session selection. Blit's
-`blit-login-session.hibr` is the `LG_SESSIONCMD` hook. It starts the
-existing Blit-owned desktop entrypoint for `desktop` and the user's shell for
-`shell`; it does not implement authentication or desktop behavior. Logout
-retires the login PTY and Blit starts a fresh login screen. Hibr's root-path
-PAM/logind test is tracked by [Hibr #79](https://git.home.arpa/itdlabs/hibr/issues/79).
-Blit does not close or modify that Hibr issue.
+When a signed-in session exits and the login screen returns,
+`GET /v1/diagnostics/runtime` has one `login_session_exit` entry with the
+session, its state and exit code. A PAM refusal stays inside Hibr's login
+screen and leaves no such entry.
 
-If an authenticated child exits and the login screen returns, inspect
-`GET /v1/diagnostics/runtime` immediately. The bounded diagnostic log contains
-one `login_session_exit` event with the retired session ID, state, and exit
-code. This distinguishes a PAM refusal, which stays in Hibr's login screen,
-from a desktop/session handoff that exited; it does not expose passwords or
-copy Hibr's private login log into Blit.
+## The desktop entry script
 
-```text
-hibr desktop / desktop --join
-        |
-OpenAPI + WebSocket client boundary
-        |
-standalone blit server
-        |
-direct DRM/KMS outputs
-```
+`/usr/share/blit/hibr/blit-session.hibr` starts a desktop or a join:
 
-## Compatibility probe
+- It loads Hibr's `img`, `pty`, `term` and `hold` modules, then executes
+  Hibr's installed `/usr/share/hibr/desktop/session.hibr` at its own path,
+  because the session finds its sibling `desktop.hibr` from `$0`
+  ([ADR 0095](adr/0095-execute-installed-hibr-session-at-its-own-path.md)).
+  `BLIT_HIBR_DESKTOP_SESSION` names another session file, for test fixtures.
+- It reasserts `DT_BIDI=on`, `HIBR_GFX=kitty` and `COLORTERM=truecolor` when
+  they are unset, because the login boundary starts the desktop with a clean
+  environment; without them Hibr falls back to half-block wallpaper
+  ([ADR 0097](adr/0097-reassert-hibr-terminal-contract-after-login.md)).
+- It sets `DT_TERMMS=0` unless the caller set it: Blit already paces
+  redraws to the display, so Hibr's 70 ms throttle is not needed.
+- For a join with `BLIT_HIBR_PANE_ROW` and `BLIT_HIBR_PANE_COL`, it runs
+  `hold attach` at those coordinates and never moves the primary.
 
-The packaged Blit integration runs the unchanged Hibr desktop through the
-package's Hibr entrypoint. That entrypoint loads Hibr's existing `img`, `pty`,
-`term`, and `hold` modules in one Hibr process, then sources the stock
-`session.hibr`. Hibr's native console writes the desktop's terminal and
-Kitty/Sixel stream to the PTY, which Blit parses for both the primary and every
-joined hold client. The complete Hibr
-desktop tree must remain installed in Hibr's own standard locations, including
-`desktop.hibr`, `wm/`, `widgets/`, themes, applications, and control-panel
-files.
-
-The packaged entrypoint executes `/usr/share/hibr/desktop/session.hibr` as
-Hibr's script entrypoint for the terminal-provider path. This is required
-because Hibr's session resolves its sibling `desktop.hibr` from its own
-`$0`; sourcing it through a Blit wrapper would redirect that import into the
-Blit directory. It does not copy or symlink Hibr's desktop tree into a
-Blit-owned directory; that would create a second path model and could omit a
-sibling such as `system/`, which is where Hibr registers Control Panel,
-Catalogue, Modules, and Task Manager. QEMU fixtures may override
-`BLIT_HIBR_DESKTOP_SESSION` with their complete staged Hibr tree.
-
-Start the direct server binary, with no Blit shell launcher involved:
+To start a desktop through the API instead of the login screen:
 
 ```sh
-BLIT_BIND_ADDRESS=127.0.0.1 blit 8080
-```
-
-The packaged default binds to `0.0.0.0` for network clients. Keep the explicit
-loopback override above when Hibr and Blit are intentionally local, or set
-`BLIT_AUTH_TOKEN` and firewall the API when it must be reachable remotely.
-
-The Debian package's `/usr/bin/blit` is only a symlink to the native
-`blit-server` binary. It is not a shell wrapper. When a client creates a
-terminal session, Blit uses the command path and argument vector from the
-schema directly with `execve(2)`. Hibr therefore remains the executable and
-the owner of desktop/session behavior; the repository's shell probes are
-limited to QEMU staging, build, and regression-test orchestration.
-
-For an explicitly API-owned desktop (not an already authenticated login
-manager), create the primary using the packaged entrypoint and authoritative
-display geometry:
-
-```sh
-curl --fail --request POST \
-  --header 'Content-Type: application/json' \
-  --data '{"command":"/usr/share/blit/hibr/blit-session.hibr","arguments":["--session","blit","--name","display-1"],"display_id":"display-1","surface_mode":"terminal"}' \
+curl --fail -X POST -H 'Content-Type: application/json' \
+  -d '{"command":"/usr/share/blit/hibr/blit-session.hibr","arguments":["--session","blit","--name","display-1"],"display_id":"display-1","surface_mode":"terminal"}' \
   http://127.0.0.1:8080/v1/terminal-sessions
 ```
 
-Use `/usr/bin/desktop` only when deliberately testing Hibr without Blit's API
-and renderer. The packaged entrypoint uses the same native Hibr terminal
-provider while Blit remains the presentation boundary.
+Hibr's `desktop` defines the options; Blit does not reinterpret them.
+`--session NAME` (`-s`) is the held desktop's name, the same for the
+primary and every join; it is not a Blit session ID. `--join` attaches
+another display to that desktop. `--name NAME` (`-n`) names the display in
+Hibr's Displays panel. `--resume` reattaches an existing held session.
+`--standby` waits for a later join; Blit counts it as a join, not another
+primary.
 
-The packaged entrypoint uses Hibr's native console for the primary and every
-`desktop --join` client. Blit parses the primary PTY and each joined hold
-client's own PTY into distinct surfaces; there is one Hibr desktop, not a
-framebuffer copy and not a second provider owner. Hit-tested input from the
-joined pane is delivered to the primary owner. Direct cell mutation of a
-joined surface is rejected with `hibr_join_surface_read_only`
-([ADR 0079](adr/0079-hibr-desktop-uses-the-native-pty-boundary.md)).
+## Joined displays
 
-The recognized packaged-entrypoint path still implements the historical
-horizontal projection of [ADR 0080](adr/0080-map-blit-panes-to-hibr-hold-union-coordinates.md),
-including forwarding join input to its registered primary. It is not the
-current native vertical-join flow below. Do not apply its additional transform
-to a native Hibr hold client which already rewrites its own local input.
+One Hibr desktop can show on several displays and panes. Each
+`desktop --join` is a hold client of the one desktop, with its own PTY;
+Blit parses each PTY into its own surface. There is one desktop, not a
+copy of a framebuffer and not a second desktop owner.
 
-Hibr's native hold contract supports both row and column placement and input
-(Hibr #238 viewport pictures, #240 true 2-D desktop layout). That capability
-does not by itself establish Blit's full joined-image or interactive
-acceptance; actual captures and protocol/input evidence remain required. Blit
-does not patch Hibr source.
+- Pointer, wheel and keyboard input go to the hit-tested or focused
+  client's own PTY, with no offset added; Hibr's hold client rewrites the
+  coordinates itself
+  ([ADR 0127](adr/0127-native-client-pty-input-and-login-owned-joins.md)).
+- Writing cells to a joined surface through the API is refused with 409
+  `hibr_join_surface_read_only`.
+- A session's `hibr_desktop.role` is `primary`, `join` or `none`.
+- `hibr_join_position` on `POST /v1/terminal-sessions` gives a join its
+  first native row and column. Later moves in Hibr's Displays panel are
+  Hibr's and are not reasserted.
 
-### Joining an already authenticated login desktop
+Joins on other displays start by themselves once a login desktop is
+associated. The saved `auxiliary_displays` setting names which output and
+pane each should use; `GET /v1/auxiliary-displays` reports each binding's
+state, and `POST /v1/auxiliary-displays/apply` changes them for the current
+desktop without saving
+([ADR 0128](adr/0128-live-auxiliary-apply-contract.md)). Blit starts each
+join with `blit-session.hibr`, finds it with `blit-desktop-observe.hibr` and
+places it once with `blit-desktop-place.hibr`, all as the signed-in user. A
+join never covers the login or another client: an occupied pane is a
+`conflict`. Blit does not restart a join that Hibr quit.
 
-The live 2026-10-17 operation keeps the user's existing held `desktop` owner,
-rather than starting another primary. Discover pane IDs from `/v1/topology`,
-verify successful authentication and the owning account/held session, then
-move the existing terminal with `POST /v1/login` targeting the bottom pane.
-Create an ordinary terminal on the upper pane as that same account:
-
-```json
-{"command":"/usr/bin/hibr","user":"osakka","arguments":["-c","exec /usr/bin/desktop --join --session desktop --name blit-upper"],"pane_id":"pane-display-1-1","surface_mode":"terminal"}
-```
-
-Hibr's native desktop join initially attaches beside the primary. Its supported
-`hold move desktop blit-upper -67 0`, invoked as the owning user through the
-terminal API, moves this 67-row join above and normalizes the union. The
-verified result is primary `(67,0,67,240)`, join `(0,0,67,240)`, same held
-owner PID, two distinct PTYs. These numbers are this host's discovered grid,
-not defaults to copy to another topology. Input reaches each client's own
-PTY; Hibr performs its one canonical coordinate rewrite.
-
-Blit currently reports role `none` for the authenticated login wrapper and
-this ordinary native join invocation. [Issue #96](https://git.home.arpa/itdlabs/blit/issues/96)
-tracks explicit API association/observation and unification of obsolete join
-special-casing. Verify the relationship with native `hold clients` and owner
-identity; do not claim that API role reporting is solved. This operation is
-live, not boot-before-authentication automation. The captured lower pane has
-unclassified residual rectangles after relayout, so complete visual/input
-acceptance remains pending. See [ADR 0122](adr/0122-native-hibr-join-orchestration.md).
-
-The package also installs `blit-runtime-console.hibr`, and the entrypoint sets
-`HIBR_RC` to it when the caller has not supplied an explicit fixture or
-operator RC. This is required for API-launched Hibr children under systemd:
-they do not inherit the QEMU fixture's environment. The RC loads the Blit
-adapter and Hibr's native `pty`, `term`, and `hold` modules only. An explicit
-`HIBR_RC` always wins, so controlled fixtures retain their own paths.
-
-`console-blit` remains available for standalone, non-held Hibr programs and
-explicit `surface_mode: external` sessions that need the cell-level Blit
-provider. It is not loaded by the packaged held-desktop path.
-
-`console darkdefault` is Hibr's dim/shadow target, not the terminal's own
-OSC 10/11 default. The Blit adapter therefore keeps it local for Hibr's
-shadow calculations and does not publish it as a surface floor. An
-API-owned provider that really owns the terminal defaults may set
-`terminal_default_foreground` and `terminal_default_background` explicitly
-on a revisioned surface update. A native PTY session must establish its
-defaults through OSC 10/11 (or the configured `BLIT_TERMINAL_FG`/
-`BLIT_TERMINAL_BG` environment); if
-`terminal_defaults.background_configured` is false, its pixels are not yet a
-valid Hibr desktop proof.
-
-### Desktop invocation options
-
-Hibr's `desktop` entrypoint defines the orchestration options; Blit does not
-reinterpret them:
-
-- `--session NAME` / `-s NAME` selects the held desktop session. Use the same
-  value for the primary and every join; it is a Hibr hold name, not a Blit
-  terminal-session ID.
-- `--join` attaches an auxiliary display beside that held session. It does
-  not create another desktop state owner.
-- `--name NAME` / `-n NAME` gives the attached Hibr display a stable name in
-  Hibr's Displays panel. The launcher uses the authoritative Blit display ID.
-- `--resume` reattaches an existing held client/session; it is for recovery,
-  not for creating an auxiliary display.
-- `--standby` waits for a later join request and is appropriate for a display
-  that should remain available without joining immediately.
-
-An explicitly external API-owned Hibr attachment fails closedly if its bounded
-startup discovery finds no token-bearing Hibr owner. Native terminal primaries
-and joins do not require that adapter handshake; inspect their PTY output and
-terminal diagnostics instead. In either mode, do not start another primary
-against the same held name until Hibr's own lifecycle has been resolved.
-
-For a provider-backed Hibr process, the Blit-owned adapter registers its PID
-at `/v1/terminal-sessions/{id}/hibr-owner` using the per-session token that
-Blit placed in the child environment. This is an internal lifecycle
-handshake, not a second display owner; it only gives Blit an exact process to
-resize and signal. The session response reports `owner_registered` and
-`owner_pid` alongside the bounded fallback discovery counters.
-
-The optional adapter probe has been run successfully with the Hibr desktop
-built by TCC. The packaged held-desktop mode intentionally depends on Blit's
-terminal parser for the native Hibr PTY boundary.
-
-## QEMU verification record
-
-The repeatable VKMS QEMU fixture verifies these boundaries independently:
-
-- a native Hibr primary and its hold clients emit terminal streams that Blit
-  parses into their own surfaces, while the optional provider gate separately
-  proves API-owned cells;
-- a primary desktop and a `--join` client remain attached to separate panes on
-  two outputs;
-- the four-pane acceptance mode starts one primary and three `--join` clients
-  in a Blit-owned `2x2` layout and verifies four attached surfaces in one
-  held desktop session;
-- the primary and every joined surface are distinct PTY viewports of one Hibr
-  desktop; no joined surface becomes a second desktop writer;
-- a direct Hibr executable launch is required for `hold` re-exec; launching
-  through the ELF loader breaks Hibr's executable self-discovery;
-- the minimal Alpine fixture must provide the glibc loader and `libc.so.6` at
-  their normal system paths before launching Hibr.
-
-The fixture exposes Hibr script diagnostics in the surface instead of calling
-them Blit failures. The strict-mode issue at `wm/apps.hibr:177` was fixed in
-Hibr's source tree by declaring and using a named discard variable; the final
-two-display run completed without that warning.
-
-## Production adapter mapping
-
-The hibr module should be a transport adapter only:
-
-- `console put` becomes revisioned surface cell/style updates.
-- `console flush` becomes one atomic frame commit, reduced to what the frame
-  actually changed. Hibr blanks the screen and redraws it every frame whether
-  or not anything moved, so the adapter keeps a shadow of the cells Blit has
-  acknowledged and sends only the delta: an idle screen sends nothing. This is
-  not an optimization but a contract obligation — a surface revision counts
-  accepted writes rather than observed changes
-  ([ADR 0058](adr/0058-a-revision-counts-accepted-writes.md)), so a client
-  that re-sends unchanged cells makes the revision useless to every other
-  client. A frame too large for the 8 KiB request bound is split into
-  `presentation: defer` requests with only the final one `presentation:
-  commit`, so Blit never presents a partial wallpaper/menu redraw between HTTP
-  chunks; a frame that fits in one request is `presentation: immediate`,
-  because Blit answers 409 `frame_not_open` to a commit with no preceding
-  defer.
-- `console key` waits on the WebSocket stream and returns decoded input. The
-  stream's terminal cells are one-based while Hibr's provider coordinates are
-  zero-based, so `console-blit` subtracts exactly once at this boundary. Its
-  pixel fallback uses the session's authoritative `cell_pixels`, including a
-  font-scale change, and reports the same values through `console cellpx`.
-  Linux F1 through F12 codes become Hibr's native `f1` through `f12` names,
-  including the non-contiguous F11/F12 codes. Printable keys use the stream's
-  Blit-resolved UTF-8 `text`, after per-device keymap, Shift, CapsLock, and
-  AltGr processing; the adapter owns no second keyboard layout. Hibr's console
-  contract remains unchanged; see [ADR 0068](adr/0068-the-hibr-adapter-translates-input-vocabulary.md).
-- A held pointer motion becomes Hibr's complete drag action, including the
-  button: `mouse drag left row column` (or the corresponding modifier prefix).
-  This field is required by Hibr's parser; omitting it shifts the row/column
-  arguments and makes horizontal movement appear vertical. The adapter picks
-  the lowest-numbered held button when more than one is down. The focused
-  adapter gate protects this boundary; see [ADR 0070](adr/0070-pointer-modifiers-cross-the-hibr-boundary.md).
-- `console watch` adds a Hibr application descriptor to the same wait as the
-  input WebSocket. Readiness wakes the desktop immediately but leaves the
-  descriptor for its owning application to drain; `console key -q` excludes
-  watched descriptors deliberately.
-- local pane ownership, clipping, stack order and hit testing follow Hibr's
-  provider contract. They do not create a second set of Blit topology panes.
-- console mouse reports become blit input events.
-- terminal resize becomes a surface/session resize mutation.
-- a replay gap is repaired with the canonical surface snapshot endpoint.
-
-A pointer event reaching the adapter is not the same as a click reaching the
-desktop, and the difference is easy to lose days to. Hibr's console delivers
-mouse reports to the session only while a mouse mode is active, which the
-owning application turns on by sending `console mouse <mode>`; with no mode
-set the adapter correctly discards the event. A Blit-hosted desktop that never
-enables reporting therefore cannot be clicked, however correct Blit's
-`pointer_button` events are — and Blit's own diagnostics will show the event
-published, routed, and arriving at the right session the whole time. When
-investigating "the mouse does not work", establish which of the two claims is
-failing before changing anything: Blit publishing the event, or the owner
-having asked for it.
-
-The OpenAPI schema remains normative for all wire messages. The module must
-not duplicate layout, revision, style, cursor, or frame semantics.
-
-## Desktop and pane orchestration
-
-Blit internally splits a physical display into logical cell panes and assigns
-opaque, server-owned pane identifiers. Each `desktop --join` invocation is an
-additional display client attached to the primary desktop's held session, not
-an independent desktop state owner:
-
-```text
-display-1 / primary       <- hibr desktop
-display-2 / pane-1        <- hibr desktop --join
-display-2 / pane-2        <- hibr desktop --join
-display-2 / pane-3        <- hibr desktop --join
-display-2 / pane-4        <- hibr desktop --join
-```
-
-Blit owns authoritative pane geometry, placement, and pane naming. The API
-reports the available panes and their logical cell bounds. Hibr uses that
-inventory to attach clients to one shared desktop session, but does not
-calculate or rename panes. Hibr remains responsible for desktop lifecycle,
-detachment, reconnection, and recovery when a pane or display disappears. A
-missing pane must not cause Blit to invent a replacement desktop, and Blit
-must not restart Hibr processes.
-
-For a 1x2 split, row zero is the upper pane and row one is the lower pane.
-The orchestration explicitly attaches the primary Hibr desktop to the lower
-pane and starts desktop --join for the upper pane. Pane bounds are terminal
-cell bounds, not arbitrary pixel rectangles. Blit partitions the physical
-output first, then centres a complete-cell grid independently inside each
-physical pane region. This prevents a menu or glyph row from straddling a
-hinge when the physical half-height is not divisible by the current cell
-height. The topology reports each pane's `pixel_region` and pane-local
-`cell_grid`; those are the single source of truth for pixel placement and
-input mapping (ADR 0075). The adapter must not derive a second origin from the font
-name or display mode (ADR 0076).
-
-The production join flow is:
-
-1. The Blit API configures or discovers the physical-display split.
-2. The Blit API starts the primary Hibr desktop on the primary pane.
-3. The primary desktop queries Blit's pane inventory and discovers auxiliaries.
-4. The launcher starts one Hibr `desktop --join` client per auxiliary pane;
-   each joins the primary held desktop session through the Blit API. The
-   launcher passes the Blit display identifier as Hibr's `--name` for
-   deterministic Displays-panel identity, transports opaque pane IDs only,
-   and does not calculate geometry or create a second layout model. Hibr's
-   `--session` value identifies the held desktop; it is not a Blit session ID.
-5. Blit reports authoritative cell dimensions and revisions for every pane.
-6. Hibr handles disconnect, reconnect, and process recovery while Blit keeps
-   the pane topology stable.
-
-Every PTY child receives `BLIT_SESSION_ID`, `BLIT_SURFACE_ID`,
-`BLIT_PANE_ID` (when attached to a pane), and `BLIT_SERVER_PORT`. These are
-the stable binding coordinates for the ABI-level adapter; the adapter must
-use them to address the server-owned surface and must not discover or invent
-another surface identity.
-
-Every PTY child also receives `BLIT_VERSION`, the server's version (the same
-value as `GET /v1/version`'s `server_version`). A child keys Blit-only
-features on it with no token or request: for example, the battery and volume
-icons (ADR 0196) need 0.2.38 or later. It is not `TERM_PROGRAM`, which Hibr
-uses to name a display.
-
-**Pointer lock (ADR 0198).** Hibr asks for mode ?7701 with DECRQM, and
-engages it with `CSI ? 7701 h` for a window that wants relative mouse
-motion, such as a Boxer game. It gives the lock back with `CSI ? 7701 l`,
-from its Release Pointer shortcut, on window focus loss, and on menus.
-Blit sends `CSI ? 7701 ; 2 $ y` when it takes the lock back itself. The
-reports are deltas, so hold must forward them without its per-display
-position offset. The full protocol is in `docs/api.md`.
-
-Two further variables are credentials and are not interchangeable:
-
-- `BLIT_SESSION_TOKEN` is the owner handshake secret from
-  [ADR 0051](adr/0051-fail-closed-hibr-owner-handshake.md). It travels in the
-  body of `POST /v1/terminal-sessions/{id}/hibr-owner` and answers which
-  process owns the session.
-- `BLIT_API_TOKEN` is the gateway bearer credential from
-  [ADR 0055](adr/0055-adapter-api-authentication.md). Blit sets it only when
-  `BLIT_AUTH_TOKEN` is configured, and the adapter sends it as
-  `Authorization: Bearer` on its HTTP requests and on the `/v1/stream`
-  upgrade. Authentication is checked before route dispatch, so without it the
-  owner handshake returns 401, the owner never registers, and the session is
-  retired as `hibr_attach_unresolved` — a failure that names Hibr rather than
-  authentication.
-
-An API `environment` entry overrides either value, because those entries are
-applied after Blit's own. Setting `BLIT_API_TOKEN` to an empty string opts a
-particular child out of receiving the credential.
-
-## Primary/auxiliary probe
-
-The shared-session orchestration path has been exercised with two TCC-built
-Hibr processes:
-
-1. `PUT /v1/topology` selects `{"columns":2,"rows":1}`.
-2. `POST /v1/terminal-sessions` starts the primary desktop with the first
-   discovered `pane_id`.
-3. A second `POST /v1/terminal-sessions` starts the auxiliary desktop with
-   the second discovered `pane_id`.
-4. `GET /v1/topology` reports both attached surface IDs.
-5. Hibr's `hold clients blit` reports one logical desktop with `primary` and
-   `auxiliary` clients at adjacent logical offsets.
-
-This proves the Blit transport and Hibr shared-session model. The orchestration
-is performed by Hibr's installed `desktop` command and its `--join` path, using
-the authoritative topology snapshot supplied by Blit. Blit does not ship or
-invoke a shell launcher. Re-running against an existing held Hibr desktop uses
-the documented `--resume` path, while auxiliary clients always use `--join`.
+Blit owns pane geometry. A monitor is split into panes first, then a whole
+cell grid is centred in each pane, so no row straddles a pane edge. The
+topology reports each pane's `pixel_region` and `cell_grid`; those are the
+only source for placement and input mapping (ADR 0075, 0076). Hibr does not
+compute or rename panes, and Blit does not invent a desktop when a pane or
+display disappears.
 
 ## Pictures: by descriptor here, through the terminal from elsewhere
 
@@ -466,48 +202,80 @@ arrive by descriptor and stays still otherwise. With a video playing on the
 owner's machine, the descriptor path cut Hibr's hold from 23% to 3% of a
 core and Blit from 21% to 10% (the ADR's "Result").
 
-## Current integration status
+## Pointer lock
 
-The standalone PTY route and the ABI-level `console-blit` provider are
-operational. `console-blit` owns no duplicate surface model: it forwards cell
-mutations and cursor state to Blit, keeps Hibr-local pane composition separate
-from physical topology, and subscribes one session-owned WebSocket to input
-events only. Its flush path drains full-screen clears iteratively, so the stock
-Hibr desktop remains alive under large redraws.
+Hibr asks for mode ?7701 with DECRQM, and engages it with `CSI ? 7701 h`
+for a window that wants relative mouse motion, such as a Boxer game. It
+gives the lock back with `CSI ? 7701 l`, from its Release Pointer shortcut,
+on window focus loss, and on menus. Blit sends `CSI ? 7701 ; 2 $ y` when it
+takes the lock back itself. The reports are deltas, so hold must forward
+them without its per-display position offset
+([ADR 0198](adr/0198-pointer-lock.md)).
 
-The current QEMU evidence covers the packaged Hibr desktop, primary plus
-auxiliary `--join` sessions, the four logical pane layouts, and input-route
-creation over TCP to a two-output VKMS fixture. The join-viewport gate covers
-distinct PTY surfaces, ownership, and input routing; the QEMU screenshot gate
-must prove the same independent viewports with real Kitty/Sixel wallpaper.
-With the current
-Hibr executable and modules staged, the control client reports both displays;
-a dedicated Blit test workload creates a window and validates Hibr `move`,
-`resize`, and `focus` across the joined display. The fixture must also provide
-the BusyBox `mkdir` applet because Hibr invokes `mkdir` as an external command
-during control-socket setup. Blit does not modify Hibr. The adapter sends one
-masked subscription control frame naming `input` and the owning primary
-terminal session. This bounds its frame reader away from large surface
-messages and lets session teardown close the stream deterministically.
-Resource links remain an explicitly deferred extension because they are not
-part of the display ownership contract.
+## When a click does nothing
 
-The adapter input vocabulary has an independent executable gate. It feeds the
-real adapter WebSocket frames and proves zero-based Hibr pointer coordinates,
-font-scaled pixel fallback, all three button names, wheel events, and F1
-through F12 names. `adapter_provider_gate.sh` separately proves pane ownership,
-clipping/stacking, watched-descriptor wakeups, UTF-8 width, and shadows against
-the exact pinned Hibr release. It also proves that a steady `console resizing`
-check performs no HTTP poll; SIGWINCH is the resize edge. Physical-host clicks,
-shortcuts, redraws, and application wakeups are still measured after package deployment; passing
-translation/provider gates are not reported as physical acceptance.
+Blit sends mouse reports to a PTY only while the program there has turned
+on a mouse tracking mode; with none, the wheel scrolls the history and a
+click only focuses the pane. A desktop that never enables reporting cannot
+be clicked, however correct Blit's `pointer_button` trace looks: the event
+is published, routed and reaches the right session the whole time. Before
+changing anything, find out which claim fails: Blit delivering the event,
+or the program having asked for it.
 
-The local join-viewport gate now proves the server-side contract without
-modifying Hibr: one primary and one `--join` session are created, each PTY
-paints a different surface, direct writes to the joined surface are rejected
-with `hibr_join_surface_read_only`, and a pointer hit in the joined pane is
-traced with the primary as `input_session`
-(`tools/tests/hibr_join_viewport_gate.rb`). This is a Blit integration gate,
-not physical-display acceptance: it does not show that the wallpaper,
-context menu and full Hibr window placement work on a real display, which
-needs screenshots and input on the live host.
+## Terminal default colours
+
+A native PTY session sets its default colours with OSC 10 and 11, or the
+session request sets `BLIT_TERMINAL_FG` and `BLIT_TERMINAL_BG` in its
+environment. Until it does, `terminal_defaults.background_configured` is
+false and its pixels do not prove a Hibr desktop
+([ADR 0109](adr/0109-hibr-terminal-default-colours-cross-the-api-boundary.md)).
+
+## The optional console adapter
+
+`console-blit` (`hibr/console-blit.c`, installed as
+`/usr/lib/blit/hibr/console-blit.so`) is a Hibr `display` provider that
+writes cells to a Blit surface through the API instead of a PTY. The
+packaged desktop does not use it. `blit-session.hibr` loads it only when
+`BLIT_HIBR_PROVIDER=api`, for a session created with
+`surface_mode: "external"`, and points `HIBR_RC` at
+`blit-runtime-console.hibr` so Hibr's child shells load it too. It sits
+outside Hibr's module directory, so the stock desktop's `need display`
+still picks Hibr's own console.
+
+What it does:
+
+- `console flush` becomes one atomic commit of only the cells that changed
+  since the last acknowledged frame, so an idle screen sends nothing. A
+  surface revision counts accepted writes
+  ([ADR 0058](adr/0058-a-revision-counts-accepted-writes.md)), so re-sending
+  unchanged cells would make it useless to other clients. A frame larger
+  than one request goes as `presentation: defer` chunks and a final
+  `commit`; one that fits is `immediate`.
+- Input arrives on one `/v1/stream` WebSocket subscribed to `input` only.
+  Stream cells are one-based, Hibr's are zero-based, and the adapter
+  subtracts once. Keys use Blit's resolved UTF-8 text; F1 to F12 become
+  Hibr's `f1` to `f12`; a held-button motion becomes `mouse drag <button>
+  row column` ([ADR 0068](adr/0068-the-hibr-adapter-translates-input-vocabulary.md),
+  [ADR 0070](adr/0070-pointer-modifiers-cross-the-hibr-boundary.md)).
+- `console watch` adds an application descriptor to the same wait as the
+  input stream.
+- Hibr-local panes, clipping and stacking stay inside the adapter; they
+  are not Blit panes.
+- It registers its process at `POST /v1/terminal-sessions/{id}/hibr-owner`
+  with `BLIT_SESSION_TOKEN`
+  ([ADR 0051](adr/0051-fail-closed-hibr-owner-handshake.md)), and sends
+  `BLIT_API_TOKEN` as `Authorization: Bearer` when the server has a token
+  ([ADR 0055](adr/0055-adapter-api-authentication.md)). Without it the
+  handshake gets 401 and the session is retired as `hibr_attach_unresolved`.
+  An API `environment` entry overrides either variable; an empty
+  `BLIT_API_TOKEN` keeps the credential from a child.
+- `BLIT_ADAPTER_TRACE=1` logs its WebSocket and pixel-frame transport, for
+  one probe session at a time.
+
+Its gates are `tools/tests/adapter_input_gate.sh`,
+`tools/tests/adapter_provider_gate.sh` and
+`tools/tests/adapter_coalesce_gate.sh`. The native path's gates include
+`tools/tests/hibr_join_viewport_gate.rb`,
+`tools/tests/native_join_pty_gate.rb`,
+`tools/tests/login_identity_gate.rb` and
+`tools/tests/auxiliary_native_gate.rb`.

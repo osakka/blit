@@ -1,6 +1,6 @@
 # ADR 0125: private post-authentication identity handoff
 
-- Status: accepted; identity foundation, not desktop-owner association
+- Status: accepted; in use since 0.1.538
 - Date: 2026-10-17
 - Issues: Blit #96, #99; follows ADR 0124
 

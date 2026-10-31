@@ -1,6 +1,6 @@
 # ADR 0064: One device table, stable ids, and per-device configuration
 
-- Status: accepted
+- Status: accepted; in use since 0.1.451
 - Date: 2026-10-10
 - Scope: the `/v1` device contract — input devices, input routing, audio and
   display inventories; the evdev scan; what a control-panel application may

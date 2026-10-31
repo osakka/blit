@@ -15,7 +15,7 @@ The following files are authoritative for their boundaries:
 | Hibr integration boundary | `docs/integration-hibr.md`, accepted ADRs, `hibr/` adapter sources | adapter `.so`, staged Hibr fixtures |
 | Architecture and policy | `docs/adr/` | implementation choices and test names |
 | What is proven | `docs/verification-status.md`, `releases/*.yaml` | screenshots, logs, temporary captures |
-| Build and acceptance procedure | `tools/`, `docs/implementation-and-verification.md` | generated build trees and test output |
+| Build and acceptance procedure | `tools/`, `docs/development-workflow.md` | generated build trees and test output |
 
 Documentation may explain the contract, but it must not invent a field,
 endpoint, lifecycle rule, or capability that is absent from the schema,
@@ -109,4 +109,5 @@ narrower boundary was measured. A screenshot that is incomplete or visually
 wrong is a failed visual result even if frame timing is healthy. A synthetic
 input trace is not physical input evidence. A Blit input receipt is not proof
 that Hibr acted on the event. Record the first unproven boundary explicitly;
-do not fill it with inference. See [the current restart point](history/current-state.md).
+do not fill it with inference. The evidence for each release is in the
+[verification ledger](verification-status.md).

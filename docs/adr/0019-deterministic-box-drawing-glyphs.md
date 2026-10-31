@@ -1,8 +1,6 @@
 # ADR 0019: Deterministic box-drawing glyph geometry
 
-## Status
-
-Accepted.
+- Status: accepted
 
 ## Context
 

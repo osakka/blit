@@ -1,14 +1,14 @@
 # ADR 0079: The packaged Hibr desktop uses the native PTY boundary
 
-Native PTY output remains the decision. The historical primary-input routing
-statements below are superseded by [ADR0127](0127-native-client-pty-input-and-login-owned-joins.md):
-each native client receives input on its own PTY, with Hibr's own2-D rewrite.
-
 - Status: accepted
 - Date: 2026-10-15
 - Scope: Hibr desktop provider selection, hold joins, terminal parsing, and
   adapter ownership
 - Supersedes: [ADR 0078](0078-hibr-joins-are-independent-viewports.md)
+
+Native PTY output remains the decision. The historical primary-input routing
+statements below are superseded by [ADR 0127](0127-native-client-pty-input-and-login-owned-joins.md):
+each native client receives input on its own PTY, with Hibr's own 2-D rewrite.
 
 ## Context
 

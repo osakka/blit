@@ -1,6 +1,6 @@
 # ADR 0006: Display refresh is an output invariant
 
-- Status: accepted
+- Status: accepted; in use since 0.1.533
 - Date: 2026-10-06
 
 ## Context

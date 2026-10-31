@@ -1,6 +1,6 @@
 # ADR-0048: One primary Hibr desktop owner
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

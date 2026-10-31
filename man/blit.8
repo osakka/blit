@@ -216,7 +216,7 @@ Directory of the bundled fonts; default
 .B BLIT_FONT_LOCAL_ROOT
 Directory of locally installed fonts; default
 .IR /usr/local/lib/blit/fonts .
-.SS Hibr login manager
+.SS Hibr login manager and joined displays
 .TP
 .B BLIT_LOGIN_AUTOSTART
 .I flag.
@@ -244,6 +244,18 @@ Display the login screen uses; default the first.
 Pane the login screen uses.
 Saved setting:
 .BR login.pane_id .
+.TP
+.B BLIT_AUXILIARY_LAUNCHER
+Script that starts Hibr on the other displays; default
+.IR /usr/share/blit/hibr/blit-session.hibr .
+.TP
+.B BLIT_HIBR_OBSERVER
+Script that watches the login desktop; default
+.IR /usr/share/blit/hibr/blit-desktop-observe.hibr .
+.TP
+.B BLIT_HIBR_PLACER
+Script that places the other displays' desktops; default
+.IR /usr/share/blit/hibr/blit-desktop-place.hibr .
 .SS Input
 .TP
 .B BLIT_EVDEV_MOUSE
@@ -259,6 +271,15 @@ document: a recovery mode for a document that stops the server starting.
 .B BLIT_SETTINGS_PATH
 Where the settings document lives; default
 .IR /var/lib/blit/settings.json .
+.SS Updates
+.TP
+.B BLIT_UPDATE_DIRECTORY
+Where uploaded packages are staged; default
+.IR /var/lib/blit/updates .
+.TP
+.B BLIT_UPDATE_SOCKET
+Socket of the update helper; default
+.IR /run/blit/update.sock .
 .SS Diagnostics
 These print to standard error, which is the journal under systemd.
 .TP
@@ -347,26 +368,6 @@ when set, mixer controls are simulated.
 .TP
 .B BLIT_SETTINGS_WRITE_DELAY_MS
 Delay before the settings document is written, 0 to 10000; default 0.
-.TP
-.B BLIT_UPDATE_DIRECTORY
-Where uploaded packages are staged; default
-.IR /var/lib/blit/updates .
-.TP
-.B BLIT_UPDATE_SOCKET
-Socket of the update helper; default
-.IR /run/blit/update.sock .
-.TP
-.B BLIT_AUXILIARY_LAUNCHER
-Script that starts Hibr on the other displays; default
-.IR /usr/share/blit/hibr/blit-session.hibr .
-.TP
-.B BLIT_HIBR_OBSERVER
-Script that watches the login desktop; default
-.IR /usr/share/blit/hibr/blit-desktop-observe.hibr .
-.TP
-.B BLIT_HIBR_PLACER
-Script that places the other displays' desktops; default
-.IR /usr/share/blit/hibr/blit-desktop-place.hibr .
 .SS Environment of a session
 Every program Blit starts in a session gets
 .BR TERM=xterm-kitty ,

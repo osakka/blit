@@ -1,9 +1,9 @@
-# ADR0153: independent bounded presentation trials
+# ADR 0153: independent bounded presentation trials
 
-- Date:2026-10-20
-- Status: implemented/deployed569; physical expiry recovery verified
+- Status: superseded by ADR 0184
+- Date: 2026-10-20
 - Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
-- Tracking: Blit109/104
+- Tracking: Blit 109/104
 
 SDL initialization runs before Blit's listener. Recovery must therefore not
 depend on that listener, event loop or process. Do not overwrite and later
@@ -21,9 +21,9 @@ service cgroup. Expiry or explicit restore removes only the matching owned
 drop-in, reloads systemd, terminates the trial process and starts the original
 service. No second API listener, renderer or persistent configuration system.
 Reboot clears the runtime override; helper restart restores an outstanding trial.
-From570, the temporary override also sets Restart=no: each trial attempts
+From 570, the temporary override also sets Restart=no: each trial attempts
 startup once rather than repeatedly initializing the GPU after a crash. Normal
-service restart policy returns when that override is removed. See ADR0154.
+service restart policy returns when that override is removed. See ADR 0154.
 
 The existing authenticated API offers GET/POST/DELETE on
 /v1/control/presentation-trial. POST selects only software or opengles2 and a
@@ -45,7 +45,7 @@ EnvironmentFile ordering. No SSH, Hibr modifications or SDL vendor changes.
 
 Physical evidence: both software and opengles2 thirty-second trials failed
 before the listener (journal reports SIGSEGV after both SDL windows exist).
-Independent expiry restored ready native KMS, two outputs, revision237 and
+Independent expiry restored ready native KMS, two outputs, revision 237 and
 the identical saved document in both cases. This verifies recovery from those
 observed crashing startup attempts, not an injected physical blocked call or
 kernel hang. The blocked-userspace fixture remains a mocked-systemd test.

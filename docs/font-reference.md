@@ -2,7 +2,8 @@
 
 For Hibr application, desktop and Control Panel developers. This reference
 describes the font set since Blit 0.2.36 (ADR 0195). Query the running
-server for the fonts it found and the one selected. It does not require changes to Hibr core.
+server for the fonts it found and the one selected. Nothing here needs a
+change to Hibr core.
 
 Public reference: [github.com/osakka/blit — font reference](https://github.com/osakka/blit/blob/main/docs/font-reference.md).
 
@@ -39,17 +40,22 @@ The shipped text fonts are unmodified upstream releases:
 | `ibm-plex-mono` | IBM Plex Mono 1.1.0 | OFL 1.1 |
 | `blit-terminus16`, `blit-spleen16` | Bitmap pixel fonts | OFL / BSD |
 
-**Every outline font draws through one glyph stack.** For each character,
-in order:
+**Every outline font draws through one glyph stack.** Arabic letters go
+to Blit Arabic Modern. Every other character takes the first of these that
+has it:
 1. Blit's cell geometry: box drawing, blocks, Braille, Powerline and bar
    corners.
-2. Blit's own icons.
-3. The text font.
-4. Nerd Fonts Symbols.
-5. Noto Sans Symbols 2, Noto Sans Symbols and Noto Sans Math.
-6. The emoji faces.
-7. Blit Arabic Modern.
-8. Unifont.
+2. Blit's own colour icons.
+3. Colour emoji, for emoji presentation.
+4. Nerd Fonts Symbols, for a private-use codepoint, whatever the text font
+   puts there.
+5. The text font.
+6. Blit's monochrome text glyphs (the themed pen, runic text, wired
+   indicator).
+7. Nerd Fonts Symbols, for anything else.
+8. Text-presentation emoji, where asked for.
+9. Noto Sans Symbols 2, Noto Sans Symbols and Noto Sans Math.
+10. Unifont.
 
 Stack glyphs are fitted to the chosen font at draw time, so every font has
 every glyph, including one you add. Native grayscale antialiasing
@@ -62,7 +68,7 @@ one-column coverage, fitted to the font's own H (ADR 0199). Wide characters
 come from Blit's wide pixel font. Only a character no face has shows the
 font's `?`.
 
-`size_px` is **cell height8–64**, not point size, browser zoom or display
+`size_px` is **cell height, 8 to 64**, not point size, browser zoom or display
 resolution. Read `active.cell_pixels` after changing it; never calculate
 image placement from an assumed half-width cell. Resizing changes the grid
 and attached PTYs. Do not change the user's font just to display one icon.
@@ -75,7 +81,7 @@ of a cell. Their ink bounds and terminal advance are different concepts.
 | --- | --- | --- |
 | Ordinary text, punctuation and source-font scripts | [Native coverage](fonts/coverage.json) | Primary face plus established fallback; asset cmap is not a promise of script shaping |
 | App actions, files, development, devices, weather, brands | [17 Nerd categories](fonts/README.md) | 10,764 names/aliases, 10,386 distinct scalars, under every font; uses terminal foreground colour |
-| Branded Blit/Hibr menu icons, Wi-Fi1–4, Bluetooth | [Original colour additions](fonts/special.md) | Explicit semantic ID/private scalar, one cell, intrinsic palette |
+| Branded Blit/Hibr menu icons, Wi-Fi 1–4, Bluetooth | [Original colour additions](fonts/special.md) | Explicit semantic ID/private scalar, one cell, intrinsic palette |
 | Themed Hibr pen, runic text, wired indicator | [Themed text additions](fonts/special.md#themed-text-additions) | U+270E, U+16D2, U+21CC retain documented text meanings |
 | Powerline separators and box/block UI geometry | [Powerline](fonts/pl.md), [Extras](fonts/ple.md) | Core U+E0B0..E0B3 use cell-fitted geometry; do not extend that guarantee to every Extra; box/half-block geometry is protected |
 | Arabic and Arabic-Indic digits | [Arabic section below](#arabic-and-arabic-indic-numerals) | Native companions, shared baseline, existing Hibr visual ordering |
@@ -110,12 +116,12 @@ mark beside a level.
 one badge (ADR 0197).
 
 Every original uses **one terminal column** in every font.
-They are plane16 private-use scalars, not standard Unicode, ordinary emoji,
+They are plane 16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
 
 - U+270E `✎` is the themed pen silhouette; it is not the multicolour pen.
 - U+16D2 `ᛒ` is Berkanan, not the new Bluetooth drawing.
-- Four Wi-Fi entries represent signal levels1..4. No disconnected/unknown
+- Four Wi-Fi entries represent signal levels 1 to 4. No disconnected/unknown
   fifth state is defined; choose an explicit textual/themed fallback.
 - Intrinsic-colour artwork keeps its palette; ordinary Nerd icons follow
   foreground colours. A truecolour terminal alone does not imply colour-font
@@ -153,8 +159,8 @@ Recommended integration sequence:
 4. Cache discovery for the connection, then invalidate after reconnect or a
    font/profile change. Do not poll the catalogue on every repaint.
 
-`GET /v1/fonts/icons` returning503 `font_icon_catalogue_unavailable` is a
-diagnostic condition, not an empty successful catalogue. A404 on an older
+`GET /v1/fonts/icons` returning 503 `font_icon_catalogue_unavailable` is a
+diagnostic condition, not an empty successful catalogue. A 404 on an older
 server means the client should retain its fallback. Future catalogue versions
 must be checked, not assumed compatible.
 
@@ -167,10 +173,8 @@ character = chr(int(entry["codepoint"], 16))
 ```
 
 This illustrates scalar conversion, not a Hibr API or a replacement for its
-UI/glyph abstraction. Internal Hibr tracking330 covers opt-in desktop
-integration; that number is not a GitHub issue mapping. Merely installing the font does not
-replace existing application icon selections. Hibr source is not modified
-by this reference.
+UI/glyph abstraction. Installing the font does not change the icons an
+application already chooses.
 
 ## Arabic and Arabic-Indic numerals
 
@@ -197,17 +201,17 @@ The [captured logical/visual corpus](../assets/fonts/arabic-specimens.json)
 is finite; neither the corpus nor raw companion cmap coverage guarantees all
 Arabic, Quranic annotations or religious ligatures. The corpus's original
 acceptance annotations are historical; current implementation evidence is in
-the [verification ledger](verification-status.md) and [ADR0174](adr/0174-arabic-companion-rasterization.md).
+the [verification ledger](verification-status.md) and [ADR 0174](adr/0174-arabic-companion-rasterization.md).
 
 ## Emoji: characters, presentation and sequences
 
-The [complete categorized reference](fonts/emoji.md) lists all5,244 pinned
-Emoji18.0 test entries:3,972 RGI entries plus1,272 qualification variants.
+The [complete categorized reference](fonts/emoji.md) lists all 5,244 pinned
+Emoji 18.0 test entries: 3,972 RGI entries plus 1,272 qualification variants.
 Each row includes the complete scalar sequence, JSON string and qualification,
 not just its first visible character. Group and subgroup names come from
 the Unicode corpus, not a second Blit classification system.
 
-Noto Color Emoji2.057 supplies intrinsic colour; Noto Emoji3.002 supplies
+Noto Color Emoji 2.057 supplies intrinsic colour; Noto Emoji 3.002 supplies
 text-presentation outlines. VS15 U+FE0E requests text and VS16 U+FE0F requests
 emoji presentation for supported sequences. ZWJ, modifiers, regional-indicator
 flags, keycaps and tags are multi-scalar clusters, not individual Nerd glyphs.
@@ -217,8 +221,7 @@ using cluster layout must follow the [explicit emoji layout API](api.md#explicit
 including owner/continuation cells and width. Do not switch the existing Hibr
 desktop's layout policy globally to make an icon work. Font/corpus coverage,
 browser appearance and passing local raster tests are not universal terminal
-or physical conformance guarantees; internal tracking110 covers remaining
-acceptance. See the [font plan](history/font-evolution-plan.md).
+or physical conformance guarantees; internal issue #110 tracks the rest.
 
 ## Machine-readable sources and reproducibility
 
@@ -234,20 +237,20 @@ acceptance. See the [font plan](history/font-evolution-plan.md).
   [Arabic provenance](../assets/fonts/arabic-fonts.source.json),
   [Emoji corpus](../assets/unicode/emoji-18.0/source.json), and
   [Hibr UI snapshot](../assets/fonts/hibr-ui-glyphs.json). The latter is a
-  versioned101-scalar snapshot, not every application.
+  versioned 101-scalar snapshot, not every application.
 
 The tables are generated, not another editable glyph registry:
 
 ```sh
-# Use the same isolated fontTools4.60.1 environment as the font builders.
+# Use the same isolated fontTools 4.60.1 environment as the font builders.
 python3 tools/fonts/build-reference.py
 python3 tools/fonts/build-reference.py --check
 ruby tools/tests/font_reference_gate.rb
 ```
 
 The generator verifies pinned input hashes, and that the glyph stack covers
-the full Nerd catalogue and the original icons. Regenerate and commit derived tables together
-when canonical assets change. No host fonts, network or running display are
+the full Nerd catalogue and the original icons. Regenerate and commit
+derived tables together when canonical assets change. No host fonts, network or running display are
 needed. Repository Markdown on [GitHub](https://github.com/osakka/blit) is the
 public publication format. Use repository-relative file links within the
 guide and GitHub `blob/main` URLs when sharing it externally. Internal Gitea

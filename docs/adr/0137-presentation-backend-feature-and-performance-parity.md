@@ -1,10 +1,10 @@
 # ADR 0137: One feature contract across presentation backends
 
-- Status: implementation in progress; parity acceptance pending
+- Status: superseded by ADR 0184
 - Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Date: 2026-10-19
 - Issue: [Blit #104](https://git.home.arpa/itdlabs/blit/issues/104)
-- Related: ADRs0004,0006,0044,0099,0129,0130,0136
+- Related: ADRs 0004, 0006, 0044, 0099, 0129, 0130, 0136
 
 ## Context
 
@@ -25,7 +25,7 @@ sequence in the [backend parity plan](../history/backend-parity-plan.md).
 Presentation mechanisms may differ; observable feature behavior must agree.
 Expose actual backend identity and timing evidence without equating an SDL
 present call's return with a completed physical scanout. Active-mode refresh
-remains the scheduling target under ADR0006. The plan's measurement tolerances
+remains the scheduling target under ADR 0006. The plan's measurement tolerances
 are release gates, not a lower configured cadence or a universal guarantee.
 
 ## Alternatives and consequences
@@ -37,7 +37,7 @@ are release gates, not a lower configured cadence or a universal guarantee.
 - Removing direct KMS would discard the current reference and does not solve
   SDL lifecycle or timing gaps; retain all three paths.
 - Seamless SDL hotplug requires verified SDL-owned connector lifecycle;
-  follow ADR0129's dependency boundary rather than a parallel DRM inventory.
+  follow ADR 0129's dependency boundary rather than a parallel DRM inventory.
 
 The initial decision introduced no runtime or API compatibility change.
 Future schema additions are additive and implemented schema-first. Existing
@@ -46,7 +46,7 @@ selection/settings remain valid; any fallback is observable in runtime identity.
 ## Verification
 
 Shared differential image/input tests, GPU-backed GLES2 runs, and identical
-bounded one-/multi-output workloads on10.54 must pass. Each acceptance claim
+bounded one-/multi-output workloads on 10.54 must pass. Each acceptance claim
 names package, hardware, modes and workload. High-refresh rows remain open
 until matching physical evidence exists. Follow the plan's rollout and
 rollback procedure and preserve the existing live configuration meanwhile.

@@ -1,21 +1,21 @@
 # ADR 0133: shared API-owned pointer appearance
 
-- Status: implemented and API-deployed in550; physical latency acceptance remains #101
+- Status: accepted; in use since 0.1.550
 - Date: 2026-10-18
 - Issues: Blit#102 (appearance), #101 (jerk/performance)
 
 Pointer appearance is independent of terminal cursor appearance and font scale.
 Keep desired appearance in the existing settings document under `pointer`, with
 shape (`arrow`, `hand`, `precision`), palette (`pearl`, `obsidian`, `neon`,
-`amber`), integer pixel size24–64 and shadow boolean. Missing fields use documented
+`amber`), integer pixel size 24–64 and shadow boolean. Missing fields use documented
 defaults. Validate before any live/settings mutation; the settings revision and
 durable receipt remain authoritative. No cursor-specific second settings file.
 Select only the top-level member through the canonical member iterator;
 opaque extension objects may contain their own `pointer` keys. Duplicate
-top-level appearance members are rejected before mutation. The549 release
+top-level appearance members are rejected before mutation. The 549 release
 review caught both cases in the earlier generic key-scanner implementation;
 550 replaces that scanner, with red/green API regressions for nesting,
-duplicates, escaped names and embedded-NUL key/enum aliases.549 was not deployed.
+duplicates, escaped names and embedded-NUL key/enum aliases. 549 was not deployed.
 
 One bounded code-native vector rasterizer produces cached antialiased RGBA
 stamps for both SDL and direct KMS. Rasterize only on appearance changes, not
@@ -37,6 +37,6 @@ themes.
 Supersampling and a bounded cached texture are selected over new SVG/font/image
 dependencies or AI-generated cursor bitmaps: exact hotspots and scalable edges
 are implementation properties, and a single source must produce both paths.
-Protected private token persistence remains ADR0003 in hibr-apps. A polished
+Protected private token persistence remains ADR 0003 in hibr-apps. A polished
 pointer does not prove input-to-photon latency or solve #101; phase timings and
 real workload/cadence acceptance remain separate.

@@ -1,8 +1,6 @@
 # ADR 0025: Preserve Hibr startup diagnostics and full-surface writes
 
-## Status
-
-Accepted
+- Status: accepted
 
 ## Context
 

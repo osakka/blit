@@ -1,6 +1,6 @@
 # ADR 0193: Touchpad drag and typing: tap-and-drag, a pressed pad follows the moving finger, and the pad pauses while typing
 
-- Status: proposed (the gates below pass in 0.2.34; acceptance waits for the owner's HP)
+- Status: accepted
 - Date: 2026-10-26
 - Scope: `blit_touchpad.h`, the main loop's wait, input device settings, the
   control panel's touchpad rows

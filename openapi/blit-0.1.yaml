@@ -240,15 +240,17 @@ paths:
       operationId: updateDisplay
       summary: Set a display's brightness
       description: >-
-        Only the properties this display lists in `capabilities` are accepted,
-        and anything else is refused with `invalid_display_property` rather
-        than ignored. Selecting a mode is deliberately not here: it resizes
-        every surface on the display and needs issue #60's resize protocol.
+        Writable: `brightness_percent` where a backlight is attributed, and
+        `rotation` 0. Any other property is a 400 `invalid_display_property`
+        rather than ignored. Selecting a mode is deliberately not here: it
+        resizes every surface on the display and needs issue #60's resize
+        protocol.
 
-        `rotation` is accepted only as 0 (native KMS has no rotation
-        transform, ADR 0184): any other valid angle is a 422
-        `display_rotation_unsupported`. `brightness_percent` is refused with 422
-        `display_brightness_unsupported` where no backlight is attributed.
+        Native KMS has no rotation transform (ADR 0184): `rotation` 0 is
+        accepted, 90, 180 or 270 is a 422 `display_rotation_unsupported`, and
+        any other value a 400 `invalid_display_rotation`.
+        `brightness_percent` is a 422 `display_brightness_unsupported` where
+        no backlight is attributed.
       requestBody:
         required: true
         content:
@@ -768,16 +770,16 @@ paths:
           name: cached
           required: false
           description: >-
-            Observe the already-composed scene without forcing a full redraw.
-            Omit this parameter when a deliberate fresh scene rebuild is
-            required.
+            Accepted and ignored. Every capture answers from the next
+            presented frame and never forces a rebuild.
           schema:
             type: string
             enum: ['1']
       responses:
         '200':
           description: >-
-            The presented KMS framebuffer, as a 32-bit bottom-up BMP image. The response
+            The next presented KMS framebuffer, as a 32-bit bottom-up BMP
+            image. The response
             carries the state identity the pixels correspond to, sampled at
             the moment the framebuffer is read, so a client can tell a
             rendering fault from a capture whose surface moved underneath it.
@@ -1050,6 +1052,9 @@ paths:
       tags: [effects]
       operationId: createOverlay
       summary: Create a bounded solid-color graphic overlay
+      description: >-
+        At most 16 overlays; beyond that the request is a 503
+        `overlay_capacity`. A malformed body is a 400 `invalid_overlay`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -1071,7 +1076,10 @@ paths:
       - name: overlay_id
         in: path
         required: true
-        schema: {$ref: '#/components/schemas/ResourceId'}
+        description: >-
+          The number in the overlay's id: `3` for `overlay-3`. The server
+          reads the leading digits only, so the full id does not match.
+        schema: {type: string, pattern: '^[0-9]+$'}
     delete:
       tags: [effects]
       operationId: deleteOverlay
@@ -1940,15 +1948,18 @@ components:
         path: {type: string}
         available: {type: boolean}
         arabic_companion_path:
-          type: string
-          nullable: true
-          description: Required companion asset for this profile; null for profiles without native Arabic. Availability includes this file.
+          type: [string, 'null']
+          description: >-
+            The Arabic companion face. Every outline font has one; a PSF
+            profile has null. An outline profile is available only when the
+            companion file is readable.
         rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
       additionalProperties: false
     ArabicCompanion:
-      type: object
-      nullable: true
-      description: Actually loaded Arabic companion, or null. Baseline is shared with the active primary font.
+      type: [object, 'null']
+      description: >-
+        The Arabic companion actually loaded, or null. Its baseline is the
+        active font's.
       required: [path, family, baseline_px, shaping]
       properties:
         path: {type: string}
@@ -1957,7 +1968,9 @@ components:
         shaping:
           type: string
           enum: [visual-cell-marks]
-          description: Hibr supplies display-order forms. OpenType positions cell-local marks; Blit does not apply paragraph bidi again. Not a universal Unicode coverage claim.
+          description: >-
+            Hibr supplies display-order forms; OpenType positions cell-local
+            marks. Blit does not apply paragraph bidi again.
       additionalProperties: false
     FontConfiguration:
       type: object
@@ -2037,10 +2050,13 @@ components:
       additionalProperties: false
     ServerDetails:
       type: object
-      required: [id, name, api_version, revision, capabilities, display_count, display_backend, resources, listener]
+      required: [id, name, server_version, api_version, revision,
+                 capabilities, display_count, display_backend, resources,
+                 listener]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         name: {type: string}
+        server_version: {type: string}
         api_version: {type: string, const: '0.1'}
         revision: {$ref: '#/components/schemas/Revision'}
         capabilities:
@@ -2057,7 +2073,10 @@ components:
           additionalProperties: false
         resources:
           type: object
-          required: [graphics, displays, audio, audio_cards, input_devices, input_routes, topology, fonts, settings, diagnostics, runtime_diagnostics, observation]
+          required: [graphics, displays, audio, audio_cards, input_devices,
+                     input_routes, topology, fonts, login, auxiliary_displays,
+                     settings, diagnostics, runtime_diagnostics, observation,
+                     effects, overlays]
           properties:
             graphics: {type: string}
             displays: {type: string}
@@ -2073,6 +2092,8 @@ components:
             diagnostics: {type: string}
             runtime_diagnostics: {type: string}
             observation: {type: string}
+            effects: {type: string}
+            overlays: {type: string}
           additionalProperties: false
         listener:
           type: object
@@ -2160,7 +2181,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/DisplayMode'
             - type: 'null'
-        presentation_state: {type: string}
+        presentation_state: {type: string, enum: [presenting, recovering, failed]}
         capabilities:
           type: array
           description: >-
@@ -2179,7 +2200,7 @@ components:
           required: [present, presentation_state, physical]
           properties:
             present: {type: boolean}
-            presentation_state: {type: string}
+            presentation_state: {type: string, enum: [presenting, recovering, failed]}
             physical:
               type: object
               description: >-
@@ -2218,18 +2239,12 @@ components:
         configuration:
           type: object
           description: >-
-            The properties this display can actually perform, and only those
-            (issue #69). It replaced an empty object, but not the reasoning
-            behind it: selecting a mode changes the render output size and
-            therefore every surface on the display, and a Hibr desktop's cells
-            come from its owner (ADR 0063), so it needs a resize protocol with
-            that owner. The modes are reported so a controller can show them;
-            `mode` is still refused.
-
-            `rotation` is accepted only as 0: native KMS composes straight into
-            the connector's framebuffer and has no rotation transform (ADR
-            0184). Any other valid angle is a 422 `display_rotation_unsupported`,
-            an invalid one a 400 `invalid_display_rotation`.
+            The settable properties this display can actually perform, and
+            only those (issue #69). Selecting a mode changes the render output
+            size and therefore every surface on the display, and a Hibr
+            desktop's cells come from its owner (ADR 0063), so it needs a
+            resize protocol with that owner. The modes are reported so a
+            controller can show them; `mode` is still refused.
 
             `brightness_percent` is the backlight's level. It is read from
             `actual_brightness`, which is what the panel is doing, and written
@@ -2237,7 +2252,6 @@ components:
             ramps reports the old value until it arrives. It is not persisted:
             systemd-backlight already restores it across a boot.
           properties:
-            rotation: {type: integer, enum: [0, 90, 180, 270]}
             brightness_percent: {type: integer, minimum: 0, maximum: 100}
           additionalProperties: false
         revision:
@@ -2523,14 +2537,15 @@ components:
         persisted:
           type: boolean
           description: >-
-            false during a marked read-only presentation trial, or when the server was started with `BLIT_SETTINGS=ignore`,
+            false when the server was started with `BLIT_SETTINGS=ignore`,
             which starts from the defaults and leaves the document untouched.
-            This is an enablement flag, not proof of a completed save; inspect storage.
+            This is an enablement flag, not proof of a completed save; read
+            `storage`.
         storage:
           type: object
           required: [state, saved_revision, error]
           properties:
-            state: {type: string, enum: [clean, pending, error, disabled, trial-read-only]}
+            state: {type: string, enum: [clean, pending, error, disabled]}
             saved_revision: {type: integer, minimum: 0}
             error: {type: string, enum: ['', settings_write_failed]}
           additionalProperties: false
@@ -2666,16 +2681,23 @@ components:
                 display_backend:
                   type: string
                   enum: [kms]
-                  description: Native KMS is the only presentation backend (ADR 0184); any other value is refused.
+                  description: >-
+                    Native KMS is the only presentation backend (ADR 0184);
+                    any other value is a 400 `invalid_settings_server`.
                 kms_async_pageflip: {type: boolean}
                 kms_compositor:
                   type: string
                   enum: [cpu, gles]
-                  description: Compose on the GPU (gles, the default) or the CPU (ADR 0181); applied at the next start.
+                  description: >-
+                    Compose on the GPU (`gles`, the default) or the CPU (ADR
+                    0181). Applied at the next start.
                 kms_frame_timing:
                   type: string
                   enum: [immediate, late]
-                  description: Compose as soon as there is work, or just before each refresh (ADR 0183); applied at once.
+                  description: >-
+                    Compose as soon as the previous flip completes
+                    (`immediate`, the default) or a lead before each vblank
+                    (`late`) (ADR 0183). Applied live.
                 effects_animation_hz:
                   type: integer
                   minimum: 10
@@ -2688,8 +2710,11 @@ components:
         effective:
           type: object
           required: [render_interval_ms, pane_layout,
-                     display_backend_requested, display_backend_active, kms_async_pageflip, expect_desktop,
-                     login, login_restart_required, pointer]
+                     display_backend_requested, display_backend_active,
+                     presentation_configuration, kms_async_pageflip,
+                     kms_compositor, kms_frame_timing, effects_animation_hz,
+                     expect_desktop, login, login_restart_required, pointer,
+                     pointer_shown]
           properties:
             render_interval_ms: {type: integer, minimum: 1, maximum: 100}
             pane_layout: {type: string}
@@ -2697,7 +2722,9 @@ components:
             display_backend_active: {type: string, enum: [drm-kms, unavailable]}
             presentation_configuration:
               type: object
-              description: Read-only provenance; saved API settings own intent, environment supplies startup defaults only.
+              description: >-
+                Read-only provenance. Saved API settings own intent; the
+                environment supplies startup defaults only.
               required: [backend_source, backend_environment, backend_environment_valid, configuration_valid]
               properties:
                 backend_source: {type: string, enum: [saved-settings, environment, default]}
@@ -2706,10 +2733,32 @@ components:
                 configuration_valid: {type: boolean}
               additionalProperties: false
             kms_async_pageflip: {type: boolean}
+            kms_compositor:
+              type: string
+              enum: [gles, cpu]
+              description: >-
+                The saved or boot compositor choice. What each output really
+                uses is `render.outputs[].compositor` in `/v1/diagnostics`.
+            kms_frame_timing: {type: string, enum: [immediate, late]}
+            effects_animation_hz: {type: integer, minimum: 10, maximum: 30}
             expect_desktop: {type: boolean}
             login: {$ref: '#/components/schemas/LoginPolicy'}
             login_restart_required: {type: boolean}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
+            pointer_shown:
+              type: object
+              description: >-
+                The pointer drawn now. A program may ask for another shape by
+                OSC 22; `hidden` is true while the program under the pointer
+                asked for `none`.
+              required: [shape, hidden]
+              properties:
+                shape:
+                  type: string
+                  enum: [arrow, hand, precision, text, wait, move, ew-resize,
+                         ns-resize, nwse-resize, nesw-resize, not-allowed]
+                hidden: {type: boolean}
+              additionalProperties: false
           additionalProperties: false
     LoginPolicy:
       type: object
@@ -2794,10 +2843,13 @@ components:
             pointers_peak: {type: integer, minimum: 0}
             gamepads: {type: integer, minimum: 0}
             gamepads_peak: {type: integer, minimum: 0}
+            input_devices: {type: integer, minimum: 0}
           additionalProperties: false
         render:
           type: object
-          required: [pending, interval_ms, effective_interval_ms, mode, outputs, font_scale, presentation_sync, pointer]
+          required: [pending, interval_ms, effective_interval_ms, mode,
+                     outputs, font_scale, surface_inset_px,
+                     presentation_sync, hotplug, pointer]
           properties:
             pending: {type: boolean}
             interval_ms: {type: integer, minimum: 1}
@@ -2807,7 +2859,13 @@ components:
               type: array
               items:
                 type: object
-                required: [display_id, refresh_hz, refresh_source, effective_interval_ms, target_interval_us, target_interval_ms, missed_deadlines, last_present_ms, max_present_ms, present_calls, kms_scanout, render_width, render_height]
+                required: [display_id, refresh_hz, refresh_source,
+                           effective_interval_ms, target_interval_us,
+                           target_interval_ms, missed_deadlines,
+                           last_present_ms, max_present_ms, present_calls,
+                           kms_scanout, kms_phases, render_width,
+                           render_height, viewport_width, viewport_height,
+                           scale_x, scale_y, compositor, effects, flip]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
@@ -2853,8 +2911,117 @@ components:
                       pointer_frame_submissions: {type: integer, minimum: 0, description: Submitted output frames that include a changed pointer position.}
                   render_width: {type: integer, minimum: 0}
                   render_height: {type: integer, minimum: 0}
+                  viewport_width:
+                    type: integer
+                    minimum: 0
+                    description: Always the render size; native KMS does not scale.
+                  viewport_height: {type: integer, minimum: 0}
+                  scale_x: {type: number, const: 1}
+                  scale_y: {type: number, const: 1}
+                  compositor:
+                    type: object
+                    description: >-
+                      Which compositor made this output's frames (ADR 0181).
+                      `reason` says why GLES was asked for and not used;
+                      `cpu_composed_frames` counts frames the CPU composed
+                      for a GLES output and `cpu_reason` says why the last
+                      one was. GPU time per frame is measured with
+                      GL_EXT_disjoint_timer_query where the driver has it
+                      (`gpu_timed`). `gles_uploaded_rows` counts rows sent to
+                      the GPU; unchanged rows are not resent.
+                    required: [active, requested, reason, renderer,
+                               gles_frames, gles_uploaded_rows,
+                               gpu_composed_frames, cpu_composed_frames,
+                               cpu_reason, gpu_timed, gpu_last_ms,
+                               gpu_max_ms, gpu_total_us, gpu_frames,
+                               frame_quads, frame_draw_calls, upload_ms,
+                               image_partial_uploads]
+                    properties:
+                      active: {type: string, enum: [cpu, gles, unavailable]}
+                      requested: {type: string, enum: [cpu, gles, unavailable]}
+                      reason: {type: string}
+                      renderer: {type: string, description: GL renderer and version.}
+                      gles_frames: {type: integer, minimum: 0}
+                      gles_uploaded_rows: {type: integer, minimum: 0}
+                      gpu_composed_frames: {type: integer, minimum: 0}
+                      cpu_composed_frames: {type: integer, minimum: 0}
+                      cpu_reason: {type: string}
+                      gpu_timed: {type: boolean}
+                      gpu_last_ms: {type: number, minimum: 0}
+                      gpu_max_ms: {type: number, minimum: 0}
+                      gpu_total_us: {type: integer, minimum: 0}
+                      gpu_frames: {type: integer, minimum: 0}
+                      frame_quads: {type: integer, minimum: 0}
+                      frame_draw_calls: {type: integer, minimum: 0}
+                      upload_ms: {type: number, minimum: 0}
+                      image_partial_uploads: {type: integer, minimum: 0}
+                    additionalProperties: false
+                  effects:
+                    type: object
+                    description: >-
+                      Pane-effect cost (ADR 0186-0188). `present_panes` is the
+                      panes the presentation pass drew last frame (0 on the
+                      plain path); `presentation_unavailable` is empty when
+                      this output can draw presentation effects, else the
+                      reason; `animation_hz` is 0 while no animated effect
+                      runs.
+                    required: [cpu_last_ms, cpu_max_ms, gpu_quads,
+                               present_panes, glow_rebuilds,
+                               presentation_unavailable, animation_hz,
+                               animation_frames, animation_phase]
+                    properties:
+                      cpu_last_ms: {type: number, minimum: 0}
+                      cpu_max_ms: {type: number, minimum: 0}
+                      gpu_quads: {type: integer, minimum: 0}
+                      present_panes: {type: integer, minimum: 0}
+                      glow_rebuilds: {type: integer, minimum: 0}
+                      presentation_unavailable: {type: string}
+                      animation_hz: {type: integer, minimum: 0, maximum: 30}
+                      animation_frames: {type: integer, minimum: 0}
+                      animation_phase: {type: number, minimum: 0}
+                    additionalProperties: false
+                  flip:
+                    type: object
+                    description: >-
+                      Page flips timed from submission to their completion
+                      event (`last_ms`, `max_ms`, `total_us`, `count`), and
+                      the frame-timing policy (ADR 0183). `lead_us` is 0
+                      under `immediate`. `submit_phase_ms` counts on-time and
+                      late flips by whole milliseconds between the previous
+                      vblank and submission, in 17 buckets, the last for 16
+                      ms and over.
+                    required: [last_ms, max_ms, total_us, count, timing,
+                               lead_us, on_time, late, slot_misses,
+                               submit_phase_ms]
+                    properties:
+                      last_ms: {type: number, minimum: 0}
+                      max_ms: {type: number, minimum: 0}
+                      total_us: {type: integer, minimum: 0}
+                      count: {type: integer, minimum: 0}
+                      timing: {type: string, enum: [immediate, late]}
+                      lead_us: {type: integer, minimum: 0}
+                      on_time: {type: integer, minimum: 0}
+                      late: {type: integer, minimum: 0}
+                      slot_misses: {type: integer, minimum: 0}
+                      submit_phase_ms:
+                        type: object
+                        required: [on_time, late]
+                        properties:
+                          on_time:
+                            type: array
+                            minItems: 17
+                            maxItems: 17
+                            items: {type: integer, minimum: 0}
+                          late:
+                            type: array
+                            minItems: 17
+                            maxItems: 17
+                            items: {type: integer, minimum: 0}
+                        additionalProperties: false
+                    additionalProperties: false
                 additionalProperties: false
             font_scale: {type: number, exclusiveMinimum: 0}
+            surface_inset_px: {type: integer, minimum: 0}
             presentation_sync:
               type: string
               enum: [drm-page-flip, drm-page-flip-async]
@@ -2898,7 +3065,7 @@ components:
             full-size sixel canvas is exactly `max_bytes` (issue #8).
           required: [max_images, max_width, max_height, max_bytes,
                      sixel_max_width, sixel_max_height,
-                     sixel_color_registers]
+                     sixel_color_registers, frames]
           properties:
             max_images: {type: integer, minimum: 1}
             max_width: {type: integer, minimum: 1}
@@ -2907,6 +3074,18 @@ components:
             sixel_max_width: {type: integer, minimum: 1}
             sixel_max_height: {type: integer, minimum: 1}
             sixel_color_registers: {type: integer, minimum: 1}
+            frames:
+              type: object
+              description: >-
+                The frames-by-descriptor channel (ADR 0202): its abstract
+                socket name (`@blit-frames-<port>`, empty when it could not
+                be opened) and server-wide counts.
+              required: [socket, accepted, refused]
+              properties:
+                socket: {type: string}
+                accepted: {type: integer, minimum: 0}
+                refused: {type: integer, minimum: 0}
+              additionalProperties: false
           additionalProperties: false
         errors:
           type: array
@@ -3431,12 +3610,7 @@ components:
         bounds:
           allOf:
             - {$ref: '#/components/schemas/Bounds'}
-          description: >-
-            Authoritative terminal-cell bounds. Physical pane regions are
-            partitioned first and each region is quantized independently, so
-            no terminal row or column crosses a physical pane boundary.
-            Physical placement is reported by the pane's pixel_region and
-            cell_grid fields.
+          description: The overlay's rectangle in the display's pixels.
         color:
           type: string
           pattern: '^#[0-9A-Fa-f]{6}$'
@@ -4146,7 +4320,7 @@ components:
               session_id: {type: [string, 'null']}
               client_name:
                 type: [string, 'null']
-                description: Native client name; from0.1.549 stable output selector plus row-major pane ordinal (ADR0135).
+                description: Native client name, from the stable output selector and the row-major pane ordinal (ADR 0135).
               state:
                 type: string
                 enum: [waiting_authentication, waiting_desktop, waiting_output, waiting_pane, starting, waiting_join, joined, stopped, conflict]
@@ -4176,7 +4350,7 @@ components:
         session_name: {type: string, const: desktop}
         client_name:
           type: [string, 'null']
-          description: Native client name; from0.1.549 stable output selector plus row-major pane ordinal (ADR0135).
+          description: Native client name, from the stable output selector and the row-major pane ordinal (ADR 0135).
         query_in_flight: {type: boolean}
         observed_monotonic_us: {type: integer, minimum: 0}
         owner:
@@ -4339,7 +4513,9 @@ components:
     TerminalSession:
       type: object
       required: [id, revision, surface_revision, state, surface_id, title,
-        terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop, text_layout]
+        terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop,
+        text_layout, login_manager, process_id, focused, surface_mode,
+        mouse_reporting, pointer_shape, graphics, frames]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -4367,7 +4543,7 @@ components:
             progress reports are not exposed as notifications.
         display_id: {$ref: '#/components/schemas/ResourceId'}
         pane_id: {$ref: '#/components/schemas/ResourceId'}
-        process_id: {type: integer, minimum: 1}
+        process_id: {type: integer, minimum: 0}
         exit_code: {type: integer}
         focused: {type: boolean}
         surface_mode: {type: string, enum: [terminal, external, mirror]}
@@ -4391,6 +4567,50 @@ components:
           items: {$ref: '#/components/schemas/GraphicsImage'}
         graphics_diagnostics:
           $ref: '#/components/schemas/GraphicsDiagnostics'
+        input_route:
+          type: string
+          description: The enabled input route that targets this session, if any.
+        mouse_reporting:
+          type: object
+          description: >-
+            What the program asked for. `mode` is the tracking mode (9, 1000,
+            1002, 1003, or 0 for off), `sgr` the SGR encoding (1006),
+            `pixels` SGR-Pixels (1016). `pointer_lock` is true while the
+            session holds the pointer (mode ?7701, ADR 0198);
+            `pointer_lock_refusals` counts lock requests refused because the
+            session lacked focus or had ended.
+          required: [mode, sgr, pixels, pointer_lock, pointer_lock_refusals]
+          properties:
+            mode: {type: integer, enum: [0, 9, 1000, 1002, 1003]}
+            sgr: {type: boolean}
+            pixels: {type: boolean}
+            pointer_lock: {type: boolean}
+            pointer_lock_refusals: {type: integer, minimum: 0}
+          additionalProperties: false
+        pointer_shape:
+          type: object
+          description: >-
+            The program's OSC 22 request: the shape name on top of its stack,
+            or null, and the stack's size. Cleared by RIS, a soft reset and
+            the program exiting.
+          required: [requested, depth]
+          properties:
+            requested: {type: [string, 'null']}
+            depth: {type: integer, minimum: 0}
+          additionalProperties: false
+        frames:
+          type: object
+          description: >-
+            Picture frames sent by descriptor into this session's images
+            (ADR 0202).
+          required: [accepted, refused, stale, superseded, last_error]
+          properties:
+            accepted: {type: integer, minimum: 0}
+            refused: {type: integer, minimum: 0}
+            stale: {type: integer, minimum: 0}
+            superseded: {type: integer, minimum: 0}
+            last_error: {type: string}
+          additionalProperties: false
       additionalProperties: false
     TerminalDefaults:
       type: object
@@ -4411,7 +4631,8 @@ components:
     HibrAttachmentDiagnostics:
       type: object
       required: [resume_requested, reassert_attempts, owner_matches, unresolved,
-                 owner_registered, owner_pid]
+                 owner_registered, owner_pid, owner_writes, owner_painted,
+                 settled]
       properties:
         resume_requested: {type: boolean}
         reassert_attempts: {type: integer, minimum: 0}
@@ -4419,6 +4640,15 @@ components:
         unresolved: {type: boolean}
         owner_registered: {type: boolean}
         owner_pid: {type: integer, minimum: 0}
+        owner_writes: {type: integer, minimum: 0}
+        owner_painted:
+          type: boolean
+          description: True once the registered owner has written output.
+        settled:
+          type: boolean
+          description: >-
+            False while Blit is still repairing the desktop's startup or
+            attach layout by nudging its terminal size; true once done.
       additionalProperties: false
     HibrDesktopBinding:
       type: object
@@ -4491,12 +4721,24 @@ components:
                  placement_width, placement_height, z, revision]
       properties:
         id: {type: integer, minimum: 1}
-        protocol: {type: string, enum: [kitty, sixel]}
+        protocol:
+          type: string
+          enum: [kitty, sixel, api]
+          description: >-
+            `api` for an image fed by stream pixel frames. Frames sent by
+            descriptor (ADR 0202) are Kitty images.
         complete: {type: boolean}
         visible: {type: boolean}
-        width: {type: integer, minimum: 1, maximum: 4096}
-        height: {type: integer, minimum: 1, maximum: 4096}
-        format: {type: integer, enum: [24, 32]}
+        width:
+          type: integer
+          minimum: 0
+          maximum: 4096
+          description: Zero while a PNG (format 100) without `s`/`v` is staged.
+        height: {type: integer, minimum: 0, maximum: 4096}
+        format:
+          type: integer
+          enum: [24, 32, 100]
+          description: 100 (PNG) only until the payload is decoded to 32.
         bytes: {type: integer, minimum: 0, maximum: 67108864}
         pixel_crc32:
           type: integer
@@ -4516,10 +4758,10 @@ components:
         z: {type: integer}
         placements:
           type: array
-          maxItems: 8
+          maxItems: 9
           description: >-
-            Numbered placements of this image (Kitty `p=`), in addition to the
-            default placement described by the top-level fields. At most 8.
+            The default placement as id 0, then up to 8 numbered placements
+            (Kitty `p=`), each with its source rectangle.
           items: {$ref: '#/components/schemas/GraphicsPlacement'}
         revision: {$ref: '#/components/schemas/Revision'}
       additionalProperties: false
@@ -4527,7 +4769,10 @@ components:
       type: object
       required: [id, x, y, width, height, z, source]
       properties:
-        id: {type: integer, minimum: 1}
+        id:
+          type: integer
+          minimum: 0
+          description: 0 is the default placement.
         x: {type: integer, description: Destination pixel x on the surface.}
         y: {type: integer, description: Destination pixel y on the surface.}
         width: {type: integer, minimum: 0, maximum: 4096}
@@ -4675,11 +4920,11 @@ components:
       enum: [scalar, emoji]
       default: scalar
       description: >-
-        scalar preserves Unicode15.1 per-scalar widths and zero-width
-        attachments. emoji additionally groups pinned Emoji18.0 sequences;
+        scalar preserves Unicode 15.1 per-scalar widths and zero-width
+        attachments. emoji additionally groups pinned Emoji 18.0 sequences;
         completed multi-scalar sequences occupy two columns where space
         permits. Singleton and ordinary text widths are unchanged. This
-        does not claim general Unicode grapheme or DEC2027 support.
+        does not claim general Unicode grapheme or DEC mode 2027 support.
     CellUpdate:
       type: object
       required: [base_revision, cells]
@@ -4688,8 +4933,8 @@ components:
         text_layout:
           $ref: '#/components/schemas/TextLayout'
           description: >-
-            scalar preserves existing Unicode15.1 per-scalar widths and
-            zero-width attachments. emoji groups pinned Emoji18.0 sequences
+            scalar preserves existing Unicode 15.1 per-scalar widths and
+            zero-width attachments. emoji groups pinned Emoji 18.0 sequences
             within each text value; completed multi-scalar sequences occupy
             two columns. Singleton and ordinary text widths are unchanged.
             Positioned updates are never joined across cells or requests.
@@ -4768,17 +5013,16 @@ components:
       type: object
       required: [type, title, status, code, detail]
       properties:
-        type: {type: string, format: uri-reference}
+        type: {type: string, const: about:blank}
         title: {type: string}
         status: {type: integer, minimum: 400, maximum: 599}
         code: {type: string}
         detail: {type: string}
-        instance: {type: string, format: uri-reference}
-        revision: {$ref: '#/components/schemas/Revision'}
-        diagnostics:
-          type: array
-          items: {type: string}
-      additionalProperties: true
+        revision:
+          $ref: '#/components/schemas/Revision'
+          description: >-
+            On a 409 revision conflict only: the resource's current revision.
+      additionalProperties: false
     StreamSubscribe:
       type: object
       required: [type, subscriptions]
@@ -4827,19 +5071,26 @@ components:
       additionalProperties: false
     StreamPixelFrameReceipt:
       type: object
-      required: [type, state]
+      description: >-
+        `pixel_frame_ready` (state `ready`) after an accepted begin;
+        `pixel_frame_present` (state `accepted`) for a completed frame when
+        `ack` was set; `pixel_frame_error` with a `code` and no state.
+      required: [type]
       properties:
         type:
           type: string
           enum: [pixel_frame_ready, pixel_frame_present, pixel_frame_error]
-        state: {type: string}
-        code: {type: string}
+        state: {type: string, enum: [ready, accepted]}
+        code:
+          type: string
+          enum: [invalid_begin, invalid_end, frame_size, frame_incomplete]
       additionalProperties: false
     StreamInputEvent:
       type: object
-      required: [type, session_id, device_id, event]
+      required: [type, session_id, device_id, event, sequence]
       properties:
         type: {type: string, const: input}
+        sequence: {$ref: '#/components/schemas/Revision'}
         session_id: {$ref: '#/components/schemas/ResourceId'}
         device_id: {$ref: '#/components/schemas/ResourceId'}
         event:
@@ -4894,6 +5145,7 @@ components:
       additionalProperties: false
     StreamSurfaceDelta:
       type: object
+      description: Damage is present only while the surface has valid damage.
       required: [type, surface_id, revision, cursor, sequence]
       properties:
         type: {type: string, const: surface_delta}
@@ -4930,4 +5182,17 @@ components:
         code: {type: string}
         detail: {type: string}
         resource_id: {$ref: '#/components/schemas/ResourceId'}
+        path:
+          type: string
+          description: Device events only; the evdev node.
+        active_devices:
+          type: integer
+          minimum: 0
+          description: Device events only; open evdev devices after the change.
+        sequence:
+          $ref: '#/components/schemas/Revision'
+          description: >-
+            Present on broadcast device events; absent on replies sent to one
+            connection (stream_connected, subscription_received, replay_gap,
+            input_forwarded).
       additionalProperties: false

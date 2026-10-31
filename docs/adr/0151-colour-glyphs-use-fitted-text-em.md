@@ -1,13 +1,13 @@
-# ADR0151: colour glyph artwork uses the fitted text em
+# ADR 0151: colour glyph artwork uses the fitted text em
 
-- Date:2026-10-20
-- Status: deployed in567; operator visual approval pending
-- Tracking: Blit107; follows ADR0147/0150
+- Status: accepted
+- Date: 2026-10-20
+- Tracking: Blit 107; follows ADR 0147/0150
 
 Modern previously scaled colour artwork to fill the entire allocated cell
 rectangle, whereas outline text was fitted to font ascent/descent and advance.
-The cell includes line spacing. At22px, the production raster gives H13px
-ink height, menu pencil11px and bell20px. The bell fits its legitimate two
+The cell includes line spacing. At 22px, the production raster gives H 13px
+ink height, menu pencil 11px and bell 20px. The bell fits its legitimate two
 cells: this is an optical sizing policy issue, not terminal-width corruption.
 
 Bound colour artwork height by the outline's already-resolved em size,
@@ -17,8 +17,8 @@ emoji source data, outline glyphs or Nerd glyphs. Colour-only contexts with
 no outline retain the cell-height bound. Do not add a second user size policy
 or a bell-specific codepoint exception. Native and SDL consume one raster.
 
-At Modern22px the bell ink becomes17x18 rather than20x20, while retaining
-the same22x22 two-cell allocation. A new regression fails before the change
+At Modern 22px the bell ink becomes 17x18 rather than 20x20, while retaining
+the same 22x22 two-cell allocation. A new regression fails before the change
 and passes afterward for this optical bound and unchanged advance. Existing
 8..64px raster/blend and backend pixel tests remain required, including the
 bell itself. tools/probes/font_glyph_metrics.c reports production-raster ink

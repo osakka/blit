@@ -1,8 +1,6 @@
 # ADR-0029: Hit-test display-attached sessions
 
-## Status
-
-Accepted
+- Status: accepted
 
 ## Decision
 

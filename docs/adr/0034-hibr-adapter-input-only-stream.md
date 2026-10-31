@@ -1,6 +1,6 @@
 # ADR 0034: Restrict the Hibr adapter stream to input events
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

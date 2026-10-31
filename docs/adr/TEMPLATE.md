@@ -1,6 +1,6 @@
 # ADR NNNN: short decision title
 
-- Status: proposed | accepted | superseded | rejected
+- Status: proposed (see the forms in README.md's "Status")
 - Date: YYYY-MM-DD
 - Scope: affected subsystem or contract
 

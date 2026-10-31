@@ -1,6 +1,6 @@
 # ADR 0128: live auxiliary-display Apply contract
 
-- Status: accepted; API/controller implemented in 0.1.543, physical acceptance pending
+- Status: accepted; in use since 0.1.543
 - Date: 2026-10-17
 - Related: [ADR 0124](0124-api-owned-desktop-policy-and-control-panel.md),
   [ADR 0126](0126-native-login-desktop-association.md),

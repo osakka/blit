@@ -1,5 +1,7 @@
 # ADR 0043: Define multi-monitor frame atomicity at the scene boundary
 
+- Status: accepted
+
 ## Context
 
 Blit owns one logical scene and may present it on several independent DRM

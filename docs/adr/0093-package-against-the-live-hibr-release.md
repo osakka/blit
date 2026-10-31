@@ -1,5 +1,7 @@
 # ADR 0093: Package against the installed Hibr release
 
+- Status: superseded by ADR 0094
+
 ## Context
 
 Blit 0.1.498 correctly stopped mirroring Hibr's desktop tree and began

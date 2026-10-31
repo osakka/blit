@@ -1,6 +1,6 @@
 # ADR 0036: Expose a bounded API diagnostic trace
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

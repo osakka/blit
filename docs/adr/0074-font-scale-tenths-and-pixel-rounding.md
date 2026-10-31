@@ -1,6 +1,6 @@
 # ADR-0074: Support tenth-step font scales with deterministic pixel rounding
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

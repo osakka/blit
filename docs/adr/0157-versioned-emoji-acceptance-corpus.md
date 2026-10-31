@@ -1,20 +1,20 @@
-# ADR0157: versioned emoji acceptance, separate font and terminal evidence
+# ADR 0157: versioned emoji acceptance, separate font and terminal evidence
 
+- Status: accepted; in use since 0.1.574
 - Date: 2026-10-20
-- Status: corpus/audit and colour asset implemented; cluster renderer pending
-- Tracking: Blit107/110; execution order in docs/roadmap.md
+- Tracking: Blit 107/110; execution order in docs/roadmap.md
 
 ## Decision
 
-Define "every emoji" against Unicode Emoji18.0's official, hash-pinned
+Define "every emoji" against Unicode Emoji 18.0's official, hash-pinned
 emoji-test.txt, not a scalar cmap count. Preserve its licence and qualification
-metadata. RGI is3,963 fully-qualified entries plus9 components. The1,029
-minimally-qualified and243 unqualified forms are additional compatibility
-cases, not additional RGI emoji. The longest current sequence is10 scalars.
+metadata. RGI is 3,963 fully-qualified entries plus 9 components. The 1,029
+minimally-qualified and 243 unqualified forms are additional compatibility
+cases, not additional RGI emoji. The longest current sequence is 10 scalars.
 None of this silently changes Hibr's existing Unicode width ABI.
 
-Use the existing single colour fallback file, updated from Noto2.042 to
-unmodified Noto Emoji2D2.057 from pinned release v2026-09-24-unicode18_0.
+Use the existing single colour fallback file, updated from Noto 2.042 to
+unmodified Noto Emoji 2D 2.057 from pinned release v2026-09-24-unicode18_0.
 It retains the existing FreeType-supported CBDT/CBLC format, without a second
 colour renderer or font selection path. Source, licence and output hashes
 remain in the canonical font provenance manifest. Do not deploy this change
@@ -26,14 +26,14 @@ glyph IDs for every corpus entry, removing default-ignorable placeholders
 after shaping. A single nonzero glyph is a necessary coverage check, not proof
 of visible colour artwork or correct terminal layout. This is operator-only
 diagnostic tooling, not a second production shaping implementation and not
-an implicit decision to link HarfBuzz6.0.0 into the server.
+an implicit decision to link HarfBuzz 6.0.0 into the server.
 
 ## Findings and required next implementation
 
-With audited host HarfBuzz6.0.0, old Noto2.042 misses/splits174 RGI entries
-and10 minimally-qualified variants. Noto2.057 produces one nonzero glyph for
-all5,244 entries. Shared raster regressions for both outline profiles pass
-all57 sizes with the candidate colour asset. Existing BlitRaster still accepts
+With audited host HarfBuzz 6.0.0, old Noto 2.042 misses/splits 174 RGI entries
+and 10 minimally-qualified variants. Noto 2.057 produces one nonzero glyph for
+all 5,244 entries. Shared raster regressions for both outline profiles pass
+all 57 sizes with the candidate colour asset. Existing BlitRaster still accepts
 one scalar, so it DOES NOT acquire cluster support by updating this font.
 
 Next establish one bounded cluster representation shared by PTY ingestion,

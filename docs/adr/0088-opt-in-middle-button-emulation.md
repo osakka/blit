@@ -1,6 +1,6 @@
 # ADR 0088: Opt-in deferred middle-button emulation
 
-Status: accepted
+- Status: accepted
 
 ## Context
 

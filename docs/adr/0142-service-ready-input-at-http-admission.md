@@ -1,15 +1,15 @@
 # ADR 0142: Give admitted HTTP clients one nonblocking read slice
 
-- Status: implemented; full regression and bounded physical comparison passed
+- Status: accepted
 - Date: 2026-10-19
 - Issues: Blit #105, #104
-- Related: ADR0141
+- Related: ADR 0141
 
 ## Evidence
 
-Physical559 bounded admission improves SDL throughput from67–71 to221–223
-delivered requests/s, but a240-slot/s producer still skips154–171 offers at
-the client queue, with request p95 around51–52ms. Newly admitted descriptors
+Physical 559 bounded admission improves SDL throughput from 67–71 to 221–223
+delivered requests/s, but a 240-slot/s producer still skips 154–171 offers at
+the client queue, with request p95 around 51–52ms. Newly admitted descriptors
 are absent from the readiness snapshot already taken by the loop, so their
 first read waits another turn, potentially behind another blocking present.
 This is a candidate residual delay, not yet its sole proven physical cause.
@@ -40,20 +40,20 @@ The admitted-ready-request regression must fail before implementation and
 pass afterward. Verify both nonblocking and close-on-exec descriptor flags,
 empty/partial clients, the eight-admission budget and capacity rejection.
 Run the delayed-present fixture and full network/lifecycle/renderer suites,
-then repeat the actual240-slot/s physical workload and all pixel/protocol
+then repeat the actual 240-slot/s physical workload and all pixel/protocol
 checks. Report remaining skips/latency without assuming this closes them.
 
 The ready-request assertion is red before the change and green afterward.
 The complete socket/held-scene fixture passes on software and offscreen GLES2,
 and the delayed-present burst still passes. Idle path spot checks also show
-variable transport setup (curl connect approximately102ms and949ms, ICMP43ms);
+variable transport setup (curl connect approximately 102ms and 949ms, ICMP 43ms);
 those are isolated observations, not a stable network baseline. Do not
 attribute all remote request RTT to Blit's event loop.
 
-Physical560 repeats the same ten-second240-slot/s workload on all three
-backends. SDL/software delivers2400with0client skips, p95=32.88ms;
-SDL/GLES2 delivers2394with6skips,p95=33.92ms, versus559's171/154skips
-and51.76/51.45ms respectively. All bounded pixel/protocol checks pass and
+Physical 560 repeats the same ten-second 240-slot/s workload on all three
+backends. SDL/software delivers 2400 with 0 client skips, p95=32.88ms;
+SDL/GLES2 delivers 2394 with 6 skips, p95=33.92ms, versus 559's 171/154 skips
+and 51.76/51.45ms respectively. All bounded pixel/protocol checks pass and
 native/login/pointer restore. Transport phases are now recorded separately;
 post-connect exchange still includes network/response time. This is not
 sustained multi-output acceptance or proof that all latency comes from

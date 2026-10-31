@@ -1,6 +1,6 @@
 # ADR 0046: Free panes do not swallow display-attached input
 
-- Status: Accepted
+- Status: accepted
 - Date: 2026-10-09
 
 ## Context

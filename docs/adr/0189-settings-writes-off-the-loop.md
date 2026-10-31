@@ -1,6 +1,6 @@
 # ADR 0189: Settings writes never block the main loop; the receipt is unchanged
 
-- Status: accepted (2026-10-26)
+- Status: accepted
 - Date: 2026-10-26
 - Scope: settings persistence, HTTP request lifecycle, main loop
 

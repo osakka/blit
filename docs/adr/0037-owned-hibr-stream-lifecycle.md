@@ -1,6 +1,6 @@
 # ADR 0037: Own Hibr adapter streams by session
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

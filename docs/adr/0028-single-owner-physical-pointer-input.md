@@ -1,8 +1,6 @@
 # ADR-0028: Use one owner for physical pointer input
 
-## Status
-
-Accepted
+- Status: accepted
 
 ## Decision
 

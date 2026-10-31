@@ -1,6 +1,6 @@
 # ADR 0198: Pointer lock: a focused program can hold the pointer and read raw motion
 
-- Status: accepted (2026-10-27; Boxer's Doom on the owner's screen is the last check)
+- Status: accepted; in use since 0.2.42
 - Date: 2026-10-27
 - Scope: `blit_server.c` (terminal modes, pointer motion, mouse reports,
   focus), the API diagnostics, a new gate

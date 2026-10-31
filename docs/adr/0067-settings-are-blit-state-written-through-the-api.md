@@ -1,6 +1,6 @@
 # ADR 0067: settings are Blit's own state, written through the API
 
-- Status: accepted
+- Status: accepted; in use since 0.1.451
 - Date: 2026-10-11
 - Scope: device and presentation configuration, its persistence, and the
   boundary between configuration and the settings that gate the API

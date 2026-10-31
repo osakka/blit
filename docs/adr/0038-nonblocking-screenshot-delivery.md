@@ -1,6 +1,6 @@
 # ADR 0038: Keep framebuffer screenshot delivery out of the render loop
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

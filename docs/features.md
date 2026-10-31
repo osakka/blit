@@ -201,7 +201,8 @@ Errors are `application/problem+json` with stable codes.
 Gone on purpose, so nothing should rely on them:
 
 - **SDL renderer** (0.2.22, ADR 0184), and with it presentation trials,
-  `server.renderer`, `BLIT_RENDERER` and display rotation.
+  `server.renderer`, `BLIT_RENDERER` and display rotation (its last
+  plumbing removed in 0.3.16; `rotation` other than 0 is refused).
 - **Global scanlines** (`PUT /v1/effects`), replaced by per-pane effects (0.2.27).
 - **Built-in Retro/Modern fonts** and the console profiles (0.2.35, 0.2.36),
   and Iosevka (0.2.37).

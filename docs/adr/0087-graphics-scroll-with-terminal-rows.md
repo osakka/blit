@@ -1,5 +1,7 @@
 # ADR 0087: Scroll terminal graphics with their owning rows
 
+- Status: accepted
+
 ## Context
 
 Blit kept graphics at absolute pixel coordinates after a terminal scroll. The

@@ -1,8 +1,8 @@
-# ADR0159: shape colour clusters with the public HarfBuzz C API
+# ADR 0159: shape colour clusters with the public HarfBuzz C API
 
+- Status: accepted; in use since 0.1.576
 - Date: 2026-10-20
-- Status: shared raster implemented/verified locally; terminal integration pending, not deployed
-- Tracking: Blit107/110; follows ADR0157/0158
+- Tracking: Blit 107/110; follows ADR 0157/0158
 
 ## Decision
 
@@ -10,7 +10,7 @@ Use HarfBuzz through its supported C API for OpenType cluster shaping rather
 than write another GSUB parser, freeze font-specific glyph-ID tables or embed
 a second terminal engine. TCC still compiles Blit's C. Pin unmodified public
 6.0.0 headers and provenance, and require the OS-maintained libharfbuzz.so.0
-runtime>=6.0.0. Do not bundle an old6.0.0 binary or replace distribution security
+runtime>=6.0.0. Do not bundle an old 6.0.0 binary or replace distribution security
 updates. Add the explicit Debian dependency and fail font-context construction
 if the runtime does not satisfy the compiled API baseline. No silent shaper
 substitution or browser/Hibr changes.
@@ -22,7 +22,7 @@ All use stays on the existing single owner thread. Shape ordered bounded
 cluster values, remove default-ignorable placeholders after shaping, require
 one nonzero colour glyph and render its glyph index through the EXISTING
 FreeType BGRA/premultiplied downsampler. Do not create backend-specific shapers
-or colour compositors. Full keys and1/2-column allocation remain canonical.
+or colour compositors. Full keys and 1/2-column allocation remain canonical.
 
 Expose a private C cluster-raster entry point alongside the scalar wrapper,
 using one cache/composition path. Preserve existing scalar selection policy
@@ -43,8 +43,8 @@ font/native/SDL/backend/terminal gates remain required.
 Keep this entry point unadvertised on the network until renderer consumption
 and PTY/API segmentation/width coordination pass end-to-end. Do not activate
 parser grouping before renderers can consume the result. No live/package
-deployment follows from a module test. Font107/emoji110 remain open.
-ADR0160/candidate577 adds compositor consumption; terminal ingress and complete
+deployment follows from a module test. Font 107/emoji 110 remain open.
+ADR 0160/candidate 577 adds compositor consumption; terminal ingress and complete
 presentation/width policy remain pending.
 
 Primary lifecycle/API references:

@@ -1,18 +1,20 @@
 # Direct KMS boundary
 
 Native DRM/KMS is Blit's only presentation backend (ADR 0184). It lives in
-`src/blit_kms.c`; frames are composed by the GLES compositor (ADR 0181,
-`BLIT_KMS_COMPOSITOR=gles`) or by the CPU compositor. Build the server with the
-TCC toolchain:
+`src/blit_kms.c`; frames are composed by the GLES compositor (ADR 0181), the
+default, or by the CPU compositor (`BLIT_KMS_COMPOSITOR=cpu`). Build the
+server with the TCC toolchain:
 
 ```sh
 tools/build-tcc.sh build/blit/blit-server
 ```
 
-On a DRM-capable guest VT, run it:
+On a DRM-capable guest VT, run it. A network bind needs a token; without
+`BLIT_AUTH_TOKEN` Blit listens on 127.0.0.1 only:
 
 ```sh
-BLIT_BIND_ADDRESS=0.0.0.0 ./build/blit/blit-server 8080
+BLIT_AUTH_TOKEN=change-me BLIT_BIND_ADDRESS=0.0.0.0 \
+  ./build/blit/blit-server 8080
 ```
 
 It must report connected outputs or say why it has none. If KMS cannot be
@@ -62,14 +64,15 @@ cannot turn page-flip submission itself into a process-wide blocking call.
 Readiness, per-output pending state, and the bounded flip timeout remain the
 only waiting mechanisms.
 
-Connector hotplug status is polled from the same bounded DRM output set while
-servicing the descriptor. A disconnected connector is marked `failed` in the
-display API and is removed from the render work for that output; surviving
-outputs continue presenting and servicing the gateway. A page-flip timeout is
-reported as `recovering` while one bounded modeset restores the output; it is
-not permanently marked failed unless the connector is actually lost or the
-recovery modeset fails. The VKMS fault fixture sets connector status to the
-DRM `disconnected` value and verifies this per-output behavior.
+Connector hotplug is watched off the frame loop (ADR 0130): a monitor thread
+wakes on DRM uevents, or every five seconds, and reads a connector snapshot
+that the main loop then applies. A disconnected connector is marked `failed`
+in the display API and is removed from the render work for that output;
+surviving outputs continue presenting and servicing the gateway. A page-flip
+timeout is reported as `recovering` while one bounded modeset restores the
+output; it is not permanently marked failed unless the connector is actually
+lost or the recovery modeset fails. The VKMS fault fixture sets connector
+status to the DRM `disconnected` value and verifies this per-output behavior.
 
 The recovery regression fixture adds `blit.kms_recovery=1` and
 `blit.kms_timeout_ms=1` to the guest command line. It requires both
@@ -114,8 +117,9 @@ capability result, not something to paper over.
 
 ## Logical width and pointer input
 
-With the default 8×16 `Blit-Terminus16.psf` font, direct KMS gives 128 columns on a 1024-pixel output. To request approximately 200 columns,
-start the server with:
+With the default 8×16 `Blit-Terminus16.psf` font, direct KMS gives 128
+columns on a 1024-pixel output. To request approximately 200 columns, start
+the server with:
 
 ```sh
 BLIT_KMS_CELL_WIDTH=5 blit 8080
@@ -134,21 +138,20 @@ unscaled glyph in its upper-left corner.
 With no saved font and no `BLIT_PSF_FONT`, the server starts on the bundled
 `Blit-Terminus16.psf`; it logs the selected font dimensions and glyph count.
 The text fonts, pixel fonts and the glyph stack beneath them are described in
-the [font reference](font-reference.md). Presentation is a
-hard refresh invariant: each active output must schedule independently at the
-maximum refresh supported by its selected mode, and no configured render
-interval may intentionally under-run that cadence. Deadlines use a monotonic
-microsecond clock and preserve each output's cadence phase after late work;
-they are not reset from the completion time of the previous frame.
-`BLIT_RENDER_INTERVAL_MS` remains a diagnostic
-override for measuring a hardware trade-off, but the production scheduler
-must clamp it so it cannot lower an output below its mode refresh. Set
-`BLIT_KMS_TRACE_TIMING=1` to log measured KMS frame durations. The KMS path
-does not submit a page flip when the output has no changed surface, cursor,
-pointer, or topology state; this is the idle CPU/latency guard. A first frame,
-changed pane, or pointer movement can still incur the physical driver's page
-flip latency, which is reported per present and bounded by
-`BLIT_KMS_FLIP_TIMEOUT_MS`.
+the [font reference](font-reference.md). Presentation is a hard refresh
+invariant: each active output must schedule independently at the maximum
+refresh supported by its selected mode, and no configured render interval may
+intentionally under-run that cadence. Deadlines use a monotonic microsecond
+clock and preserve each output's cadence phase after late work; they are not
+reset from the completion time of the previous frame.
+`BLIT_RENDER_INTERVAL_MS` remains a diagnostic override for measuring a
+hardware trade-off; the scheduler clamps it so it cannot lower an output below
+its mode refresh. Set `BLIT_KMS_TRACE_TIMING=1` to log measured KMS frame
+durations. The KMS path does not submit a page flip when the output has no
+changed surface, cursor, pointer, or topology state; this is the idle
+CPU/latency guard. A first frame, changed pane, or pointer movement can still
+incur the physical driver's page flip latency, which is reported per present
+and bounded by `BLIT_KMS_FLIP_TIMEOUT_MS`.
 
 The software pointer is an overlay, not terminal content. Each output retains
 the pixels beneath its pointer and restores that underlay before drawing the
@@ -324,8 +327,8 @@ session contract.
 A payload that cannot be parsed at all is still rejected diagnostically, but
 geometry past the bound is clipped rather than discarded and neither colour
 space nor an undefined colour register costs an image -- see the Sixel section
-of the [terminal reference](terminal.md#sixel); `tools/tests/sixel_decoder_gate.rb`
-asserts this against the framebuffer.
+of the [terminal reference](terminal.md#sixel);
+`tools/tests/sixel_decoder_gate.rb` asserts this against the framebuffer.
 
 ## Pointer stress gate
 

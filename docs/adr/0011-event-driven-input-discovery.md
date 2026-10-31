@@ -1,5 +1,7 @@
 # ADR-0011: Event-driven input-device discovery
 
+- Status: accepted; in use since 0.1.239
+
 ## Context
 
 Blit owns the presentation and input event loop. A periodic synchronous scan

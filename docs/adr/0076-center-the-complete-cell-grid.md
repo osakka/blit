@@ -1,6 +1,6 @@
 # ADR-0076: Center the complete-cell display grid
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

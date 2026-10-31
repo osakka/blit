@@ -1,8 +1,8 @@
-# ADR0160: consume owned clusters consistently in every compositor
+# ADR 0160: consume owned clusters consistently in every compositor
 
+- Status: accepted; in use since 0.1.577
 - Date: 2026-10-20
-- Status: implemented; focused local gates pass, not deployed
-- Tracking:107/110; follows ADR0159
+- Tracking: 107/110; follows ADR 0159
 
 ## Decision
 
@@ -16,7 +16,7 @@ vertices before replacing a colliding tile. Reset keys on font/size changes.
 For a supported cluster, draw once and suppress the old scalar overlays and
 colour bold overstrike. Unsupported ordinary combining text retains its
 existing base/mark path; do not drop visible attachments. Keep exact existing
-owner-supplied1/2-column allocation and do not modify Hibr or the Unicode
+owner-supplied 1/2-column allocation and do not modify Hibr or the Unicode
 width ABI. Parser grouping is a subsequent shared-ingress change, not an
 assumption inferred from backend tests.
 

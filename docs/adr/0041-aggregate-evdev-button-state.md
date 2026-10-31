@@ -1,6 +1,6 @@
 # ADR 0041: Aggregate button state across evdev mice
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

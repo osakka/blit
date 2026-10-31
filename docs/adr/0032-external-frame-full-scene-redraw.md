@@ -1,6 +1,6 @@
 # ADR 0032: Redraw the complete SDL scene for external Hibr commits
 
-Status: Superseded by ADR-0036
+- Status: superseded by ADR 0036
 
 ## Context
 

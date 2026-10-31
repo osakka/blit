@@ -1,6 +1,6 @@
 # ADR 0196: Battery and volume are one levelled icon per state
 
-- Status: accepted (2026-10-27; the owner's screen is the last check)
+- Status: accepted; in use since 0.2.38
 - Date: 2026-10-27
 - Scope: `assets/fonts/icons` (catalogue and artwork), `BlitIcons-Regular.ttf`,
   the icon gates

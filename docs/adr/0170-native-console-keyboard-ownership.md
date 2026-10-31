@@ -1,9 +1,8 @@
-# ADR0170: native KMS owns its Linux VT keyboard
+# ADR 0170: native KMS owns its Linux VT keyboard
 
+- Status: accepted; in use since 0.1.587
 - Date: 2026-10-21
-- Status: candidate0.1.587 corrects586's failed physical-host acceptance;
-  dedicated-VT validation in progress
-- Tracking: [Blit117](https://git.home.arpa/itdlabs/blit/issues/117)
+- Tracking: [Blit 117](https://git.home.arpa/itdlabs/blit/issues/117)
 
 Native KMS reads evdev without disabling the kernel VT keyboard handler.
 The packaged service has null stdin and no controlling terminal; SDL's
@@ -12,7 +11,7 @@ The packaged service has null stdin and no controlling terminal; SDL's
 Reserve an unused VT with VT_OPENQRY, keep it open, register VT_PROCESS and
 activate it with a bounded wait before native presentation. Remember the
 previous VT and return there on exit only when Blit's VT is still active.
-Never borrow the active login VT:586 passed a getty-free VM but failed on
+Never borrow the active login VT: 586 passed a getty-free VM but failed on
 10.54 when getty restarted, invalidating the old descriptor (EIO) and restoring
 K_UNICODE. The dedicated VT must survive a hangup of the original login VT.
 A single /run/blit/console.lock prevents competing Blit VT owners. Native
@@ -39,17 +38,17 @@ fatal process death. A separate recovery process observes process death;
 fatal-signal handlers alone cannot cover SIGKILL. A ten-second main-loop
 heartbeat timeout kills the owner through its pidfd and restores the console.
 The existing synchronous privileged package-install exchange gets a bounded
-120-second lease, reset to10 seconds on return. It must not be killed merely
+120-second lease, reset to 10 seconds on return. It must not be killed merely
 because a valid dpkg install exceeds the interactive heartbeat budget. The
 watchdog is never disabled; expiry still kills/restores the owner. Diagnostics
-report the selected timeout. Tests hold an installation lease beyond10 seconds
+report the selected timeout. Tests hold an installation lease beyond 10 seconds
 and separately verify the ordinary stopped-owner watchdog.
 Preserve the kernel SysRq path (no evdev grab), document its availability, and
 retain the independent service/updater stop path. This process-level watchdog
 does not cover hardware/kernel hangs or killing the recovery process too.
 
 SDL's own VT handling must not have a competing owner. Native support does
-not establish SDL daemon acceptance. Keep117 open until the relevant real
+not establish SDL daemon acceptance. Keep 117 open until the relevant real
 kernel VT/input and deployed backend lifecycle tests pass. Do not deploy
 untested console ownership changes to the operator's active desktop.
 

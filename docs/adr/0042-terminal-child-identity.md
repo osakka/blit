@@ -1,6 +1,6 @@
 # ADR 0042: Explicit terminal child identity
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

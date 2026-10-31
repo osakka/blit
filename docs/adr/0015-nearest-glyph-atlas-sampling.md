@@ -1,6 +1,6 @@
 # ADR 0015: nearest sampling for the SDL glyph atlas
 
-- Status: accepted
+- Status: retired in 0.2.22 (ADR 0184)
 - Date: 2026-10-08
 - Scope: SDL3 terminal glyph presentation
 

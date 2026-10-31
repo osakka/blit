@@ -1,6 +1,6 @@
 # ADR 0197: An icon that spans columns is one codepoint per column
 
-- Status: accepted (2026-10-27; the owner's screen is the last check)
+- Status: accepted; in use since 0.2.40
 - Date: 2026-10-27
 - Scope: `assets/fonts/icons` (catalogue and artwork), the icon generator,
   `blit_raster.c` (`draw_fitted`), the icon gates

@@ -1,6 +1,6 @@
 # ADR 0036: Separate external cell damage from graphics-scene invalidation
 
-Status: Accepted
+- Status: retired in 0.2.22 (ADR 0184)
 
 ## Context
 

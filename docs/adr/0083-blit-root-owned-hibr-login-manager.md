@@ -1,6 +1,6 @@
 # ADR 0083: Blit supervises Hibr's root-owned login manager
 
-- Status: accepted
+- Status: accepted; in use since 0.1.485
 - Date: 2026-10-15
 - Scope: login-screen lifecycle, privilege boundary, and API control
 - Related: Blit #83; Hibr #79, #164, #196, #176

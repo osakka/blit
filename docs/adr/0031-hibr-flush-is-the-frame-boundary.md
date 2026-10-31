@@ -1,6 +1,6 @@
 # ADR 0031: Make Hibr `console flush` the atomic frame boundary
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

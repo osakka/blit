@@ -1,6 +1,6 @@
 # ADR 0141: Admit bounded HTTP bursts between presentation turns
 
-- Status: implemented; bounded physical improvement verified, residual pressure remains
+- Status: accepted
 - Date: 2026-10-19
 - Issues: [Blit #105](https://git.home.arpa/itdlabs/blit/issues/105), #104
 
@@ -45,13 +45,13 @@ After the bounded-accept change, the same fixture returns all eight responses
 within 17.83–18.29ms in the focused runs. A production-code socket fixture
 also checks exactly eight admissions in the first turn, finite under-filled
 draining, unchanged pending/render-deadline state, close-on-exec descriptors,
-32-client capacity and five overflow503 responses.
+32-client capacity and five overflow 503 responses.
 The same delayed-present fixture is red on offscreen GLES2 using the
-manifest-matched0.1.558 staging binary (142.53ms), and green on the0.1.559
+manifest-matched 0.1.558 staging binary (142.53ms), and green on the 0.1.559
 canonical binary (18.21ms). This preserves one oracle across SDL profiles.
-The full run passes107 gates, with7 explicit skips and no failures; the
+The full run passes 107 gates, with 7 explicit skips and no failures; the
 three pinned-header adapter gates pass separately.
-Physical559 revalidation delivers approximately221–223 SDL requests/s versus
-67–71 before, and p95 improves from135ms to51–52ms. All bounded pixel/protocol
+Physical 559 revalidation delivers approximately 221–223 SDL requests/s versus
+67–71 before, and p95 improves from 135ms to 51–52ms. All bounded pixel/protocol
 checks pass and native/login/pointer restore. Client queue skipping remains
-at240 requested slots/s, so issue105 and full latency acceptance stay open.
+at 240 requested slots/s, so issue 105 and full latency acceptance stay open.

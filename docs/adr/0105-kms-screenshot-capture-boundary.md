@@ -1,8 +1,7 @@
 # ADR 0105: KMS screenshots capture the composed frame
 
-## Status
-
-Accepted — 2026-10-16.
+- Status: accepted
+- Date: 2026-10-16
 
 ## Decision
 

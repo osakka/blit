@@ -80,8 +80,8 @@ test used Alpine Linux 3.24.0, QEMU TCG (no `/dev/kvm` was available), and a
 `CONFIG_DRM_VIRTIO_GPU=y`; the guest created a VKMS card and a virtio DRM card
 (`/dev/dri/card0` and `/dev/dri/card1`) plus `/dev/dri/renderD128`. Point the
 server at the virtio card with `BLIT_DRM_DEVICE=/dev/dri/card1`. For GLES
-composition (the default) the initramfs must stage Mesa's `kms_swrast_dri.so`, its
-dependencies, and the GLVND vendor file, then set `LIBGL_DRIVERS_PATH` and
+composition (the default) the initramfs must stage Mesa's `kms_swrast_dri.so`,
+its dependencies, and the GLVND vendor file, then set `LIBGL_DRIVERS_PATH` and
 `__EGL_VENDOR_LIBRARY_DIRS`; without them the CPU compositor is used. A real
 bare-metal KMS test remains required before accepting physical display
 ownership and hardware timing behavior.
@@ -192,16 +192,19 @@ qemu-system-x86_64 ... \
 
 Inside the guest, mount `proc`, `sysfs`, `devtmpfs`, and `devpts`, configure
 `eth0` as `10.0.2.15/24`, and create the two-output VKMS topology above. Run
-the staged server with the test-only network bind and GBM path:
+the staged server with a token, the network bind and the GBM path; without
+`BLIT_AUTH_TOKEN` Blit refuses to listen on `0.0.0.0`:
 
 ```sh
+BLIT_AUTH_TOKEN=change-me \
 BLIT_BIND_ADDRESS=0.0.0.0 \
 GBM_BACKENDS_PATH=/blit-stage/gbm \
 /blit-stage/ld-linux-x86-64.so.2 --library-path /blit-stage \
 /blit-stage/blit-server 18091
 ```
 
-The host can then exercise `http://127.0.0.1:18091`. The validated sequence
+The host can then exercise `http://127.0.0.1:18091`, sending
+`Authorization: Bearer change-me`. The validated sequence
 returns both displays, creates a PTY session, applies a cell update, accepts a
 frame, and upgrades the WebSocket stream.
 

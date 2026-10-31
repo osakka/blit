@@ -1,6 +1,6 @@
 # ADR 0033: Reassert external Hibr sessions after PTY attach
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

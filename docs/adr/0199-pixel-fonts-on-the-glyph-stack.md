@@ -1,6 +1,6 @@
 # ADR 0199: Pixel fonts keep their own glyphs and borrow the glyph stack for the rest
 
-- Status: accepted (2026-10-27; the owner's screen is the last check)
+- Status: accepted
 - Date: 2026-10-27
 - Scope: `blit_raster.c` (`blit_raster_open_pixel`), `blit_server.c` (font
   preparation), a new gate

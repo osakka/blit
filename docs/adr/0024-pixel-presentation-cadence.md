@@ -1,6 +1,6 @@
 # ADR-0024: Pixel presentation cadence follows the producer and output path
 
-- Status: accepted
+- Status: retired in 0.2.22 (ADR 0184)
 - Date: 2026-10-08
 
 ## Context

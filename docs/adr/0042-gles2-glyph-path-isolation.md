@@ -1,8 +1,7 @@
 # ADR-0042: Isolate the SDL GLES2 glyph path
 
-## Status
-
-Accepted for 0.1.396 after the live geometry acceptance experiment.
+- Status: retired in 0.2.22 (ADR 0184)
+- Note: accepted for 0.1.396 after the live geometry acceptance experiment.
 
 ## Context
 

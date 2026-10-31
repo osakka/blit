@@ -1,6 +1,6 @@
 # ADR 0192: A session's output is taken in full buffers, not one PTY read per loop pass
 
-- Status: accepted (2026-10-26)
+- Status: accepted
 - Date: 2026-10-26
 - Scope: main loop, session output service
 

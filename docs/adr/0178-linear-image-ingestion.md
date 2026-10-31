@@ -1,12 +1,12 @@
-# ADR0178: linear chunk decoding and direct packed-RGBA submission
+# ADR 0178: linear chunk decoding and direct packed-RGBA submission
 
-- Status: accepted for development, not deployed
+- Status: accepted
 - Date: 2026-10-21
-- Scope: internal125/122 image ingestion; no protocol/API change
+- Scope: internal 125/122 image ingestion; no protocol/API change
 
 The production TCC decoder calls `strlen` in its per-byte loop condition.
-A counted-call fixture observes4,097 full length scans for a4,096-byte
-payload, including16,785,409 examined bytes when counting each terminator.
+A counted-call fixture observes 4,097 full length scans for a 4,096-byte
+payload, including 16,785,409 examined bytes when counting each terminator.
 That byte count sums logical scan lengths, not measured cache/DRAM traffic.
 This is deterministic repeated work, not a measured live rendering bottleneck.
 
@@ -17,9 +17,9 @@ output and arbitrary split positions, capacity canaries and rejected inputs.
 
 The SDL cache already reuses unchanged textures, but every changed image is
 repacked into newly allocated RGBA memory, even when already packed RGBA.
-Pass an existing32-bit RGBA buffer directly to synchronous SDL_UpdateTexture
+Pass an existing 32-bit RGBA buffer directly to synchronous SDL_UpdateTexture
 with its original pitch. Preserve straight-alpha samples and texture policy;
-retain RGB24-to-RGBA conversion for24-bit input. No asynchronous pointer
+retain RGB24-to-RGBA conversion for 24-bit input. No asynchronous pointer
 ownership, readback, PBO or threading change. The caller retains its image
 buffer during the call, just as the previous staging buffer was retained
 until return and immediately freed. Driver-internal copying is not eliminated

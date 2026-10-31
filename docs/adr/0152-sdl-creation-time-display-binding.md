@@ -1,9 +1,9 @@
-# ADR0152: select SDL output before window resource allocation
+# ADR 0152: select SDL output before window resource allocation
 
-- Date:2026-10-20
-- Status: implemented; physical multi-connector validation pending
+- Status: superseded by ADR 0184
+- Date: 2026-10-20
 - Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
-- Tracking: Blit104; SDL dependency unchanged
+- Tracking: Blit 104; SDL dependency unchanged
 
 Blit created every window with SDL_CreateWindow's default position and only
 then called SDL_SetWindowPosition, ignoring its return. The pinned KMSDRM
@@ -22,7 +22,7 @@ successful SDL acceptance. No settings schema or Hibr/vendor changes.
 
 The production initialize_outputs regression fails before correction with
 two unsupported moves and zero creation bindings. After correction, non-
-contiguous IDs11/57 get distinct renderers with exact creation bindings and
+contiguous IDs 11/57 get distinct renderers with exact creation bindings and
 zero moves. The display boundary is mocked; software and offscreen GLES
 renderers are real. Injected creation, wrong binding, fullscreen and renderer
 failures verify diagnostics and exact window cleanup. Native fallback is
@@ -31,7 +31,7 @@ mocked unavailable, so this test never opens a physical DRM device.
 This does NOT prove SDL enumerates both physical connectors, fixes connector
 hotplug, or meets physical presentation timing. The earlier host exposed only
 one SDL display while native exposed two; that remains a separate investigation.
-Keep native567 active during local tests, then capture enumeration and output
+Keep native 567 active during local tests, then capture enumeration and output
 initialization independently in any bounded physical comparison.
 
 References:

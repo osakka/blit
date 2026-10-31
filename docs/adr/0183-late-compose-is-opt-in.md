@@ -1,6 +1,6 @@
 # ADR 0183: late compose is opt-in; immediate is the default
 
-- Status: accepted (owner's A/B on 10.54, 2026-10-25)
+- Status: accepted; in use since 0.2.21
 - Date: 2026-10-25
 - Scope: native KMS frame scheduling, `server.kms_frame_timing`
 

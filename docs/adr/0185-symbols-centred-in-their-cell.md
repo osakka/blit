@@ -1,6 +1,6 @@
 # ADR 0185: outline glyphs are centred at sub-pixel precision; shapes get the icon fit
 
-- Status: accepted (the owner's decision, 2026-10-25)
+- Status: accepted
 - Date: 2026-10-25
 - Scope: shared raster (`draw_outline_face`), outline font generator
 - Amends: ADR 0150 and 0156 (the icon fit's scope)

@@ -1,10 +1,7 @@
 # ADR 0014: Batch SDL glyph geometry for full-screen terminal redraws
 
-## Status
-
-Retired by [ADR 0184](0184-sdl-is-removed.md): the SDL code it describes was removed.
-
-Accepted.
+- Status: retired in 0.2.22 (ADR 0184)
+- Retired by [ADR 0184](0184-sdl-is-removed.md): the SDL code it describes was removed.
 
 ## Context
 

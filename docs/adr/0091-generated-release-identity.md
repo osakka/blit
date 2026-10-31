@@ -1,8 +1,7 @@
 # ADR 0091: Generate release identity from the package
 
-## Status
-
-Accepted for the release tooling slice of issue #27.
+- Status: accepted; in use since 0.2.2
+- Note: accepted for the release tooling slice of issue #27.
 
 ## Context
 

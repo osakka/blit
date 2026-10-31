@@ -1,5 +1,40 @@
 # Verification status
 
+## 2026-10-31: documentation sweep (after 0.3.20, no release)
+
+Every document checked against the code, not against other documents.
+191 files; documentation, API schema and schema-suite gates pass.
+
+- **ADRs:** one status line each, in six forms now defined in the ADR
+  index. 12 records retired, 16 superseded (six by ADR 0184, as its
+  header says), 40 marked `in use since` from a `Used` features row
+  or a ledger entry, the rest `accepted`; 0180 stays `proposed`. 0190 and
+  0193 moved from proposed to accepted (shipped). 0202 now supersedes 0182.
+- **A stripped space before numbers** ("in0.1.545", "ADR0169",
+  "issue101") restored at about 550 places; identifiers such as `card0`
+  and `base64` left alone.
+- **API guide and OpenAPI:** endpoint methods corrected (hibr-owner is
+  POST only, inject POST only, update upload PUT); problem codes and 429s
+  that the server never sends replaced with the real ones; the runbook's
+  jq keys made real; settings keys completed. Many response schemas were
+  missing keys the server sends (`frames`, `flip.submit_phase_ms`,
+  `compositor`, `server_version` and others) and now carry them.
+- **Hibr integration guide** rewritten (513 → about 290 lines): QEMU- and
+  adapter-era text cut; join input goes to each client's own PTY (ADR
+  0127), the login desktop's role is `primary` once associated.
+- **Diagnostics guide:** render_path, evdev and loop-gap field names made
+  real. **Font reference:** the glyph stack order is the code's.
+- **Testing and workflow guides:** the service runs as root (the
+  unprivileged profile is an example drop-in); an unauthenticated network
+  bind exits 3; the release flow written in order; the hotplug monitor is a
+  netlink thread; the old build-from-scratch gate plan replaced by an
+  acceptance table.
+- **blit(8):** five production settings moved out of "Testing".
+- **Found, not fixed (code), now on the roadmap:** overlay DELETE ignores
+  its own `overlay-N` ids; dead diagnostics counters and tool checks; live
+  gates without a bearer token; the kitty-limits probe sized for 8 images;
+  `font_fallback_gate.c` in no suite; two stream messages without schema.
+
 ## 2026-10-30: 0.3.20 `blit --version` and `blit --help`
 
 - The owner asked how to tell which Blit is running. `blit --version`

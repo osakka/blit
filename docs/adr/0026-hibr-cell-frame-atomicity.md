@@ -1,6 +1,6 @@
 # ADR 0026: Commit external Hibr cell frames atomically
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

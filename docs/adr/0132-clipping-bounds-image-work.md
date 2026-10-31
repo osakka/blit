@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-10-18
-- Related: ADRs0112/0114; reported direct-KMS slowdown after hotplug
+- Related: ADRs 0112/0114; reported direct-KMS slowdown after hotplug
 - Issue: [Blit#101](https://git.home.arpa/itdlabs/blit/issues/101)
 
 The general fractional image scaler tested damage clipping inside a loop over
@@ -17,8 +17,8 @@ placement, never rebased to the clip. Preserve RGB/RGBA alpha, source cropping,
 negative origins and outside-damage pixels. No protocol or backend switch.
 
 `tools/tests/kms_graphics_clip_gate.c` runs the actual compositor, compares
-clipped output to a full-render reference, and requires a24x32 repaint to
-cost less than10% of a1919x1079 fractional repaint. The old loop fails at
-38.1% (178884µs versus469154µs for20 repaints). This demonstrates a code
+clipped output to a full-render reference, and requires a 24x32 repaint to
+cost less than 10% of a 1919x1079 fractional repaint. The old loop fails at
+38.1% (178884µs versus 469154µs for 20 repaints). This demonstrates a code
 bottleneck, not the cause or complete resolution of a particular physical
 host's slowdown. Real CPU/render cadence measurements remain required.

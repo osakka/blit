@@ -1,6 +1,6 @@
 # ADR 0122: native Hibr joins own their 2-D placement and input
 
-- Status: accepted for live orchestration; API registry follow-up pending
+- Status: accepted
 - Date: 2026-10-17
 - Issue: [Blit #96](https://git.home.arpa/itdlabs/blit/issues/96)
 - Related: [ADR 0081](0081-hibr-joins-require-a-2d-union-contract.md)

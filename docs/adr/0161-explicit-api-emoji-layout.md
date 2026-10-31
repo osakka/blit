@@ -1,16 +1,16 @@
-# ADR0161: explicit emoji layout without breaking scalar-width providers
+# ADR 0161: explicit emoji layout without breaking scalar-width providers
 
+- Status: accepted
 - Date: 2026-10-20
-- Status: implemented; focused local gates pass, not deployed
-- Tracking:107/110
+- Tracking: 107/110
 
-Existing Hibr API providers assign coordinates using Unicode15.1 scalar
+Existing Hibr API providers assign coordinates using Unicode 15.1 scalar
 widths and submit positioned cells. Silently folding every sequence would
 change their ownership contract. Add optional CellUpdate.text_layout:
 `scalar` (existing default) or `emoji` (explicit sequence grouping).
 This is one decoder with a grouping policy, not another terminal engine.
 
-Generate one bounded prefix trie from the pinned Emoji18.0 corpus. In emoji
+Generate one bounded prefix trie from the pinned Emoji 18.0 corpus. In emoji
 layout, append matching sequence members to the current cell. Completed
 multi-scalar corpus sequences occupy two columns; singleton widths and
 ordinary combining/wide behaviour remain unchanged. Unknown sequences use

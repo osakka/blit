@@ -1,8 +1,8 @@
-# ADR0154: retain TCC runtime fault traces
+# ADR 0154: retain TCC runtime fault traces
 
-- Date:2026-10-20
-- Status: implemented570; trial map/stage extension candidate571
-- Tracking: Blit104/109
+- Status: accepted
+- Date: 2026-10-20
+- Tracking: Blit 104/109
 
 Two physical SDL multi-output startup trials create their windows then exit
 SIGSEGV before the listener. Journal signal names alone cannot locate the
@@ -29,9 +29,9 @@ the independent timer still restores the ordinary service/restart policy.
 The override fault gate verifies this property. No canonical settings writes,
 Hibr changes, dependency patches or SSH.
 
-Physical570 confirms one failed attempt and independent native restoration.
+Physical 570 confirms one failed attempt and independent native restoration.
 TCC captures an instruction address but no useful symbol/caller for the library
-fault. From571, protected startup logs bounded stage markers and executable
+fault. From 571, protected startup logs bounded stage markers and executable
 /proc/self/maps entries before the final output's first presentation. Keep raw
 mapping addresses/file offsets; symbolize against the exact packaged ELF, not
 an assumed load address. No map collection or allocation inside the signal

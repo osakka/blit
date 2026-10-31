@@ -1,6 +1,6 @@
 # ADR 0040: Compose pointer motion over cached scene damage
 
-Status: Accepted
+- Status: retired in 0.2.22 (ADR 0184)
 
 ## Context
 

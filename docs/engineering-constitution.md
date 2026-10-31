@@ -68,7 +68,7 @@ The project prefers:
 - boring, inspectable boundaries over clever coupling;
 - evidence from conformance tests and diagnostics over confidence by analogy.
 
-## Review gate
+## 5. Review gate
 
 Before a change is considered complete, reviewers should be able to answer
 yes to all of these questions:

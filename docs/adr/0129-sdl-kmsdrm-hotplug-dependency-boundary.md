@@ -1,10 +1,10 @@
 # ADR 0129: SDL KMSDRM hotplug crosses the dependency boundary
 
-- Status: deferred; user selected direct KMS for this delivery (ADR0130)
+- Status: superseded by ADR 0130
 - Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
 - Date: 2026-10-18
 - Issue: [Blit#100](https://git.home.arpa/itdlabs/blit/issues/100)
-- Related: ADRs0124,0128; hibr-apps ADR0002
+- Related: ADRs 0124, 0128; hibr-apps ADR 0002
 
 ## Evidence
 
@@ -38,7 +38,7 @@ implicit authorization for primary migration.
 
 Test each boundary separately: SDL connector changes/events and cleanup;
 Blit add/remove/reorder/failure reconciliation and stable bindings; native
-standby recovery; then actual second/third monitor add/remove on10.54 without
+standby recovery; then actual second/third monitor add/remove on 10.54 without
 service restart. Dummy events or API inventory alone do not accept scanout.
 
 ## Alternatives
@@ -55,6 +55,6 @@ service restart. Dummy events or API inventory alone do not accept scanout.
 ## Current result
 
 This records the SDL alternative, not the selected implementation. The user
-subsequently requested a pure-KMS switch and direct-backend hotplug. ADR0130
+subsequently requested a pure-KMS switch and direct-backend hotplug. ADR 0130
 governs that delivery. SDL remains unmodified and its runtime discovery gap
 remains; direct-KMS acceptance must not be represented as SDL acceptance.

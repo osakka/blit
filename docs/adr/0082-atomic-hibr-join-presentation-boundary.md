@@ -1,6 +1,7 @@
 # ADR 0082: Atomic presentation boundary for one Hibr desktop
 
-- Status: accepted; revised 2026-10-29 (0.3.13), see the end
+- Status: accepted; in use since 0.3.13
+- Note: revised 2026-10-29 (0.3.13), see the end
 - Date: 2026-10-15
 - Scope: SDL presentation scheduling for native Hibr primary and join PTYs
 - Depends on: [ADR 0072](0072-refresh-bound-damage-coalescing.md),

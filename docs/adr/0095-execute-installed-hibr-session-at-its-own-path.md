@@ -1,5 +1,7 @@
 # ADR 0095: Execute the installed Hibr session at its own path
 
+- Status: accepted
+
 ## Context
 
 Hibr's installed `desktop/session.hibr` derives the location of its sibling

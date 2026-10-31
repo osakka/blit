@@ -1,6 +1,6 @@
 # ADR 0126: observe a named native login client before join orchestration
 
-- Status: accepted; association delivery, not automatic joins
+- Status: accepted
 - Date: 2026-10-17
 - Issues: Blit #96, #99; follows ADRs 0122, 0124, 0125
 

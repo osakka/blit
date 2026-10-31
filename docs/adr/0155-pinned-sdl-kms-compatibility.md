@@ -1,14 +1,14 @@
-# ADR0155: pinned SDL KMS compatibility boundary
+# ADR 0155: pinned SDL KMS compatibility boundary
 
-- Date:2026-10-20
-- Status: deployed572; single-output startup verified, multi-output pending
+- Status: superseded by ADR 0184
+- Date: 2026-10-20
 - Superseded by [ADR 0184](0184-sdl-is-removed.md): SDL is removed; native KMS is the only presentation path.
-- Tracking: Blit104
+- Tracking: Blit 104
 
-Physical571 fault: second output first SDL_RenderPresent, before its completion
-marker. RIP7f015c951bc1 lies in SDL executable map7f015c832000..7f015c98c000,
-file offset32000. ELF executable PT_LOAD virtual address equals that file
-offset; resulting ELF address151bc1 resolves to add_plane_property(),
+Physical 571 fault: second output first SDL_RenderPresent, before its completion
+marker. RIP 7f015c951bc1 lies in SDL executable map 7f015c832000..7f015c98c000,
+file offset 32000. ELF executable PT_LOAD virtual address equals that file
+offset; resulting ELF address 151bc1 resolves to add_plane_property(),
 SDL_kmsdrmvideo.c:248. Instruction loads p->props. Remote/local/bundled SDL
 SHA256 all d91f2936576a0fee7bf5cb231f8528be65ffa44e2ed7cbea480d599a0bbd08c2.
 
@@ -21,7 +21,7 @@ using this SDL plane state. Current upstream source inspected still has this
 guard; no verified upstream fix is available from that inspection.
 
 Use SDL's supported SDL_HINT_KMSDRM_ATOMIC=0 before SDL initialization for the
-exact pinned SDL3.4.16 version. The legacy swap path does not consume the
+exact pinned SDL 3.4.16 version. The legacy swap path does not consume the
 secondary atomic plane. Do not copy private structs, patch the vendor, add
 a second presentation implementation or silently report native fallback as
 SDL success. Normal native backend exits before this compatibility policy.

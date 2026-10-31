@@ -1,9 +1,10 @@
 # Blit documentation
 
 Blit is an API-driven display server for text: it drives monitors directly
-through Linux DRM/KMS, composes frames on the GPU (OpenGL ES), or on the CPU when chosen or when
-there is no usable GPU,, and presents terminal sessions with images, emoji, icons and
-effects. Hibr's desktop runs on it; so can any other program.
+through Linux DRM/KMS, composes frames on the GPU (OpenGL ES), or on the CPU
+when chosen or when there is no usable GPU, and presents terminal sessions
+with images, emoji, icons and effects. Hibr's desktop runs on it; so can any
+other program.
 
 Public repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 Issue numbers in these documents (#111) are the internal tracker's, not
@@ -29,7 +30,8 @@ GitHub's.
 - [Terminal reference](terminal.md) — escape sequences, mouse and keyboard
   protocols, Kitty graphics, Sixel, Unicode, limits and known gaps.
 - [Font and glyph reference](font-reference.md) — fonts, the glyph stack,
-  Nerd Fonts, emoji and Blit's own icons, with codepoints.
+  Nerd Fonts, emoji and Blit's own icons, with codepoints; its generated
+  tables are in [fonts/](fonts/README.md).
 - [Font assets](../assets/fonts/README.md) and [icons](../assets/fonts/icons/README.md)
   — what is shipped, its provenance and licences.
 - Manual pages: [`blit(8)`](../man/blit.8), [`blit.env(5)`](../man/blit.env.5),
@@ -72,8 +74,8 @@ GitHub's.
 - [Roadmap](roadmap.md) — what is next, in order.
 - [Verification ledger](verification-status.md) — the evidence for each
   release.
-- [History](history/README.md) — earlier plans, investigations and restart notes,
-  kept as records.
+- [History](history/README.md) — earlier plans, investigations and restart
+  notes, kept as records; not a description of today.
 
 ## Which document wins
 

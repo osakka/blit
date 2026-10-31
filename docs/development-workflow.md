@@ -98,23 +98,26 @@ normal font/backend composition gates. The standalone gate exhausts production
 channel/alpha arithmetic against a frozen test-only oracle and checks TCC
 instruction work. `--benchmark` reports same-process CPU medians, not live FPS;
 `--observe` disables the division-count requirement and is not performance
-acceptance (ADR0179).
+acceptance (ADR 0179).
 
 Image-ingestion changes require `ruby tools/tests/graphics_ingestion_gate.rb`.
-It instruments the production decoder, not a parallel decoder. `--observe` intentionally disables performance assertions
-and must never be reported as a passing performance gate (ADR0178).
+It instruments the production decoder, not a parallel decoder. `--observe`
+disables the performance assertions and must never be reported as a passing
+performance gate (ADR 0178).
 
-Graphics damage changes require `ruby tools/tests/graphics_placement_damage_gate.rb`,
-on both `BLIT_GATE_BACKEND=native` and `gles`. It compares production
-incremental composition against full-redraw pixels;
-counts or screenshots alone are insufficient. Preserve held/deferred snapshot
-acknowledgement and unknown-caller fallback (ADR0177).
+Graphics damage changes require
+`ruby tools/tests/graphics_placement_damage_gate.rb`, on both
+`BLIT_GATE_BACKEND=native` and `gles`. It compares production incremental
+composition against full-redraw pixels; counts or screenshots alone are
+insufficient. Preserve held/deferred snapshot acknowledgement and
+unknown-caller fallback (ADR 0177).
 
 The `font` suite also runs the production cache workload
-(`ruby tools/probes/font_cache_workload.rb --check`), and `timing` verifies the read-only baseline sampler's units, counter-reset
-rejection and backend-change rejection. Report cache work separately from
-live frame latency. Keep source/font identities and workload conditions with
-the result; never promote an idle API sample into a Kitty comparison.
+(`ruby tools/probes/font_cache_workload.rb --check`), and `timing` verifies
+the read-only baseline sampler's units, counter-reset rejection and
+backend-change rejection. Report cache work separately from live frame
+latency. Keep source/font identities and workload conditions with the result;
+never promote an idle API sample into a Kitty comparison.
 
 Use the narrowest gate that proves the change, then run the broader gate before
 handoff:
@@ -136,7 +139,7 @@ handoff:
   bounded workload rather than a subjective “feels faster” claim.
 
 For font/catalogue asset changes, regenerate `docs/fonts` with
-`tools/fonts/build-reference.py` in the existing pinned fontTools4.60.1
+`tools/fonts/build-reference.py` in the existing pinned fontTools 4.60.1
 environment, then run its `--check` mode and
 `ruby tools/tests/font_reference_gate.rb`. This documentation gate is included
 in the font suite and uses no display. Tables and coverage inventories are
@@ -151,12 +154,13 @@ categories above, so the narrowest run is one suite and the pre-handoff run is
 ```sh
 tools/run-gates.sh terminal          # the narrowest gate for a terminal change
 tools/run-gates.sh all               # before handoff
-BLIT_GATE_BACKEND=gles tools/run-gates.sh all   # the same suites on the GLES compositor
+BLIT_GATE_BACKEND=gles tools/run-gates.sh renderer   # on the GLES compositor
 BLIT_GATE_PACKAGE=blit_X.Y.Z-1_amd64.deb tools/run-gates.sh packaging
 BLIT_GATE_LIVE=http://HOST:8080 tools/run-gates.sh timing
 ```
 
-Prefer it over invoking a gate directly.
+Prefer it over invoking a gate directly. `packaging` is a suite of its own,
+skipped unless `BLIT_GATE_PACKAGE` names a `.deb`.
 
 Every gate runs against native KMS on the DRM mock (ADR 0184).
 `BLIT_GATE_BACKEND=gles` runs the same suites through the GLES compositor on
@@ -182,7 +186,7 @@ monitor counts, refresh modes, GPUs, or input devices.
 
 ## What a green suite does not mean
 
-`RUN_GATES_PASS pass=69 skip=4 fail=0` means the behaviour the suite can reach
+`RUN_GATES_PASS pass=N skip=M fail=0` means the behaviour the suite can reach
 is correct. It is not a statement about the behaviour it cannot reach, and the
 distance between those two has cost this project multiple releases. The known
 blind spots, so that a green run is read for what it is:
@@ -214,7 +218,8 @@ hub that resets 66 times.
 KMS code against the DRM mock, not a real card. `physical_multi_display_gate.rb`
 and `screenshot_nonblocking_gate.sh` run only with `BLIT_GATE_LIVE` (otherwise
 they are skips), and the QEMU oracle only when invoked.
-`tools/probes/host_cell_pixel_agreement.rb`, which states the cells-versus-pixels invariant, is run by no automated path at all.
+`tools/probes/host_cell_pixel_agreement.rb`, which states the
+cells-versus-pixels invariant, is run by no automated path at all.
 Unprivileged-profile access to backlight and control devices is unmeasured.
 A skip that is never taken is indistinguishable from a test that does not
 exist.
@@ -249,31 +254,34 @@ means source and focused tests pass; “validated” means the matching runtime
 artifact passed the relevant end-to-end gate. Screenshots supplement API/state
 assertions; neither substitutes for the other.
 
-Building a Debian artifact requires the exact pinned Hibr checkout as an
-explicit input; omission fails closed:
+A release runs these steps in order. Building the package requires the
+exact pinned Hibr checkout as an explicit input; omitting it fails closed:
 
 ```sh
-BLIT_HIBR_ROOT=/path/to/hibr-$(sed -n '1p' packaging/HIBR_VERSION) \
-  packaging/build-deb.sh /tmp/blit-package
+hibr=/path/to/hibr-$(sed -n '1p' packaging/HIBR_VERSION)
+deb=/tmp/blit-package/blit_X.Y.Z-1_amd64.deb
+tools/build-tcc.sh
+tools/build-tcc.sh build/blit/blit-helper helper
+BLIT_HIBR_ROOT=$hibr tools/run-gates.sh all
+BLIT_GATE_BACKEND=gles tools/run-gates.sh renderer
+BLIT_HIBR_ROOT=$hibr packaging/build-deb.sh /tmp/blit-package
+BLIT_SOURCE_COMMIT=<build-commit> BLIT_DOCUMENTATION_COMMIT=<build-commit> \
+  tools/release/generate-manifest.sh "$deb" releases/X.Y.Z.yaml
+tools/tests/package_artifact_gate.sh "$deb"
+tools/deploy/update-live.sh HOST "$deb"
 ```
 
-The machine-owned identity fields in `releases/<version>.yaml` are generated
-from the package, not copied by hand. After building the package from the
-source/documentation commit, generate or check them with:
-
-```sh
-BLIT_SOURCE_COMMIT=$(git rev-parse HEAD) \
-BLIT_DOCUMENTATION_COMMIT=$(git rev-parse HEAD) \
-  tools/release/generate-manifest.sh \
-  /path/to/blit_X.Y.Z-1_amd64.deb /tmp/generated-release-identity.yaml
-
-tools/release/generate-manifest.sh --check \
-  /path/to/blit_X.Y.Z-1_amd64.deb releases/X.Y.Z.yaml
-```
+`releases/<version>.yaml` is generated from the package, not written by
+hand, apart from the `status:` line the operator adds. The two commit
+variables are needed when the manifest is recorded in a later commit than
+the build. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
+existing manifest with a package. The artifact gate and `update-live.sh`
+both refuse a package whose SHA-256 differs from the manifest's;
+`update-live.sh` also needs `BLIT_UPDATE_TOKEN` or `BLIT_UPDATE_TOKEN_FILE`.
 
 The generator owns package/version/checksum/hash/Hibr-pin facts. Measured
-acceptance fields and notes remain explicit evidence in the release record;
-the generator never invents physical, GPU, Hibr, or refresh results. The
+acceptance results are recorded in the verification ledger; the generator
+never invents physical, GPU, Hibr, or refresh results. The
 release identity decision is [ADR 0091](adr/0091-generated-release-identity.md).
 
 Package documentation is compared with `package_documentation_commit`, not
@@ -304,4 +312,4 @@ unit policy. Without `--static`, it needs local systemd/passwordless sudo and
 uses isolated transient units: real socket visibility and restart limiting.
 `session_log_gate.rb` verifies private default log directories through API
 sessions; both belong to the lifecycle suite. Neither test changes the live
-display host or edits Hibr. See ADR0167.
+display host or edits Hibr. See ADR 0167.

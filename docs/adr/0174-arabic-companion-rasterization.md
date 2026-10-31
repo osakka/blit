@@ -1,29 +1,29 @@
-# ADR0174: Arabic companion faces and cell-local mark positioning
+# ADR 0174: Arabic companion faces and cell-local mark positioning
 
-Status: accepted implementation; deployed0.1.588 profile activation;
-physical typography acceptance pending (2026-10-21).
-Tracks Blit119 under118.
+- Status: accepted
+- Date: 2026-10-21
+- Tracking: Blit 119 under 118
 
 ## Evidence and decision
 
-The two Latin/Nerd faces lack42 audited Arabic-range scalars and ten Arabic-Indic
+The two Latin/Nerd faces lack 42 audited Arabic-range scalars and ten Arabic-Indic
 digits U+0660..0669. Legacy PSF substitution is not native Arabic typography.
 Hibr's `uni vis` already emits display-order presentation forms, including a
 single-cell lam-alef. Blit must preserve those forms and column allocations,
 not run a second bidi algorithm or alter Hibr.
 
-Evaluate separate, reproducibly derived Arabic companions: Kawkab Mono0.501
-for Retro and GNU FreeMono20120503 for Modern. Source hashes, family names,
+Evaluate separate, reproducibly derived Arabic companions: Kawkab Mono 0.501
+for Retro and GNU FreeMono 20120503 for Modern. Source hashes, family names,
 versions and alias-generation dependencies live in arabic-fonts.source.json.
 Only absent presentation mappings that the source HarfBuzz shaper resolves
 to one glyph are materialized offline. Existing mappings and positioning
-tables are preserved. Cascadia Mono2407.24 was rejected: lam-alef shaping
+tables are preserved. Cascadia Mono 2407.24 was rejected: lam-alef shaping
 returns multiple glyphs, incompatible with Hibr's one-cell presentation form.
-Vazir Code1.1.2 fails the same contract. DejaVu Sans Mono2.37 lacks U+0670
+Vazir Code 1.1.2 fails the same contract. DejaVu Sans Mono 2.37 lacks U+0670
 superscript alef from the vocalized religious specimen and was rejected.
 FreeMono covers all captured specimen scalars; that is not exhaustive Arabic
 coverage. Its GPLv3+font embedding exception and preferred source accompany
-the experimental derived face, separately from Kawkab's OFL1.1.
+the experimental derived face, separately from Kawkab's OFL 1.1.
 
 Use the existing shared raster/cache/compositor, with an explicit companion
 attachment before first use. All glyphs in a face use one cell-size transform
@@ -34,7 +34,7 @@ form is already supplied. This is not paragraph shaping or implicit bidi.
 Ink extents are independent of terminal advance: measure first, allocate a
 bounded canvas and return ink offsets. No clipped letter is accepted. KMS
 and SDL now consume offsets and expand damage/source regions in backend
-fixtures. Companion attachment was initially test-only; deployed0.1.588
+fixtures. Companion attachment was initially test-only; deployed 0.1.588
 activates canonical profiles atomically as described below.
 Unsupported clusters fail rather than being advertised as supported.
 
@@ -56,9 +56,9 @@ fall back to full-screen repainting as a substitute for damage correctness.
 Respect pane boundaries. Require incremental-vs-clean-frame pixel comparison
 and guard pixels before server profile selection is enabled.
 
-SDL uses power-of-two atlas extents with16×8 bounded tiles for overhanging
-contexts (up to32MiB/output at64px), keeping existing contexts at1024×1024.
-An arbitrary416×208 atlas reproducibly dropped an ink pixel at8px in SDL
+SDL uses power-of-two atlas extents with 16×8 bounded tiles for overhanging
+contexts (up to 32MiB/output at 64px), keeping existing contexts at 1024×1024.
+An arbitrary 416×208 atlas reproducibly dropped an ink pixel at 8px in SDL
 software; binary-exact UV boundaries fix that without changing tolerance.
 Texture creation remains fallible; future profile activation must validate
 the replacement on every output before swapping. No hardware limit override.

@@ -1,8 +1,7 @@
 # ADR 0107: Restore synchronized KMS view state inside the match
 
-## Status
-
-Accepted — 2026-10-16.
+- Status: accepted
+- Date: 2026-10-16
 
 ## Context
 

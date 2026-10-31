@@ -1,6 +1,6 @@
 # ADR 0124: API-owned desktop policy and a catalogue control panel
 
-- Status: accepted; delivery is staged, not complete
+- Status: accepted; in use since 0.1.537
 - Date: 2026-10-17
 - Issue: [Blit #99](https://git.home.arpa/itdlabs/blit/issues/99)
 - Related: ADRs 0067, 0089, 0122; native association issue #96
@@ -18,8 +18,8 @@ The user confirmed explicit persistence on 2026-10-17: actions in Hibr's
 existing Displays pane change the current session only. They do not silently
 rewrite Blit's saved startup intent, and Blit must not continually undo them.
 The control panel distinguishes Apply (live state) from Save as
-default (persistent intent). Version0.1.543 implements the live auxiliary
-contract in ADR0128 alongside the existing settings resource.
+default (persistent intent). Version 0.1.543 implements the live auxiliary
+contract in ADR 0128 alongside the existing settings resource.
 Automatic remembering may be added later as a reversible
 policy through this same store/controller, not a parallel implementation.
 Reverting configuration does not promise to resurrect terminated processes.
@@ -69,7 +69,7 @@ standby lifecycle below.
 1. Verified authenticated desktop association and native standby integration,
    using Hibr's supported per-user interface, never screen/process-name guesses.
    The 0.1.540 join path supplies the association and per-client lifetime
-   boundary; 0.1.542 adds persisted auxiliary intent. Version0.1.543
+   boundary; 0.1.542 adds persisted auxiliary intent. Version 0.1.543
    starts a named `desktop --standby` client only after that association is
    fresh. The standby runs as the authenticated desktop user and occupies its
    configured Blit pane.
@@ -92,13 +92,13 @@ standby lifecycle below.
    asynchronous requests, revision conflicts, configuration export/import,
    and validation/apply UX; then run catalogue lifecycle tests.
 
-Version0.1.543 implements stages1–3 under ADR0128. The native interface does
+Version 0.1.543 implements stages 1–3 under ADR 0128. The native interface does
 not prove intentional release, so a missing attached client with a live
 standby reports waiting/unknown instead. Both the synthetic controller and
 installed-Hibr desktop auto-invite/standby tests pass locally. The catalogue
 pane now has actual callback/API, UI rendering/keyboard and install/update/
-remove tests in `hibr-apps`. On2026-10-18 it was published as pane0.1.0,
-and the reproducibly gated server package was deployed to10.54. Authenticated
+remove tests in `hibr-apps`. On 2026-10-18 it was published as pane 0.1.0,
+and the reproducibly gated server package was deployed to 10.54. Authenticated
 physical auto-join and general hotplug acceptance remain separate boundaries
 in the verification ledger, not consequences of catalogue publication.
 

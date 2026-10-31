@@ -1,8 +1,8 @@
-# ADR0148: explicit presentation source and safe invalid-environment handling
+# ADR 0148: explicit presentation source and safe invalid-environment handling
 
-- Date: 2026-10-19
 - Status: accepted
-- Tracking: Blit108; related ADR0138
+- Date: 2026-10-19
+- Tracking: Blit 108; related ADR 0138
 
 The saved settings API remains the sole writable presentation owner. Environment
 variables are startup defaults, not competing overrides. Keep precedence:
@@ -29,6 +29,6 @@ Existing operator files and tokens are not rewritten by package upgrades.
 
 Verify both precedence directions, unset/valid/invalid environment values,
 API survival and recovery, ignore/reset and no durable-setting mutation on
-invalid input. Build the maintenance package from the deployed561 source,
+invalid input. Build the maintenance package from the deployed 0.1.561 source,
 not the pending font candidate. Merge the same patch into main; no divergent
 runtime implementation or Hibr changes. Physical output ownership stays native.

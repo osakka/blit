@@ -1,8 +1,8 @@
-# ADR0177: one retained graphics-damage contract
+# ADR 0177: one retained graphics-damage contract
 
-- Status: accepted for development; not deployed
+- Status: accepted
 - Date: 2026-10-21
-- Scope: internal125/122, existing canonical graphics scene and both renderers
+- Scope: internal 125/122, existing canonical graphics scene and both renderers
 
 Compare immutable bounded placement descriptors against the last scene
 actually composed for each surface. Descriptors contain image/placement IDs,

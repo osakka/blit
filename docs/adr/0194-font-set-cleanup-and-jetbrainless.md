@@ -1,6 +1,6 @@
 # ADR 0194: Blit's own fonts only, renamed; JetBrains Mono as Blit JetBrainless
 
-- Status: accepted (2026-10-27; the owner's screen is the last check)
+- Status: accepted; in use since 0.2.35
 - Date: 2026-10-27
 - Scope: `assets/fonts`, the font profile table, packaging, the font gates
 

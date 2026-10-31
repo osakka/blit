@@ -1,8 +1,7 @@
 # ADR 0092: Authenticated, correlated diagnostic bundles
 
-## Status
-
-Accepted for the live-render troubleshooting boundary.
+- Status: accepted
+- Note: accepted for the live-render troubleshooting boundary.
 
 ## Context
 

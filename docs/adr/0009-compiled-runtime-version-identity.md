@@ -1,5 +1,7 @@
 # ADR 0009: compiled runtime version is the API identity
 
+- Status: accepted
+
 ## Context
 
 Blit exposes its version through `/v1/version` and `/v1/server`. A locally

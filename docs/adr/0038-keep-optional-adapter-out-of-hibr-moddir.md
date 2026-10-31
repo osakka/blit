@@ -1,6 +1,7 @@
 # ADR 0038: Keep the optional Blit adapter outside Hibr's module directory
 
-Status: accepted; integration-path statement amended by ADR 0069 and ADR0168
+- Status: accepted
+- Note: integration-path statement amended by ADR 0069 and ADR 0168
 
 ## Context
 
@@ -23,7 +24,7 @@ The canonical native-provider test path remains `/usr/bin/desktop` with
 `surface_mode: terminal`; it does not load `console-blit`. The packaged Blit
 held-desktop path is now the explicit `/usr/share/blit/hibr/blit-session.hibr`
 entrypoint, which loads the adapter by absolute path as specified by ADR 0069.
-The current held-desktop path is native terminal-provider (ADR0168); the
+The current held-desktop path is native terminal-provider (ADR 0168); the
 API adapter is opt-in only. Earlier API-provider integration statements above
 are historical, not instructions to inject it into ordinary child shells.
 Hibr source and installed Hibr modules remain outside Blit's ownership

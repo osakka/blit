@@ -1,6 +1,6 @@
 # ADR 0195: Text fonts are discovered; every glyph comes from one shipped stack
 
-- Status: accepted (2026-10-27, after the evidence below; the owner's screen is the last check)
+- Status: accepted; in use since 0.2.36
 - Date: 2026-10-27
 - Scope: `blit_raster.c` (glyph resolution), `blit_font.c` (the font list),
   font assets and their layout, packaging, the font gates, the outline

@@ -1,9 +1,7 @@
 # ADR 0005: Kitty graphics first, sixel compatibility second
 
-## Status
-
-Accepted as the sequencing decision. The initial unadvertised-sixel phase is
-superseded by [ADR-0021](0021-bounded-sixel-capability.md).
+- Status: accepted
+- Note: accepted as the sequencing decision; the initial unadvertised-sixel phase is superseded by [ADR-0021](0021-bounded-sixel-capability.md).
 
 ## Context
 

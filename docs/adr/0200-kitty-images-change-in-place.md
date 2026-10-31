@@ -1,6 +1,6 @@
 # ADR 0200: Kitty images change in place: replace by id, and edit the root frame
 
-- Status: accepted (2026-10-29)
+- Status: accepted
 - Date: 2026-10-29
 - Scope: `blit_server.c` (the Kitty graphics parser), a new gate
 - For: hibr #404, X Screen in pixels

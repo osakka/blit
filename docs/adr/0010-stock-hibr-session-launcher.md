@@ -1,6 +1,7 @@
 # ADR 0010: Launch the stock Hibr session in one module-owning process
 
-- Status: Accepted; production-path wording amended by ADR 0069
+- Status: accepted
+- Note: production-path wording amended by ADR 0069
 - Date: 2026-10-07
 
 ## Context

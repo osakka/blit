@@ -2,10 +2,10 @@
 
 `BLIT_AUTH_TOKEN=... ruby tools/probes/host_font_size.rb` uses the
 pixel-size font API. It changes global font cell heights through
-17,19,23px, saves observations/BMP captures, checks unchanged renderer and
+17, 19 and 23 px, saves observations/BMP captures, checks unchanged renderer and
 physical pane regions plus complete grid bounds, then restores the original
 size policy. Override the bounded list with `BLIT_FONT_SIZES` (at most eight
-values 8..64). It never kills applications, injects input or changes the
+values, 8 to 64). It never kills applications, injects input or changes the
 compositor.
 It refuses to overwrite a concurrently changed font on restoration. This
 probe visibly resizes active applications; run it only during an agreed test
@@ -25,28 +25,29 @@ production KMS full-frame and pointer gates (`kms_compose_gate.sh`,
 `gles_compose_gate.sh`, `kms_pointer_phase_gate.rb`) cover those pixel
 boundaries locally. Physical performance acceptance remains separate.
 
-`GET /v1/diagnostics/runtime.performance` now exposes cumulative
+The `performance` object of `GET /v1/diagnostics/runtime` reports cumulative
 `process_cpu_ms` (Blit including its threads), `desktop_cpu_ms` (verified
 native desktop owner only, not its children; null when unavailable), and
 `system_load_1m` (host load, not CPU percent). CPU-ms delta divided by elapsed
 wall-ms measures consumed cores. Check PID/start-time identity across samples;
 never subtract across a service or desktop restart.
 
-`BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_cadence.rb` applies360
+`BLIT_AUTH_TOKEN=... ruby tools/probes/host_pointer_cadence.rb` applies 360
 bounded pointer motions, with no clicks/keys/session/settings changes, then
 restores the original pointer location. `BLIT_POINTER_PATTERN=sweep` follows a
-bounded bounce path; `BLIT_POINTER_STEP_PX` selects1..40 pixels per input
-event (default1), and `BLIT_POINTER_HZ` selects1..240 requests/s (default60).
+bounded bounce path; `BLIT_POINTER_STEP_PX` selects 1 to 40 pixels per input
+event (default 1), and `BLIT_POINTER_HZ` selects 1 to 240 requests/s (default
+60).
 The result reports requested input rate, actual per-output submission rate,
 refresh target, missed-deadline delta, physical evdev events and CPU delta.
 Set `BLIT_EVIDENCE_DIR` to retain the measurements. This is an API-injected
 input-path test, not physical-device evidence or a window-drag test. HTTP
 latency and output count affect the result; compare only runs with matching
 topology/workload. Combine these results with physical-input capture and
-render/loop timings. An idle0Hz presentation counter is not proof of a slow
+render/loop timings. An idle 0 Hz presentation counter is not proof of a slow
 renderer.
 
-`BLIT_POINTER_SECONDS` optionally bounds the offered workload to 0.25..120
+`BLIT_POINTER_SECONDS` optionally bounds the offered workload to 0.25 to 120
 seconds; otherwise it retains the original 360-request workload. Rates use
 the server's two observation timestamps, not a client interval that excludes
 part of the counter sample. `submission_hz` counts presentation calls;
@@ -126,7 +127,7 @@ it does not use the server's cumulative maximum gap or rolling rate as a
 short-capture FPS measurement. `present_calls` is damage-driven: an unchanged
 scene is intentionally not re-presented. The analyzer therefore labels this
 as `damage-driven-present-calls-not-vblank-rate` and only warns about a low
-present rate when terminal or graphics scene work was observed. Input activity
+present rate when terminal output was observed. Input activity
 is reported independently because a short pointer burst is not a sustained
 frame-rate workload. Warnings are observations, not pass/fail claims.
 
@@ -143,7 +144,7 @@ pass; a missing or malformed artifact makes the capture fail.
 
 Interpret the first missing boundary in this order:
 
-1. `physical_evdev_events` did not increase: device/permissions/seat input;
+1. `evdev_mouse_events` did not increase: device/permissions/seat input;
 2. input increased but no `pointer_motion`/`pointer_button` trace: routing;
 3. input and trace exist but no surface revision/commit: Hibr/PTY surface;
 4. surface changed but no `render_path`: compositor scheduling;
@@ -174,8 +175,8 @@ tools/diagnostics/pointer-artifact-capture.sh \
 
 The capture separates the failure classes: `runtime-physical.json` reports
 whether evdev mouse counters increased, pointer traces report what Blit
-accepted, render traces report pointer-cache versus full-redraw composition,
-and the BMP hashes provide visual evidence. Zero physical evdev events means
+accepted, render traces report what was presented, and the BMP hashes
+provide visual evidence. Zero physical evdev events means
 the input/device path is the blocker; accepted events with bad BMPs means the
 Blit presentation path; correct BMPs with incorrect terminal content means
 the terminal surface. Keep screenshots disabled for timing/input captures:
@@ -289,10 +290,8 @@ Use the timing-only form when measuring frame cadence, loop gaps, or input
 latency. Use the default screenshot form when visual evidence is required;
 the screenshot endpoint is intentionally kept separate because its transfer
 can block a single-threaded server for hundreds of milliseconds. Diagnostic
-captures use `?cached=1` to observe the already-composed scene without
-invalidating a live Hibr frame. Callers that need a deliberate full rebuild
-may omit the query parameter; do not use that fresh-capture form inside a
-pointer-latency or redraw-cadence measurement.
+captures send `?cached=1`, which is still accepted and has no effect: every
+capture reads a frame that was presented (see the last section).
 
 The output directory contains:
 
@@ -305,7 +304,7 @@ The output directory contains:
   path decisions;
 - `runtime-*.json`: frame timing, input counters, stream health, and session
   resources;
-- `session-*.json`: the selected terminal session's surface revision and
+- `session-*.json`: each terminal session's surface revision and
   graphics objects, including whether an image is being replaced, hidden, or
   repeatedly recreated;
 - `screenshots/*.bmp` and `screenshot-sha256.txt`: authoritative lossless
@@ -317,12 +316,8 @@ The output directory contains:
 
 Interpretation is causal: a physical click must appear as `pointer_button`,
 the associated Hibr surface activity must follow a `commit`, and the renderer
-must report the path used for the resulting presentation. Missing events or a
-hash change without a corresponding commit are distinct, actionable failures.
-A `render_path` event with `graphics_changed=1` must correlate with a change
-in the matching `session-*.json` graphics list; otherwise the compositor's
-graphics-scene boundary is wrong. A `pointer-cache` path should not require
-a full scene rebuild.
+must report the resulting presentation. Missing events or a hash change
+without a corresponding commit are distinct, actionable failures.
 
 The general trace is intentionally bounded, and a busy Hibr surface can fill
 it with surface updates. The harness therefore also requests filtered views:
@@ -346,8 +341,8 @@ physical evdev deltas. `outputs` retains the display refresh target and present
 latencies, while `trace_end_sequences` shows whether each causal boundary
 advanced. A report with `no_physical_evdev_mouse_events` is not evidence that
 the pointer is broken; it means no physical movement occurred during that
-capture. Conversely, `present_rate_below_half_refresh` is a measured cadence
-warning even when the last individual present latency looks healthy.
+capture. Conversely, `active_present_rate_below_half_refresh` is a measured
+cadence warning even when the last individual present latency looks healthy.
 
 Trace responses are also bounded at the HTTP boundary: the default is the 32
 newest matching events, and callers may request `limit=1..128`. This prevents a
@@ -369,15 +364,15 @@ state, frame-batch state, and synchronization state. This keeps the bounded
 trace useful under high-volume terminal output while preserving the
 atomic-frame evidence.
 
-On the direct-KMS backend, `render_path` records the output submitted and
-deferred masks, KMS present time, pointer state, and each of the first four
-submitted views' surface revision, damage rectangle, cursor state, and
-synchronization state. Correlate a PTY `surface_update` with the following
+`render_path` records the output, submitted and deferred masks, the view and
+overlay counts, the KMS present time, the pointer position, whether the
+scene was held, and for each of the first four views its surface revision,
+damage rectangle, cursor state and synchronization state. Correlate a PTY `surface_update` with the following
 KMS `render_path` record before attributing a visual defect to the compositor:
 
 ```text
 surface_update: session=1 surface=surface-1 bytes=... revision=... damage=...
-render_path: backend=kms path=direct-kms submitted_mask=... view0=surface-1/rev-.../damage-...
+render_path: backend=kms path=direct-kms ... view0=surface-1/rev-.../damage-.../cursor-.../sync-0
 ```
 
 `graphics_payload` is one entry per Kitty or sixel payload that reached the
@@ -446,7 +441,8 @@ either. Both are reported in the device item and both are honest gaps rather
 than oversights.
 
 The device sections are `input_devices`, `audio_devices` and `displays`;
-the document also holds `font`, `server`, `login` and pane `effects`
+the document also holds `font`, `server`, `login`, `display_layouts`,
+`auxiliary_displays` and pane `effects`
 ([blit(8)](../man/blit.8) names the saved setting behind each environment
 variable). A display is keyed by its **name**, not by `display-<n>`, for the
 same stability reason — the name is the connector (`DP-1` on the live host)
@@ -651,16 +647,11 @@ or a missing runtime response is not accepted as physical-input evidence.
 It reports both the maximum loop gap observed during the capture and the
 runtime's lifetime maximum; an old screenshot or diagnostic stall therefore
 cannot be mistaken for a stall caused by the current physical-input test.
-For machines with multiple pointer nodes, inspect `performance.evdev_mouse_devices`
-in `/v1/diagnostics/runtime`: each entry reports the opened path, file
-descriptor, and event/motion/button/wheel counters. This distinguishes an
-unmoved node from a wrong-node or duplicate-device diagnosis without guessing
-from the aggregate counter.
-
-The Hibr adapter batches up to 256 cell mutations per request, while retaining
-deferred updates and one final `commit` per Hibr flush. This bounds transport
-overhead without exposing a partial frame. The batch is still limited by the
-adapter's fixed request buffer and the server's bounded HTTP body policy.
+For machines with several pointer nodes, `performance` in
+`/v1/diagnostics/runtime` names the node that last moved:
+`last_evdev_mouse_path`, `last_evdev_mouse_device_id` and
+`last_evdev_mouse_device_present`; `/v1/input/devices` has each device's
+state. Together they tell an unmoved node from the wrong node.
 
 ## Pointer-artifact transaction
 
@@ -682,30 +673,28 @@ screenshot after each injected position; use that only after the timing
 transaction has completed, or interpret the resulting transfer separately.
 The injected events use the same API dispatch path as physical input and are
 labelled `api-pointer`; they are a controlled comparator, not evidence about
-the physical evdev device. Compare `render_path` with the screenshots: a
-pointer-only frame should use `pointer-cache`. A full redraw with
-`external_changed=1 graphics_changed=0` identifies an external-cell damage
-path, while `graphics_changed=1` identifies the intentionally expensive image
-or graphics-scene rebuild path.
+the physical evdev device. Compare `render_path` and its view damage with
+the screenshots.
 
-The adapter also advertises Kitty-compatible pixel placement to Hibr and sends
-image frames through Blit's bounded WebSocket pixel protocol. Static under-text
-images use `imgkeep` and are not retransmitted; clearing one hides the cached
-image before the next atomic scene presentation.
-
-When diagnosing the Hibr adapter itself, enable its opt-in transport trace for
-one disposable probe session:
+The rest of this section applies only to the optional `console-blit`
+adapter ([Hibr integration](integration-hibr.md#the-optional-console-adapter)),
+not the packaged desktop, which writes to a PTY. The adapter sends at most
+256 cells per request, deferred, with one final `commit` per Hibr flush, so
+no partial frame is presented. It sends image frames through the WebSocket
+pixel protocol; a static image under text (`imgkeep`) is not retransmitted.
+To diagnose the adapter itself, enable its transport trace for one
+disposable probe session:
 
 ```sh
 BLIT_ADAPTER_TRACE=1
 ```
 
-The trace is emitted by the Blit-owned adapter and reports WebSocket dial and
+The trace reports WebSocket dial and
 handshake failures, image requests, pixel-frame transport failures, and
 successful frame submission. It does not modify Hibr. The authoritative result
 is still the Blit runtime: `pixel_frames_accepted` must increase and
 `pixel_frame_errors` must remain unchanged. Do not enable this continuously on
- a busy desktop; it is a probe aid, not a replacement for the runtime counters.
+a busy desktop; it is a probe aid, not a replacement for the runtime counters.
 
 ## Live experience capture contract
 
@@ -719,14 +708,16 @@ outputs and for PTY sessions that are still attaching.
 
 Interpret the evidence in this order:
 
-1. `last_render_ms`, `max_render_ms`, `missed_deadlines`, and `loop_gap` decide
+1. `last_render_ms`, `max_render_ms`, `missed_deadlines`, `last_loop_gap_ms`
+   and `max_loop_gap_ms` decide
    whether the renderer was late; `present_calls` is damage-driven and is not
    itself a vblank rate.
 2. `terminal_bytes` and `terminal_reads` prove producer activity.
    `surface_commit_hz`, its window/age/gap fields, `surface_commits`, and
    `frame_commits` apply only to their corresponding producers.
-3. `pixel_frames_accepted` and `pixel_frame_errors` distinguish a Hibr/image
-   transport problem from a presentation problem.
+3. `pixel_frames_accepted` and `pixel_frame_errors` (WebSocket pixel frames),
+   and each session's `frames` counters (pictures by descriptor), distinguish
+   an image transport problem from a presentation problem.
 4. Aggregate evdev counters plus the per-device entries and input traces
    distinguish no physical input from a wrong device, duplicate device, or
    dispatch problem.
@@ -735,11 +726,11 @@ Interpret the evidence in this order:
 
 An image-only Hibr probe is the control experiment. If it accepts a pixel frame
 and presents it while the desktop capture reports zero image activity,
-the display server and adapter are working and the desktop is selecting its
-glyph fallback/configuration path. That conclusion is evidence-based and does
+the display server is working and the desktop is selecting its glyph
+fallback or configuration path. That conclusion is evidence-based and does
 not require changing Hibr.
 
-# Live Hibr boundary capture
+## Live Hibr boundary capture
 
 For a real-host report, capture the three layers separately and keep the raw
 framebuffer beside the API snapshots:

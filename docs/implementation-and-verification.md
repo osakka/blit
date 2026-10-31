@@ -1,9 +1,13 @@
 # Implementation and verification contract
 
-This document is the delivery contract for blit. It is normative for the
-implementation sequence, test evidence, release gates, and handover. A stage
-is not complete because a screen looks correct; it is complete only when its
-automated and hardware acceptance criteria pass.
+This document states what Blit must do and what counts as evidence that it
+does. It is normative for requirements, test evidence and the release
+decision. What exists today is in [features](features.md); the evidence for
+each release is in the [verification ledger](verification-status.md); the
+build-to-deploy steps are in the [development
+workflow](development-workflow.md). A change is not complete because a screen
+looks correct; it is complete only when its automated and hardware acceptance
+criteria pass.
 
 ## Non-negotiable invariants
 
@@ -30,7 +34,7 @@ automated and hardware acceptance criteria pass.
 - `BLIT-PLAT-001`: run without X11 or Wayland on a Linux DRM/KMS host.
 - `BLIT-PLAT-002`: expose one stable API service over TCP.
 - `BLIT-PLAT-003`: present through native DRM/KMS only (ADR 0184), composing
-  with the GLES compositor (ADR 0181) or the CPU compositor as fallback.
+  with the GLES compositor (ADR 0181) by default or the CPU compositor.
 - `BLIT-PLAT-004`: run as a managed non-root service when the host grants the
   required DRM/input permissions.
 - `BLIT-PLAT-005`: report backend, display, graphics, audio, and input
@@ -54,8 +58,8 @@ automated and hardware acceptance criteria pass.
 
 - `BLIT-DISPLAY-001`: discover stable display IDs, bounds, modes, refresh, and
   presentation state; expose the complete mode inventory and active mode.
-- `BLIT-DISPLAY-002`: support `1x1`, `2x1`, `1x2`, and `2x2` logical pane
-  layouts.
+- `BLIT-DISPLAY-002`: split each display into a logical pane grid of 1–8
+  columns by 1–8 rows (ADR 0131).
 - `BLIT-DISPLAY-003`: map each pane to exactly one display and authoritative
   cell bounds.
 - `BLIT-DISPLAY-004`: support explicit display offsets, gaps, and output loss
@@ -108,149 +112,33 @@ automated and hardware acceptance criteria pass.
   the GLES and CPU compositors.
 - `BLIT-RENDER-002`: prevent stale pixels, pointer trails, cross-output
   cursors, and partial redraw corruption.
-- `BLIT-EFFECT-001`: implement bounded, deterministic CRT effects only after
-  text/presentation acceptance passes.
+- `BLIT-EFFECT-001`: keep pane and presentation effects bounded and
+  deterministic (ADR 0186–0188, 0190); with effects off, draw exactly what
+  no effects draws.
 - `BLIT-EFFECT-002`: keep effects downstream of canonical text and topology
   state.
 
-## Delivery sequence and gates
+## Acceptance
 
-### Gate 0 — repository and toolchain
+`tools/run-gates.sh` is the executable list of gates; its suites and the
+change classes they prove are in the
+[development workflow](development-workflow.md#required-gates). By area:
 
-Deliver: clean documentation map, ADRs, TCC build commands, pinned libdrm,
-Mesa and HarfBuzz artifacts, reproducible fixture scripts, and no undocumented generated
-files.
+| Requirements | Local proof | Beyond the DRM mock |
+|---|---|---|
+| `BLIT-API-*` | `schema` suite | — |
+| `BLIT-TERM-*` | `terminal` and `font` suites | Hibr capture |
+| `BLIT-RENDER-*`, `BLIT-EFFECT-*`, `BLIT-INPUT-*` | `renderer` suite, on `BLIT_GATE_BACKEND=native` and `gles` | VKMS pixel and input fixtures ([KMS testing](testing-kms.md)) |
+| `BLIT-DISPLAY-*` | `renderer` and `timing` suites | VKMS two- and four-output fixtures; a physical multi-monitor host |
+| `BLIT-HIBR-*` | `hibr` suite | `tools/tests/qemu_hibr_lifecycle_gate.sh` |
+| `BLIT-PLAT-*`, lifecycle and faults | `lifecycle` and `timing` suites | `physical_multi_display_gate.rb` with `BLIT_GATE_LIVE` |
 
-Evidence:
-
-- OpenAPI parses.
-- TCC compiles every first-party C target.
-- `git diff --check` passes.
-- dependency hashes and build paths are recorded.
-
-### Gate 1 — schema and protocol
-
-Deliver: complete OpenAPI resources, typed problem responses, revisions,
-idempotency rules, HTTP routes, and WebSocket event schemas.
-
-Tests:
-
-- schema parse and structural validation;
-- every route has success and failure contract tests;
-- stale revision, malformed JSON, unknown resource, oversized request, and
-  idempotency conflict tests;
-- HTTP and WebSocket identity/revision consistency test.
-
-Exit condition: no production route exists that is absent from the schema, and
-no schema property is advertised as supported while returning a placeholder
-response.
-
-### Gate 2 — canonical terminal engine
-
-Deliver: one PTY-to-grid engine with explicit parser state, damage, cursor,
-alternate screen, styles, and resize behavior.
-
-Tests:
-
-- deterministic byte-vector tests for every supported control sequence;
-- fragmented-input tests at every byte boundary;
-- malformed-sequence and bounded-resource tests;
-- golden surface snapshots for colors, attributes, cursor, scrolling, and
-  alternate screen;
-- PTY `TIOCSWINSZ` tests proving dimensions and redraw agree.
-
-Exit condition: the Hibr desktop conformance workload produces repeatable,
-revision-traceable surface snapshots across repeated runs and no renderer is
-involved in the assertions. “Repeatable” here describes the fixture output
-only; it is not a visual or physical-host acceptance claim.
-
-### Gate 3 — presentation
-
-Deliver: the direct KMS backend with GLES and CPU compositors consuming the
-same frame plan.
-
-Tests:
-
-- empty, single-surface, multi-surface, damage-only, cursor-only, and full
-  redraw frames;
-- pixel/framebuffer assertions for known cell fixtures;
-- pointer movement with previous-position invalidation;
-- compositor failure and output-loss diagnostics.
-
-Exit condition: both compositors produce equivalent logical output
-(`BLIT_GATE_BACKEND=native` and `gles`) and neither owns terminal state.
-
-### Gate 4 — topology and geometry
-
-Deliver: authoritative pane layout for all four supported matrices, including
-font/grid metrics, offsets, gaps, and display loss behavior.
-
-Test matrix:
-
-| Layout | Displays | Panes | Required clients |
-|---|---:|---:|---|
-| `1x1` | 1 | 1 | primary |
-| `2x1` | 2 | 2 | primary + join |
-| `1x2` | 1 or 2 | 2 | primary + join |
-| `2x2` | 2 or 4 | 4 | primary + three joins |
-
-For each case assert topology JSON, pane bounds, surface ownership, PTY
-dimensions, rendered cell coordinates, and absence of duplicate surfaces.
-
-Exit condition: all matrix cases pass on the DRM mock and in VKMS, with
-physical-host confirmation for at least one multi-monitor arrangement.
-
-### Gate 5 — input and Hibr integration
-
-Deliver: focus, explicit input routes, pointer hit-testing, SGR mouse reports,
-keyboard routing, primary/join orchestration, attach, resume, and recovery.
-
-Tests:
-
-- focus transitions by API and primary click;
-- explicit keyboard and pointer route precedence;
-- route target exit and device disappearance;
-- pointer movement/click in every pane of every topology matrix;
-- Hibr primary plus joins with keyboard, mouse, resize, redraw, and recovery;
-- WebSocket input events correlated with the PTY receiving the bytes.
-
-Exit condition: one Hibr desktop can be controlled across all supported panes
-without a second layout or terminal state owner.
-
-### Gate 6 — fault and soak behavior
-
-Deliver: lifecycle state machine, output loss, restart, reconnect, replay,
-resource limits, diagnostics, and bounded recovery.
-
-Tests:
-
-- kill/restart primary and join processes;
-- restart the exact Blit executable through `/v1/control/restart` and verify
-  that the same binary returns on the same port;
-- terminate sessions during writes and resizes;
-- disconnect/reconnect stream clients;
-- force replay gaps and verify snapshot repair;
-- remove or disable one VKMS output;
-- run multi-hour PTY output and pointer-motion soak tests under fixed memory
-  limits.
-
-The repeatable bounded precursor is `tools/tests/terminal_soak_gate.rb`. It
-must pass with multiple concurrent PTYs, sustained VT/UTF-8 output, snapshots,
-resizes, runtime diagnostics, and zero leaked sessions before a longer soak is
-accepted as evidence. The caller supplies `BLIT_SOAK_PID`; the gate enforces
-`BLIT_SOAK_MAX_RSS_KIB` (128 MiB by default) throughout the run.
-
-Exit condition: every injected failure has a deterministic state transition,
-typed diagnostic, and documented recovery path.
-
-### Gate 7 — effects and release
-
-Deliver: bounded CRT/retro effects, optional overlays, packaging, service
-unit, security configuration, and handover bundle.
-
-Effects must pass with effects disabled first, then prove bounded frame time,
-memory, and deterministic parameters. Effects may never change terminal cells,
-focus, routes, or topology.
+Effects never change terminal cells, focus, routes or topology. The bounded
+soak precursor is `tools/tests/terminal_soak_gate.rb`: multiple concurrent
+PTYs, sustained VT/UTF-8 output, snapshots, resizes and zero leaked sessions.
+The caller supplies `BLIT_SOAK_PID`; the gate enforces
+`BLIT_SOAK_MAX_RSS_KIB` (128 MiB by default) throughout the run. A longer
+soak is evidence only after it passes.
 
 ## Test evidence rules
 
@@ -269,26 +157,9 @@ Evidence is invalid when it depends on manual visual inspection alone, an
 unrecorded host configuration, an unaudited binary, or a test process that
 continues after the claimed result.
 
-## Handover package
-
-The final handover must contain:
-
-1. the pinned source commit and clean working tree status;
-2. OpenAPI schema and generated/validated contract report;
-3. TCC build instructions and dependency manifest with hashes;
-4. server binary build recipe and deployment/service configuration;
-5. Hibr adapter/module and exact primary/join launcher configuration;
-6. QEMU/VKMS fixture kernel, initramfs recipe, and complete matrix results;
-7. physical-host KMS test report with GPU, connectors, modes, permissions,
-   input devices, and rollback procedure;
-8. conformance, integration, fault, and soak test reports;
-9. known limitations and explicit non-goals;
-10. operator runbook for startup, shutdown, authentication, logs, recovery,
-    and safe display-manager restoration.
-
 ## Release decision
 
 The release is blocked if any requirement above lacks evidence, any matrix
-case is skipped, any advertised API behavior is a stub, any compositor owns
-canonical state, or any Hibr path requires manual geometry or undocumented
-environment assumptions.
+case it claims is unexercised, any advertised API behavior is a stub, any
+compositor owns canonical state, or any Hibr path requires manual geometry or
+undocumented environment assumptions.

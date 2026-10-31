@@ -1,6 +1,6 @@
 # ADR 0136: present pointer motion over the last committed scene
 
-- Status: implemented; physical acceptance pending
+- Status: accepted
 - Date: 2026-10-19
 - Issue: Blit#101
 

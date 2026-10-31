@@ -1,8 +1,6 @@
 # ADR 0109: Hibr terminal default colours cross the API boundary
 
-## Status
-
-Accepted.
+- Status: accepted
 
 ## Context
 

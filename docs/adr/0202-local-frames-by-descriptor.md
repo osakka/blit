@@ -1,11 +1,11 @@
 # ADR 0202: local picture frames by descriptor, not through the terminal
 
-- Status: accepted and in use. Blit's half in 0.3.17–0.3.19, Hibr's in
-  0.99.397–0.99.398 (2026-10-30). Reviewed by the Hibr maintainers; their
-  answers and changes are folded in. Measured result under "Result".
+- Status: accepted; in use since 0.3.17
+- Note: Blit's half in 0.3.17–0.3.19, Hibr's in 0.99.397–0.99.398 (2026-10-30). Reviewed by the Hibr maintainers; their answers and changes are folded in. Measured result under "Result".
 - Scope: moving large or frequent pictures (video, a game, a browser page)
   from a program in a Blit session to Blit without encoding them into the
   terminal stream
+- Supersedes: [ADR 0182](0182-desktop-video-off-the-pty.md) (desktop video stays on the PTY)
 - Depends on: [ADR 0066](0066-the-terminal-names-no-file-blit-opens.md),
   [ADR 0200](0200-kitty-images-change-in-place.md),
   [ADR 0065](0065-the-privilege-and-authentication-model.md)

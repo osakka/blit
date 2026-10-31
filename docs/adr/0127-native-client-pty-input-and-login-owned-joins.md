@@ -1,14 +1,14 @@
 # ADR 0127: native client PTYs and login-owned joins
 
-- Status: accepted; join boundary increment, not saved automatic policy
+- Status: accepted; in use since 0.1.540
 - Date: 2026-10-17
 - Issues: Blit #96, #99; follows ADRs 0122, 0124–0126
-- Supersedes: ADR0080's horizontal slot and primary-input projection
+- Supersedes: ADR 0080's horizontal slot and primary-input projection
 
 ## Evidence and decision
 
-The revised join-input regression fails against0.1.539: a click targeting
-session2 is forwarded to session1 at column129, instead of local column1.
+The revised join-input regression fails against 0.1.539: a click targeting
+session 2 is forwarded to session 1 at column 129, instead of local column 1.
 This is the obsolete recognized-launch path, not a Hibr rendering defect.
 Hibr's installed native hold client already rewrites SGR positions using its
 own current row/column. Blit must send pointer, wheel and keyboard input to
@@ -16,7 +16,7 @@ the hit-tested/focused client's own PTY, without a union offset or a second
 route to the primary. Remove the old projection rather than retaining another
 mode switch. Each client also keeps its own output surface and graphics.
 
-Use ADR0126's fresh exact native login association as an eligible owner for
+Use ADR 0126's fresh exact native login association as an eligible owner for
 recognized API joins. Authentication alone, expired observation or a shell
 does not qualify. Project the associated login's ownership role in the API
 without setting external-adapter ownership flags. This role identifies the
@@ -53,7 +53,7 @@ session. This is cleanup, not a retry/reconnect controller.
 
 The raw-PTY API gate verifies hit-testing/local coordinates and distinct
 surfaces. Installed native Hibr CLI in an isolated namespace separately proves
-two67x240 clients form a134x240 union: lower input gets row+67 exactly once,
+two 67x240 clients form a 134x240 union: lower input gets row+67 exactly once,
 upper input stays local, and button/release/modifier/wheel/keyboard bytes are
 preserved. The credential-dropping login fixture tests recognized joins,
 identity/pane/placement rejection, token removal and logout cleanup. These
@@ -65,7 +65,7 @@ placement once, preserve deliberate release and user rearrangement, then
 reconcile crash/output/login changes. Reuse the corrected native path and
 existing settings/controller, not an external script, manual operator recipe
 or another desktop owner. General stable output binding and fallback/return
-policy remain staged under ADR0124. No Hibr-core changes or SSH.
+policy remain staged under ADR 0124. No Hibr-core changes or SSH.
 
 Primary implementation reference inspected read-only:
 `hibr/mods/hold/mouse.c` (`hd_mrewrite`/`hd_mtrans`) and

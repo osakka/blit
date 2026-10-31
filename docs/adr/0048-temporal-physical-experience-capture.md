@@ -1,6 +1,6 @@
 # ADR-0048: Temporal physical-experience capture is the troubleshooting boundary
 
-Status: accepted
+- Status: accepted
 
 ## Context
 

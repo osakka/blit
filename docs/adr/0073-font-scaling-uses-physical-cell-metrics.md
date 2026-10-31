@@ -1,6 +1,6 @@
 # ADR-0073: Keep font scaling in the physical cell-metric boundary
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

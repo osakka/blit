@@ -14,7 +14,7 @@ an existing ADR instead of adding another record when it preserves that
 decision; a changed public contract, ownership boundary, renderer boundary,
 security policy, or compatibility rule requires a new ADR.
 
-## Accepted decisions
+## Decisions
 
 - [0001 — TCC is the project compiler](0001-tcc-toolchain.md)
 - [0002 — OpenAPI control plane and network streaming plane](0002-network-api-and-streaming.md)
@@ -146,7 +146,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0126 — Native login desktop association](0126-native-login-desktop-association.md)
 - [0127 — Native client PTYs and login-owned joins](0127-native-client-pty-input-and-login-owned-joins.md)
 - [0128 — Live auxiliary-display Apply contract](0128-live-auxiliary-apply-contract.md)
-- [0129 — SDL KMSDRM hotplug dependency boundary (proposed alternative)](0129-sdl-kmsdrm-hotplug-dependency-boundary.md)
+- [0129 — SDL KMSDRM hotplug dependency boundary](0129-sdl-kmsdrm-hotplug-dependency-boundary.md)
 - [0130 — Direct-KMS live output reconciliation](0130-direct-kms-live-output-reconciliation.md)
 - [0131 — Independent output pane grids](0131-per-output-pane-grids.md)
 - [0132 — Clipping bounds image work](0132-clipping-bounds-image-work.md)
@@ -220,6 +220,25 @@ security policy, or compatibility rule requires a new ADR.
 - [0200 — Kitty images change in place: replace by id, and edit the root frame](0200-kitty-images-change-in-place.md)
 - [0201 — File-manager icons: one drawing per kind, colourways by a primary colour](0201-file-manager-icons.md)
 - [0202 — Local picture frames by descriptor, not through the terminal](0202-local-frames-by-descriptor.md)
+
+## Status
+
+Every record opens with one status line, `- Status: <form>`, in one of
+these forms and no other:
+
+| Form | Means |
+| --- | --- |
+| `proposed` | Not decided yet, or decided and not built |
+| `accepted` | Decided and built |
+| `accepted; in use since X.Y.Z` | Built, and running on the owner's machine since that release (a `Used` row in [features](../features.md) or an entry in the [verification ledger](../verification-status.md)) |
+| `superseded by ADR NNNN` | Replaced by a later decision; the record stays as history |
+| `retired in X.Y.Z (ADR NNNN)` | What it decided was removed in that release, for the reason in that ADR |
+| `rejected` | Considered and not taken |
+
+A `- Note:` line under the status may say how a later record amended part
+of the decision. Open acceptance work belongs in the roadmap or a ticket, not
+in the status line. The status line and this index change as a decision's life moves on;
+the body is the record of the decision as it was made and is not rewritten.
 
 ## Adding an ADR
 

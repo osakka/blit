@@ -1,6 +1,6 @@
 # ADR-0047: Restore under-text graphics on incremental damage
 
-Status: accepted
+- Status: retired in 0.2.22 (ADR 0184)
 
 ## Context
 

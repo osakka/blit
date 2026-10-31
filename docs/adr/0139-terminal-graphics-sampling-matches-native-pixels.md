@@ -1,8 +1,8 @@
 # ADR 0139: Terminal graphics use nearest-neighbor sampling on every backend
 
-- Status: implemented; bounded physical comparison passes on all three backends
+- Status: accepted; in use since 0.1.557
 - Date: 2026-10-19
-- Issue: Blit104
+- Issue: Blit 104
 
 ## Evidence and decision
 

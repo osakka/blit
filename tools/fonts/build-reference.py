@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate repository-web glyph reference from pinned catalogues and fonts.
 
-Build-time only; requires the existing fontTools4.60.1 tooling.
+Build-time only; requires the existing fontTools 4.60.1 tooling.
 --check compares without writing. No network or installed-font discovery.
 """
 import argparse
@@ -45,7 +45,7 @@ def ranges(values):
 
 def generate():
     if fontTools.__version__ != '4.60.1':
-        raise SystemExit('Use pinned fontTools4.60.1 (same as font builders)')
+        raise SystemExit('Use pinned fontTools 4.60.1 (same as font builders)')
     modern, arabic = load('fonts.source.json'), load('arabic-fonts.source.json')
     nerd = load(modern['catalogue']['file'])
     assert digest(FONTS / modern['catalogue']['file']) == modern['catalogue']['sha256']

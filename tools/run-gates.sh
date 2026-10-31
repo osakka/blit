@@ -30,6 +30,7 @@ Suites (from docs/development-workflow.md "Required gates"):
   renderer    native KMS pixel, damage, pointer and graphics composition
   hibr        singleton ownership and resume fail-closed behaviour
   lifecycle   restart, shutdown, supervised update handling
+  packaging   the .deb artifact gate (needs BLIT_GATE_PACKAGE)
   timing      measured presentation cadence and the bounded PTY soak
   all         every suite above
 

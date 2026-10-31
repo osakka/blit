@@ -1,6 +1,6 @@
 # ADR 0045: Fail closed on unresolved Hibr resume attachments
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

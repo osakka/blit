@@ -1,6 +1,6 @@
 # ADR 0181: a GLES compositor inside native KMS; SDL retired at cutover
 
-- Status: accepted by the owner, 2026-10-24; implementation evidence follows the cutover criteria below
+- Status: accepted; in use since 0.2.9
 - Date: 2026-10-24
 - Scope: presentation backends, GPU composition, test oracles, packaging.
   Decides the open mechanism/ownership question ADR 0180 leaves to internal 128.

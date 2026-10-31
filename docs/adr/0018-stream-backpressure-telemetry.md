@@ -1,8 +1,6 @@
 # ADR 0018: Expose bounded stream back-pressure telemetry
 
-## Status
-
-Accepted.
+- Status: accepted
 
 ## Context
 

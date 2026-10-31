@@ -1,8 +1,8 @@
-# ADR0149: submitted pointer state belongs to each output
+# ADR 0149: submitted pointer state belongs to each output
 
+- Status: accepted
 - Date: 2026-10-19
-- Status: deployed; bounded API cadence verified, physical-mouse acceptance pending
-- Tracking: Blit101; related ADR0136, ADR0137
+- Tracking: Blit 101; related ADR 0136, ADR 0137
 
 Native KMS had one global previous-pointer state, updated whenever a present
 call did not defer. Outputs have independent deadlines/masks. Servicing an
@@ -21,15 +21,15 @@ No schema, settings, input mapping, font, Hibr or SDL backend change.
 
 kms_pointer_phase_gate.c includes the production compositor and the existing
 mock DRM boundary. Before the fix it fails "idle output consumed active
-pointer motion". Afterward it verifies120 idle-first motions on both outputs,
+pointer motion". Afterward it verifies 120 idle-first motions on both outputs,
 crossings in both orders, hide, pending-flip/latest-position retention,
 modeset and exact cursor/no-trail pixels. Existing native composition, pointer
 art/geometry and hotplug gates remain required. Compare the same bounded live
 workload before/after; retain native backend, layout and current font.
 
-On10.54, the clean requested60Hz API workload improved from23.62 to54.84
-confirmed DP flips/sec; a120Hz offered workload reached58.18 confirmed/sec
-on the59.997Hz output. Zero physical mouse events in these windows. Absolute
+On 10.54, the clean requested 60Hz API workload improved from 23.62 to 54.84
+confirmed DP flips/sec; a 120Hz offered workload reached 58.18 confirmed/sec
+on the 59.997Hz output. Zero physical mouse events in these windows. Absolute
 position/scene differed across versions; deterministic regression isolates the
 defect, while API measurements show bounded recovery, not universal physical
-latency acceptance. See verification-status.md and issue101.
+latency acceptance. See verification-status.md and issue 101.

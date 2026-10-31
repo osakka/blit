@@ -39,21 +39,21 @@ The Debian package installs a root-owned `blit-update-helper` behind
 gateway user: it verifies the package name and SHA-256, then delegates
 installation to that helper and requests a supervised restart.
 
-The package includes `blit.service`. Installation creates a root-owned update
-token and starts the server as the dedicated `blit` account with `video`,
-`render`, and `input` supplementary groups. Existing `/etc/blit/blit.env` and
-`/etc/blit/update.token` files are preserved on upgrades. The default package
-configuration binds to `0.0.0.0:8080` for the trusted test LAN:
-
-The package also supplies `LANG=C.UTF-8` and `LC_ALL=C.UTF-8` by default so
-Hibr's Unicode desktop glyphs are emitted as UTF-8 through its PTY. Existing
-operator values in `/etc/blit/blit.env` are preserved.
+The package includes `blit.service`, which runs the server as root with the
+`video`, `render`, `input` and `audio` supplementary groups; the unprivileged
+profile (ADR 0065) ships as an example drop-in,
+`/usr/share/doc/blit/examples/blit-unprivileged.conf`. Installation generates
+`/etc/blit/update.token` and an API `BLIT_AUTH_TOKEN` in `/etc/blit/blit.env`,
+both readable by root and the `blit` group. The default configuration binds
+`0.0.0.0:8080` for the trusted LAN and sets `LANG=C.UTF-8` and
+`LC_ALL=C.UTF-8`, so Hibr's Unicode desktop glyphs reach its PTY as UTF-8.
+Existing values in `/etc/blit/blit.env` and `/etc/blit/update.token` are
+preserved on upgrades.
 
 Before publishing a Debian artifact, run the repository-owned package gate:
 
 ```sh
-tools/tests/package_artifact_gate.sh \
-  build/packages-335/blit_0.1.335-1_amd64.deb
+tools/tests/package_artifact_gate.sh /tmp/blit-package/blit_X.Y.Z-1_amd64.deb
 ```
 
 It verifies the external release-manifest hash, TCC binary identity, embedded
@@ -65,27 +65,30 @@ sudo systemctl status blit.service
 ```
 
 `BLIT_UPDATE_TOKEN_FILE` is preferred for the update token. The file is read
-once at startup, trimmed of trailing whitespace, and never logged or returned;
-the `blit` service account therefore needs read access (the example uses the
-`blit` group). `BLIT_UPDATE_TOKEN` remains supported for protected
-environment-file deployments. The update token is deployment configuration and
-is not generated, returned, or logged by Blit. Verify:
+once at startup, trimmed of trailing whitespace, and never logged or returned,
+so the service user needs read access to it. `BLIT_UPDATE_TOKEN` remains
+supported for protected environment-file deployments. The server never
+generates, returns or logs the token; the package installer creates it once.
+Every other request needs the API bearer token from `/etc/blit/blit.env`:
 
 ```sh
-curl --fail http://127.0.0.1:8080/v1/version
-curl --fail http://127.0.0.1:8080/v1/control/update/status
+curl --fail -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/v1/version
+curl --fail -H "Authorization: Bearer $TOKEN" \
+  http://127.0.0.1:8080/v1/control/update/status
 ```
 
-reports the expected server version and `state: "ready"`. Upload only a
+These report the expected server version and `state: "ready"`. The upload
+itself is authorized by the update token alone. Upload only a
 package whose SHA-256 was independently recorded:
 
 ```sh
-sha256sum blit_0.1.234-1_amd64.deb
+sha256sum blit_X.Y.Z-1_amd64.deb
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header 'X-Blit-SHA256: RECORDED_SHA256' \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_0.1.234-1_amd64.deb \
+  --data-binary @blit_X.Y.Z-1_amd64.deb \
   http://127.0.0.1:8080/v1/control/update
 ```
 
@@ -97,7 +100,8 @@ tools/tests/screenshot_nonblocking_gate.sh http://DESKTOP_IP:8080 display-1
 ```
 
 The gate requires the version endpoint to respond within one second while a
-framebuffer-sized screenshot is still being downloaded.
+framebuffer-sized screenshot is still being downloaded. It sends no bearer
+token, so it runs only against a server without `BLIT_AUTH_TOKEN`.
 
 Poll `/v1/control/update/status` until the supervisor reports the new
 version; an interrupted upload or `403` response is not an installation.
@@ -109,7 +113,7 @@ the API bearer token, and never retries a rejected credential:
 ```sh
 BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
   BLIT_AUTH_TOKEN_FILE=/secure/path/live-api.token \
-  tools/deploy/update-live.sh 192.168.10.54 blit_0.1.234-1_amd64.deb
+  tools/deploy/update-live.sh HOST blit_X.Y.Z-1_amd64.deb
 ```
 
 `BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`
@@ -118,28 +122,8 @@ is not a built-in token; only the value configured on the running host in
 credential is wrong and the package was not installed. The helper also
 requires the package name and SHA-256 to match the checked-in
 `releases/<version>.yaml` manifest, then checks package metadata, update
-readiness, and the final running version.
-
-### Bootstrap for legacy staging failures
-
-A host that logs `sha256sum: /tmp/blit-update-...: No such file or directory`
-is running a pre-shared-staging updater. Its gateway and root helper have
-different private `/tmp` namespaces, so the network updater cannot install the
-package that would repair the staging path. This is a bootstrap boundary, not
-an update-token failure. Install the package once from the host console (or
-another already-authorized root channel), then restart the service:
-
-```sh
-sudo dpkg --install blit_0.1.389-1_amd64.deb
-sudo systemctl daemon-reload
-sudo systemctl restart blit.service
-```
-
-Verify `/v1/version` before returning to `tools/deploy/update-live.sh`. Do not
-retry the old network upload repeatedly; it cannot cross the private-`/tmp`
-boundary. The new package stages uploads in `/var/lib/blit/updates`, which is
-shared with the root helper and remains protected by the configured update
-token.
+readiness, and the final running version. Uploads are staged in
+`/var/lib/blit/updates`, which the gateway shares with the root helper.
 
 The idle-timeout gate holds a valid upload open without sending its body and
 verifies that the gateway transitions to `update upload idle timeout` instead
@@ -150,7 +134,7 @@ BLIT_GATE_BINARY=build/blit/blit-server \
   tools/tests/update_idle_timeout_gate.sh
 ```
 
-## Current acceptance evidence
+## Acceptance gates
 
 ### Physical multi-display gate
 
@@ -168,82 +152,36 @@ session on each auxiliary display, then checks runtime health, pointer
 diagnostics, and resource counts. It removes the sessions and restores the
 original topology afterward. `BLIT_HIBR_COMMAND` and `BLIT_HIBR_SESSION` can
 override the installed Hibr paths. Exit status `77` means the host does not
-currently expose enough physical displays and is not a pass.
+currently expose enough physical displays and is not a pass. Like the
+screenshot gate it sends no bearer token, so a host with `BLIT_AUTH_TOKEN`
+set (every package install) answers it with `401`.
 
-The TCC-built server has been exercised locally on the DRM mock and in QEMU
-with direct DRM/KMS:
+### Font and input fixtures
 
-- OpenAPI YAML parses as OpenAPI 3.1 with 25 paths and 45 schemas.
-- The WebSocket upgrade on `/v1/stream` returns `101 Switching Protocols`.
-- The TCC WebSocket probe also delivers a deliberately fragmented, masked
-  subscription message and receives `subscription_received`, proving TCP and
-  WebSocket frame boundaries do not have to align.
-- A live `2x1` topology mutation produces two server-owned panes.
-- A PTY session, revisioned cell update, and coherent frame commit all return
-  their schema-defined success responses.
-- Terminal-session `arguments` and bounded string `environment` overrides are
-  passed through the canonical PTY launcher and verified in the resulting
-  surface output.
-- QEMU direct-KMS mode reports a ready backend, KMS display mode, graphics
-  capabilities, evdev keyboard/pointer inventory, and a running PTY session.
-- The terminal conformance runner passes printable text, cursor addressing,
-  styles, erase, scrolling, scroll regions, alternate-screen restoration,
-  saved cursors, UTF-8, truecolor SGR, and fragmented CSI sequences over the
-  public API.
-- The runtime PSF manifest gate loads the generator's required-glyph set,
-  verifies all required Hibr glyphs are mapped, non-blank, and not fallback
-  `.notdef` output, and checks the fixed 8×16 geometry. Geometric block
-  elements use exact cell-row coverage; they are not accepted merely because a
-  fallback font returned a cropped
-  bitmap:
+The font suite's `tools/tests/hibr_font_manifest_gate.py` loads the
+generator's required-glyph set and checks that every required Hibr glyph is
+mapped, non-blank and not `.notdef` fallback output, in the fixed 8×16
+geometry; geometric block elements must cover exact cell rows, not a cropped
+fallback bitmap. `tools/tests/font_fallback_gate.c` checks that an unmapped
+scalar outside the PSF range selects the visible replacement glyph while a
+mapped one is unchanged; no suite runs it, so build it with TCC by hand.
 
-  ```sh
-  tools/tests/hibr_font_manifest_gate.py
-  ```
-- `tools/tests/font_fallback_gate.c` is compiled with TCC and verifies that an
-  unmapped scalar outside the PSF range selects the visible replacement glyph,
-  while an explicitly mapped scalar remains unchanged.
-- Two consecutive terminal-conformance runs pass against one server, proving
-  explicit session deletion releases bounded session capacity.
-- The reproducible two-display VKMS/QEMU fixture passes the logical pane matrix
-  (`1x1`, `2x1`, `1x2`, and `2x2`, with expected pane counts of 2, 4, 4, and
-  8), restores `1x1`, then starts the real Hibr primary and `desktop --join`
-  sessions on distinct displays; both reach `running` and their surface
-  revisions advance.
-- The same fixture configures and reads back explicit `evdev-keyboard` and
-  `evdev-pointer` routes targeting different live Hibr sessions; route IDs,
-  device IDs, targets, and enabled state match the OpenAPI contract.
-- The fixture creates explicit keyboard and pointer routes to dedicated Hibr
-  input-probe sessions and verifies the route records. End-to-end QEMU event
-  injection is verified separately by the Blit-only input gate: a TCC-built
-  PTY byte sink receives keyboard bytes on the first routed surface and SGR
-  mouse bytes on the second routed surface. That gate requires the QEMU kernel
-  input fragment in `tools/probes/qemu-kernel.input.config` to be merged with
-  `CONFIG_INPUT_EVDEV=y`, `CONFIG_MOUSE_PS2=y`, and `CONFIG_INPUT_UINPUT=y`.
-- The ordinary-console Hibr run verifies both terminal surfaces independently:
-  the primary and joined surface revisions advance, and the joined surface is
-  not a mirror of the primary Blit HTTP surface; Hibr hold fans the terminal
-  stream to each Blit PTY client. With current Hibr binaries/modules and the
-  fixture's BusyBox `mkdir` applet, Hibr creates its control socket and the
-  probe validates `displays`, `move`, `resize`, and `focus`, including moving a
-  window to the joined display.
+The QEMU input gate needs the kernel fragment in
+`tools/probes/qemu-kernel.input.config` (`CONFIG_INPUT_EVDEV=y`,
+`CONFIG_MOUSE_PS2=y`, `CONFIG_INPUT_UINPUT=y`) merged into the fixture
+kernel.
 
-The initial gateway is a TCC-built TCP service. It exposes the discovery
-routes defined by the OpenAPI contract and a first WebSocket upgrade path.
+### Network bounds
 
 HTTP reads are event-loop bounded: the gateway retains incomplete requests per
 connection, reads at most the bytes available for that readiness event, and
 expires a request that remains incomplete for five seconds. This prevents a
 fragmented or slow TCP client from stalling KMS presentation, PTY draining,
-input routing, or WebSocket servicing. The regression gate is:
-
-```sh
-BLIT_GATE_PORT=19202 BLIT_GATE_TOKEN=blit-network-gate \
-  ruby tools/tests/http_fragmentation_gate.rb 19202
-```
-
-It holds one request fragmented for one second while requiring an independent
-authenticated diagnostics request to complete in under 800 ms.
+input routing, or WebSocket servicing. `http_fragmentation_gate.rb` holds one
+request fragmented for one second while requiring an independent
+authenticated diagnostics request to complete in under 800 ms. It is a
+sub-gate: `tools/tests/network_auth_gate.sh` (schema suite) starts the
+server and runs it, so do not run it on its own.
 
 `/v1/diagnostics` reports `presentation_sync` as `drm-page-flip`, or
 `drm-page-flip-async` when the explicit asynchronous page-flip test policy is
@@ -252,9 +190,12 @@ enabled.
 Writes use the same bounded policy: HTTP and WebSocket sends are nonblocking.
 If a receiver cannot accept the next bounded write, the HTTP response is
 closed or the WebSocket stream is removed. Blit does not sleep in the gateway
-loop waiting for a remote reader. The network gate also opens a small receive
-buffer, requests a large surface snapshot without reading it, and verifies
-that an independent diagnostics request completes in under 800 ms.
+loop waiting for a remote reader. `http_backpressure_gate.rb`, the other
+sub-gate of `network_auth_gate.sh`, opens a small receive buffer, requests a
+large surface snapshot without reading it, and verifies that an independent
+diagnostics request completes in under 800 ms.
+
+### QEMU Hibr fixture
 
 The Hibr VKMS fixture must stage the exact Hibr executable, modules, and
 desktop tree being tested. Refresh an existing initramfs tree with:
@@ -278,35 +219,33 @@ sources the unchanged stock `session.hibr`. The `console-blit` provider is
 therefore the active display implementation for the stock desktop, while the
 Hibr checkout remains untouched.
 
-For the isolated input gate, use the staging helper, then boot the fixture with
-`blit.input_only=1` on the kernel command line:
+The fixture's behaviour is selected on the QEMU kernel command line, after
+staging with the helper above:
+
+- `blit.input_only=1` runs the isolated input gate. It checks PTY delivery
+  while the network input stream also carries key releases, repeats, pointer
+  buttons and wheel events. It enables application keypad mode and requires
+  KP1 to reach the PTY as the VT/SS3 sequence `ESC O q`. The wait before
+  checking defaults to 30 seconds; `blit.input_wait=8` bounds it for
+  automation.
+- `blit.input_fairness=1` instead floods one synthetic evdev mouse for five
+  seconds and requires a nonzero `performance.evdev_service_budget_yields`
+  while the PTY/render loop stays serviced.
+- `blit.hibr_panes=1` starts one primary and three `desktop --join` clients
+  across a Blit-owned `2x2` pane layout and requires four attached surfaces.
+- `blit.hibr_restart=1`, with `blit.hibr_panes=1`, kills Hibr's registered
+  primary owner after startup, requires Hibr's supervisor to restore the
+  primary session, then kills a join client and attaches a fresh join on the
+  next pane. It requires `HIBR_PRIMARY_RESTART_PASS`,
+  `HIBR_JOIN_RECONNECT_PASS` and `HIBR_PANE_MATRIX_PASS`.
+- `blit.hibr_stock=1` uses the stock-session entrypoint rather than the
+  dedicated window-control workload.
+
+The host wrapper boots a packed initramfs, asserts every marker, and rejects
+a clean QEMU poweroff when any is missing:
 
 ```sh
-tools/probes/stage_hibr_qemu.sh /tmp/hibr-initroot-current /path/to/hibr
-# Add `blit.input_only=1` to the QEMU kernel command line. The gate checks
-# PTY delivery while the network input stream also carries key releases,
-# repeats, pointer buttons, and wheel events.
-# To exercise the physical-input fairness boundary specifically, use
-# `blit.input_fairness=1` instead. The same fixture floods one synthetic evdev
-# mouse for five seconds and requires a nonzero
-# `performance.evdev_service_budget_yields` marker while the PTY/render loop
-# remains serviced.
-# For a bounded run in automation, add `blit.input_wait=8`; the default wait
-# remains 30 seconds. The fixture also enables application keypad mode and
-# verifies that KP1 reaches the PTY as the VT/SS3 sequence `ESC O q`.
-# For the full held-desktop pane matrix, add `blit.hibr_panes=1`; this starts
-# one primary and three `desktop --join` clients across a Blit-owned `2x2`
-# pane layout and requires four attached surfaces.
-# Add `blit.hibr_restart=1` with `blit.hibr_panes=1` to kill the Hibr
-# registered primary owner after startup, require Hibr's supervisor to restore
-# the primary session, then kill an auxiliary join client and attach a fresh
-# join on the next pane. The acceptance markers are
-# `HIBR_PRIMARY_RESTART_PASS`, `HIBR_JOIN_RECONNECT_PASS`, and
-# `HIBR_PANE_MATRIX_PASS`. The repository-owned host wrapper asserts all
-# markers and rejects a clean QEMU poweroff when any marker is missing:
-tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-0.1.401-input.initramfs.gz
-# Add `blit.hibr_stock=1` to exercise that stock-session entrypoint rather
-# than the dedicated window-control workload.
+tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-input.initramfs.gz
 ```
 
 ## Build
@@ -417,15 +356,16 @@ physical DRM device:
 env $GATE_DISPLAY_ENV ./build/blit/blit-server 8080
 ```
 
-Add `BLIT_KMS_COMPOSITOR=gles BLIT_GLES_PLATFORM=surfaceless` (or set
-`BLIT_GATE_BACKEND=gles` before `gate_display_setup`) to compose with GLES.
+`gate_display_setup` selects the CPU compositor; set `BLIT_GATE_BACKEND=gles`
+before it to compose with GLES on the surfaceless platform.
 `GET /v1/diagnostics/screenshots/display-1` returns the presented frame.
 
-The installed listener defaults to all IPv4 interfaces (`0.0.0.0`) so a client
-on the management network can reach it. Authentication is disabled when
-`BLIT_AUTH_TOKEN` is unset; set a token and apply a firewall policy before
-exposing the API. Send `Authorization: Bearer <token>` on HTTP and WebSocket
-upgrades:
+Without `BLIT_AUTH_TOKEN`, Blit listens on 127.0.0.1 only and requires no
+authentication. It refuses an explicit network address such as `0.0.0.0`
+with no token, unless `BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1` asks for it by
+name. With a token it listens on all IPv4 interfaces by default; send
+`Authorization: Bearer <token>` on HTTP requests and WebSocket upgrades, and
+apply a firewall policy before exposing the API:
 
 ```sh
 BLIT_AUTH_TOKEN='replace-me' \
@@ -539,72 +479,68 @@ The result is exposed by `GET /v1/diagnostics/runtime` under `performance` as
 windowed values and are not contaminated by older lifetime maxima.
 `frame_rate_window_sequence` increments only when a new measurement window
 completes, allowing a remote gate to distinguish its workload from stale
-measurements left by an earlier client.
-`frame_rate_hz` is the rate of damage-driven composition
-and presentation passes; it is not the panel scanout rate. Use
-`pixel_frames_pending` to detect an API pixel producer that is outrunning
-presentation; the scheduler drains that pending work at the selected
-output refresh instead of silently clearing the only boolean render flag.
-Use `snapshot.render.outputs[].refresh_hz` and `effective_interval_ms` for the
-selected display cadence and scheduler target. The same object includes
-`loop_iterations`,
-`terminal_reads`, `present_calls`, `last_loop_gap_ms`, and
-`max_loop_gap_ms`, `last_select_ms`, and `max_select_ms`, which distinguish
-kernel-wait stalls from other event-loop stalls and presentation stalls. The
-pending terminal, pointer, overlay, and pixel work is coalesced to each
-output's deadline; a producer can update state faster than the display without
-forcing a present for every event. During a motion test, compare the interval
-between `render_path` trace timestamps with
+measurements left by an earlier client. `frame_rate_hz` is the rate of
+damage-driven composition and presentation passes; it is not the panel scanout
+rate. Use `pixel_frames_pending` to detect an API pixel producer that is
+outrunning presentation; the scheduler drains that pending work at the
+selected output refresh instead of silently clearing the only boolean render
+flag. Use `snapshot.render.outputs[].refresh_hz` and `effective_interval_ms`
+for the selected display cadence and scheduler target. The same object
+includes `loop_iterations`, `terminal_reads`, `present_calls`,
+`last_loop_gap_ms`, and `max_loop_gap_ms`, `last_select_ms`, and
+`max_select_ms`, which distinguish kernel-wait stalls from other event-loop
+stalls and presentation stalls. The pending terminal, pointer, overlay, and
+pixel work is coalesced to each output's deadline; a producer can update state
+faster than the display without forcing a present for every event. During a
+motion test, compare the interval between `render_path` trace timestamps with
 `snapshot.render.outputs[].target_interval_ms`. A trace that follows the
 producer faster than that interval is a scheduler regression, not evidence of
 a faster display. Pointer damage is retained independently for the old and new
-output when a pointer crosses displays.
-The completed bounded loop-gap window is exposed as `loop_gap_window_ms`,
-`loop_gap_window_sequence`, and `loop_gap_window_max_ms`. The sequence advances
-once per completed 500 ms window; use it to take two runtime samples and avoid
-mistaking a partial or stale sample for the interval being investigated.
-direct-KMS duration is reported as `last_kms_present_ms` and
-`max_kms_present_ms`; these measure the complete KMS present call, including
-page-flip submission and driver event servicing. Interpret them alongside
+output when a pointer crosses displays. The completed bounded loop-gap window
+is exposed as `loop_gap_window_ms`, `loop_gap_window_sequence`, and
+`loop_gap_window_max_ms`. The sequence advances once per completed 500 ms
+window; use it to take two runtime samples and avoid mistaking a partial or
+stale sample for the interval being investigated. direct-KMS duration is
+reported as `last_kms_present_ms` and `max_kms_present_ms`; these measure the
+complete KMS present call, including page-flip submission and driver event
+servicing. Interpret them alongside
 `snapshot.render.outputs[].missed_deadlines` to separate renderer work from a
-slow KMS or virtual-display backend. The `last_render_ms` and
-`max_render_ms` values retain their complete render-path meaning. Evdev scan
-duration is reported as `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured from
-presented frames, not inferred from the display mode or configured interval.
-Input dispatch is independently observable through `input_events`,
+slow KMS or virtual-display backend. The `last_render_ms` and `max_render_ms`
+values retain their complete render-path meaning. Evdev scan duration is
+reported as `last_evdev_scan_ms` and `max_evdev_scan_ms`. The rate is measured
+from presented frames, not inferred from the display mode or configured
+interval. Input dispatch is independently observable through `input_events`,
 `last_input_dispatch_ms`, and `max_input_dispatch_ms`. These counters cover
 keyboard, pointer, and gamepad events after evdev receipt and through Blit's
 routing path, so input latency can be separated from rendering and scanout
-latency.
-The `evdev_service_budget_yields` counter records how often a physical evdev
-device reached the bounded per-turn input budget and returned to the main loop.
-A rising value during motion is expected under a busy device; a zero value
-means only that the captured interval did not fill the budget. It is the
-counter used by the fairness regression test to prove that evdev service did
-not drain an unbounded stream in one loop turn.
-For physical mouse diagnosis, compare the lifetime `evdev_mouse_events`,
-`evdev_mouse_motion_events`, `evdev_mouse_syncs`,
-`evdev_mouse_button_events`, and `evdev_mouse_wheel_events` counters between
-the capture start and end. `evdev_mouse_events` increasing while the filtered
-pointer trace remains empty means records reached Blit but did not produce a
-changed pointer position; all of them remaining unchanged means the kernel
-device produced no records for Blit during the window. The endpoint also
-reports `last_evdev_mouse_path` and `last_evdev_mouse_event_age_ms` so a stale
-or changing device can be identified without shell access to the desktop.
-During a fast-motion capture, pair `evdev_service_budget_yields` with
-`last_loop_gap_ms`, the PTY `surface_update` trace, and the `render_path`
-trace. A busy device must produce yields while the loop continues to service
-producers and presentation; an unbounded drain is a gateway defect.
-The path is historical: Linux can renumber `/dev/input/eventN` during a KVM
-or USB re-enumeration. Pair it with `last_evdev_mouse_device_id` and
-`last_evdev_mouse_device_present`; an empty ID or `false` means the last event
-came from a device generation that is no longer in the current input table.
-The keyboard has the corresponding `last_evdev_keyboard_device_id` and
-`last_evdev_keyboard_device_present` fields. This prevents a historical node
-path from being mistaken for the currently opened device.
-Each scheduler output also reports `last_present_ms`, `max_present_ms`, and
-`present_calls`, which identify per-output KMS presentation cost rather
-than hiding it in one aggregate server-wide maximum.
+latency. The `evdev_service_budget_yields` counter records how often a
+physical evdev device reached the bounded per-turn input budget and returned
+to the main loop. A rising value during motion is expected under a busy
+device; a zero value means only that the captured interval did not fill the
+budget. It is the counter used by the fairness regression test to prove that
+evdev service did not drain an unbounded stream in one loop turn. For physical
+mouse diagnosis, compare the lifetime `evdev_mouse_events`,
+`evdev_mouse_motion_events`, `evdev_mouse_syncs`, `evdev_mouse_button_events`,
+and `evdev_mouse_wheel_events` counters between the capture start and end.
+`evdev_mouse_events` increasing while the filtered pointer trace remains empty
+means records reached Blit but did not produce a changed pointer position; all
+of them remaining unchanged means the kernel device produced no records for
+Blit during the window. The endpoint also reports `last_evdev_mouse_path` and
+`last_evdev_mouse_event_age_ms` so a stale or changing device can be
+identified without shell access to the desktop. During a fast-motion capture,
+pair `evdev_service_budget_yields` with `last_loop_gap_ms`, the PTY
+`surface_update` trace, and the `render_path` trace. A busy device must
+produce yields while the loop continues to service producers and presentation;
+an unbounded drain is a gateway defect. The path is historical: Linux can
+renumber `/dev/input/eventN` during a KVM or USB re-enumeration. Pair it with
+`last_evdev_mouse_device_id` and `last_evdev_mouse_device_present`; an empty
+ID or `false` means the last event came from a device generation that is no
+longer in the current input table. The keyboard has the corresponding
+`last_evdev_keyboard_device_id` and `last_evdev_keyboard_device_present`
+fields. This prevents a historical node path from being mistaken for the
+currently opened device. Each scheduler output also reports `last_present_ms`,
+`max_present_ms`, and `present_calls`, which identify per-output KMS
+presentation cost rather than hiding it in one aggregate server-wide maximum.
 
 The shutdown gate verifies that `POST /v1/control/shutdown` acknowledges the
 request and the Blit process exits cleanly:
@@ -617,11 +553,11 @@ BLIT_GATE_BINARY=build/blit/blit-server \
 It requires `401` without a token and `200` with the configured bearer token.
 
 TLS termination, token rotation, and per-client authorization remain
-deployment responsibilities; do not expose an unauthenticated listener.
+deployment responsibilities.
 
 Native KMS is the only presentation path (ADR 0184): the gateway owns the DRM
 connectors and page-flips its scanout buffers on a DRM-capable VT, composing
-with GLES and falling back to the CPU compositor.
+with GLES by default or with the CPU compositor.
 
 ## Exercise discovery
 
@@ -631,7 +567,7 @@ curl --fail http://127.0.0.1:8080/v1/displays
 curl --fail http://127.0.0.1:8080/v1/topology
 curl --fail http://127.0.0.1:8080/v1/graphics
 curl --fail http://127.0.0.1:8080/v1/audio
-  curl --fail http://127.0.0.1:8080/v1/input/devices
+curl --fail http://127.0.0.1:8080/v1/input/devices
 curl --fail http://127.0.0.1:8080/v1/diagnostics
 ```
 
@@ -641,8 +577,8 @@ It does not infer audio capability from the presence of the directory alone.
 
 ## Exercise a PTY-backed session
 
-The first terminal slice starts the requested command under a real PTY. Keep
-this test local unless the deployment has configured its command policy and
+A terminal session runs the requested command under a real PTY. Keep this
+test local unless the deployment has configured its command policy and
 `BLIT_AUTH_TOKEN`; bearer authentication is enforced whenever that token is
 set.
 
@@ -682,9 +618,10 @@ curl --fail --request POST \
 
 An omitted `display_id` targets the first output for compatibility. Unknown
 display IDs are rejected with `display_not_found`; arguments and environment
-are passed only after the executable path passes the configured policy. The nested `surface`
-object and its `width`/`height` members are required by the OpenAPI contract;
-omitting them returns the typed `session_create_failed` problem.
+are passed only after the executable path passes the configured policy. The
+nested `surface` object and its `width`/`height` members are required by the
+OpenAPI contract; omitting them returns the typed `session_create_failed`
+problem.
 
 ## Discover and attach to Blit panes
 
@@ -757,8 +694,7 @@ curl --fail --request PATCH \
   http://127.0.0.1:8080/v1/surfaces/surface-1/scrollback
 ```
 
-Output from an alternate screen is never added to this history. Selection and
-copy remain separate terminal-view work.
+Output from an alternate screen is never added to this history.
 
 ## Apply cells and present a frame
 
@@ -780,24 +716,17 @@ curl --fail --request POST \
 
 Stale cell revisions are rejected with `409 Conflict`. Cell mutations update
 authoritative state; frame receipts record acceptance and trigger the KMS
-output from an immutable surface/revision plan. The first frame for an
-output is a full draw; subsequent single-surface frames use the captured dirty
-rows, while multi-surface frames conservatively redraw the output. Cell styles accept six-digit foreground
-and background colors plus bold, dim, underline, and inverse flags; invalid
-colors are rejected. Text is validated as UTF-8 and decoded into logical
-cells; malformed UTF-8 and zero-width sequences without a preceding base
-glyph are rejected. Wide glyphs occupy two physical columns, and combining
-marks, joiners, and variation selectors remain attached to their base cell.
-A cell update may also carry a
-bounded `{x,y,visible}` cursor object; session GET responses report the current
-cursor, and out-of-bounds cursor positions are rejected. The API accepts only
-valid logical cell sequences. PTY-driven cursor movement now
-updates the canonical surface for printable UTF-8 output, CR/LF,
-backspace, tab, and the core ANSI cursor/erase commands `A`, `B`, `C`, `D`,
-`H`, `f`, `J`, and `K`. Output reaching the bottom row scrolls the surface by
-one row and marks the full surface dirty. Selection and blink timing remain
-later layers. Unsupported PTY widths become a visible replacement cell so
-cursor positioning remains deterministic.
+output from an immutable surface/revision plan. Cell styles accept six-digit
+foreground and background colors plus bold, dim, underline, and inverse flags;
+invalid colors are rejected. Text is validated as UTF-8 and decoded into
+logical cells; malformed UTF-8 and zero-width sequences without a preceding
+base glyph are rejected. Wide glyphs occupy two physical columns, and
+combining marks, joiners, and variation selectors remain attached to their
+base cell. A cell update may also carry a bounded `{x,y,visible}` cursor
+object; session GET responses report the current cursor, and out-of-bounds
+cursor positions are rejected. The API accepts only valid logical cell
+sequences. What the PTY-driven terminal engine interprets is in the [terminal
+reference](terminal.md).
 
 Session responses expose `surface_revision` separately from the session
 configuration `revision`. Clients should use that value as `base_revision` for
@@ -812,27 +741,25 @@ identical request returns its original response without spawning another PTY
 or applying state again; reusing a key with a different payload returns
 `idempotency_conflict`.
 
-Unsupported inventories are returned as empty arrays until their native
-backends are implemented. Display discovery is sourced from DRM/KMS.
+Display discovery is sourced from DRM/KMS.
 
 Evdev mouse clicks, drags, and wheel events are routed to the Blit pane under
 the pointer and encoded as SGR mouse reports for the owning PTY. A primary
 button press focuses that pane; keyboard input then follows the focused live
 session until the API changes focus. Hibr's console mouse mode controls
-whether the joined desktop consumes those reports. Pointer capture, touch,
-and seat-level policy remain follow-up work. KMS outputs and evdev devices are
-normalized to the same virtual-desktop coordinate space. This prevents a pointer on an
-auxiliary monitor from being hit-tested or clicked against the primary
-monitor. The 0.1 API supports explicit
-`evdev-keyboard` and `evdev-pointer` routes through `/v1/input/routes/{id}`;
-an explicit route takes precedence over focus or pointer hit-testing for its
-device source. Enabling a route disables any other enabled route for that
-device, preventing duplicate delivery. The Blit-only QEMU gate verifies both
-route records and end-to-end virtual-evdev delivery. SGR button presses use
-button codes 0–2 and releases use the same code with the `m` terminator;
-legacy VT reports use the protocol's button-3 release code and 32-byte offset.
-Evdev Shift, Alt, and Ctrl state contributes the standard SGR/VT modifier bits
-to button, wheel, and drag reports.
+whether the joined desktop consumes those reports. KMS outputs and evdev
+devices are normalized to the same virtual-desktop coordinate space. This
+prevents a pointer on an auxiliary monitor from being hit-tested or clicked
+against the primary monitor. The API supports explicit `evdev-keyboard` and
+`evdev-pointer` routes through `/v1/input/routes/{id}`; an explicit route
+takes precedence over focus or pointer hit-testing for its device source.
+Enabling a route disables any other enabled route for that device, preventing
+duplicate delivery. The Blit-only QEMU gate verifies both route records and
+end-to-end virtual-evdev delivery. SGR button presses use button codes 0–2 and
+releases use the same code with the `m` terminator; legacy VT reports use the
+protocol's button-3 release code and 32-byte offset. Evdev Shift, Alt, and
+Ctrl state contributes the standard SGR/VT modifier bits to button, wheel, and
+drag reports.
 
 Network clients can drive a live PTY without synthetic hardware through
 `POST /v1/terminal-sessions/{session_id}/input` with `{ "data": "...", "mode":
@@ -871,8 +798,8 @@ input assertion by relying on old visible cells.
 
 ## Exercise the stream upgrade
 
-The current slice accepts a WebSocket opening handshake, keeps the connection
-open, and sends an initial diagnostic text frame. HTTP surface mutations are
+The stream accepts a WebSocket opening handshake, keeps the connection open,
+and sends an initial diagnostic text frame. HTTP surface mutations are
 then broadcast to connected streams:
 
 ```sh
@@ -887,16 +814,16 @@ curl --include --no-buffer \
 Clients may send a text WebSocket message to receive a subscription diagnostic
 acknowledgement, for example a `frames`-only subscription. Event fan-out is
 filtered by subscription, and client text frames are unmasked. Ping frames
-receive pong responses; surface deltas and frame receipts are the currently
-implemented event types, along with `terminal_output` events from PTY-backed
-sessions. A `surface_delta` includes the current surface revision, cursor, and
-bounded damage rectangle. Input messages identify `session_id` and carry
-terminal data inside the event object. Broadcast surface, terminal-output, and
-frame events carry a monotonic server `sequence`; clients can detect missed
-events when a reconnect produces a gap. Reconnect with
-`/v1/stream?since=<last-sequence>` to replay the bounded retained history. If
-the cursor is older than retention, the stream emits `replay_gap`; clients
-must resynchronize from the HTTP resources.
+receive pong responses. The event types are `surface_delta`, `frame`,
+`terminal_output`, `input`, `device_changed`, `diagnostic`, and the
+`pixel_frame_*` events of the pixel canvas. A `surface_delta` includes the
+current surface revision, cursor, and bounded damage rectangle. Input messages
+identify `session_id` and carry terminal data inside the event object.
+Broadcast surface, terminal-output, and frame events carry a monotonic server
+`sequence`; clients can detect missed events when a reconnect produces a gap.
+Reconnect with `/v1/stream?since=<last-sequence>` to replay the bounded
+retained history. If the cursor is older than retention, the stream emits
+`replay_gap`; clients must resynchronize from the HTTP resources.
 
 The canonical resynchronization endpoint is:
 

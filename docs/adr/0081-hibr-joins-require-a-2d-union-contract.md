@@ -62,7 +62,7 @@ than “working” or “accepted”.
 
 ## Dependency update, 2026-10-17
 
-Hibr #238/#240 are closed; the live Hibr 0.99.232 ABI16 supports the native
+Hibr #238/#240 are closed; the live Hibr 0.99.232 ABI 16 supports the native
 2-D hold contract. Thus the missing-Hibr-capability block above is historical,
 not a current explanation for rendering issues. [ADR 0122](0122-native-hibr-join-orchestration.md)
 records a verified live vertical union of the existing authenticated desktop

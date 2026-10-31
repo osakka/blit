@@ -24,7 +24,7 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
   lock for games. See the [terminal reference](docs/terminal.md).
 - **Images:** the Kitty graphics protocol (including in-place edits) and
   Sixel. Hibr's wallpaper and video play through it.
-- **Fonts:** Hack, JetBrains Mono, Fira Code, IBM Plex Mono, IBM 3270,
+- **Fonts:** Hack, JetBrains Mono NL, Fira Code, IBM Plex Mono, IBM 3270,
   Terminus and Spleen, any size from 8 to 64 pixels, changed live. Drop
   in your own monospaced font. Under every font sits one glyph stack: Nerd
   Fonts, colour emoji, Arabic, Unifont, and Blit's own colour icons.

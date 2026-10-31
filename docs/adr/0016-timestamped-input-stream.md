@@ -1,8 +1,6 @@
 # ADR 0016: Timestamp every streamed input event
 
-## Status
-
-Accepted.
+- Status: accepted
 
 ## Context
 

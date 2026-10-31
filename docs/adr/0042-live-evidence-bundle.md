@@ -1,6 +1,6 @@
 # ADR 0042: Correlated live evidence bundles
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

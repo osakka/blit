@@ -1,6 +1,6 @@
 # ADR 0052: Expose surface content counters in compact diagnostics
 
-Status: accepted
+- Status: accepted
 
 ## Context
 

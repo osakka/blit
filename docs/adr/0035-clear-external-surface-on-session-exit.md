@@ -1,6 +1,6 @@
 # ADR 0035: Clear external surfaces when their PTY exits
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

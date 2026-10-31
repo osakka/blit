@@ -1,8 +1,6 @@
 # ADR 0004: Canonical terminal state and direct KMS presentation
 
-## Status
-
-Accepted
+- Status: accepted
 
 ## Context
 

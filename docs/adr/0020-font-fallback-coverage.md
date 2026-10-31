@@ -1,8 +1,6 @@
 # ADR 0020: Reject unresolved fallback glyphs
 
-## Status
-
-Accepted.
+- Status: accepted
 
 ## Context
 

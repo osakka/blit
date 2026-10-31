@@ -1,6 +1,6 @@
 # ADR 0044: Separate high-refresh scheduling from scanout evidence
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

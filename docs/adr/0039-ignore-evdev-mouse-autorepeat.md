@@ -1,6 +1,6 @@
 # ADR 0039: Ignore evdev mouse-button autorepeat
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

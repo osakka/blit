@@ -1,6 +1,6 @@
 # ADR 0049: Retire KMS work only after output submission
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

@@ -1,11 +1,11 @@
 # ADR 0070: the scene cache is used only where render targets are known to persist
 
-> Superseded for SDL composition by [ADR 0099](0099-ping-pong-scene-cache-for-sdl-damage.md).
-
-- Status: accepted
+- Status: superseded by ADR 0099
 - Date: 2026-10-13
 - Scope: the SDL presentation path — incremental damage, the cached scene
   texture, and what the gate suite can prove about either
+
+> Superseded for SDL composition by [ADR 0099](0099-ping-pong-scene-cache-for-sdl-damage.md).
 
 ## Context
 

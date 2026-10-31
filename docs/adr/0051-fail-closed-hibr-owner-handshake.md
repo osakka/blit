@@ -1,6 +1,6 @@
 # ADR 0051: Fail closed when a Hibr desktop owner is not registered
 
-Status: Accepted
+- Status: accepted
 
 ## Context
 

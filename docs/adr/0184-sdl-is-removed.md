@@ -1,6 +1,6 @@
 # ADR 0184: SDL is removed; native KMS is the only presentation path
 
-- Status: accepted (the owner's decision, 2026-10-25)
+- Status: accepted; in use since 0.2.22
 - Date: 2026-10-25
 - Scope: presentation, startup, settings, diagnostics, gates, packaging
 - Supersedes: ADR 0129, 0137, 0138, 0152, 0153, 0155

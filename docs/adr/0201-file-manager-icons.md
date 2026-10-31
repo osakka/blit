@@ -1,6 +1,6 @@
 # ADR 0201: File-manager icons: one drawing per kind, colourways by a primary colour
 
-- Status: accepted (2026-10-29; the owner approved the preview)
+- Status: accepted; in use since 0.3.4
 - Date: 2026-10-29
 - Scope: `tools/fonts/draw-file-icons.py` (new), `assets/fonts/icons`, the
   icon catalogue and its API limit, the icon gates, the package gate

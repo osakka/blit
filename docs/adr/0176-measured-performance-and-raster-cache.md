@@ -1,8 +1,8 @@
-# ADR0176: measured performance and bounded associative glyph reuse
+# ADR 0176: measured performance and bounded associative glyph reuse
 
-- Status: accepted for 0.2 development; not deployed
+- Status: accepted
 - Date: 2026-10-21
-- Scope: internal Blit122/123, shared raster cache, performance acceptance
+- Scope: internal Blit 122/123, shared raster cache, performance acceptance
 
 ## Context
 

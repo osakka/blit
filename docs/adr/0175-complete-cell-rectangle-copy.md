@@ -1,12 +1,12 @@
-# ADR0175: complete-cell rectangle copy and standard discovery
+# ADR 0175: complete-cell rectangle copy and standard discovery
 
-- Status: accepted; released/deployed589; end-to-end Hibr integration pending
-- Date:2026-10-21
-- Scope: canonical terminal grid, DECCRA and DA1; internal Blit120
+- Status: accepted
+- Date: 2026-10-21
+- Scope: canonical terminal grid, DECCRA and DA1; internal Blit 120
 
 ## Context
 
-Issue120 requests cheap solid window movement. DECCRA already exists, but
+Issue 120 requests cheap solid window movement. DECCRA already exists, but
 only copies codepoint, attributes and foreground/background. It drops marks,
 underline colour and link identity. Per-cell overlap cleanup can erase a
 newly copied wide owner. DA1 does not report rectangular editing. These are
@@ -15,7 +15,7 @@ Blit defects, not a reason to introduce a second copy escape or modify Hibr.
 ## Decision
 
 Keep the standard `CSI Pts;Pls;Pbs;Prs;Pps;Ptd;Pld;Ppd $ v` operation.
-Copy every canonical cell field, including all16 attachment slots and their
+Copy every canonical cell field, including all 16 attachment slots and their
 count, legacy representation, colours, attributes and hyperlink identity.
 Use one bounded row snapshot and copy rows bottom-up when moving downward,
 top-down otherwise. This preserves whole-source snapshot semantics without
@@ -34,7 +34,7 @@ page. Oversized coordinates clamp to its last cell. There is one active page:
 default/zero/one and larger page selectors resolve to that page (DEC's
 last-available-page rule), never the inactive alternate buffer.
 
-Once these tests pass, append standard feature28 (rectangular editing) to
+Once these tests pass, append standard feature 28 (rectangular editing) to
 DA1 while preserving Blit's existing identity and other features. DECRQM is
 a mode query, not a command-support query; no fabricated DECCRA mode or
 private escape is introduced. Hibr must query through its actual transport;
@@ -62,15 +62,15 @@ fixture: full metadata, all overlap directions, clipping/default/page/origin
 cases, wide-boundary damage, byte-fragmented CSI, cursor/pen preservation and
 repeated copies compared to an immutable-source oracle. Verify DA1/DECID
 exact bytes. Exercise final presentation through the shared renderer gates.
-Do not deploy over the tagged588 desktop merely to test local parser changes.
+Do not deploy over the tagged 588 desktop merely to test local parser changes.
 
 The regression fixture reproduces dropped combining counts on the old code.
-Candidate589 passes1048 immutable-grid/metadata/boundary/parser cases,
-including512x160. Terminal suite5pass/0skip/0fail; renderer59pass/1skip/0fail;
-offscreen GLES11pass/0skip/0fail. Valgrind reports0errors/0lost bytes.
+Candidate 589 passes 1048 immutable-grid/metadata/boundary/parser cases,
+including 512x160. Terminal suite 5 pass/0 skip/0 fail; renderer 59 pass/1 skip/0 fail;
+offscreen GLES 11 pass/0 skip/0 fail. Valgrind reports 0 errors/0 lost bytes.
 The remaining renderer skip requires native VT/QEMU kernel fixtures; it is
-not a pass. Hibr integration is tracked separately as internal337.
-The final standard suite passes149/5skip/0fail, including120s terminal soak.
+not a pass. Hibr integration is tracked separately as internal 337.
+The final standard suite passes 149/5 skip/0 fail, including 120s terminal soak.
 
 Primary references:
 

@@ -1,5 +1,7 @@
 # ADR-0008: API-supervised package lifecycle
 
+- Status: accepted; in use since 0.1.232
+
 ## Context
 
 Blit upgrades are initiated over the authenticated API by a root-owned Unix
@@ -8,7 +10,7 @@ install script can terminate the helper before it reports the result.
 
 ## Decision
 
-Current namespace policy is ADR0167: the display service shares `/tmp` so
+Current namespace policy is ADR 0167: the display service shares `/tmp` so
 ordinary user shells can discover Hibr session sockets. The update staging
 decision below remains unchanged and does not depend on tmp isolation.
 

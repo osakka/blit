@@ -1,62 +1,44 @@
 # Blit API guide
 
-## Native console ownership (since 0.1.587)
-
-`GET /v1/diagnostics/processes` (0.2.17) lists up to 16 processes of the
-logged-in owner (Blit's own user before login), busiest first by cumulative
-CPU (`pid`, `ppid`, `comm`, `cpu_ms`, `threads`, `rss_kib`); diff two samples
-to see what is using the CPU now.
-
-`GET /v1/diagnostics/console` reports Blit's native VT ownership, VT number,
-active state, previous VT, actual Linux keyboard mode/read errno, keyboard
-muting, registered recovery
-process and main-loop watchdog timeout (normally10s, bounded120s during the
-privileged package-install exchange). `owner: unmanaged` means Blit is not
-managing a VT.
-The endpoint is read-only and uses the normal API authentication policy.
-
-Native KMS reserves its own unused text/automatic VT, never the active login
-VT, and mutes its kernel keyboard handler
-while presenting, and restores it when releasing the VT or stopping. Physical
-Ctrl+Alt+F1..F12 switches VTs; API-injected chords do not switch the host.
-While away, physical events are discarded, not replayed on return; API input
-and PTY/session work remain available. Acquisition requires DRM master and
-requests a full repaint. Failure leaves diagnostics available or stops the
-server rather than claiming usable presentation.
-On exit it returns to the previous VT if its own is still active. Console
-descriptor/mute loss stops presentation rather than reporting stale ownership.
-This requires privileged Linux VT access; a profile lacking it must remain
-API-only with a startup error, not silently share a console keyboard.
-
-The recovery process handles main-process death and an expired heartbeat.
-It does not cover a kernel/GPU hang or killing the whole recovery group.
-`evdev_exclusive: false` is deliberate: keyboard muting covers all keyboards
-without grabbing one of a combined device's separate evdev clients. It does
-not prevent a separately running gpm from reading pointer events; pointer
-exclusivity remains issue 117 acceptance work. See [ADR0170](adr/0170-native-console-keyboard-ownership.md).
-
-## Presentation configuration ownership (0.1.563)
-
-Saved `/v1/settings` is the canonical configuration. Native KMS is the only
-presentation backend (ADR 0184): `document.server.display_backend` and the
-startup fallback `BLIT_DISPLAY_BACKEND` accept only `kms`. Any other saved
-value is a 400 `invalid_settings_server`; an invalid environment value logs
-`invalid_environment_backend` and, without a saved backend, leaves the API
-available with no presentation, for repair.
-
-Read `effective.presentation_configuration` for the backend source and the
-environment's validity. These fields are derived observations, never a second
-writable configuration. `effective.display_backend_active` is `drm-kms`, or
-`unavailable` when no DRM device could be opened (Blit then serves its API
-with no outputs and says why in `/v1/diagnostics`).
-
-Change intent through the settings API, save it using the storage API, and
-restart presentation. Editing an environment file requires a service restart
-to reload it; an in-process restart inherits the original environment.
-
 This is the human-facing guide to the API. The normative contract is always
 [`openapi/blit-0.1.yaml`](../openapi/blit-0.1.yaml); this guide explains the
 resource model and safe ordering of calls without duplicating every schema.
+
+## Native console ownership
+
+`GET /v1/diagnostics/console` reports Blit's native VT ownership: the VT
+number, whether it is active, the previous VT, the Linux keyboard mode (and
+the errno if reading it failed), keyboard muting, whether a recovery process
+is registered, and the main-loop watchdog timeout (normally 10 s, 120 s
+during the privileged package-install exchange). `owner: unmanaged` means
+Blit is not managing a VT. The endpoint is read-only and uses the normal API
+authentication.
+
+Native KMS reserves its own unused VT, never the active login VT, and mutes
+its kernel keyboard handler while presenting. It restores the handler when it
+releases the VT or stops. Physical Ctrl+Alt+F1..F12 switches VTs;
+API-injected chords do not switch the host. While Blit's VT is not active,
+physical events are discarded, not replayed on return; API input and
+PTY/session work remain available. Acquiring the VT requires DRM master and
+requests a full repaint. A failure leaves diagnostics available or stops the
+server rather than claiming usable presentation. On exit Blit returns to the
+previous VT if its own is still active. Losing the console descriptor or the
+mute stops presentation rather than reporting stale ownership. This requires
+privileged Linux VT access; a profile lacking it stays API-only with a
+startup error, and never silently shares a console keyboard.
+
+The recovery process handles main-process death and an expired heartbeat. It
+does not cover a kernel or GPU hang, or the whole recovery group being
+killed. `evdev_exclusive: false` is deliberate: keyboard muting covers all
+keyboards without grabbing one of a combined device's separate evdev clients.
+It does not stop a separately running gpm from reading pointer events;
+pointer exclusivity is still open (issue 117). See
+[ADR 0170](adr/0170-native-console-keyboard-ownership.md).
+
+`GET /v1/diagnostics/processes` lists up to 16 processes of the logged-in
+owner (Blit's own user before login), busiest first by cumulative CPU
+(`pid`, `ppid`, `comm`, `cpu_ms`, `threads`, `rss_kib`). Diff two samples to
+see what is using the CPU now.
 
 ## Contract-first client rule
 
@@ -101,7 +83,7 @@ desktop process.
 | Terminal bytes and emulation state | Blit terminal session | Write through the session input subresource; observe surface revisions. |
 | Desktop semantics and `desktop --join` | Hibr | Start one primary and attach joins; Blit observes ownership and placement. |
 | Cell surface and pane placement | Blit | Commit revisioned cells, map panes, resize PTYs, and route input. |
-| Physical scanout and refresh scheduling | Blit renderer/backend | Report output modes, cadence, missed deadlines, and failures. |
+| Physical scanout and refresh scheduling | Blit native KMS compositor | Report output modes, cadence, missed deadlines, and failures. |
 | Client event/frame observation | Blit stream | Deliver ordered events and bounded pixel frames; clients resync over HTTP. |
 
 This is an ownership guide, not a second wire contract. The OpenAPI schema
@@ -135,7 +117,7 @@ is enabled, requests carry `Authorization: Bearer TOKEN`.
 | `2xx` | Accepted or completed according to that operation | Persist IDs/revisions; observe asynchronous work. |
 | `409` | Ownership, revision, or lifecycle conflict | Re-read authoritative state; do not blindly retry the same body. |
 | `404` | Unknown route or resource | Verify `/v1/version`, then check the schema and opaque ID. |
-| `429` | Bounded queue/back-pressure limit | Apply bounded backoff and inspect runtime counters. |
+| `503` | A bounded capacity is full (`http_capacity`, `stream_capacity`, `input_route_capacity`) or a dependency is unavailable | Apply bounded backoff and inspect runtime counters. |
 | `4xx/5xx` problem | Typed failure | Branch on `code`, preserve safe context, and record correlation data. |
 
 Never infer presentation from request latency. A session input receipt means
@@ -144,7 +126,7 @@ revision or stream event confirms it.
 
 ## Endpoint and authentication
 
-The default development endpoint is `http://HOST:8080`. All public resources
+The default endpoint is `http://HOST:8080`. All public resources
 are versioned under `/v1`; `/v1/version` is the first request a client should
 make and returns both `server_version` and `api_version`.
 
@@ -167,7 +149,7 @@ Every client begins with `GET /v1/version`. The response identifies both the
 running server and the API contract:
 
 ```json
-{"server_version":"0.1.409","api_version":"0.1"}
+{"server_version":"0.3.20","api_version":"0.1"}
 ```
 
 `server_version` answers “which binary is serving this request?”;
@@ -207,64 +189,89 @@ resource is usable only when its API state and capability fields say it is.
 
 ## Presentation configuration ownership
 
-`GET /v1/settings` is authoritative for saved presentation intent.
-`document.server.display_backend` accepts only `kms` (ADR 0184), as does
-`BLIT_DISPLAY_BACKEND`. `server.renderer`, which chose an SDL renderer, no
-longer exists: a saved value is carried as an unknown key and has no effect.
+Saved `/v1/settings` is the canonical configuration. Native KMS is the only
+presentation backend (ADR 0184): `document.server.display_backend` and the
+startup fallback `BLIT_DISPLAY_BACKEND` accept only `kms`. Any other saved
+value is a 400 `invalid_settings_server`. An invalid environment value logs
+`invalid_environment_backend` and, without a saved backend, leaves the API
+available with no presentation, for repair.
 
-`document.server.kms_compositor` (0.2.9, ADR 0181) chooses how the native
-backend composes a frame: `gles` (the default since 0.3.11) or `cpu`. It is
-read when the native backend opens, so a change applies at the next start
-(`POST /v1/control/restart`); `effective.kms_compositor` is the saved choice
-and `BLIT_KMS_COMPOSITOR` the boot default. Any other value is a 400
-`invalid_settings_server`. In `/v1/diagnostics`, each
-`render.outputs[].compositor` says what an output actually uses: `active`
-(`cpu` or `gles`), `requested`, `reason` when GLES
-was asked for and not used (no EGL/GBM, no scanout config, a lost context),
-`renderer` (GL renderer and version), `gles_frames` and `gles_uploaded_rows`
-(rows sent to the GPU; unchanged rows are not resent, from 0.2.11). From
-0.2.12 the GPU composes frames itself: `gpu_composed_frames` counts them,
-`cpu_composed_frames` counts frames the CPU had to compose instead, and
-`cpu_reason` says why the last one could not be composed by the GPU. A GLES failure at
-start or while running drops that output to CPU and keeps presenting. From
-0.2.16 the compositor object also reports GPU time per GPU-composed frame
-(`gpu_timed`, `gpu_last_ms`, `gpu_max_ms`, `gpu_total_us`, `gpu_frames`;
-measured with `GL_EXT_disjoint_timer_query` when the driver has it), and the
-last frame's `frame_quads`, `frame_draw_calls` and `upload_ms` (sprites made
-and textures uploaded). Each output's `flip` object (`last_ms`, `max_ms`,
-`total_us`, `count`) times page flips from submission to their completion
-event, for either compositor. In
-0.2.9 GLES draws the CPU compositor's finished frame; later steps move the
-composition itself onto the GPU.
+`effective.presentation_configuration` reports where the backend choice came
+from and whether the environment value is valid. These are derived
+observations, never a second writable configuration.
+`effective.display_backend_active` is `drm-kms`, or `unavailable` when no DRM
+device could be opened (Blit then serves its API with no outputs and says why
+in `/v1/diagnostics`). Do not keep competing writable backend preferences in
+a control panel.
 
-From 0.2.20 `server.kms_frame_timing` chooses when a native KMS frame is
-composed: `immediate` (the default from 0.2.21) composes as soon as the
-previous flip completes; `late` composes each output's frame a lead before its
-next vblank, predicted from the kernel's vblank timestamps, so input that
-arrives during the refresh is shown at that vblank rather than the next. It
-applies live, without a restart; `BLIT_KMS_FRAME_TIMING` sets the boot
-default. The lead starts at 4 ms, grows by 1 ms (to half a refresh) when a
-frame misses its vblank -- a flip completing two or more vblanks after the
-CRTC's vblank number at submission, or the loop busy through the compose slot
--- and shrinks by 0.25 ms (to 2 ms) after 240 flips on time. Each output's
-`flip` object in `/v1/diagnostics` reports `timing`, `lead_us`, `on_time`,
-`late` and `slot_misses`, and (0.3.14) `submit_phase_ms`: the on-time and
-late flips counted by how many whole milliseconds after the previous vblank
-each was submitted (17 buckets, the last 16 ms and over). Late flips gathered
-in the last buckets were submitted too close to the vblank. See ADR 0183.
+Change intent through the settings API, which saves it. Saving leaves
+current displays and sessions running; a setting read at start (such as
+`kms_compositor`) needs `POST /v1/control/restart`. Confirm storage is
+`clean` before restarting, then verify `/v1/version` and each output's
+`compositor` in `/v1/diagnostics`. A restart recreates sessions through the
+login and auxiliary policy. Resetting settings restores the boot defaults,
+which likewise need a restart to reach a start-time setting. Editing an
+environment file needs a service restart to reload it; an in-process restart
+inherits the original environment.
 
-From 0.2.10 a GLES start is guarded. Blit creates
-`<settings path>.gles-starting` before opening GLES and removes it once every
-GLES output has drawn and flipped frames for 30 seconds. A marker still
-present at the next start means that start never became healthy (a crash
-included): that run uses the CPU compositor with `compositor.reason`
-`previous GLES start did not complete`, logs `gles_start_guard`, and clears
-the marker, so a deliberate restart tries GLES again. The saved setting is
-never rewritten.
+### Compositor
 
-Read `effective.display_backend_active` and runtime
-`render.presentation_sync`. Do not maintain competing writable backend
-preferences in a control panel.
+`document.server.kms_compositor` (ADR 0181) chooses how the native backend
+composes a frame: `gles` (the default) or `cpu`. It is read when the backend
+opens, so a change applies at the next start (`POST /v1/control/restart`).
+`effective.kms_compositor` is the saved choice and `BLIT_KMS_COMPOSITOR` the
+boot default. Any other value is a 400 `invalid_settings_server`. A GLES
+failure at start or while running drops that output to the CPU compositor and
+keeps presenting.
+
+In `/v1/diagnostics`, each `render.outputs[].compositor` says what an output
+actually uses:
+
+- `active` (`cpu` or `gles`) and `requested`;
+- `reason` when GLES was asked for and not used (no EGL/GBM, no scanout
+  config, a lost context), and `renderer` (GL renderer and version);
+- `gles_frames` and `gles_uploaded_rows` (rows sent to the GPU; unchanged
+  rows are not resent);
+- `gpu_composed_frames`, `cpu_composed_frames` (frames the CPU had to compose
+  instead) and `cpu_reason` (why the last one was not GPU-composed);
+- GPU time per GPU-composed frame: `gpu_timed`, `gpu_last_ms`, `gpu_max_ms`,
+  `gpu_total_us`, `gpu_frames`, measured with `GL_EXT_disjoint_timer_query`
+  when the driver has it;
+- the last frame's `frame_quads`, `frame_draw_calls` and `upload_ms`.
+
+Each output's `flip` object (`last_ms`, `max_ms`, `total_us`, `count`) times
+page flips from submission to their completion event, for either compositor.
+
+A GLES start is guarded. Blit creates `<settings path>.gles-starting` before
+opening GLES and removes it once every GLES output has drawn and flipped
+frames for 30 seconds. A marker still present at the next start means that
+start never became healthy (a crash included): that run uses the CPU
+compositor with `compositor.reason` `previous GLES start did not complete`,
+logs `gles_start_guard`, and clears the marker, so a deliberate restart tries
+GLES again. The saved setting is never rewritten.
+
+### Frame timing
+
+`document.server.kms_frame_timing` chooses when a native KMS frame is
+composed. `immediate` (the default) composes as soon as the previous flip
+completes. `late` composes each output's frame a lead before its next vblank,
+predicted from the kernel's vblank timestamps, so input that arrives during
+the refresh is shown at that vblank rather than the next. It applies live,
+without a restart; `BLIT_KMS_FRAME_TIMING` sets the boot default.
+
+The lead starts at 4 ms. It grows by 1 ms (up to half a refresh) when a frame
+misses its vblank -- a flip completing two or more vblanks after the CRTC's
+vblank number at submission, or the loop busy through the compose slot --
+and shrinks by 0.25 ms (down to 2 ms) after 240 flips on time. Each output's
+`flip` object reports `timing`, `lead_us`, `on_time`, `late`, `slot_misses`
+and `submit_phase_ms`: the on-time and late flips counted by how many whole
+milliseconds after the previous vblank each was submitted (17 buckets, the
+last 16 ms and over). Late flips gathered in the last buckets were submitted
+too close to the vblank. See ADR 0183.
+
+`render.presentation_sync` in `/v1/diagnostics` names how frames reach the
+panel: `drm-page-flip`, or `drm-page-flip-async` when
+`server.kms_async_pageflip` is on.
 
 ## Hibr login manager
 
@@ -294,14 +301,14 @@ delay. The
 `login_manager` marker in the returned terminal session distinguishes this
 supervised boundary from an ordinary PTY session.
 
-### Authenticated identity (0.1.538)
+### Authenticated identity
 
-The `identity` object in `GET /v1/login` distinguishes the login process from the user selected
-by its post-authentication hook. Before authentication it reports
-`state: waiting`, reason `awaiting_authenticated_hook`, with null UID/GID/PID
-and session kind. The default Blit-owned hook uses a private inherited channel;
-Blit verifies the kernel sender credentials and ancestry without an API token
-or any public registration endpoint. A verified example is:
+The `identity` object in `GET /v1/login` tells the login process apart from
+the user its post-authentication hook selected. Before authentication it
+reports `state: waiting`, reason `awaiting_authenticated_hook`, with null
+UID/GID/PID and session kind. The default Blit-owned hook uses a private
+inherited channel; Blit verifies the kernel sender credentials and ancestry
+without an API token or any public registration endpoint. A verified example:
 
 ```json
 {"state":"verified","reason":"kernel_credentials_verified",
@@ -310,55 +317,53 @@ or any public registration endpoint. A verified example is:
 
 The PID identifies the handoff sender, **not** the live held desktop owner.
 Verification is not desktop readiness: the selected session can also be
-`shell`. Native owner association is exposed separately by `login.desktop`;
-0.1.543 auxiliary reconciliation requires that fresh association before launch.
-Destroying/replacing the supervised login discards this identity.
-No active login reports `unavailable/no_active_login`; custom session commands
-are unchanged and report `unavailable/custom_session_command`. Setup failures
-report `unavailable/handoff_setup_failed`. Rejected messages expose null
-identity fields and a reason (`root_sender`, `foreign_sender`,
-`invalid_message`, `invalid_credentials`, `truncated_message` or
-`receive_failed`). A failed handoff does not prevent ordinary desktop/shell
-startup; it prevents trusting that login for future automation. See ADR 0125.
+`shell`. Native owner association is reported separately by `login.desktop`,
+and auxiliary reconciliation requires a fresh association before launch.
+Destroying or replacing the supervised login discards this identity.
 
-### Native desktop association (0.1.539)
+No active login reports `unavailable/no_active_login`; a custom session
+command reports `unavailable/custom_session_command`, and a setup failure
+`unavailable/handoff_setup_failed`. Rejected messages expose null identity
+fields and a reason (`root_sender`, `foreign_sender`, `invalid_message`,
+`invalid_credentials`, `truncated_message` or `receive_failed`). A failed
+handoff does not prevent ordinary desktop or shell startup; it prevents
+trusting that login for later automation. See ADR 0125.
 
-The `desktop` object in `GET /v1/login` observes the exact named login client using Hibr's
-native `hold list` and `hold clients`, as the verified user. Since0.1.549,
-the packaged hook's existing desktop `--name` argument is stable: connector
-(otherwise the display name) plus one-based row-major pane ordinal, such as
-`blit-DP-1-p2`. Auxiliary clients use the same rule, not their role or boot-time
-IDs. Long/unsafe selectors receive a bounded readable prefix plus a hash of
-the whole selector; duplicate inventory or occupied managed identities refuse
-launch. Native duplicate names/suffixes report `native_client_name_in_use`,
-never guessed ownership. See ADR0135. A live pane reassignment retains the
-client's birth name until its next launch. This is not another desktop instance
-or a new settings resource; Hibr owns preferences under the native name.
+### Native desktop association
 
-`state` is `inactive` before verified authentication or for shell selection;
-`waiting` when the native owner/client is absent; `ready` when the exact client,
-grid, live owner UID and process start-time identity are verified; `error` when
-the query fails or its result is invalid. Ready results contain `owner` (PID,
-UID, starttime_ticks, union rows/columns), `client` (the exact login client),
-and `clients` (all named clients reported by that same native owner, including
-signed row/column origins and primary flags). The collection is empty unless
-the owner and exact login-client association have both been verified. It is
-read-only native state, not a second layout database. Otherwise `owner` and
-`client` are null.
+The `desktop` object in `GET /v1/login` observes the exact named login client
+through Hibr's native `hold list` and `hold clients`, run as the verified
+user. The packaged hook names the desktop client by connector (otherwise the
+display name) plus one-based row-major pane ordinal, such as `blit-DP-1-p2`.
+Auxiliary clients use the same rule, not their role or boot-time IDs. A long
+or unsafe selector becomes a bounded readable prefix plus a hash of the whole
+selector; duplicate inventory or an occupied managed identity refuses launch.
+A duplicate native name reports `native_client_name_in_use`, never guessed
+ownership (ADR 0135). A live pane reassignment keeps the client's birth name
+until its next launch. This is not another desktop instance or a new
+settings resource; Hibr owns preferences under the native name.
+
+`state` is `inactive` before verified authentication or for a shell
+selection; `waiting` when the native owner or client is absent; `ready` when
+the exact client, grid, live owner UID and process start-time identity are
+verified; `error` when the query fails or its result is invalid. A ready
+result contains `owner` (PID, UID, `starttime_ticks`, union rows/columns),
+`client` (the exact login client), and `clients` (all named clients the same
+native owner reports, with signed row/column origins and primary flags).
+Otherwise `owner` and `client` are null and `clients` is empty. This is
+read-only native state, not a second layout database.
 `observed_monotonic_us` is the last successful query's time; results expire
-after three seconds. `query_in_flight` distinguishes background work from
-a current observation.
+after three seconds. `query_in_flight` tells background work apart from a
+current observation.
 
-The observer has a two-second deadline and a one-second retry interval,
-without account lookup or Hibr IPC blocking presentation. Its clean environment
-contains no API token or inherited input/display/network descriptors. Login
-replacement cancels the query and invalidates its generation. No public API
-registers a claimed owner PID. The helper never moves, promotes, detaches or
-starts a desktop/client. This is association evidence, not automatic joins or
-registration in the old external-adapter ownership flags. From0.1.540, a
-fresh association safely projects the login's ownership role for native joins
-without enabling input projection. See ADRs0126 and0127.
-This stage uses the packaged `desktop` name and Hibr's default per-user hold
+The observer has a two-second deadline and a one-second retry interval, and
+neither account lookup nor Hibr IPC blocks presentation. Its clean
+environment carries no API token and no inherited input, display or network
+descriptors. Replacing the login cancels the query and invalidates its
+generation. The helper never moves, promotes, detaches or starts a desktop
+or client. A fresh association projects the login's ownership role for
+native joins without enabling input projection (ADRs 0126 and 0127). The
+observer uses the packaged `desktop` name and Hibr's default per-user hold
 namespace; custom PAM TMPDIR namespaces are not inferred.
 
 The package enables this behavior with `BLIT_LOGIN_AUTOSTART=1`. The service
@@ -376,23 +381,24 @@ status codes.
 | Area | Endpoints | Purpose |
 | --- | --- | --- |
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
-| Hardware | `GET /v1/graphics`, `/v1/displays[/{id}]`, `/v1/audio[/{id}]`, `/v1/audio/cards[/{id}]` | Discover the compositor, outputs, modes, sound devices and mixers |
+| Hardware | `GET /v1/graphics`, `GET /v1/displays`, `GET/PATCH /v1/displays/{id}`, `GET /v1/audio`, `GET/PATCH /v1/audio/{id}`, `GET /v1/audio/cards`, `GET/PATCH /v1/audio/cards/{id}` | Discover and configure the GPU, outputs, sound devices and mixers |
 | Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, place panes |
 | Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
 | Auxiliary displays | `GET/PUT /v1/auxiliary-displays`, `POST /v1/auxiliary-displays/apply` | Start and place Hibr on the other monitors |
-| Terminals | `GET/POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input`, `/graphics`, `/output-capture` | Inventory, create, place, inspect, drive, and stop PTY sessions; reset their images; capture their output |
-| Hibr | `GET /v1/terminal-sessions/{id}/hibr-owner` | Inspect the primary/join ownership attachment |
-| Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state |
-| Input | `GET /v1/input/devices[/{id}]`, `GET/POST /v1/input/inject`, `GET/PUT /v1/input/routes[/{id}]` | Discover, configure, and route physical or synthetic input |
+| Terminals | `GET/POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input`, `DELETE .../graphics`, `POST/GET/DELETE .../output-capture` | Inventory, create, place, inspect, drive, and stop PTY sessions; reset their images; capture their output |
+| Hibr | `POST /v1/terminal-sessions/{id}/hibr-owner` | Internal: the Blit-launched Hibr adapter registers its PID for resize reassertion |
+| Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET/PATCH /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state; scroll the view |
+| Input | `GET /v1/input/devices`, `GET/PATCH /v1/input/devices/{id}`, `POST /v1/input/inject`, `GET /v1/input/routes`, `PUT/DELETE /v1/input/routes/{id}` | Discover, configure, and route physical or synthetic input |
 | Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
-| Graphics | `GET /v1/effects`, `POST/DELETE /v1/overlays/{id}` | Report pane effects; manage bounded overlays |
+| Graphics | `GET /v1/effects`, `GET/POST /v1/overlays`, `DELETE /v1/overlays/{id}` | Report pane effects; manage bounded overlays |
 | Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/console`, `/processes`, `/observation`, `/trace`, `/screenshots/{display_id}` | Inspect aggregate state, timing, the console, busy processes, events, and evidence captures |
 | Control | `POST /v1/control/shutdown`, `/restart`, `GET/PUT /v1/control/shutdown-key` | Stop or restart the server; program the keyboard chord that stops it |
-| Updates | `PUT /v1/control/update`, `GET /status`, `POST /cancel`, `/reset` | Upload and supervise a verified package update |
+| Updates | `PUT /v1/control/update`, `GET .../status`, `POST .../cancel`, `POST .../reset` | Upload and supervise a verified package update |
 
-The schema contains 49 path templates (`api_schema_gate.rb` checks the count). Keep this table synchronized when a
-path is added, removed, or renamed; the schema remains the authoritative count.
+The schema contains 49 path templates (`api_schema_gate.rb` checks the
+count). Keep this table synchronized when a path is added, removed, or
+renamed; the schema remains the authoritative count.
 
 ### Method-level reference
 
@@ -404,27 +410,31 @@ GET    /v1/version                         compatibility handshake
 GET    /v1/server                          capabilities and links
 GET    /v1/graphics /displays /audio       hardware inventory
 GET/PUT /v1/control/shutdown-key           the keyboard stop chord
-GET/PATCH /v1/displays/{id}                brightness
+GET/PATCH /v1/displays/{id}                rotation 0 only, brightness
+GET/PATCH /v1/audio/{id}                   a PCM's default flag
 GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
-GET/PUT /v1/fonts /topology               revisioned configuration
-GET     /v1/effects                        pane effects (set in settings)
+GET/PUT /v1/fonts /topology                revisioned configuration
+GET    /v1/effects                         pane effects (set in settings)
 GET/PUT/DELETE /v1/settings                persisted server and font settings
 GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
 POST   /v1/terminal-sessions/{id}/input    terminal input bytes
 DELETE /v1/terminal-sessions/{id}/graphics explicit retained-graphics reset
-GET    /v1/terminal-sessions/{id}/hibr-owner Hibr ownership state
+POST   /v1/terminal-sessions/{id}/hibr-owner internal Hibr owner registration
 GET/PUT /v1/surfaces/{id}/cells            authoritative cell snapshot/update
-GET    /v1/surfaces/{id}/summary/scrollback repair and inspection
-GET/POST /v1/input/*                       discover, route, or inject input
+GET    /v1/surfaces/{id}/summary           cheap health check
+GET/PATCH /v1/surfaces/{id}/scrollback     history and scrolled view
+GET/PATCH /v1/input/devices[/{id}]         discover and configure devices
+POST   /v1/input/inject                    synthetic input
+GET    /v1/input/routes, PUT/DELETE /{id}  input routing
 POST   /v1/frames                          explicit coherent frame boundary
 GET    /v1/stream                          events and bounded pixel frames
 GET    /v1/diagnostics*                    state, timing, traces, screenshots
 GET    /v1/diagnostics/observation         one canonical operational state dump
 POST   /v1/control/{shutdown,restart}      orderly service control
-POST/GET /v1/control/update*               verified package supervision
-POST/DELETE /v1/overlays[/{id}]            bounded graphic overlays
+PUT    /v1/control/update, GET .../status  verified package supervision
+GET/POST /v1/overlays, DELETE /{id}        bounded graphic overlays
 ```
 
 A Hibr session's `hibr_attachment.settled` (in `GET /v1/terminal-sessions`)
@@ -540,23 +550,27 @@ fi
 curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
   "$base/v1/version"; printf '\n'
 curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
-  "$base/v1/server" | jq '{state,backend,display_count,session_count}'; printf '\n'
+  "$base/v1/server" | jq '{display_count,display_backend}'; printf '\n'
 curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
-  "$base/v1/displays" | jq '.displays[] | {id,name,state,width,height,refresh_hz,presenting}'; printf '\n'
+  "$base/v1/displays" | jq '.displays[] | {id,name,active_mode,presentation_state}'; printf '\n'
 curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
-  "$base/v1/diagnostics/runtime" | jq '{performance,input,frames,events}'; printf '\n'
+  "$base/v1/diagnostics" | jq '{health,resources,errors,warnings}'; printf '\n'
+curl --fail --silent --show-error --connect-timeout 2 "${auth[@]}" \
+  "$base/v1/diagnostics/runtime" | jq '.performance | {frame_rate_hz,present_calls,missed_deadlines,surface_commit_hz,input_events}'; printf '\n'
 ```
 
 Interpret the result in this order:
 
 1. `/version` proves which binary and API contract answered.
-2. `/server` proves whether the service is ready and how many resources it
-   believes exist.
+2. `/server` shows whether the display backend is ready and how many
+   displays it found.
 3. `/displays` proves discovered outputs and their active modes; it does not
    prove that a desktop has supplied content.
-4. `/diagnostics/runtime` separates presentation cadence, producer commits,
+4. `/diagnostics` gives health, resource counts, and the errors and warnings
+   a status check should act on.
+5. `/diagnostics/runtime` separates presentation cadence, producer commits,
    missed deadlines, input dispatch, and recent bounded events.
-5. `/diagnostics/screenshots/{display_id}` proves pixels for one output; pair
+6. `/diagnostics/screenshots/{display_id}` proves pixels for one output; pair
    it with the surface summary and trace rather than treating it as a full
    diagnosis.
 
@@ -653,31 +667,31 @@ primary with `409` problem responses. The server therefore has one explicit
 Hibr owner at a time rather than accidentally spawning competing desktops.
 
 The API does not rewrite Hibr configuration or patch Hibr source. A client
-should keep the returned session IDs. From0.1.540, a login-owned join requires
-fresh `GET /v1/login` desktop readiness, not authentication alone. The associated
-login projects ownership role `primary`; Hibr's primary-display choice remains
+should keep the returned session IDs. A login-owned join requires fresh
+`GET /v1/login` desktop readiness, not authentication alone. The associated
+login projects ownership role `primary`; Hibr's primary-display choice is
 the separate native `login.desktop.client.primary` flag. Omitting `user`
 derives the authenticated account in the child, without the service's API
-token. A conflicting explicit account returns409
-`hibr_desktop_identity_mismatch`; an occupied/missing logical pane returns409
-`hibr_join_pane_unavailable`. Delete test sessions at the end and confirm
+token. A conflicting explicit account returns 409
+`hibr_desktop_identity_mismatch`; an occupied or missing logical pane returns
+409 `hibr_join_pane_unavailable`. Delete test sessions at the end and confirm
 `/v1/diagnostics` reports zero sessions and surfaces.
 
 Native clients receive input through their own PTYs in local coordinates;
-Hibr alone translates it into the current2-D union. Blit does not forward
+Hibr alone translates it into the current 2-D union. Blit does not forward
 joined input to the primary or add a horizontal slot offset. An optional
 `hibr_join_position: {"row": -67, "column": 0}` requests initial native
-placement through the Blit launcher; signed values are bounded to±32767 and
+placement through the Blit launcher; signed values are bounded to ±32767 and
 both fields are required. This is a logical-cell example, not a fixed monitor
 size or automatic layout policy. It is invalid on non-join and standby
 requests. The launcher never moves the primary or reasserts later user layout.
 
-Recognized `--standby`/`-w` is an auxiliary client, not another desktop owner.
-Hibr owns its waiting/deliberately-released behavior. Login-owned clients are
-retired asynchronously when their authentication generation ends or a fresh
-observation proves native owner replacement. Temporary query errors alone do
-not trigger destruction. Saved automatic auxiliary policy and its placement/
-reconnect reconciliation are not yet implemented by this API increment.
+A recognized `--standby`/`-w` is an auxiliary client, not another desktop
+owner. Hibr owns its waiting and deliberately-released behaviour. Login-owned
+clients are retired asynchronously when their authentication generation ends
+or a fresh observation proves native owner replacement. Temporary query
+errors alone do not trigger destruction. Saved auxiliary policy is described
+under "Live auxiliary displays" below.
 
 Primary and join lifetimes are intentionally different: the primary may keep
 its Blit session running while Hibr's detached owner restarts after the
@@ -701,14 +715,9 @@ reports physical outputs; `/v1/topology` reports logical placement.
 
 ## Displays, topology, and fonts
 
-Since0.1.545, configure independent splits through `PUT /v1/settings`.
-Read the full document, edit `display_layouts`, then replace it with its
-current `If-Match` revision.
-
-Use0.1.546 or newer: it durably saves non-default legacy migration at startup;
-the unreleased0.1.545 candidate required a later settings mutation to save it.
-
-For example:
+Configure each output's pane split through `PUT /v1/settings`: read the full
+document, edit `display_layouts`, then replace it with its current
+`If-Match` revision. For example:
 
 ```json
 "display_layouts": {
@@ -717,11 +726,11 @@ For example:
 }
 ```
 
-Each dimension is1–8; columns precede rows, so1x2 is stacked and2x1 is
-side-by-side. A missing connector entry means1x1. Disconnected entries remain
-saved. Limits are16 configured outputs,64 live panes and16 simultaneous
-terminal sessions; these are different resources. Invalid or physically
-sub-cell grids return400; removing an occupied pane returns409
+Each dimension is 1–8; columns precede rows, so 1x2 is stacked and 2x1 is
+side-by-side. A missing connector entry means 1x1. Disconnected entries stay
+saved. The limits are 16 configured outputs, 64 live panes and 16
+simultaneous terminal sessions; these are different resources. Invalid or
+physically sub-cell grids return 400; removing an occupied pane returns 409
 `topology_in_use` without changing settings. Detach it explicitly first.
 Surviving terminal IDs/processes retain their pane ordinal and receive PTY
 resize. Hibr Displays still owns native desktop arrangement.
@@ -805,14 +814,15 @@ apply live, with no restart, and are saved:
 answer. Legacy startup settings migrate for the currently connected outputs
 only; a later new monitor does not inherit another output's split.
 
-`PUT /v1/fonts` applies the selected profile and scale to pixels, not only to
+`PUT /v1/fonts` applies the selected profile and size to pixels, not only to
 metadata. The reported `cell_pixels` dimensions are the physical cell metrics
-used by the renderer, PTY resize, pane/display geometry, pointer hit-testing,
-and Kitty/Sixel placement; changing scale does not rely on a renderer
-transform. A display-attached Hibr session is reflowed to the new display grid
-and receives the existing resize/reassert contract. Hibr source is never
-modified by this operation. Pixel acceptance is covered by the local font API
-gate and should be repeated with the live screenshot endpoint after deployment.
+used by the compositor, PTY resize, pane/display geometry, pointer
+hit-testing, and Kitty/Sixel placement; a size change does not rely on a
+scaling transform. A display-attached Hibr session is reflowed to the new
+display grid and receives the existing resize/reassert contract. Hibr source
+is never modified by this operation. Pixel acceptance is covered by the local
+font API gate and should be repeated with the live screenshot endpoint after
+deployment.
 
 `GET /v1/displays` reports physical outputs, active modes, supported modes,
 bounds, and presentation state. `PUT /v1/topology` changes the logical
@@ -838,19 +848,17 @@ and 0076 in docs/adr.
 
 ### Display settings: rotation, brightness, and what power costs
 
-A display's `configuration` used to be `{}`, and that was a decision rather
-than an omission (ADR 0064): selecting a mode changes the render output size
-and therefore every surface on the display, and a Hibr desktop's cells come
-from its owner (ADR 0063), so applying one needs a resize protocol with that
-owner. Issue #60 is that protocol. `mode` is still refused, with
+A display's mode is not writable (ADR 0064): selecting a mode changes the
+render output size and therefore every surface on the display, and a Hibr
+desktop's cells come from its owner (ADR 0063), so applying one needs a
+resize protocol with that owner (issue #60). A PATCH naming `mode` is a 400
 `invalid_display_property`.
 
-What is left is the settings that resize nothing, and `capabilities` says
-which of them this backend and this hardware can actually perform. It is
-derived, not declared: `configuration` offers exactly what `capabilities`
-claims, and a PATCH accepts exactly that. A property that takes a value and
-does nothing is worse than its absence, which is the reasoning the empty
-object used.
+What is writable is the settings that resize nothing, and `capabilities`
+says which of them this hardware can actually perform. It is derived, not
+declared: `configuration` offers exactly what `capabilities` claims, and a
+PATCH accepts exactly that. A property that takes a value and does nothing
+is worse than its absence.
 
 ```text
 mode-report   always
@@ -858,10 +866,9 @@ brightness    only where a backlight is attributed to the display.
 ```
 
 **`rotation`** is not a capability: native KMS composes straight into the
-connector's framebuffer and has no rotation transform (ADR 0184 removed the
-SDL path that had one). A PATCH with `rotation: 0` is accepted, since that
-is what every display is; `90`, `180` or `270` is a 422
-`display_rotation_unsupported`, and any other value a 400
+connector's framebuffer and has no rotation transform. A PATCH with
+`rotation: 0` is accepted, since that is what every display is; `90`, `180`
+or `270` is a 422 `display_rotation_unsupported`, and any other value a 400
 `invalid_display_rotation`.
 
 **`brightness_percent`** reads `actual_brightness` -- what the panel is doing
@@ -887,8 +894,9 @@ host say why:
 ```
 
 So sysfs is not an avenue -- that is the kernel -- and setting the property
-needs DRM master, which Blit holds; that is the route the rest of #69 takes. `/sys/class/graphics/fb0/blank` is not an alternative: fbdev emulation
-is one device for the whole card, so it could not express "turn off this one
+needs DRM master, which Blit holds; that is the route issue #69 takes.
+`/sys/class/graphics/fb0/blank` is not an alternative: fbdev emulation is one
+device for the whole card, so it could not express "turn off this one
 display" even if it worked behind a master.
 
 On this host there is **no backlight at all** (`/sys/class/backlight` exists and
@@ -904,69 +912,70 @@ root with no backlight. It is the same unmeasured-group caveat as the ALSA
 control device in #68, and it belongs to an operator who switches profiles on
 hardware that has a panel.
 
-### Explicit emoji cell layout (since 0.1.578)
+### Explicit emoji cell layout
 
-`PUT /v1/surfaces/{id}/cells` accepts optional `text_layout`:
+`PUT /v1/surfaces/{id}/cells` accepts an optional `text_layout`:
 
-- `scalar` (default): existing Unicode15.1 scalar widths and zero-width
-  attachments. Existing positioned Hibr providers are unchanged.
-- `emoji`: group pinned Emoji18.0 sequences within each cell's `text` value.
-  Completed multi-scalar sequences occupy two columns; singletons/ordinary
-  text keep existing widths. Never join across positioned cells or requests.
+- `scalar` (default): Unicode 15.1 scalar widths and zero-width attachments.
+  Positioned Hibr providers are unchanged.
+- `emoji`: group pinned Emoji 18.0 sequences within each cell's `text` value.
+  A completed multi-scalar sequence occupies two columns; singletons and
+  ordinary text keep their widths. Grouping never joins across positioned
+  cells or requests.
 
-For example, `{"base_revision":7,"text_layout":"emoji","cells":[{"x":0,"y":0,"text":"👩‍💻X"}]}`
-places the emoji at0, its continuation at1 and X at2. Use Modern/Retro for the
-shared colour-cluster raster. Snapshots return the complete sequence on its
-anchor. Overwriting either half clears the previous wide ownership. A wide
-cluster that cannot fit the right edge is clipped whole, following existing
-API clipping semantics (the request can still be acknowledged). Invalid
-layout types/values return400 `invalid_text_layout` before cell mutation.
-This cell-update policy does not alter the owning session's PTY policy.
+For example,
+`{"base_revision":7,"text_layout":"emoji","cells":[{"x":0,"y":0,"text":"👩‍💻X"}]}`
+places the emoji at 0, its continuation at 1 and X at 2. Snapshots return the
+complete sequence on its anchor. Overwriting either half clears the previous
+wide ownership. A wide cluster that cannot fit the right edge is clipped
+whole, following the API's usual clipping (the request can still be
+acknowledged). An invalid layout returns 400 `invalid_text_layout` before any
+cell changes. This cell-update policy does not alter the owning session's
+PTY policy.
 
-Offline candidate579 also accepts `text_layout` on
-`POST /v1/terminal-sessions`, for example
+`POST /v1/terminal-sessions` also accepts `text_layout`, for example
 `{"command":"/bin/cat","text_layout":"emoji"}`. It is fixed for the lifetime
-of that session and returned by session observations; PATCH returns400
-`immutable_text_layout`. Default/omitted `scalar` preserves existing Hibr
-widths. `emoji` uses the same pinned sequence trie across PTY reads, supports
-late widening and whole-cluster REP/wrap. With autowrap disabled or a single
+of the session and returned by session observations; a PATCH returns 400
+`immutable_text_layout`. The default, `scalar`, keeps Hibr's widths. `emoji`
+uses the same pinned sequence trie across PTY reads, and supports late
+widening and whole-cluster REP and wrap. With autowrap disabled or a single
 available column, allocation stays one column rather than spilling outside
-the viewport. Controls and successful positioned updates terminate an active
-extension; incomplete UTF-8 bytes do not. This is not DEC2027/general Unicode
-grapheme support.
+the viewport. Controls and successful positioned updates end an active
+extension; incomplete UTF-8 bytes do not. This is not DEC mode 2027 or
+general Unicode grapheme support.
 
-Candidate582 fixes resize ownership: overlapping whole cells survive; a wide
-cell cut by the new right edge is removed whole, including its retained
-anchor. Both active and saved alternate buffers are normalized. Growing the
-grid cannot resurrect clipped attachments or link IDs. A resize terminates
-streaming emoji-extension eligibility, without resetting the terminal or its
-last printable REP value. This is grid clipping, not paragraph reflow.
+On resize, overlapping whole cells survive; a wide cell cut by the new right
+edge is removed whole, including its retained anchor. Both the active and the
+saved alternate buffer are normalized. Growing the grid cannot resurrect
+clipped attachments or link IDs. A resize ends streaming emoji-extension
+eligibility, without resetting the terminal or its last printable REP value.
+This is grid clipping, not paragraph reflow.
 
-Offline candidate580 uses pinned Unicode18.0 presentation data: default-emoji
-scalars and standardized VS16 pairs select colour; standardized VS15 pairs
-select monochrome outlines. Modern/Retro share a real monochrome Noto Emoji
-fallback when their selected outline lacks a text glyph. Presentation never
-changes the owner's allocated columns. These are shared-raster semantics,
-not a claim of complete terminal or physical-display acceptance. Existing
-scalar layout remains the default; grouping still requires explicit opt-in.
+Presentation follows pinned Unicode 18.0 data: default-emoji scalars and
+standardized VS16 pairs select colour; standardized VS15 pairs select a
+monochrome outline. Outline fonts share a monochrome Noto Emoji fallback for
+text presentation the font itself lacks. Presentation never changes the
+owner's allocated columns.
+
+### Fonts
 
 `GET /v1/fonts` lists profiles and the active cell size. `PUT /v1/fonts` can
-select `font_id`, legacy `scale` from 1.0 through 3.0 in 0.1 increments,
-or `size_px` (integer8..64, exact cell height). Select a profile together with
-either size control, never both size controls. Profile-only selection retains
-the active size policy. `active.sizing` identifies `scale` or `pixels`;
-`active.size_px` and `active.cell_pixels` report the actual result. Returned
-scale under pixel mode is derived and need not be a valid legacy scale write.
-For example, `{"size_px":23}` selects12x23 cells for the8x16 font. This is
-font/cell sizing, not a display mode change. Existing bitmap profiles are
-sampled at this size. Outline fonts (`rasterization: "native-antialiased"`)
-are drawn at a fitted native size. Pixel fonts (`"bitmap-nearest"`) keep
-their own pixels for every glyph they have, and take the rest from the glyph
-stack, so both kinds report `colour_glyphs: true` (ADR 0199). Select smooth
-text, for example, with `{"font_id":"hack","size_px":23}`. Discover available
-profiles through `GET /v1/fonts`, not a version-number comparison alone.
+select `font_id`, legacy `scale` from 1.0 through 3.0 in 0.1 increments, or
+`size_px` (integer 8..64, exact cell height). Select a profile together with
+either size control, never both size controls. Profile-only selection keeps
+the active size policy. `active.sizing` is `scale` or `pixels`;
+`active.size_px` and `active.cell_pixels` report the actual result. A scale
+returned under pixel sizing is derived and need not be a valid scale write.
+For example, `{"size_px":23}` selects 12x23 cells for the 8x16 font. This is
+font and cell sizing, not a display mode change. Outline fonts
+(`rasterization: "native-antialiased"`) are drawn at a fitted native size.
+Pixel fonts (`"bitmap-nearest"`) keep their own pixels for every glyph they
+have and take the rest from the glyph stack, so both kinds report
+`colour_glyphs: true` (ADR 0199). Select smooth text, for example, with
+`{"font_id":"hack","size_px":23}`.
 
-**Since 0.2.36 (ADR 0195), fonts are discovered.**
+Fonts are discovered (ADR 0195):
+
 - **What `GET /v1/fonts` lists:** every regular, monospaced TTF or OTF in
   the fonts root's `text/` folder or `/usr/local/lib/blit/fonts/text`, plus
   the narrow-cell PSFs in the root.
@@ -978,54 +987,43 @@ profiles through `GET /v1/fonts`, not a version-number comparison alone.
 - **The list is read fresh on each request,** so a font copied in appears
   without a restart.
 - **Shipped fonts:** `hack`, `ibm-3270`, `jetbrains-mono-nl`, `fira-code`,
-  `ibm-plex-mono`, `blit-terminus16` and `blit-spleen16`.
+  `ibm-plex-mono`, `blit-terminus16` and `blit-spleen16`. Without a saved
+  selection Blit boots with `blit-terminus16`.
 - **Glyph coverage:** every outline font draws icons, symbols, box drawing,
   Braille, blocks, Arabic, emoji and Unifont's coverage from Blit's glyph
   stack, fitted to that font.
 - **Retired ids:** `blit-modern`, `blit-retro`, `blit-jetbrainless` and the
   console fonts. A saved selection naming one falls back to the boot font.
 
-Candidate0.1.573 adds `blit-retro`, an antialiased 3270 Mono derivative, and
-expands both outline profiles to the full pinned Nerd Fonts3.4.0 catalogue.
-Select with `{"font_id":"blit-retro","size_px":24}`; use the same existing
-settings save/load contract for persistence. The font inventory is canonical
-for availability. Neither a font change nor `colour_glyphs:true` implies full
-emoji-sequence shaping; see issue110 and [font scope](../assets/fonts/README.md).
-Candidate0.1.574 upgrades the one shared colour asset to Noto2D2.057 and pins
-the Emoji18.0 acceptance corpus. The API still reports colour-face availability,
-not complete emoji-cluster conformance; the scalar-only renderer is not changed
-by that asset update. No additional sizing or browser-zoom API is introduced.
+Discover available profiles through `GET /v1/fonts`, not a version
+comparison. `colour_glyphs: true` does not imply full emoji-sequence
+shaping; see issue 110 and [font scope](../assets/fonts/README.md).
 
 `active.rasterization` is `bitmap-nearest` or `native-antialiased`;
 `active.colour_glyphs` reports the colour face, and `active.raster_cache`
-reports bounded cached bytes and render count. `glyphs` and `mappings` retain
-their PSF identity meaning (the canonical fallback for the modern profile),
-not a total Unicode coverage claim for the outline/emoji faces. Profiles
-report their rasterization and availability. Installation keeps Terminus as
-default. Profile/size changes validate the rasterizer before retiring active
-state. Both native KMS compositors (CPU and GLES) share the same
-coverage/colour source, fallback policy and cell sizing.
+reports bounded cached bytes and render count. `glyphs` and `mappings`
+describe the loaded primary font file (its identity), not the coverage of
+the glyph stack behind it. A profile or size change validates the rasterizer
+before retiring the active state. Both native KMS compositors (CPU and GLES)
+share the same coverage and colour source, fallback policy and cell sizing.
 
-Candidate0.1.588 attaches a required Arabic companion to canonical
-`blit-retro` and `blit-modern` profiles. `profiles[].arabic_companion_path`
-identifies the packaged asset; `active.arabic_companion` reports the actually
-loaded `path`, `family`, `baseline_px` and `shaping: "visual-cell-marks"`.
-It is null for profiles without a companion. Availability includes the
-companion file; a failed font/size replacement preserves the active font.
-Arabic shares the Latin baseline and retains ink extending beyond a cell.
-Hibr supplies display-order presentation forms; Blit positions cell-local
-marks without applying a second bidi pass. Tested core letters, lam-alef,
-diacritics and Arabic-Indic digits `٠١٢٣٤٥٦٧٨٩` are a finite scope, not a
-promise of every Arabic/Quranic form. Uncovered scalars use the shared,
-explicitly flagged PSF fallback. Custom noncanonical font paths do not infer
-an Arabic companion. Primary `glyphs`/`mappings` still describe PSF fallback,
-not total companion coverage. Font size remains controlled by `size_px`.
+Every outline profile carries the Arabic companion `BlitArabicModern.ttf`:
+`profiles[].arabic_companion_path` names it, and `active.arabic_companion`
+reports the loaded `path`, `family`, `baseline_px` and
+`shaping: "visual-cell-marks"`. Both are null for a pixel font. Availability
+includes the companion file; a failed font or size replacement keeps the
+active font. Arabic shares the Latin baseline and keeps ink that extends
+beyond a cell. Hibr supplies display-order presentation forms; Blit
+positions cell-local marks without applying a second bidi pass. Tested core
+letters, lam-alef, diacritics and Arabic-Indic digits `٠١٢٣٤٥٦٧٨٩` are a
+finite scope, not a promise of every Arabic or Quranic form.
 
-Integer JSON values such as `2` remain valid and mean `2.0`. Blit recalculates
-pane geometry and resizes attached PTYs. Because a framebuffer cell cannot be
-fractional, the physical width and height use one shared nearest-pixel rule;
-for example, an 8x16 font at scale 1.1 is a 9x18 cell. This is a display
-geometry operation; it does not change Hibr source or terminal protocol state.
+A `scale` given as an integer, such as `2`, means `2.0`. A size change
+recalculates pane geometry and resizes attached PTYs. Because a framebuffer
+cell cannot be fractional, the physical width and height use one shared
+nearest-pixel rule; for example, an 8x16 font at scale 1.1 is a 9x18 cell.
+This is a display geometry operation; it does not change Hibr source or
+terminal protocol state.
 
 For example, apply a modest size increase without restarting the server:
 
@@ -1035,24 +1033,23 @@ curl --fail-with-body -X PUT "$BLIT_URL/v1/fonts" \
   -H 'Content-Type: application/json' --data '{"size_px":23}'
 ```
 
-Read back `active.scale` and `active.cell_pixels`: rounded cell dimensions,
-not fractional physical pixels, determine the grid. An8x16 source becomes
-10x19 at1.2. The live font API queues automatic saving; poll settings storage
-for a clean receipt. To edit font sizing as part of a complete configuration,
-read `GET /v1/settings`,
-update its complete `document.font` with the desired profile/scale and
-`PUT /v1/settings` using the returned revision in `If-Match`. Preserve the
-other document sections and require `storage.state == "clean"`. A successful
-live font response alone is not confirmation of a durable settings save.
+Read back `active.size_px` and `active.cell_pixels`: rounded cell
+dimensions, not fractional physical pixels, determine the grid. An 8x16
+source becomes 10x19 at scale 1.2. `PUT /v1/fonts` queues an automatic save;
+poll settings storage for a clean receipt. To edit font sizing as part of a
+complete configuration, read `GET /v1/settings`, update its complete
+`document.font` with the desired profile and size, and `PUT /v1/settings`
+with the returned revision in `If-Match`. Preserve the other document
+sections and require `storage.state == "clean"`. A successful live font
+response alone does not confirm a durable save.
 
-When saving pixel sizing, set `document.font` to `{"font_id":"…","size_px":23}`
-and remove the legacy `scale` key. Saving both returns400 and preserves the
-previous durable configuration. A legacy scale write likewise replaces pixel
-mode rather than multiplying it. See ADR0144.
+When saving pixel sizing, set `document.font` to
+`{"font_id":"…","size_px":23}` and remove the legacy `scale` key. Saving
+both returns 400 and keeps the previous durable configuration. A scale write
+likewise replaces pixel sizing rather than multiplying it. See ADR 0144.
 
-Text foreground/background colours are terminal styles, independent of font
-selection. The current monochrome PSF pipeline does not provide multicolour
-emoji merely by selecting a profile with more Unicode mappings.
+Text foreground and background colours are terminal styles, independent of
+font selection.
 
 ### API-owned server settings
 
@@ -1060,14 +1057,21 @@ emoji merely by selecting a profile with more Unicode mappings.
 settings. The response has three relevant parts: `document` is the sparse
 stored document, `effective` is what this process is using now, and
 `revision` is the optimistic-concurrency value for replacement. The document
-contains `font` (`font_id`, `scale`) and `server` values for
-`render_interval_ms`, `kms_async_pageflip`, and `expect_desktop`. The
-environment variables with the corresponding names are boot defaults only
-when the document is silent.
+holds `font` (`font_id` with `scale` or `size_px`) and `server` values:
+`render_interval_ms` (1–100), `pane_layout`, `display_backend`,
+`kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
+`effects_animation_hz`, `expect_desktop` and `shutdown_key`. The other
+sections are `display_layouts`, `effects`, `pointer`, `login`,
+`auxiliary_displays`, `input_devices`, `audio_devices` and `displays`.
+Environment variables such as `BLIT_RENDER_INTERVAL_MS`, `BLIT_PANE_LAYOUT`,
+`BLIT_KMS_COMPOSITOR`, `BLIT_KMS_FRAME_TIMING`, `BLIT_KMS_ASYNC_PAGEFLIP`,
+`BLIT_EXPECT_DESKTOP`, `BLIT_PSF_FONT` and `BLIT_FONT_SCALE` are boot
+defaults, used only when the document is silent.
 
-Per-output pane layout is owned by `document.display_layouts`, applied live by
-settings replacement. Legacy `PUT /v1/topology` applies one1x1/1x2/2x1/2x2
-grid to the connected outputs in bulk and refuses occupied layout changes.
+Per-output pane layout is owned by `document.display_layouts`, applied live
+by settings replacement. Legacy `PUT /v1/topology` applies one 1x1, 1x2, 2x1
+or 2x2 grid to the connected outputs in bulk and refuses occupied layout
+changes.
 Prefer explicit connector-keyed layouts for independent monitors.
 
 Replace the complete document with `If-Match` (omitted only for an initial
@@ -1087,7 +1091,7 @@ credentials, or test seams. `BLIT_EVDEV_MOUSE` is a compatibility boot
 override only; stable input devices and their API configuration are the
 supported input boundary. See ADR 0089 and ADR 0067.
 
-#### Login startup policy (0.1.537)
+#### Login startup policy
 
 `document.login` moves login placement into the same API-owned store:
 
@@ -1096,13 +1100,13 @@ supported input boundary. See ADR 0089 and ADR 0067.
 ```
 
 Add that object to the complete document read from `GET /v1/settings`; replace
-with `PUT /v1/settings` and its revision in `If-Match`. Do not send this fragment
-as the whole document: replacement would reset unrelated settings. The saved
-policy is normalized to explicit values. Missing fields use boot defaults;
-`preferred_pane_id:null` requests automatic selection. `fallback` is `wait`
-or `first_available`. A missing preferred pane is valid intent, retained until
-available; fallback assignment never overwrites it. Current IDs are scoped to
-the backend topology, not portable monitor identities.
+with `PUT /v1/settings` and its revision in `If-Match`. Do not send this
+fragment as the whole document: replacement would reset unrelated settings.
+The saved policy is normalized to explicit values. Missing fields use boot
+defaults; `preferred_pane_id:null` requests automatic selection. `fallback` is
+`wait` or `first_available`. A missing preferred pane is valid intent,
+retained until available; fallback assignment never overwrites it. Current IDs
+are scoped to the backend topology, not portable monitor identities.
 
 This section is **startup-applied**. `effective.login` and
 `effective.login_restart_required` show the distinction. Saving must not kill
@@ -1118,45 +1122,42 @@ pane grid. Missing outputs are valid dormant intent. Saving this field does
 not move or reconnect a current desktop client. Blit's standby
 reconciler applies initial placement once; Hibr Displays owns subsequent
 session moves. The control panel must keep live Apply separate from durable
-Save as default. Since 0.1.543, saved auxiliaries are loaded as the live policy
-at boot. Later settings replacements affect the next boot, while the current
-policy is controlled by the separate Apply operation below.
+Save as default. Saved auxiliaries are loaded as the live policy at boot.
+Later settings replacements affect the next boot; the current policy is
+controlled by the separate Apply operation below.
 
-#### Live auxiliary displays (0.1.543)
+#### Display hotplug
 
-Direct KMS0.1.544 reconciles connected outputs without restarting the service.
-A read-only worker observes DRM uevents, coalesces bursts for100ms and probes
-periodically every five seconds as a fallback. The main thread owns output
-creation/retirement and publishes changed display inventory and topology
-revisions. Unchanged output resources and primary PTYs are retained. When
-the last output disappears, the API remains available and PTYs keep their
-pane intent; primary migration is not automatic. Unknown outputs are not
-automatically added to auxiliary policy. Since0.1.545, new outputs use their
-connector-keyed layout or1x1 when unconfigured. Font selection/size remain
-global. The0.1.544 global-split inheritance is superseded by ADR0131.
+Native KMS reconciles connected outputs without restarting the service. A
+read-only worker observes DRM uevents, coalesces bursts for 100 ms and probes
+every five seconds as a fallback. The main thread owns output creation and
+retirement and publishes changed display inventory and topology revisions.
+Unchanged output resources and primary PTYs are kept. When the last output
+disappears, the API stays available and PTYs keep their pane intent; primary
+migration is not automatic. A new output uses its connector-keyed layout, or
+1x1 when unconfigured (ADR 0131). Font selection and size are global.
 
-`diagnostics.render.hotplug` (also in runtime/observation snapshots) reports
-`supported`, `observer` (`uevent+periodic`, `periodic`, `unavailable`),
-`inventory_revision`, worker `scans`, `last_scan_ms`, and `error`. A failed
-probe preserves the last inventory; a failed activation/teardown is reported
-without destroying unrelated outputs. Failed teardown quarantines resources
-until a subsequent retry can disable scanout. Unknown connector status also
-retains its last-known output instead of inventing a disconnection; inspect
-`hotplug.error` before treating retained inventory as freshly verified presence.
-New connections may remain
-unavailable if output slots or compatible CRTCs are exhausted. Support targets
-the selected DRM device, not arbitrary multi-GPU ownership.
+`diagnostics.render.hotplug` (also in the runtime and observation snapshots)
+reports `supported`, `observer` (`uevent+periodic`, `periodic`,
+`unavailable`), `inventory_revision`, worker `scans`, `last_scan_ms`, and
+`error`. A failed probe keeps the last inventory; a failed activation or
+teardown is reported without destroying unrelated outputs. A failed teardown
+quarantines resources until a later retry can disable scanout. An unknown
+connector status also keeps its last-known output instead of inventing a
+disconnection; inspect `hotplug.error` before treating retained inventory as
+freshly verified presence. A new connection may stay unavailable if output
+slots or compatible CRTCs are exhausted. Support targets the selected DRM
+device, not multi-GPU ownership.
 
-The existing auxiliary controller resolves saved/live connector bindings
-against this inventory. A removed managed auxiliary is retired; on return a
-new standby can be provisioned after fresh authenticated native readiness.
+#### Live auxiliary displays
+
+The auxiliary controller resolves saved and live connector bindings against
+the display inventory. A removed managed auxiliary is retired; on its return
+a new standby can be provisioned after fresh authenticated native readiness.
 Its initial placement is verified once. Surviving clients' user placement is
-not reasserted. Unmanaged/primary PTYs are not terminated by output loss.
-
-Native KMS discovers connectors live (see the hotplug section above), so a
-monitor plugged in later becomes an output without restarting the service.
-New monitors are not automatically added to the requested auxiliary set;
-select them explicitly through Apply and save them as defaults.
+not reasserted. Unmanaged and primary PTYs are not terminated by output loss.
+New monitors are not added to the auxiliary set automatically; select them
+explicitly through Apply and save them as defaults.
 
 `GET /v1/auxiliary-displays` returns the live policy revision, operation ID,
 source (`startup` or `apply`), and per-binding progress. Each binding reports
@@ -1206,7 +1207,7 @@ with the previous `saved_revision`. A request whose save is not confirmed
 within 30 s is answered 503 `settings_write_failed`; the save may still
 complete, so read the storage state.
 The writer syncs file contents and the parent directory around atomic rename.
-Replacement no longer deletes the old file first. A forced save failure
+Replacement never deletes the old file first. A forced save failure
 returns HTTP 503 `settings_write_failed`, not success; changes may already
 have applied in memory. Read settings and resolve the error before retrying.
 Failure after rename but before directory sync means durability is unconfirmed,
@@ -1248,16 +1249,15 @@ bounded pixel frames. Pixel frames use `pixel_frame_begin` metadata followed by
 binary data and a final completion message. Back-pressure and dropped-event
 counters are visible in runtime diagnostics.
 
-Since0.1.583, `pixel_frame_begin` accepts paired `placement_width` and
-`placement_height` (integer1..65535) in terminal pixels. `width`/`height`
+`pixel_frame_begin` accepts paired `placement_width` and `placement_height`
+(integer 1..65535) in terminal pixels. `width`/`height`
 remain source dimensions and alone determine RGB/RGBA payload length. The
 destination starts at `x`,`y`; it is not a Chrome zoom setting. Omitting both
 placement fields preserves source-sized placement for older producers. A
 partial pair, non-integer, zero or out-of-range size is rejected as
 `pixel_frame_error`/`invalid_begin` before changing the current image.
 Blit's display adapter converts the callback's requested destination cells
-using the current cell metrics and sends this pair. Ship the matching server
-and adapter together; older servers do not implement these placement fields.
+using the current cell metrics and sends this pair.
 
 The HTTP surface state and the stream are complementary. HTTP GETs are the
 repair path; the stream is the low-latency observation path. A client must
@@ -1267,29 +1267,28 @@ before a disconnect.
 
 ## Input
 
-### Negotiated keyboard reporting (since 0.1.585)
+### Negotiated keyboard reporting
 
-`GET /v1/terminal-sessions/{id}` exposes
-`terminal_capabilities.keyboard`: `protocol: kitty`, `supported_flags:11`,
-current `active_flags` and saved `stack_depth` (0..16). These are observations,
-not a second API setting: the program owns negotiation through its PTY.
-`CSI ? u` queries; `CSI > flags u` pushes; `CSI < count u` pops;
-`CSI = flags ; mode u` replaces/sets/clears bits with modes1/2/3.
-Main/alternate buffers and sessions keep independent state. Unsupported
-flags4/16 are masked out; only1/2/8 are implemented.
+`GET /v1/terminal-sessions/{id}` exposes `terminal_capabilities.keyboard`:
+`protocol: kitty`, `supported_flags: 11`, the current `active_flags` and the
+saved `stack_depth` (0..16). These are observations, not a second API
+setting: the program owns negotiation through its PTY. `CSI ? u` queries;
+`CSI > flags u` pushes; `CSI < count u` pops; `CSI = flags ; mode u`
+replaces, sets or clears bits with modes 1, 2 and 3. The main and alternate
+buffers, and each session, keep independent state. Flags 4 and 16 are masked
+out; only 1, 2 and 8 are implemented.
 
-API key injection already uses the physical keyboard dispatch. For example,
-send `{"kind":"key","code":125,"value":1}` then value0 for left Super;
-right Super is126. A program requesting all-key reporting receives its
-canonical key event, not literal text. Super chords require press-Super,
-press-key,release-key,release-Super. Repeat/release encoding additionally
-requires flag2. Without negotiated all-key reporting, a lone modifier remains
-silent. Input stream events include logical `super` after remapping; the
-existing input-device modifier role `meta` means the evdev Super role here.
-An external browser that cannot capture an OS-reserved key may offer this
-explicit action; the server cannot intercept that client's operating system.
-Do not confuse terminal raw-byte support with Hibr326's pending console/hold
-integration. See ADR0169 for supported scope and acceptance limits.
+API key injection uses the physical keyboard dispatch. For example, send
+`{"kind":"key","code":125,"value":1}` then value 0 for left Super; right
+Super is 126. A program requesting all-key reporting receives its canonical
+key event, not literal text. A Super chord is press Super, press key,
+release key, release Super. Repeat and release encoding also require flag 2.
+Without negotiated all-key reporting, a lone modifier stays silent. Input
+stream events include logical `super` after remapping; the input-device
+modifier role `meta` is the evdev Super role here. An external browser that
+cannot capture an OS-reserved key may offer this as an explicit action; the
+server cannot intercept that client's operating system. See ADR 0169 for
+scope and acceptance limits.
 
 Physical keyboards, pointers, and gamepads are discovered through
 `/v1/input/devices`. Bind a source to a session with
@@ -1401,25 +1400,26 @@ PCM, which it does not do.
 
 ### Pointer and gamepad settings
 
-#### Pointer appearance (Blit0.1.549+)
+#### Pointer appearance
 
 Read `GET /v1/settings` → `effective.pointer` for active, default-filled
 appearance. Edit `document.pointer` and submit the **complete** settings
 document using `PUT /v1/settings`, `{"document": ...}`, with the settings
-revision in `If-Match`. This applies live and saves through the existing atomic
-writer. Inspect its storage receipt; stale writes return409 and invalid pointer
-objects return400 `invalid_settings_pointer` before mutation.
+revision in `If-Match`. This applies live and saves through the atomic
+writer. Inspect its storage receipt; stale writes return 409 and invalid
+pointer objects return 400 `invalid_settings_pointer` before any change.
 
 ```json
 {"shape":"arrow","palette":"pearl","size_px":32,"shadow":true}
 ```
 
 Shapes: `arrow`, `hand`, `precision`. Palettes: `pearl`, `obsidian`, `neon`,
-`amber`. Nominal size24–64 integer physical pixels; up to six additional pixels
-hold antialiasing/shadow. Defaults are arrow/pearl/24/shadow-on. Missing fields
-use defaults; remove the object to reset. Shape-specific hotspots preserve
-pointer hit-testing. One cached vector source drives the pointer; size is
-independent of font scale. Motion does not rerasterize the artwork.
+`amber`. Nominal size 24–64 integer physical pixels; up to six additional
+pixels hold antialiasing and shadow. Defaults are arrow/pearl/24/shadow-on.
+Missing fields use defaults; remove the object to reset. Shape-specific
+hotspots preserve pointer hit-testing. One cached vector source drives the
+pointer; size is independent of font scale. Motion does not rerasterize the
+artwork.
 
 A program may ask for another shape by OSC 22 (below); the settings stay the
 display's own pointer and are never changed by it. `effective.pointer_shown`
@@ -1430,10 +1430,11 @@ is one of the API shapes or a program shape (`text`, `wait`, `move`,
 Program shapes take this palette, size and shadow; the API cannot select them
 as the display's own pointer.
 
-Catalogue `control-panel/blit`0.1.5 registers **Blit Mouse** alongside Blit.
-Appearance and stable-ID device controls share its staged settings draft and
-revision-checked Save. Hibr's separate Mouse pane still owns window behaviour.
-Selecting a different pointer is not a performance or input-latency guarantee.
+The Hibr control panel's `control-panel/blit` catalogue registers **Blit
+Mouse** alongside Blit. Appearance and stable-ID device controls share its
+staged settings draft and revision-checked Save. Hibr's separate Mouse pane
+still owns window behaviour. Selecting a different pointer is not a
+performance or input-latency guarantee.
 
 For direct-KMS pointer stalls, inspect
 `GET /v1/diagnostics/runtime` → `snapshot.render.outputs[].kms_phases`.
@@ -1572,8 +1573,8 @@ and different remaps, which is what makes per-device routing usable.
 `GET /v1/fonts/icons` returns the packaged, versioned catalogue of Blit's own
 colour icons (status icons, the hui badge, telephones, file-manager icons):
 each icon's id, codepoint, how many columns it spans, and the codepoints
-retired and never reused. Authentication is the same as other read endpoints. A
-missing/unreadable/oversized catalogue returns503
+retired and never reused. Authentication is the same as other read
+endpoints. A missing, unreadable or oversized catalogue returns 503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)
 and [full developer glyph reference](font-reference.md) for generated category
@@ -1581,10 +1582,10 @@ tables, semantic IDs, JSON encodings, width/colour rules and safe fallbacks.
 
 `GET /v1/fonts` remains authoritative for the active profile and exact pixel
 size; use `PUT /v1/fonts` to select a font. The icons sit in the glyph stack
-under every font, pixel fonts included (ADR 0195, 0199). Clients must select the documented characters;
-existing ASCII/Unicode/Nerd UI modes do not automatically become multicolour.
-Do not equate the active `glyphs`/`mappings` PSF fallback counters with the
-repertoire of the attached outline/emoji faces.
+under every font, pixel fonts included (ADRs 0195 and 0199). Clients must
+send the documented characters; ASCII, Unicode or Nerd UI modes do not
+become multicolour on their own. The active `glyphs` and `mappings` counts
+describe the primary font file, not the glyph stack's repertoire.
 
 ## Picture frames by descriptor
 
@@ -1620,24 +1621,11 @@ does not include terminal cell contents or framebuffer bytes: pair it with a
 surface snapshot and `GET /v1/diagnostics/screenshots/{display_id}` when pixel
 evidence is required.
 
-`diagnostics.render.presentation_sync` names how frames reach the panel:
-`drm-page-flip`, or `drm-page-flip-async`. Each output's `compositor` says
-whether the GPU (`gles`) or the CPU composed it, and why.
-
 Each `render.outputs[]` entry's `present_calls`, `last_present_ms` and
 `max_present_ms` belongs to that output's resource lifetime and counts
 submitted frames. An idle output does not inherit another output's counts or
 timing. Runtime performance totals remain aggregate counters. Submission does
-not prove physical scanout; flip/vblank evidence is in `kms_scanout`.
-The response reports `effective.display_backend_requested`,
-`effective.display_backend_active` and `effective.presentation_restart_required`.
-Saving leaves current displays/sessions running. Confirm storage is `clean`
-before `POST /v1/control/restart`; verify `/v1/version` and the observation's
-backend/video-driver/renderer identity afterward. Restart recreates sessions
-through the existing login/auxiliary policy. A missing KMS device leaves the
-API reachable for recovery and reports not-ready rather than claiming an
-output exists. Resetting settings restores the boot preference and likewise
-requires restart when it differs from the active path.
+not prove physical scanout; flip and vblank evidence is in `kms_scanout`.
 
 ```sh
 curl --fail --header "Authorization: Bearer $BLIT_AUTH_TOKEN" \
@@ -1666,15 +1654,16 @@ curl --fail --output display.bmp \
   http://HOST:8080/v1/diagnostics/screenshots/display-1
 ```
 
-Use `?cached=1` to inspect the already-composed scene without forcing a fresh
-redraw. A screenshot is evidence of pixels only; pair it with runtime
+The capture is a BMP of the next presented frame; taking it never forces a
+redraw (`?cached=1` is accepted and has no further effect). A screenshot is
+evidence of pixels only; pair it with runtime
 counters, surface snapshots, and trace events before diagnosing a boundary.
 
 For a performance report, capture `/v1/version`, `/v1/displays`, and
 `/v1/diagnostics/runtime` at the start and end of the same bounded workload.
-Compare `present_calls`, `frame_rate_hz`, `surface_commit_hz`, frame/render intervals, missed deadlines, queue
-pressure, and input dispatch counters. Do not report a frame rate from a
-screenshot timestamp or HTTP request latency.
+Compare `present_calls`, `frame_rate_hz`, `surface_commit_hz`, frame/render
+intervals, missed deadlines, queue pressure, and input dispatch counters. Do
+not report a frame rate from a screenshot timestamp or HTTP request latency.
 
 Each `diagnostics.render.outputs[]` entry includes `kms_scanout`. On direct
 KMS, `present_calls` counts submitted frames while
@@ -1705,7 +1694,7 @@ display mode/refresh, workload duration, `present_calls`, measured frame or
 render interval, missed deadlines, input dispatch counters, terminal bytes,
 queue pressure, and the trace window used. “The screen looked slow” is a
 useful observation, but it is not enough to identify whether the producer,
-surface commit, scheduler, renderer, KMS submission, or physical scanout is
+surface commit, scheduler, compositor, KMS submission, or physical scanout is
 the limiting boundary.
 
 ## Effects, overlays, and control
@@ -1721,8 +1710,8 @@ managed child process groups and releases outputs; it cannot restart itself.
 Use the host supervisor to start it again. `/v1/control/restart` requests an
 orderly restart of the exact executable currently serving the API, preserving
 the listen port; this also works for a TCC-built development fixture without
-silently switching to another installed binary. Package installation uses the separate
-`/v1/control/update` flow and must be verified through
+silently switching to another installed binary. Package installation uses the
+separate `/v1/control/update` flow and must be verified through
 `/v1/control/update/status` and `/v1/version`.
 
 ## Stopping the server from the keyboard
@@ -1759,23 +1748,21 @@ than none:
 
 ## Errors and compatibility
 
-Failures use `application/problem+json` with a stable `code`, HTTP status,
-title, detail, and structured context where applicable. Clients must branch on
-the code, not parse human prose. Common codes include `route_not_found`,
-`invalid_request`, `stale_revision`, `unsupported_capability`,
-`hibr_desktop_exists`, and `hibr_desktop_owner_missing`.
+Failures use `application/problem+json` with `type`, `title`, `status`, a
+stable `code` and a prose `detail`. Clients must branch on the code, not
+parse the detail. Common codes include `route_not_found`,
+`method_not_allowed`, `revision_conflict`, `idempotency_conflict`,
+`invalid_if_match`, `hibr_desktop_exists`, and `hibr_desktop_owner_missing`.
 
-The problem response has `type`, `title`, `status`, and stable `code`; many
-failures also include machine-readable context. Log the code, status, request
-correlation data, and safe context. Do not log bearer tokens, update
-credentials, PTY contents, or complete binary payloads. A `404` for an unknown
-route is not evidence that the server is down; verify `/v1/version` and then
-check the requested path against the schema.
+Log the code, status, request correlation data, and safe context. Do not log
+bearer tokens, update credentials, PTY contents, or complete binary payloads.
+A `404` for an unknown route is not evidence that the server is down; verify
+`/v1/version` and then check the requested path against the schema.
 
 Unknown response fields should be ignored. Resource IDs are opaque. Events and
 snapshots carry revisions/sequences so clients can detect gaps and resync from
 the authoritative GET endpoint. A schema or semantic breaking change requires
-a new API version and ADR; changing a renderer implementation does not.
+a new API version and ADR; changing a compositor implementation does not.
 
 ### Recovery table
 
@@ -1783,10 +1770,10 @@ a new API version and ADR; changing a renderer implementation does not.
 | --- | --- | --- |
 | Connection refused | supervisor/process and `/v1/version` | Start or repair the service; do not start a second server on the same port |
 | `404 route_not_found` | API version and OpenAPI path | Correct the route; this is not evidence that rendering failed |
-| `409` ownership/revision | resource `GET` and `hibr-owner` | Resynchronize, then retry with the current revision or repair the stale owner |
-| black or stale display | `/displays`, runtime, screenshot, surface summary | Separate output discovery, producer commits, renderer cadence, and pixels |
+| `409` ownership/revision | resource `GET` and the session's `hibr_desktop` | Resynchronize, then retry with the current revision or repair the stale owner |
+| black or stale display | `/displays`, runtime, screenshot, surface summary | Separate output discovery, producer commits, presentation cadence, and pixels |
 | motion but no click | routes plus `pointer_button` trace | Verify source, button capability, target session, and aggregate state |
-| duplicate desktop | diagnostics and Hibr-owner resources | Retire the stale attachment and keep one primary owner |
+| duplicate desktop | diagnostics and each session's `hibr_desktop` role | Retire the stale attachment and keep one primary owner |
 | slow scene updates | `surface_commit_hz` versus `frame_rate_hz` | Fix the producer boundary; do not label producer cadence as display refresh |
 
 ## Safe client checklist
@@ -1794,8 +1781,8 @@ a new API version and ADR; changing a renderer implementation does not.
 - Pin and verify `api_version` before use.
 - Discover capabilities and output readiness.
 - Keep resource IDs and revisions; use idempotency keys on retries.
-- Treat `409`, `429`, renderer failures, and unavailable outputs as recoverable
-  typed states where the problem code permits.
+- Treat `409`, `503`, compositor failures, and unavailable outputs as
+  recoverable typed states where the problem code permits.
 - Resync authoritative state after a stream gap.
 - Delete temporary sessions, routes, and overlays in cleanup paths.
 - Do not log bearer tokens, update tokens, package bytes, or private paths.

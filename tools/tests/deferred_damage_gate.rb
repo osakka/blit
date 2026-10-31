@@ -21,9 +21,9 @@
 # -- this one, a 12x8 host probe, one at the screensaver's exact 240x135 with a
 # 24x14 sprite, and one writing a cell per request as the live trace showed the
 # owner actually does -- and not one of them failed before the fix and passed
-# after. The development container has no GPU, so every local run uses SDL's
-# software renderer, and the failure has only ever been observed on the host's
-# opengles2 path. What carries the fix is the live measurement: 8407 stale
+# after. The development container had no GPU, so every local run then used
+# SDL's software renderer (SDL is gone since ADR 0184), and the failure was
+# only ever observed on the host's opengles2 path. What carries the fix is the live measurement: 8407 stale
 # cells growing at 96 a second before, a flat 5-9 after, where those few are
 # the race between reading the cells and reading the screenshot.
 #
