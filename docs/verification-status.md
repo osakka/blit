@@ -1,5 +1,24 @@
 # Verification status
 
+## 2026-10-31: 0.3.21 dead diagnostics removed; "delete all" frees descriptor images
+
+- **Dead diagnostics**, found by the documentation sweep. Leftovers of the
+  SDL renderer (ADR 0184), reported but never true:
+  - `performance.pointer_cache_hits`/`misses`: always 0, nothing counted
+    them. Removed from the runtime JSON and the OpenAPI.
+  - `tools/diagnostics/verify-live-physical.sh` failed on a render-path
+    `graphics_changed=1` the server never emits; the check is gone.
+  - `tools/diagnostics/analyze-experience.py` counted
+    `graphics_texture_uploads`, which does not exist, so graphics work never
+    counted as activity. It now uses `graphics_payloads` plus
+    `pixel_frames_accepted`.
+- **`frame_descriptor_gate`** gains the case Hibr's restart wipe relies on
+  (Hibr 0.99.400): `a=d,d=A` frees every image, descriptor-made ones
+  included, even one never placed, and its id then gets `ENOENT`.
+- Roadmap: Super as a drag modifier points at Hibr #415. Blit's half
+  (ADR 0169) is done.
+- **Suites:** font 38/38; full 156/157 (6 skips), the failure `frame_rate_gate` (a full-scene render over its 20 ms budget under the full run), then 3/3 alone (worst render 3.9–5.5 ms); GLES renderer 66/66 (1 skip).
+
 ## 2026-10-31: documentation sweep (after 0.3.20, no release)
 
 Every document checked against the code, not against other documents.

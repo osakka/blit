@@ -240,11 +240,23 @@ def main():
         late = wait_for(lambda: image(session, 12)[0], 'the late frame did not land')
         check(not late.get('visible'), 'an expired placement was applied: %s' % late)
 
+        # 8. a=d,d=A frees every image, descriptor-made ones included, even
+        #    one that was never placed -- how Hibr wipes a display's store
+        #    after a restart (0.99.400) -- and their ids then get ENOENT.
+        client.send(frame(13, 1, 16, 16), memfd(red))
+        wait_for(lambda: image(session, 13)[0], 'an unplaced descriptor image was not kept')
+        run('\\033_Ga=d,d=A,q=2\\033\\\\')
+        wait_for(lambda: not api('GET', '/v1/terminal-sessions/%s' % session).get('graphics'),
+                 'a=d,d=A left images: %s' % [g.get('id') for g in
+                     api('GET', '/v1/terminal-sessions/%s' % session).get('graphics', [])])
+        client.send(frame(13, 2, 16, 16), memfd(red))
+        check(client.reply().startswith(b'ERROR 13 ENOENT'), 'a frame after a=d,d=A was not refused')
+
         frames = image(session, 7)[1]['frames']
         print('FRAME_DESCRIPTOR_PASS token=random hello=token_checked before_placement=kept screen=drawn '
               'newest=wins stale=dropped edit=rectangle refused=unsealed+short+efbig+unknown '
               'kitty_into_descriptor=refused frame_into_kitty=refused after_delete=enoent '
-              'placement_before_frame=held_then_placed expired_placement=refused '
+              'placement_before_frame=held_then_placed expired_placement=refused delete_all=frees_descriptor_images '
               'accepted=%d refused=%d stale=%d wrong_uid=not_tested_without_root'
               % (frames['accepted'], frames['refused'], frames['stale']))
     finally:

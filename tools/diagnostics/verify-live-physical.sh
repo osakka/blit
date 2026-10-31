@@ -35,9 +35,6 @@ physical_motion = [event for event in motion
                    if "device=evdev-pointer" in event.get("detail", "")]
 physical_buttons = [event for event in buttons
                     if "device=evdev-pointer" in event.get("detail", "")]
-full_empty = [event for event in render
-              if "graphics_changed=1" in event.get("detail", "") and
-                 "graphics_images=0" in event.get("detail", "")]
 runtime = read("runtime-end.json").get("performance", {})
 runtime_start = read("runtime-start.json").get("performance", {})
 devices = read("input-devices.json").get("devices", [])
@@ -78,9 +75,6 @@ if not render:
     raise SystemExit(1)
 if runtime.get("missed_deadlines", 0) != 0:
     print("FAIL missed-refresh-deadline")
-    raise SystemExit(1)
-if full_empty:
-    print("FAIL empty-graphics-full-redraw count=%d" % len(full_empty))
     raise SystemExit(1)
 print("LIVE_PHYSICAL_INPUT_PASS")
 PY

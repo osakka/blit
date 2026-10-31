@@ -57,7 +57,8 @@ def main():
     terminal_bytes_delta = delta(end, start, "terminal_bytes")
     surface_commits_delta = delta(end, start, "surface_commits")
     frame_commits_delta = delta(end, start, "frame_commits")
-    graphics_upload_delta = delta(end, start, "graphics_texture_uploads")
+    graphics_delta = (delta(end, start, "graphics_payloads") +
+                      delta(end, start, "pixel_frames_accepted"))
 
     rate = (present_delta / elapsed_s) if elapsed_s else 0.0
     output_rates = []
@@ -83,7 +84,7 @@ def main():
     # re-presented, so present_calls is not a vblank/frame-rate counter. Only
     # classify a low present rate as suspicious while the capture observed
     # active terminal, graphics, or input work.
-    active_scene_work = terminal_bytes_delta > 0 or graphics_upload_delta > 0
+    active_scene_work = terminal_bytes_delta > 0 or graphics_delta > 0
     input_activity = input_delta > 0 or evdev_delta > 0
     if (active_scene_work and output_rates and
             rate < max(1.0, float(output_rates[0].get("refresh_hz") or 0) * 0.5)):
@@ -108,7 +109,7 @@ def main():
             "terminal_bytes": terminal_bytes_delta,
             "surface_commits": surface_commits_delta,
             "frame_commits": frame_commits_delta,
-            "graphics_texture_uploads": graphics_upload_delta,
+            "graphics_payloads_and_pixel_frames": graphics_delta,
         },
         "resources": resources(end),
         "outputs": output_rates,

@@ -1412,8 +1412,6 @@ typedef struct {
     double diagnostic_last_terminal_ms;
     double diagnostic_max_terminal_ms;
     unsigned long long diagnostic_terminal_bytes;
-    unsigned long long diagnostic_pointer_cache_hits;
-    unsigned long long diagnostic_pointer_cache_misses;
     unsigned long long diagnostic_input_events;
     unsigned long long diagnostic_pointer_position_changes;
     double diagnostic_last_input_dispatch_ms;
@@ -3086,8 +3084,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"frame_rate_missed_deadlines\":%llu,"
         "\"frame_rate_window_sequence\":%llu,"
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
-        "\"terminal_bytes\":%llu,\"pointer_cache_hits\":%llu,"
-        "\"pointer_cache_misses\":%llu,\"frame_rate_hz\":%.3f,"
+        "\"terminal_bytes\":%llu,\"frame_rate_hz\":%.3f,"
         "\"input_events\":%llu,\"pointer_position_changes\":%llu,"
         "\"last_input_dispatch_ms\":%.3f,"
         "\"max_input_dispatch_ms\":%.3f,"
@@ -3169,8 +3166,6 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_last_terminal_ms,
         runtime->diagnostic_max_terminal_ms,
         runtime->diagnostic_terminal_bytes,
-        runtime->diagnostic_pointer_cache_hits,
-        runtime->diagnostic_pointer_cache_misses,
         frame_rate_hz,
         runtime->diagnostic_input_events,
         runtime->diagnostic_pointer_position_changes,

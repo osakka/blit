@@ -633,7 +633,7 @@ tools/diagnostics/verify-live-physical.sh \
 
 Exit status `2` means the capture was valid but no physical motion occurred;
 it is not a renderer pass or failure. Exit status `1` means a device,
-render-path, deadline, or empty-graphics redraw invariant failed.
+render-path or deadline invariant failed.
 
 The probe is deliberately synthetic. Physical-device diagnosis uses the same
 capture directory and must additionally show `device_id`/evdev events from
