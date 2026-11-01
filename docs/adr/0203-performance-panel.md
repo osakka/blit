@@ -1,6 +1,8 @@
 # ADR 0203: a performance panel drawn by Blit, with a section Hibr feeds
 
 - Status: proposed
+- Note: reviewed by the Hibr maintainers, 2026-11-01; the frame-socket
+  channel, `HUD1` and their line set are theirs.
 - Date: 2026-11-01
 - Scope: compositor (both), settings, diagnostics, the frame socket, the
   Control Panel's Blit pane
@@ -24,8 +26,9 @@ and for Hibr.
 
 ## Options considered
 
-1. **A Hibr window** fed from the API. Rejected: today every Hibr window is
-   redrawn on every frame (Hibr #418), so the panel would cost what it
+1. **A Hibr window** fed from the API. Rejected: on the owner's desktop
+   today every window is redrawn on every frame (Hibr #418; the cause is
+   under investigation, not the design), so the panel would cost what it
    measures. It also dies with the desktop, and it can't be seen at the
    login screen.
 2. **Two panels**, one per project. Rejected: two places to look, and two
@@ -67,19 +70,34 @@ Option 3.
   and reads 0. Either it follows the desktop or it goes. Glyph cache hits
   and misses are counted for the first time; nothing else is shown as
   hits/misses.
-- **Hibr's section.** Hibr's desktop has no API token (by design since Hibr
-  0.99.357), so it can't push through the API. It sends a few short
-  `key=value` lines about once a second, and Blit shows them under "hibr",
-  with their age. Proposed lines: desktop fps, cpu %, the longest callback
-  in the last second (name and ms), what woke it most (`woke`), frames and
-  bytes sent per display. The channel is Hibr's to choose with us:
-  - **the frame socket** (ADR 0202): authenticated, already open, local
-    only. A new message type, `STA1`, carries up to 8 lines of up to 64
-    bytes. A remote Hibr shows no section.
-  - **an OSC escape on the PTY**: works remotely too, but is not
-    authenticated, so any program on that terminal could write those lines.
-    Display-only and bounded, but anyone could write to them.
-  Blit prefers the frame socket.
+- **Hibr's section**, sent over the frame socket (ADR 0202). Hibr's desktop
+  has no API token (by design since Hibr 0.99.357). The frame socket is
+  authenticated and already open, and it is local only, so a remote Hibr
+  shows no section, which is fine.
+  - **Asked for, not pushed.** A client that says version 2 in its hello
+    may be sent `HUD1 on\n` or `HUD1 off\n`: on when the panel is shown
+    with the `hibr` section on a display that session feeds, off when it
+    stops. A version 1 client never receives one, so today's clients see
+    only error replies, as before. Hibr times itself only while it is on;
+    its timing runs a little code around every callback.
+  - **`STA1`**, client to Blit, about once a second while on: up to 8 lines
+    of up to 64 bytes each, `key=value` text. More lines or longer ones are
+    refused with `EINVAL`. Blit shows the latest under "hibr", with its
+    age, and drops it 5 s after the last one.
+  - **Through hold.** On a held desktop, frames go console → hold's server →
+    the attaching client → Blit, and `STA1` and `HUD1` travel the same path
+    in both directions, so hold forwards them.
+  - **Hibr's lines** (theirs to define; at present):
+    1. `fps=` frames/s, `wakes=` wakes/s;
+    2. `cpu=` desktop self + children %;
+    3. `slow=` the longest single callback in the last second and its ms
+       (`max_ms`, Hibr ADR 0049);
+    4. `woke=` the top two wake sources and their counts;
+    5. `drawn=` windows drawn/left this second and the top `drawn_why`;
+    6. `frame=` the desktop's own draw time, average and max ms;
+    7. `held=` callbacks over 150 ms in the last minute;
+    8. `flush=` average ms, and `live=` while a film or game paces frames.
+    Frames and bytes per display are Blit's own counts and aren't repeated.
 - **Control.** A `hud` object in the settings document: `enabled`,
   `display_id` (or `all`), `corner`, `hz`, `sections` (`blit`, `hibr`,
   `graph`). It is persisted and revisioned like every setting and changed
@@ -95,7 +113,8 @@ Option 3.
   `hud.hz`. Off, it costs nothing.
 - Hibr's numbers are only as fresh as Hibr sends them; Blit shows their age
   and never fetches them.
-- Hibr's work: send the status lines, and say which channel.
+- Hibr's work: in the desktop, send `STA1` through the console while
+  `HUD1` is on; in hold, forward both ways.
 
 ## Verification
 
@@ -103,6 +122,8 @@ Option 3.
   screenshot; on, it is present, its text matches `/v1/diagnostics/runtime`,
   and over an idle 5 s the frame count rises by no more than `hud.hz` × 5,
   all counted as `hud_frames`. Update time is under budget.
-- The frame-socket gate: `STA1` lines appear in the panel; oversize lines and
-  more than 8 are refused with `EINVAL`.
+- The frame-socket gate: a version 2 client gets `HUD1 on` when the panel
+  with a hibr section is shown and `HUD1 off` when it goes; a version 1
+  client gets neither. `STA1` lines appear in the panel; oversize lines and
+  more than 8 are refused with `EINVAL`; lines older than 5 s are dropped.
 - The documentation gate: blit(8) (`BLIT_HUD`), the API guide, a features row.
