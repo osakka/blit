@@ -268,15 +268,28 @@ static void kms_retry_deadline_gate(void)
         ++failures;
     }
     runtime->diagnostic_frame_rate_frames = 1;
-    record_kms_frame_submission(runtime, 0);
+    record_kms_frame_submission(runtime, 0, 0);
     if (runtime->diagnostic_frame_rate_frames != 0 || runtime->diagnostic_present_calls != 0) {
         fprintf(stderr, "KMS_RETRY_FAIL deferred attempt counted as presentation\n");
         ++failures;
     }
     runtime->diagnostic_frame_rate_frames = 1;
-    record_kms_frame_submission(runtime, 3);
+    record_kms_frame_submission(runtime, 3, 0);
     if (runtime->diagnostic_frame_rate_frames != 1 || runtime->diagnostic_present_calls != 2) {
         fprintf(stderr, "KMS_RETRY_FAIL actual output submissions not counted\n");
+        ++failures;
+    }
+    /* ADR 0203: a present only for the performance panel is a present, not
+       a frame; one with any other output is still a frame. */
+    record_kms_frame_submission(runtime, 1, 1);
+    if (runtime->diagnostic_frame_rate_frames != 0 || runtime->diagnostic_present_calls != 3) {
+        fprintf(stderr, "KMS_RETRY_FAIL a panel-only present counted as a frame\n");
+        ++failures;
+    }
+    runtime->diagnostic_frame_rate_frames = 1;
+    record_kms_frame_submission(runtime, 3, 1);
+    if (runtime->diagnostic_frame_rate_frames != 1 || runtime->diagnostic_present_calls != 5) {
+        fprintf(stderr, "KMS_RETRY_FAIL a frame with a panel update was not counted\n");
         ++failures;
     }
     free(runtime);

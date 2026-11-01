@@ -1,5 +1,63 @@
 # Verification status
 
+## 2026-11-01: 0.3.22 the performance panel (ADR 0203)
+
+- **What:** a "stats for nerds" panel drawn by Blit over everything, asked
+  for by the owner and designed with the Hibr maintainers (ADR 0203,
+  accepted). The panel shows:
+  - fps against the refresh rate, and the mode;
+  - missed deadlines and late flips;
+  - the compositor and why, and the renderer;
+  - render, present, loop-gap and input times;
+  - Kitty, Sixel and descriptor-frame rates, and refusals;
+  - errors, and glyph-cache hits and misses;
+  - a 60 s graph of each second's worst present time;
+  - a Hibr section from the lines Hibr sends.
+
+  It is the `hud` object in the settings document (`BLIT_HUD=1` at start)
+  and a switch in the Control Panel's Blit pane (pane 0.1.20).
+- **Light by construction:**
+  - It updates at `hud.hz` (default 2); only while on does it ever wake the
+    loop.
+  - It is an opaque bitmap in the boot PSF, copied after the overlays in
+    the CPU compositor and one texture quad in GLES.
+  - Panel-only presents are counted as `hud_frames` and kept out of
+    `frame_rate_hz`.
+  - Measured: mean update 0.33 ms (CPU) and 0.38 ms (GLES), with a worst
+    of 0.56 ms; over an idle 5 s at 2 Hz, 10 presents, all `hud_frames`.
+- **Frame socket version 2** (ADR 0202): `HUD1 on|off` to version 2
+  clients only, and `STA1` status lines from them. The count is
+  little-endian and only a check against the newlines; up to 8 lines of up
+  to 64 bytes. They are shown for 5 s and exposed as the session's
+  `status`.
+- **Counters made true:**
+  - `desktop_cpu_ms` now sums the desktop owner's process tree. It followed
+    the login wrapper and read 0, while `desktop:desktop` used 30%.
+  - `glyph_cache_hits`/`misses` are counted for the first time.
+- **Gates:**
+  - `performance_panel_gate.rb` (renderer suite, both compositors):
+    - off: absent;
+    - on: the heading and compositor lines match the PSF pixel for pixel,
+      with the exact border and background;
+    - idle presents within budget;
+    - off again: the region repainted byte-identically.
+  - `frame_descriptor_gate` gains version 2: HUD1 on, off, after OK and
+    steady across unrelated settings writes; never to version 1. STA1 is
+    accepted and shown, and refused for v1, 9 lines, 65 bytes, a count
+    mismatch, no newline, a control character, count 0 and an attached
+    descriptor. Lines expire after 5 s.
+- **Control Panel pane 0.1.20 (hibr-apps):** `blit_panel_gate`,
+  `blit_ui_gate` and `blit_mouse_gate` pass against this server. The UI
+  gate failed once ("hold: no such session" before the pane loaded) and
+  passed twice after.
+- **Not yet seen on hardware**, nor with a real Hibr version 2 client.
+- **Suites:** font 38/38. The full suite was 157/158 (6 skips) and GLES
+  renderer 66/67: both failed only `surface_damage_gate`, which no longer
+  compiled (`record_kms_frame_submission` gained the panel-only mask). The
+  gate now passes the mask and adds two cases: a panel-only present counts
+  as a present and not a frame, while a frame that also updates the panel
+  is still a frame. It then passes on both compositors.
+
 ## 2026-10-31: 0.3.21 dead diagnostics removed; "delete all" frees descriptor images
 
 - **Dead diagnostics**, found by the documentation sweep. Leftovers of the

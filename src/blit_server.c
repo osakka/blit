@@ -786,10 +786,33 @@ typedef struct {
     int authenticated;
     unsigned long long session_id;
     uid_t uid;  /* the peer's, from SO_PEERCRED at the hello */
+    int version;  /* the hello's, 1 or 2 */
+    int hud_on;   /* the last HUD1 sent, to a version 2 client */
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64
 #define BLIT_FRAME_PENDING 8
+#define BLIT_HUD_STATUS_LINES 8
+#define BLIT_HUD_STATUS_BYTES 64
+#define BLIT_HUD_STATUS_US 5000000ULL
+#define BLIT_HUD_LINES (12 + 1 + BLIT_HUD_STATUS_LINES)
+#define BLIT_HUD_COLUMNS 64
+#define BLIT_HUD_GRAPH 60
+
+/* ADR 0203: the performance panel on one output: its pixels and place,
+   the text drawn into it (also reported), a revision that changes only
+   with the pixels, and the graph's samples, one a second. */
+typedef struct {
+    unsigned char *rgba;
+    size_t capacity;
+    int x, y, width, height;
+    unsigned long long revision, signature;
+    char lines[BLIT_HUD_LINES][BLIT_HUD_COLUMNS * 4 + 1];
+    int line_count;
+    float graph[BLIT_HUD_GRAPH];
+    int graph_next;
+    double graph_second_ms;
+} BlitHudPanel;
 #define BLIT_FRAME_PENDING_US 2000000ULL
 
 /* ADR 0202: an a=p that arrived on the PTY before its image's first frame
@@ -885,6 +908,10 @@ typedef struct {
     char frames_last_error[32];
     int frame_connections;
     BlitPendingPlacement frame_pending[BLIT_FRAME_PENDING];
+    /* ADR 0203: the latest STA1 from a frame client, for the panel. */
+    char status_lines[BLIT_HUD_STATUS_LINES][BLIT_HUD_STATUS_BYTES + 1];
+    int status_count;
+    uint64_t status_us;
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -1535,6 +1562,20 @@ typedef struct {
     char frame_name[64];
     BlitFrameClient frame_clients[32];
     unsigned long long frames_accepted, frames_refused;
+    char frames_last_error[32];
+    /* ADR 0203: the performance panel. The settings document's hud section
+       as applied, the update clock, its cost, and each output's panel. */
+    int hud_enabled, hud_corner, hud_hz;
+    unsigned hud_sections;
+    char hud_display_id[32];
+    uint64_t hud_next_us, hud_graph_us, hud_rates_us;
+    unsigned long long hud_updates;
+    double hud_last_update_ms, hud_max_update_ms, hud_update_total_ms;
+    unsigned long long hud_rates_kitty, hud_rates_sixel, hud_rates_frames;
+    double hud_kitty_hz, hud_sixel_hz, hud_frames_hz;
+    BlitFont hud_font;
+    int hud_font_loaded;
+    BlitHudPanel hud_panels[BLIT_MAX_DISPLAYS];
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -1662,6 +1703,15 @@ static char blit_version[64] = BLIT_BUILD_VERSION;
 
 static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *plan,
                            uint32_t output_mask, int hold_scene);
+/* ADR 0203: the performance panel (blit_hud.h) and its frame-socket half. */
+static int settings_hud_valid(const char *document);
+static void settings_apply_hud(BlitRuntime *runtime);
+static size_t hud_settings_json(const BlitRuntime *runtime, char *out, size_t capacity);
+static void hud_json(const BlitRuntime *runtime, char *body, size_t capacity);
+static void hud_tick(BlitRuntime *runtime, uint64_t now);
+static void hud_reconcile(BlitRuntime *runtime);
+static void hud_note_present(BlitRuntime *runtime, int output, double present_ms);
+static void frame_hud_notify(BlitRuntime *runtime);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
@@ -2218,6 +2268,13 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
         if (next <= now) { wait_ms = 0; break; }
         if ((int)((next - now + 999ULL) / 1000ULL) < wait_ms)
             wait_ms = (int)((next - now + 999ULL) / 1000ULL);
+    }
+    /* The performance panel's next update, only while it is on. */
+    if (runtime->hud_next_us != 0) {
+        if (runtime->hud_next_us <= now)
+            wait_ms = 0;
+        else if ((int)((runtime->hud_next_us - now + 999ULL) / 1000ULL) < wait_ms)
+            wait_ms = (int)((runtime->hud_next_us - now + 999ULL) / 1000ULL);
     }
     if (!runtime->render_pending)
         return wait_ms;
@@ -2921,6 +2978,86 @@ static double diagnostic_owner_cpu_ms(pid_t pid, unsigned long long expected_sta
     return start == expected_start ? (double)(user + system) * 1000.0 / ticks : -1;
 }
 
+/* The signed-in desktop's CPU: the process Hibr names as its owner and
+   every process under it, each with the children it has reaped, so the
+   desktop proper (a child of the process the login started) and whatever it
+   runs are counted. A child that exits unreaped by the tree drops out, so
+   the sum can step down; callers diff two samples. The root's start time
+   guards against a reused pid. It reads every process of the owner's, so
+   a sum is kept for a second: a script polling the runtime diagnostics
+   must not stall the loop it measures. */
+static double diagnostic_tree_cpu_ms(pid_t root, unsigned long long expected_start,
+                                     uid_t uid)
+{
+    enum { MAX = 4096 };
+    static long pids[MAX], parents[MAX];
+    static unsigned long long ticks_used[MAX];
+    static int tree[MAX];
+    static pid_t cached_root;
+    static unsigned long long cached_start;
+    static uint64_t cached_us;
+    static double cached;
+    uint64_t now = monotonic_us();
+    long ticks = sysconf(_SC_CLK_TCK);
+    char path[64];
+    double total = 0;
+    int count = 0, members = 0, i, k;
+    DIR *proc;
+    struct dirent *entry;
+
+    if (root <= 1 || !expected_start || ticks <= 0 ||
+        diagnostic_owner_cpu_ms(root, expected_start) < 0)
+        return -1;
+    if (cached_us != 0 && root == cached_root && expected_start == cached_start &&
+        now - cached_us < 1000000ULL)
+        return cached;
+    proc = opendir("/proc");
+    while (proc != NULL && count < MAX && (entry = readdir(proc)) != NULL) {
+        char data[1024], *cursor, *save, *field, *end;
+        unsigned long long used = 0;
+        long pid = strtol(entry->d_name, &end, 10), ppid = 0;
+        int fd, number = 3;
+        ssize_t length;
+        struct stat info;
+        if (*end != 0 || pid <= 0) continue;
+        snprintf(path, sizeof(path), "/proc/%ld", pid);
+        if (stat(path, &info) != 0 || info.st_uid != uid) continue;
+        snprintf(path, sizeof(path), "/proc/%ld/stat", pid);
+        fd = open(path, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        length = read(fd, data, sizeof(data) - 1);
+        close(fd);
+        if (length <= 0) continue;
+        data[length] = 0;
+        cursor = strrchr(data, ')');
+        if (cursor == NULL) continue;
+        for (field = strtok_r(cursor + 1, " ", &save); field;
+             field = strtok_r(NULL, " ", &save), ++number) {
+            if (number == 4) ppid = strtol(field, NULL, 10);
+            if (number >= 14 && number <= 17) used += strtoull(field, NULL, 10);
+            if (number == 17) break;
+        }
+        if (pid == (long)root) tree[members++] = count;
+        pids[count] = pid;
+        parents[count] = ppid;
+        ticks_used[count] = used;
+        ++count;
+    }
+    if (proc != NULL) closedir(proc);
+    /* Outward from the root: each member's children join the list once. */
+    for (k = 0; k < members; ++k) {
+        total += (double)ticks_used[tree[k]] * 1000.0 / (double)ticks;
+        for (i = 0; i < count; ++i)
+            if (parents[i] == pids[tree[k]] && pids[i] != (long)root)
+                tree[members++] = i;
+    }
+    cached_root = root;
+    cached_start = expected_start;
+    cached_us = now;
+    cached = total;
+    return total;
+}
+
 /* The logged-in owner's processes, busiest first by cumulative CPU, so a
    desktop that is slow because something upstream of Blit is saturating a
    core can be diagnosed through the API. Callers diff two samples. */
@@ -3028,7 +3165,8 @@ static void diagnostic_processes_json(const BlitRuntime *runtime, char *body,
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
-    char snapshot[8192];
+    /* /v1/diagnostics whole: an entry per output and the panels' lines. */
+    static char snapshot[BLIT_MAX_DISPLAYS * 5120 + 16384];
     size_t used;
     int count;
     int first;
@@ -3041,6 +3179,8 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     struct rusage process_usage;
     double process_cpu_ms = 0, desktop_cpu_ms = -1, system_load = 0;
     char desktop_cpu[64] = "null";
+    unsigned long long glyph_hits = 0, glyph_misses = 0;
+    blit_raster_cache_counts(runtime->font.raster_state, &glyph_hits, &glyph_misses);
     memset(&process_usage, 0, sizeof(process_usage));
     if (!getrusage(RUSAGE_SELF, &process_usage))
         process_cpu_ms = (process_usage.ru_utime.tv_sec + process_usage.ru_stime.tv_sec) * 1000.0 +
@@ -3048,7 +3188,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
     for (index = 0; index < BLIT_MAX_SESSIONS; ++index) {
         BlitSession *session = &runtime->sessions[index];
         if (session->used && session->login_manager && session->login_identity_state == 2) {
-            desktop_cpu_ms = diagnostic_owner_cpu_ms(session->login_desktop_pid, session->login_desktop_start_ticks);
+            desktop_cpu_ms = diagnostic_tree_cpu_ms(session->login_desktop_pid,
+                                                    session->login_desktop_start_ticks,
+                                                    session->login_identity_uid);
             break;
         }
     }
@@ -3119,6 +3261,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"graphics_payloads_rejected\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
         "\"pixel_frames_pending\":%llu,"
+        "\"glyph_cache_hits\":%llu,\"glyph_cache_misses\":%llu,"
         "\"frame_rate_frames\":%llu,\"frame_rate_window_ms\":%llu,"
         "\"frame_rate_age_ms\":%llu,\"loop_iterations\":%llu,"
         "\"terminal_reads\":%llu,\"surface_commits\":%llu,"
@@ -3212,6 +3355,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->pixel_frames_accepted,
         runtime->pixel_frame_errors,
         diagnostic_pixel_frames_pending(runtime),
+        glyph_hits, glyph_misses,
         runtime->diagnostic_frame_rate_last_frames,
         runtime->diagnostic_frame_rate_window_ms, frame_rate_age_ms,
         runtime->diagnostic_loop_iterations,
@@ -3435,7 +3579,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
                 "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu,"
-                "\"submit_phase_ms\":{\"on_time\":[%s],\"late\":[%s]}}}",
+                "\"submit_phase_ms\":{\"on_time\":[%s],\"late\":[%s]}},"
+                "\"hud_frames\":%llu}",
                 have_kms_info ? kms_info.compositor : "unavailable",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "unavailable"),
@@ -3472,7 +3617,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.flips_on_time : 0ULL,
                 have_kms_info ? kms_info.flips_late : 0ULL,
                 (unsigned long long)(i < BLIT_MAX_DISPLAYS ? runtime->kms_slot_misses[i] : 0),
-                phase_on_time, phase_late);
+                phase_on_time, phase_late,
+                have_kms_info ? kms_info.hud_frames : 0ULL);
         }
     }
     if (used < capacity)
@@ -3489,6 +3635,8 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
        and flip details: sized for every output Blit can have, so a third
        display never truncates the array mid-entry. */
     static char scheduler[BLIT_MAX_DISPLAYS * 3072 + 64];
+    /* ADR 0203: a panel's lines with its place, per output. */
+    static char hud[BLIT_MAX_DISPLAYS * 2048 + 512];
     char hotplug[512];
     char hotplug_error[256];
     BlitKmsHotplugInfo hotplug_info;
@@ -3514,6 +3662,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
         if (runtime->input_devices[i].used) ++input_devices;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
+    hud_json(runtime, hud, sizeof(hud));
     blit_kms_hotplug_info(runtime->kms, &hotplug_info);
     json_escape(hotplug_info.error, hotplug_error, sizeof(hotplug_error));
     snprintf(hotplug, sizeof(hotplug),
@@ -3682,7 +3831,9 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"max_height\":%d,\"max_bytes\":%lu,"
              "\"sixel_max_width\":%d,\"sixel_max_height\":%d,"
              "\"sixel_color_registers\":%d,"
-             "\"frames\":{\"socket\":\"%s%s\",\"accepted\":%llu,\"refused\":%llu}},"
+             "\"frames\":{\"socket\":\"%s%s\",\"accepted\":%llu,\"refused\":%llu,"
+             "\"last_error\":\"%s\"}},"
+             "\"hud\":%s,"
              "\"errors\":%s,\"warnings\":%s}",
              runtime->kms != NULL && runtime->display_count > 0 ?
                  "true" : "false", backend, escaped_error,
@@ -3711,6 +3862,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              BLIT_SIXEL_COLOR_REGISTERS,
              runtime->frame_fd >= 0 ? "@" : "", runtime->frame_fd >= 0 ? runtime->frame_name : "",
              runtime->frames_accepted, runtime->frames_refused,
+             runtime->frames_last_error, hud,
              errors,
              warnings);
 }
@@ -15319,7 +15471,29 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         "\"superseded\":%lu,\"last_error\":\"%s\"}",
         session->frames_accepted, session->frames_refused, session->frames_stale,
         session->frames_superseded, session->frames_last_error);
-    snprintf(body + used, capacity - used, "}");
+    /* ADR 0203: the latest STA1 lines from its frame client, while they are
+       younger than the five seconds the panel shows them for. */
+    {
+        uint64_t now = monotonic_us();
+        if (session->status_count > 0 && now >= session->status_us &&
+            now - session->status_us < BLIT_HUD_STATUS_US) {
+            int line;
+            used += (size_t)snprintf(body + used, capacity - used, ",\"status\":{\"lines\":[");
+            for (line = 0; line < session->status_count && used < capacity; ++line) {
+                char escaped[BLIT_HUD_STATUS_BYTES * 6 + 1];
+                json_escape(session->status_lines[line], escaped, sizeof(escaped));
+                used += (size_t)snprintf(body + used, capacity - used, "%s\"%s\"",
+                                         line ? "," : "", escaped);
+            }
+            if (used < capacity)
+                used += (size_t)snprintf(body + used, capacity - used, "],\"age_ms\":%llu}",
+                                         (unsigned long long)((now - session->status_us) / 1000ULL));
+        } else {
+            used += (size_t)snprintf(body + used, capacity - used, ",\"status\":null");
+        }
+    }
+    if (used < capacity)
+        snprintf(body + used, capacity - used, "}");
 }
 
 static const char *pane_surface_id(const BlitRuntime *runtime,
@@ -21889,6 +22063,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
     BlitLoginPolicy effective;
     char login[512];
     char environment_value[512];
+    char hud[256];
     const char *backend_env = getenv("BLIT_DISPLAY_BACKEND");
     int restart_required;
 
@@ -21910,6 +22085,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
 
     settings_build(runtime, document, sizeof(document),
                    runtime->settings_revision);
+    hud_settings_json(runtime, hud, sizeof(hud));
     json_appendf(body, capacity, &used,
                  "{\"revision\":%llu,\"path\":\"%s\",\"persisted\":%s,"
                  "\"storage\":{\"state\":\"%s\",\"saved_revision\":%llu,"
@@ -21925,7 +22101,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
                  "\"size_px\":%d,\"shadow\":%s},"
-                 "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s}}}",
+                 "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s},"
+                 "\"hud\":%s}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled ? "true" : "false",
                  !runtime->settings_enabled ? "disabled" :
@@ -21954,7 +22131,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  blit_pointer_shapes[runtime->pointer_shown_art.revision ?
                      runtime->pointer_shown_art.config.shape :
                      runtime->pointer_art.config.shape],
-                 runtime->pointer_hidden ? "true" : "false");
+                 runtime->pointer_hidden ? "true" : "false", hud);
 }
 
 /* A read-only, point-in-event-loop-turn state dump for operators and
@@ -22116,6 +22293,7 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     ++runtime->settings_revision;
     settings_apply_pointer(runtime);
     settings_apply_effects(runtime);
+    settings_apply_hud(runtime);
     if (remove_file) {
         runtime->settings_saved_revision = runtime->settings_revision;
         runtime->settings_write_reported = 0;
@@ -23498,6 +23676,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "effects maps an output name to pane ordinals (1 through 64), each to named effects with their one parameter: scanlines {intensity 0..100}, corners {radius_px 0..1024}.");
                 return;
             }
+            if (!settings_hud_valid(document)) {
+                send_problem(fd, 400, "Bad Request", "invalid_settings_hud",
+                             "hud accepts enabled (boolean), display_id (display-N or all), corner (top-left, top-right, bottom-left or bottom-right), hz (1 through 10) and sections (unique blit, hibr, graph).");
+                return;
+            }
             if (!requested_layout) {
                 requested_columns = runtime->boot_pane_columns;
                 requested_rows = runtime->boot_pane_rows;
@@ -23523,6 +23706,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             settings_apply_server(runtime);
             settings_apply_pointer(runtime);
             settings_apply_effects(runtime);
+            settings_apply_hud(runtime);
             display_layouts_materialize(runtime, 0);
             settings_apply_pane_layout(runtime, old_columns, old_rows);
             reset_render_schedule(runtime, monotonic_us());
@@ -25768,13 +25952,15 @@ static void finish_render_diagnostics(BlitRuntime *runtime,
 }
 
 static void record_kms_frame_submission(BlitRuntime *runtime,
-                                         uint32_t submitted)
+                                         uint32_t submitted, uint32_t hud_only)
 {
     int i;
     /* The window was incremented on entry to render_outputs. A deferred or
        unchanged attempt is not a presented frame. Count each actual output
-       submission in present_calls, and one successful composition in FPS. */
-    if (submitted == 0 && runtime->diagnostic_frame_rate_frames > 0)
+       submission in present_calls, and one successful composition in FPS.
+       A frame presented only for the performance panel is left out of FPS,
+       which the panel shows (ADR 0203); present_calls keeps it. */
+    if ((submitted & ~hud_only) == 0 && runtime->diagnostic_frame_rate_frames > 0)
         --runtime->diagnostic_frame_rate_frames;
     for (i = 0; i < runtime->output_count; ++i)
         if (submitted & (1U << i))
@@ -25842,6 +26028,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
     double kms_present_ms;
     uint32_t kms_submitted_output_mask = 0;
     uint32_t kms_deferred_output_mask = 0;
+    unsigned long long hud_frames[BLIT_MAX_DISPLAYS];
+    uint32_t hud_only_mask = 0;
     int surface_index;
     int overlay_index;
     unsigned long long visual_revision;
@@ -25983,6 +26171,10 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         }
         ++view_count;
     }
+    for (surface_index = 0; runtime->hud_enabled && surface_index < runtime->output_count &&
+         surface_index < BLIT_MAX_DISPLAYS; ++surface_index)
+        hud_frames[surface_index] = blit_kms_hud_frames(
+            runtime->kms, display_index_for_output(runtime, surface_index));
     kms_present_started = monotonic_us();
     if (blit_kms_present(runtime->kms, views, view_count,
                          runtime->pointer_x, runtime->pointer_y,
@@ -26070,7 +26262,13 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
        differently phased secondary output. */
     runtime->pointer_dirty_outputs &= ~kms_submitted_output_mask;
     runtime->pointer_dirty = runtime->pointer_dirty_outputs != 0;
-    record_kms_frame_submission(runtime, kms_submitted_output_mask);
+    for (surface_index = 0; runtime->hud_enabled && surface_index < runtime->output_count &&
+         surface_index < BLIT_MAX_DISPLAYS; ++surface_index) {
+        int display_index = display_index_for_output(runtime, surface_index);
+        if (blit_kms_hud_frames(runtime->kms, display_index) != hud_frames[surface_index])
+            hud_only_mask |= 1U << surface_index;
+    }
+    record_kms_frame_submission(runtime, kms_submitted_output_mask, hud_only_mask);
     finish_render_diagnostics(runtime, diagnostic_render_started);
 }
 
@@ -28976,6 +29174,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
     remove_http_client(runtime, index);
 }
 
+#include "blit_hud.h"
 #include "blit_frames.h"
 
 int main(int argc, char **argv)
@@ -29282,6 +29481,7 @@ int main(int argc, char **argv)
         settings_apply_server(&runtime);
         settings_apply_pointer(&runtime);
         settings_apply_effects(&runtime);
+        settings_apply_hud(&runtime);
         settings_apply_login_at_boot(&runtime);
         if (runtime.kms_async_pageflip)
             setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
@@ -29836,6 +30036,8 @@ int main(int argc, char **argv)
                 all_output_mask(&runtime) : hibr_frame_barrier_held(&runtime, now);
             kms_check_slots(&runtime, now, held);
             effects_animation_tick(&runtime, now);
+            hud_reconcile(&runtime);
+            hud_tick(&runtime, now);
             if (blit_vt_active() && runtime.render_pending &&
                 (output_mask = due_output_mask(&runtime, now)) != 0) {
                 /* A held output may present only the pointer, over its
@@ -29864,6 +30066,7 @@ int main(int argc, char **argv)
                     if (kms_info.present_calls != runtime.output_present_calls[i]) {
                         runtime.output_present_calls[i] = kms_info.present_calls;
                         runtime.output_presented_us[i] = now;
+                        hud_note_present(&runtime, i, kms_info.last_present_ms);
                     }
                 }
                 blit_vt_phase("loop: after render");
@@ -29939,6 +30142,12 @@ int main(int argc, char **argv)
        GPU. */
     if (runtime.gles_guard_active) unlink(runtime.gles_guard_path);
     blit_font_free(&runtime.font);
+    blit_font_free(&runtime.hud_font);
+    {
+        int panel;
+        for (panel = 0; panel < BLIT_MAX_DISPLAYS; ++panel)
+            free(runtime.hud_panels[panel].rgba);
+    }
     blit_vt_close();
     if (blit_restart_requested) {
         restart_server_process(&runtime);

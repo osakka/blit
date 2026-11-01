@@ -48,6 +48,10 @@ struct KmsGlesResources {
     BlitGlesTexture pointer;
     unsigned long long pointer_revision;
     int pointer_width, pointer_height;
+    /* ADR 0203: each output's panel, uploaded when its revision changes. */
+    BlitGlesTexture hud[KMS_MAX_OUTPUTS];
+    unsigned long long hud_revision[KMS_MAX_OUTPUTS];
+    int hud_width[KMS_MAX_OUTPUTS], hud_height[KMS_MAX_OUTPUTS];
     /* The font the sprites were made from. A replaced font can land at the
        same addresses as the one it replaced, so its path and cell size are
        compared too, and any change empties the atlas. */
@@ -78,6 +82,8 @@ static void kms_gles_resources_free(BlitKms *kms)
         blit_gles_texture_delete(kms->gles, r->corners);
         for (i = 0; i < KMS_IMAGE_TEXTURES; ++i)
             blit_gles_texture_delete(kms->gles, r->images[i].texture);
+        for (i = 0; i < KMS_MAX_OUTPUTS; ++i)
+            blit_gles_texture_delete(kms->gles, r->hud[i]);
     }
     free(r->scratch_black);
     free(r->scratch_white);
@@ -649,7 +655,8 @@ effects:
 }
 
 /* The output's frame: the scene (views recomposed as needed, held ones
-   kept), then overlays and the pointer over it, as the CPU path layers them.
+   kept), then overlays, the panel and the pointer over it, as the CPU path
+   layers them.
    Returns 0, or -1 having dropped the output to the CPU compositor. */
 static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
                             const BlitKmsSurfaceView *views, int view_count,
@@ -799,6 +806,34 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         blit_gles_rect(kms->gles, overlay->x, overlay->y, overlay->width,
                        overlay->height, overlay->color,
                        (unsigned)(overlay->opacity * 255 / 100));
+    }
+    {
+        /* ADR 0203: the panel, opaque, 1:1 -- the CPU path's copy. */
+        const BlitKmsHud *hud = output_hud(kms, output);
+        int slot = (int)(output - kms->outputs);
+        if (hud != NULL && slot >= 0 && slot < KMS_MAX_OUTPUTS) {
+            if (r->hud[slot] == 0 || r->hud_revision[slot] != hud->revision ||
+                r->hud_width[slot] != hud->width || r->hud_height[slot] != hud->height) {
+                long long started = kms_now_us();
+                if (r->hud[slot] == 0 || r->hud_width[slot] != hud->width ||
+                    r->hud_height[slot] != hud->height) {
+                    blit_gles_texture_delete(kms->gles, r->hud[slot]);
+                    r->hud[slot] = blit_gles_texture_create(kms->gles, hud->width,
+                                                            hud->height, 4);
+                }
+                if (r->hud[slot])
+                    blit_gles_texture_update(kms->gles, r->hud[slot], 4, 0, 0, hud->width,
+                                             hud->height, hud->rgba, hud->width * 4);
+                r->hud_revision[slot] = hud->revision;
+                r->hud_width[slot] = hud->width;
+                r->hud_height[slot] = hud->height;
+                r->upload_us += kms_now_us() - started;
+            }
+            if (r->hud[slot])
+                blit_gles_quad(kms->gles, BLIT_GLES_IMAGE, r->hud[slot], hud->width,
+                               hud->height, 0, 0, hud->width, hud->height,
+                               hud->x, hud->y, hud->width, hud->height, 0);
+        }
     }
     if (pointer_intersects_output(output, pointer_x, pointer_y, pointer_visible)) {
         int x = (int)pointer_x - output->info.x, y = (int)pointer_y - output->info.y;

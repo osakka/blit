@@ -86,6 +86,19 @@ typedef struct {
     int opacity;
 } BlitKmsOverlay;
 
+/* ADR 0203: the performance panel, an opaque RGBA picture made by the
+   server, laid over one output after the overlays and under the pointer.
+   The revision changes only when its pixels do. */
+typedef struct {
+    unsigned long long display_id;
+    int x;
+    int y;
+    int width;
+    int height;
+    const unsigned char *rgba;
+    unsigned long long revision;
+} BlitKmsHud;
+
 typedef struct {
     unsigned long long id;
     char name[128];
@@ -167,6 +180,8 @@ typedef struct {
        and the glowing line's phase in the last frame that drew it. */
     unsigned long long effects_animation_frames;
     double effects_animation_phase;
+    /* ADR 0203: frames presented only because the panel changed. */
+    unsigned long long hud_frames;
 } BlitKmsDisplayInfo;
 
 typedef struct {
@@ -194,6 +209,8 @@ const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index);
    nothing changed -- an animated effect is due -- with the scene as it is.
    Consumed by that present. */
 void blit_kms_request_animation(BlitKms *kms, uint32_t output_mask);
+/* ADR 0203: an output's hud_frames, without copying its display info. */
+unsigned long long blit_kms_hud_frames(const BlitKms *kms, int index);
 /* Whether an output is presenting (BLIT_KMS_PRESENTATION_PRESENTING). */
 int blit_kms_output_presenting(const BlitKms *kms, int index);
 int blit_kms_display_info(const BlitKms *kms, int index,
@@ -209,6 +226,11 @@ uint32_t blit_kms_ready_output_mask(const BlitKms *kms);
 int blit_kms_cell_width(const BlitKms *kms);
 int blit_kms_cell_height(const BlitKms *kms);
 void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art);
+/* ADR 0203: the panels to draw, at most one per output; the pixels are the
+   caller's and must stay valid until the next call. An output whose panel
+   changed revision is presented even with nothing else changed; one whose
+   panel moved, resized or went away is repainted in full. */
+void blit_kms_set_hud(BlitKms *kms, const BlitKmsHud *huds, int count);
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views,
                      int view_count, float pointer_x, float pointer_y,
                      int pointer_visible, uint32_t output_mask,

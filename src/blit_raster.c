@@ -49,6 +49,8 @@ struct BlitRaster {
     int width, height, em, baseline;
     size_t bytes;
     unsigned long renders;
+    /* Lookups the cache answered, and those it had to raster for. */
+    unsigned long long hits, misses;
     unsigned reclaim_slot;
     RasterEntry cache[RASTER_SLOTS];
 };
@@ -1209,9 +1211,11 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
                     ++set[other].age;
             entry->age = 0;
             *glyph = entry->glyph;
+            ++raster->hits;
             return 1;
         }
     }
+    ++raster->misses;
     for (way = 0; way < RASTER_WAYS; ++way) {
         if (!set[way].valid) { chosen = way; break; }
         if (set[way].age > set[chosen].age) chosen = way;
@@ -1353,6 +1357,12 @@ int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
 
 size_t blit_raster_cached_bytes(const BlitRaster *raster)
 { return raster ? raster->bytes : 0; }
+void blit_raster_cache_counts(const BlitRaster *raster, unsigned long long *hits,
+                              unsigned long long *misses)
+{
+    *hits = raster ? raster->hits : 0;
+    *misses = raster ? raster->misses : 0;
+}
 const char *blit_raster_arabic_path(const BlitRaster *raster)
 { return raster && raster->arabic ? raster->arabic_path : NULL; }
 const char *blit_raster_arabic_family(const BlitRaster *raster)

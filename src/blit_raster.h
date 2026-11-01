@@ -55,6 +55,9 @@ int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
                             BlitRasterGlyph *glyph);
 size_t blit_raster_cached_bytes(const BlitRaster *raster);
 unsigned long blit_raster_render_count(const BlitRaster *raster);
+/* The glyph cache's hits and misses since the raster was made. */
+void blit_raster_cache_counts(const BlitRaster *raster, unsigned long long *hits,
+                              unsigned long long *misses);
 /* Install an already validated context on the canonical loaded font. */
 void blit_raster_attach(BlitFont *font, BlitRaster *raster);
 /* RGB destination, integer premultiplied source-over. Only coverage masks

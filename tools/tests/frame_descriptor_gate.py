@@ -3,7 +3,9 @@
 
 A session's program sends an image's pixels as a sealed memfd over Blit's
 frame socket; the image is placed and deleted with Kitty escapes on its PTY.
-Run by frame_descriptor_gate.sh, which sets up the mock display.
+Version 2 of the socket (ADR 0203) adds HUD1 and STA1 for the performance
+panel's Hibr section. Run by frame_descriptor_gate.sh, which sets up the
+mock display.
 
 Not covered here: a peer whose uid may not send a session frames. That needs
 a second uid, so root; the rule is frame_peer_allowed in src/blit_frames.h.
@@ -36,10 +38,12 @@ def check(ok, why):
         fail(why)
 
 
-def api(method, path, body=None):
+def api(method, path, body=None, revision=None):
     data = json.dumps(body).encode() if body is not None else None
-    request = urllib.request.Request(BASE + path, data=data, method=method,
-                                     headers={'Content-Type': 'application/json'})
+    headers = {'Content-Type': 'application/json'}
+    if revision is not None:
+        headers['If-Match'] = str(revision)
+    request = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)
     with urllib.request.urlopen(request, timeout=10) as response:
         raw = response.read()
         return json.loads(raw) if raw else {}
@@ -63,18 +67,36 @@ def frame(image_id, sequence, width, height, fmt=24, stride=None, x=0, y=0, w=0,
                                  fmt, stride, x, y, w, h)
 
 
+def status(lines, count=None):
+    """STA1: the lines, each ending in a newline, after their count."""
+    count = len(lines) if count is None else count
+    return b'STA1' + struct.pack('<I', count) + b''.join(line + b'\n' for line in lines)
+
+
+def set_hud(hud):
+    """The settings document with `hud` in it, written whole."""
+    wait_for(lambda: api('GET', '/v1/settings')['storage']['state'] == 'clean', 'settings not clean')
+    settings = api('GET', '/v1/settings')
+    document = settings['document']
+    document['hud'] = hud
+    api('PUT', '/v1/settings', {'document': document}, settings['revision'])
+
+
 class Client:
-    def __init__(self, name, token):
+    def __init__(self, name, token, version=1):
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         self.socket.connect('\0' + name)
         token = token.encode()
-        self.socket.send(b'BLITFRM1' + struct.pack('<II', 1, len(token)) + token)
+        self.socket.send(b'BLITFRM1' + struct.pack('<II', version, len(token)) + token)
         self.socket.settimeout(2.0)
         self.hello = self.socket.recv(64)
 
     def send(self, header, fd):
         socket.send_fds(self.socket, [header], [fd])
         os.close(fd)
+
+    def say(self, message):
+        self.socket.send(message)
 
     def reply(self, wait=1.0):
         self.socket.settimeout(wait)
@@ -121,7 +143,8 @@ def wait_for(predicate, why, seconds=5.0):
 def main():
     work = tempfile.mkdtemp(prefix='blit-frame-gate-')
     env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
-               BLIT_SETTINGS='ignore', BLIT_LOGIN_AUTOSTART='0')
+               BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
+               BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'))
     server = subprocess.Popen([os.environ.get('BLIT_GATE_BINARY', os.path.join(ROOT, 'build/blit/blit-server')),
                                str(PORT)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -252,12 +275,84 @@ def main():
         client.send(frame(13, 2, 16, 16), memfd(red))
         check(client.reply().startswith(b'ERROR 13 ENOENT'), 'a frame after a=d,d=A was not refused')
 
+        # 9. Version 2 (ADR 0203): HUD1 to a version 2 client only, when the
+        #    panel with its Hibr section is shown on the session's display;
+        #    STA1 lines in the session and the panel, refused when malformed,
+        #    gone five seconds after the last.
+        name, token = child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN']
+        v2 = Client(name, token, version=2)
+        check(v2.hello == b'OK\n', 'a version 2 hello was answered %r' % v2.hello)
+        check(v2.reply(0.4) == b'', 'HUD1 was sent with the panel off')
+        set_hud({'enabled': True, 'display_id': 'display-1', 'sections': ['blit', 'hibr']})
+        check(v2.reply() == b'HUD1 on\n', 'the panel was turned on without HUD1 on')
+        check(client.reply(0.4) == b'', 'a version 1 client was sent HUD1')
+        late = Client(name, token, version=2)
+        check(late.hello == b'OK\n' and late.reply() == b'HUD1 on\n',
+              'a version 2 client joining a shown panel was not told after its OK')
+        # A settings write that leaves the panel as it was tells no one:
+        # a write resets to the defaults before applying the document.
+        wait_for(lambda: api('GET', '/v1/settings')['storage']['state'] == 'clean', 'settings not clean')
+        settings = api('GET', '/v1/settings')
+        document = dict(settings['document'], effects={'enabled': True})
+        api('PUT', '/v1/settings', {'document': document}, settings['revision'])
+        check(v2.reply(0.6) == b'' and late.reply(0.2) == b'',
+              'an unrelated settings write sent HUD1')
+        client.say(status([b'fps=1']))
+        check(client.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 from a version 1 client was not refused')
+        v2.say(status([b'fps=60 wakes=12', b'cpu=31%', b'slow=paint 4.2']))
+        check(v2.reply(0.4) == b'', 'an accepted STA1 was answered')
+        got = wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session).get('status'),
+                       'the STA1 lines are not in the session')
+        check(got['lines'] == ['fps=60 wakes=12', 'cpu=31%', 'slow=paint 4.2'] and got['age_ms'] < 5000,
+              'session status %s' % got)
+        panel = wait_for(lambda: next((p for p in api('GET', '/v1/diagnostics')['hud']['panels']
+                                       if 'cpu=31%' in p['lines']), None),
+                         'the STA1 lines are not in the panel')
+        at = panel['lines'].index('cpu=31%')
+        check(panel['lines'][at - 2].startswith('hibr  ('), 'the hibr heading is missing: %s' % panel['lines'])
+        text_y = panel['y'] + 7 + at * 16
+        inked = sum(1 for x in range(panel['x'] + 7, panel['x'] + 7 + 8 * 7) for y in range(text_y, text_y + 16)
+                    if screen_pixel(x, y) == (0xd8, 0xd8, 0xdc))
+        check(inked > 20, 'the hibr area of the panel is empty on screen (%d text pixels)' % inked)
+        refusals = [('nine lines', status([b'k=v'] * 9)),
+                    ('a 65-byte line', status([b'x' * 65])),
+                    ('count 3 with 2 lines', status([b'a=1', b'b=2'], count=3)),
+                    ('count 1 with 2 lines', status([b'a=1', b'b=2'], count=1)),
+                    ('no final newline', status([b'a=1'])[:-1]),
+                    ('a control character', status([b'a=\x1b[1m'])),
+                    ('count 0', status([], count=0))]
+        for why, message in refusals:
+            v2.say(message)
+            check(v2.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 with %s was not refused' % why)
+        socket.send_fds(v2.socket, [status([b'a=1'])], [memfd(b'x')])
+        check(v2.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 with a descriptor was not refused')
+        v2.say(status([b'x' * 64]))
+        check(v2.reply(0.4) == b'', 'a 64-byte line was refused')
+        time.sleep(5.4)
+        check(api('GET', '/v1/terminal-sessions/%s' % session).get('status') is None,
+              'STA1 lines older than five seconds were kept')
+        wait_for(lambda: not any(l.startswith('hibr  (') for p in api('GET', '/v1/diagnostics')['hud']['panels']
+                                 for l in p['lines']),
+                 'the panel kept a status older than five seconds')
+        set_hud({'enabled': True, 'display_id': 'display-1', 'sections': ['blit']})
+        check(v2.reply() == b'HUD1 off\n' and late.reply() == b'HUD1 off\n',
+              'dropping the hibr section did not send HUD1 off')
+        set_hud({'enabled': True, 'display_id': 'display-1', 'sections': ['hibr']})
+        check(v2.reply() == b'HUD1 on\n' and late.reply() == b'HUD1 on\n',
+              'restoring the hibr section did not send HUD1 on')
+        set_hud({'enabled': False})
+        check(v2.reply() == b'HUD1 off\n' and late.reply() == b'HUD1 off\n',
+              'turning the panel off did not send HUD1 off')
+        check(client.reply(0.4) == b'', 'a version 1 client was sent HUD1')
+
         frames = image(session, 7)[1]['frames']
         print('FRAME_DESCRIPTOR_PASS token=random hello=token_checked before_placement=kept screen=drawn '
               'newest=wins stale=dropped edit=rectangle refused=unsealed+short+efbig+unknown '
               'kitty_into_descriptor=refused frame_into_kitty=refused after_delete=enoent '
               'placement_before_frame=held_then_placed expired_placement=refused delete_all=frees_descriptor_images '
-              'accepted=%d refused=%d stale=%d wrong_uid=not_tested_without_root'
+              'v2_hud1=on+off+after_ok+steady_on_unrelated_write v1_hud1=never sta1=session+panel+screen '
+              'sta1_refused=v1+9_lines+65_bytes+count_mismatch+no_newline+control+count_0+descriptor '
+              'sta1_expiry=5s accepted=%d refused=%d stale=%d wrong_uid=not_tested_without_root'
               % (frames['accepted'], frames['refused'], frames['stale']))
     finally:
         server.terminate()

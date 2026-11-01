@@ -1,6 +1,6 @@
 # ADR 0203: a performance panel drawn by Blit, with a section Hibr feeds
 
-- Status: proposed
+- Status: accepted
 - Note: reviewed by the Hibr maintainers, 2026-11-01; the frame-socket
   channel, `HUD1` and their line set are theirs.
 - Date: 2026-11-01
@@ -36,14 +36,15 @@ and for Hibr.
 3. **One panel drawn by Blit's compositor** (this decision), with a section
    whose lines Hibr sends.
 
-## Decision (proposed)
+## Decision
 
 Option 3.
 
 - **Drawn by Blit**, after the panes and overlays, in both compositors and
-  pixel-identical between them. Text uses the glyph cache and the current
-  font; the graph is bars drawn with the existing rectangle blend. No new
-  rasterizer, no new dependency.
+  pixel-identical between them. The server makes it as one opaque picture
+  that both compositors copy 1:1. Text is the boot PSF, loaded once for
+  the panel, so it looks the same whatever font the terminals use; the
+  graph is bars. No new rasterizer, no new dependency.
 - **It must not disturb what it measures.** It updates at a fixed rate
   (`hud.hz`, default 2, at most 10) and damages only its own rectangle. A
   frame presented only to update the panel is counted apart
@@ -75,15 +76,19 @@ Option 3.
   authenticated and already open, and it is local only, so a remote Hibr
   shows no section, which is fine.
   - **Asked for, not pushed.** A client that says version 2 in its hello
-    may be sent `HUD1 on\n` or `HUD1 off\n`: on when the panel is shown
+    may be sent `HUD1 on\n` or `HUD1 off\n` (a single line whose first
+    word is `HUD1`, read beside `OK` and `ERROR`): on when the panel is shown
     with the `hibr` section on a display that session feeds, off when it
     stops. A version 1 client never receives one, so today's clients see
     only error replies, as before. Hibr times itself only while it is on;
     its timing runs a little code around every callback.
   - **`STA1`**, client to Blit, about once a second while on: up to 8 lines
-    of up to 64 bytes each, `key=value` text. More lines or longer ones are
-    refused with `EINVAL`. Blit shows the latest under "hibr", with its
-    age, and drops it 5 s after the last one.
+    of up to 64 bytes each, `key=value` text, after a little-endian line
+    count. Each line ends in `\n`; the count is only a check, and a
+    message whose lines disagree with it is refused with `EINVAL`, as are
+    more lines or longer ones. Blit shows the latest under "hibr", with its
+    age, and drops it 5 s after the last one. The bytes are in ADR 0202's
+    "Wire format, version 2".
   - **Through hold.** On a held desktop, frames go console → hold's server →
     the attaching client → Blit, and `STA1` and `HUD1` travel the same path
     in both directions, so hold forwards them.

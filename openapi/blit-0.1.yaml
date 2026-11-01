@@ -2523,6 +2523,31 @@ components:
         palette: {type: string, enum: [pearl, obsidian, neon, amber], default: pearl}
         size_px: {type: integer, minimum: 24, maximum: 64, default: 24}
         shadow: {type: boolean, default: true}
+    HudSettings:
+      type: object
+      description: >-
+        The performance panel (ADR 0203), drawn by Blit over the panes on
+        each display it is shown on. `enabled` defaults to `BLIT_HUD=1` at
+        start; `display_id` is a display or `all` (the default); `corner`
+        defaults to `top-right`; `hz`, the most updates a second, to 2; and
+        `sections` to all three: `blit` (Blit's counters for that display),
+        `hibr` (the lines the session's frame client sends as STA1) and
+        `graph` (the last 60 s of frame time against the refresh interval).
+      properties:
+        enabled: {type: boolean}
+        display_id:
+          type: string
+          pattern: '^(all|display-[1-9][0-9]*)$'
+        corner:
+          type: string
+          enum: [top-left, top-right, bottom-left, bottom-right]
+        hz: {type: integer, minimum: 1, maximum: 10}
+        sections:
+          type: array
+          uniqueItems: true
+          maxItems: 3
+          items: {type: string, enum: [blit, hibr, graph]}
+      additionalProperties: false
     Settings:
       type: object
       required: [revision, path, persisted, storage, document, effective]
@@ -2630,6 +2655,12 @@ components:
                 type: object
                 propertyNames: {type: string, pattern: '^[1-9][0-9]?$'}
                 additionalProperties: {$ref: '#/components/schemas/EffectSet'}
+            hud:
+              allOf: [{$ref: '#/components/schemas/HudSettings'}]
+              description: >-
+                The performance panel. Applied live; persisted; an unknown or
+                repeated member or a value out of range is 400
+                invalid_settings_hud.
             display_layouts:
               type: object
               maxProperties: 16
@@ -2714,7 +2745,7 @@ components:
                      presentation_configuration, kms_async_pageflip,
                      kms_compositor, kms_frame_timing, effects_animation_hz,
                      expect_desktop, login, login_restart_required, pointer,
-                     pointer_shown]
+                     pointer_shown, hud]
           properties:
             render_interval_ms: {type: integer, minimum: 1, maximum: 100}
             pane_layout: {type: string}
@@ -2759,6 +2790,10 @@ components:
                          ns-resize, nwse-resize, nesw-resize, not-allowed]
                 hidden: {type: boolean}
               additionalProperties: false
+            hud:
+              allOf: [{$ref: '#/components/schemas/HudSettings'}]
+              required: [enabled, display_id, corner, hz, sections]
+              description: The performance panel's settings in force.
           additionalProperties: false
     LoginPolicy:
       type: object
@@ -2805,7 +2840,7 @@ components:
       additionalProperties: false
     Diagnostics:
       type: object
-      required: [revision, health, resources, render, graphics, errors, warnings]
+      required: [revision, health, resources, render, graphics, hud, errors, warnings]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         health:
@@ -2865,7 +2900,8 @@ components:
                            last_present_ms, max_present_ms, present_calls,
                            kms_scanout, kms_phases, render_width,
                            render_height, viewport_width, viewport_height,
-                           scale_x, scale_y, compositor, effects, flip]
+                           scale_x, scale_y, compositor, effects, flip,
+                           hud_frames]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
@@ -2886,7 +2922,14 @@ components:
                       submit_ms: {type: number, minimum: 0}
                       drawn_cells: {type: integer, minimum: 0}
                   max_present_ms: {type: number, minimum: 0, description: Maximum presentation-call duration for this output over its current resource lifetime.}
-                  present_calls: {type: integer, minimum: 0, description: Frames submitted to this output over its current resource lifetime; not a physical refresh-rate measurement.}
+                  present_calls: {type: integer, minimum: 0, description: Frames submitted to this output over its current resource lifetime; not a physical refresh-rate measurement. Includes hud_frames.}
+                  hud_frames:
+                    type: integer
+                    minimum: 0
+                    description: >-
+                      Frames presented to this output only because the
+                      performance panel changed (ADR 0203). Counted in
+                      `present_calls`, left out of the runtime `frame_rate_hz`.
                   kms_scanout:
                     type: object
                     description: >-
@@ -3079,13 +3122,59 @@ components:
               description: >-
                 The frames-by-descriptor channel (ADR 0202): its abstract
                 socket name (`@blit-frames-<port>`, empty when it could not
-                be opened) and server-wide counts.
-              required: [socket, accepted, refused]
+                be opened) and server-wide counts, with the reason for the
+                last refusal (empty before any).
+              required: [socket, accepted, refused, last_error]
               properties:
                 socket: {type: string}
                 accepted: {type: integer, minimum: 0}
                 refused: {type: integer, minimum: 0}
+                last_error: {type: string}
               additionalProperties: false
+          additionalProperties: false
+        hud:
+          type: object
+          description: >-
+            The performance panel (ADR 0203): its settings in force, the
+            frames presented only for it (the sum of the outputs'
+            `hud_frames`), how many times its pictures were rebuilt and what
+            a rebuild cost, and each panel shown, with its place on the
+            output and the lines drawn in it.
+          required: [enabled, display_id, corner, hz, sections, frames,
+                     updates, last_update_ms, mean_update_ms, max_update_ms,
+                     panels]
+          properties:
+            enabled: {type: boolean}
+            display_id: {type: string}
+            corner: {type: string, enum: [top-left, top-right, bottom-left, bottom-right]}
+            hz: {type: integer, minimum: 1, maximum: 10}
+            sections:
+              type: array
+              items: {type: string, enum: [blit, hibr, graph]}
+            frames: {type: integer, minimum: 0}
+            updates: {type: integer, minimum: 0}
+            last_update_ms: {type: number, minimum: 0}
+            mean_update_ms: {type: number, minimum: 0}
+            max_update_ms: {type: number, minimum: 0}
+            panels:
+              type: array
+              items:
+                type: object
+                required: [display_id, x, y, width, height, revision, lines]
+                properties:
+                  display_id: {type: string}
+                  x: {type: integer, minimum: 0}
+                  y: {type: integer, minimum: 0}
+                  width: {type: integer, minimum: 1}
+                  height: {type: integer, minimum: 1}
+                  revision:
+                    type: integer
+                    minimum: 1
+                    description: Changes only when the panel's pixels or place do.
+                  lines:
+                    type: array
+                    items: {type: string}
+                additionalProperties: false
           additionalProperties: false
         errors:
           type: array
@@ -3153,7 +3242,7 @@ components:
           additionalProperties: false
         performance:
           type: object
-          required: [process_cpu_ms, desktop_cpu_ms, system_load_1m, uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, frame_rate_hz, input_events, pointer_position_changes, last_input_dispatch_ms, max_input_dispatch_ms, evdev_mouse_events, evdev_mouse_syncs, evdev_mouse_motion_events, evdev_mouse_wheel_events, evdev_mouse_button_events, evdev_mouse_button_repeats_ignored, evdev_mouse_button_state_coalesced, last_evdev_mouse_event_age_ms, last_evdev_mouse_path, last_evdev_mouse_device_id, last_evdev_mouse_device_present, evdev_keyboard_events, evdev_keyboard_key_presses, evdev_keyboard_keys_delivered, evdev_keyboard_keys_undelivered, last_evdev_keyboard_event_age_ms, last_evdev_keyboard_path, last_evdev_keyboard_device_id, last_evdev_keyboard_device_present, input_keys_dropped, input_reports_dropped, pointer_lock_reports, pointer_lock_releases, evdev_service_budget_yields, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_payloads, graphics_payloads_kitty, graphics_payloads_sixel, graphics_payloads_rejected, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, surface_commits, surface_commit_hz, surface_commit_frames, surface_commit_window_ms, surface_commit_window_sequence, surface_commit_age_ms, last_surface_commit_gap_ms, max_surface_commit_gap_ms, frame_commits, present_calls, last_loop_gap_ms, max_loop_gap_ms, loop_gap_window_ms, loop_gap_window_sequence, loop_gap_window_max_ms, last_kms_present_ms, max_kms_present_ms, last_select_ms, max_select_ms, last_evdev_scan_ms, max_evdev_scan_ms, evdev_scan_opens, evdev_open_requests, evdev_open_requests_dropped, evdev_open_queue_depth, evdev_opener_thread]
+          required: [process_cpu_ms, desktop_cpu_ms, system_load_1m, uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, frame_rate_hz, input_events, pointer_position_changes, last_input_dispatch_ms, max_input_dispatch_ms, evdev_mouse_events, evdev_mouse_syncs, evdev_mouse_motion_events, evdev_mouse_wheel_events, evdev_mouse_button_events, evdev_mouse_button_repeats_ignored, evdev_mouse_button_state_coalesced, last_evdev_mouse_event_age_ms, last_evdev_mouse_path, last_evdev_mouse_device_id, last_evdev_mouse_device_present, evdev_keyboard_events, evdev_keyboard_key_presses, evdev_keyboard_keys_delivered, evdev_keyboard_keys_undelivered, last_evdev_keyboard_event_age_ms, last_evdev_keyboard_path, last_evdev_keyboard_device_id, last_evdev_keyboard_device_present, input_keys_dropped, input_reports_dropped, pointer_lock_reports, pointer_lock_releases, evdev_service_budget_yields, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_payloads, graphics_payloads_kitty, graphics_payloads_sixel, graphics_payloads_rejected, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, glyph_cache_hits, glyph_cache_misses, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, surface_commits, surface_commit_hz, surface_commit_frames, surface_commit_window_ms, surface_commit_window_sequence, surface_commit_age_ms, last_surface_commit_gap_ms, max_surface_commit_gap_ms, frame_commits, present_calls, last_loop_gap_ms, max_loop_gap_ms, loop_gap_window_ms, loop_gap_window_sequence, loop_gap_window_max_ms, last_kms_present_ms, max_kms_present_ms, last_select_ms, max_select_ms, last_evdev_scan_ms, max_evdev_scan_ms, evdev_scan_opens, evdev_open_requests, evdev_open_requests_dropped, evdev_open_queue_depth, evdev_opener_thread]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             process_cpu_ms:
@@ -3163,7 +3252,13 @@ components:
             desktop_cpu_ms:
               type: [number, 'null']
               minimum: 0
-              description: Cumulative CPU milliseconds of the verified native desktop owner only, excluding its children. Null if unavailable or its PID/start-time identity changed.
+              description: >-
+                Cumulative CPU milliseconds of the signed-in desktop: the
+                verified native desktop owner and every process under it,
+                each with the children it has reaped. A child that exits
+                unreaped by the tree drops out, so the sum can step down.
+                Null if unavailable or the owner's PID/start-time identity
+                changed.
             system_load_1m:
               type: number
               minimum: 0
@@ -3192,7 +3287,7 @@ components:
             frame_rate_hz:
               type: number
               minimum: 0
-              description: Windowed composition rate. Direct KMS counts only attempts that submitted at least one output; deferred and unchanged attempts are excluded. This is not a physical scanout measurement.
+              description: Windowed composition rate. Direct KMS counts only attempts that submitted at least one output; deferred and unchanged attempts, and frames presented only for the performance panel (`hud_frames`), are excluded. This is not a physical scanout measurement.
             input_events: {type: integer, minimum: 0}
             pointer_position_changes:
               type: integer
@@ -3278,6 +3373,17 @@ components:
             pixel_frames_accepted: {type: integer, minimum: 0}
             pixel_frame_errors: {type: integer, minimum: 0}
             pixel_frames_pending: {type: integer, minimum: 0}
+            glyph_cache_hits:
+              type: integer
+              minimum: 0
+              description: >-
+                Glyph lookups the native raster's cache answered since the
+                font was loaded. A pixel (PSF) font draws its own glyphs
+                without the cache, so both counts stay 0 for one.
+            glyph_cache_misses:
+              type: integer
+              minimum: 0
+              description: Glyph lookups the cache had to raster for.
             frame_rate_frames: {type: integer, minimum: 0}
             frame_rate_window_ms: {type: integer, minimum: 0}
             frame_rate_age_ms: {type: integer, minimum: 0}
@@ -4608,6 +4714,21 @@ components:
             stale: {type: integer, minimum: 0}
             superseded: {type: integer, minimum: 0}
             last_error: {type: string}
+          additionalProperties: false
+        status:
+          type: [object, 'null']
+          description: >-
+            The latest STA1 lines this session's frame client sent for the
+            performance panel (ADR 0202 version 2, ADR 0203), and how old
+            they are; null when there are none or they are five seconds old.
+          required: [lines, age_ms]
+          properties:
+            lines:
+              type: array
+              minItems: 1
+              maxItems: 8
+              items: {type: string, maxLength: 64}
+            age_ms: {type: integer, minimum: 0, maximum: 4999}
           additionalProperties: false
       additionalProperties: false
     TerminalDefaults:

@@ -119,6 +119,9 @@ typedef struct {
     int glyph_clip_active;
     int glyph_clip_x0, glyph_clip_y0, glyph_clip_x1, glyph_clip_y1;
     long long effects_frame_us;
+    /* ADR 0203: the panel as last presented here (width 0: none). */
+    int hud_x, hud_y, hud_width, hud_height;
+    unsigned long long hud_revision;
 } KmsOutput;
 
 typedef struct {
@@ -173,6 +176,9 @@ struct BlitKms {
     unsigned long long pointer_art_revision;
     int pointer_art_width;
     int pointer_art_height;
+    /* ADR 0203: the server's panels, at most one per output. */
+    BlitKmsHud huds[KMS_MAX_OUTPUTS];
+    int hud_count;
     /* ADR 0062: the 16x16 font for wide cells. */
     BlitFont *wide_font;
     int cell_width_override;
@@ -593,6 +599,53 @@ static void apply_view_effects(KmsOutput *output, const BlitKmsSurfaceView *view
             }
     }
     output->effects_frame_us += kms_thread_cpu_us() - started;
+}
+
+/* ADR 0203: this output's panel, or NULL. */
+static const BlitKmsHud *output_hud(const BlitKms *kms, const KmsOutput *output)
+{
+    int i;
+    for (i = 0; i < kms->hud_count; ++i)
+        if (kms->huds[i].display_id == output->info.id && kms->huds[i].rgba != NULL &&
+            kms->huds[i].width > 0 && kms->huds[i].height > 0)
+            return &kms->huds[i];
+    return NULL;
+}
+
+/* Whether the panel stands where it last stood: anything else uncovers
+   pixels only a full repaint restores. */
+static int output_hud_in_place(const KmsOutput *output, const BlitKmsHud *hud)
+{
+    if (hud == NULL)
+        return output->hud_width == 0;
+    return hud->x == output->hud_x && hud->y == output->hud_y &&
+        hud->width == output->hud_width && hud->height == output->hud_height;
+}
+
+static void remember_output_hud(KmsOutput *output, const BlitKmsHud *hud)
+{
+    output->hud_x = hud ? hud->x : 0;
+    output->hud_y = hud ? hud->y : 0;
+    output->hud_width = hud ? hud->width : 0;
+    output->hud_height = hud ? hud->height : 0;
+    output->hud_revision = hud ? hud->revision : 0;
+}
+
+/* An opaque copy, so drawing it again over itself changes nothing. */
+static void draw_kms_hud(KmsOutput *output, const BlitKmsHud *hud)
+{
+    int x0 = hud->x < 0 ? 0 : hud->x, y0 = hud->y < 0 ? 0 : hud->y;
+    int x1 = hud->x + hud->width, y1 = hud->y + hud->height, x, y;
+    if (x1 > output->mode.hdisplay) x1 = output->mode.hdisplay;
+    if (y1 > output->mode.vdisplay) y1 = output->mode.vdisplay;
+    for (y = y0; y < y1; ++y) {
+        uint32_t *row = (uint32_t *)((unsigned char *)output->back.map +
+                                     (size_t)y * output->back.pitch);
+        const unsigned char *rgba = hud->rgba +
+            ((size_t)(y - hud->y) * (size_t)hud->width + (size_t)(x0 - hud->x)) * 4;
+        for (x = x0; x < x1; ++x, rgba += 4)
+            row[x] = (uint32_t)rgba[0] << 16 | (uint32_t)rgba[1] << 8 | rgba[2];
+    }
 }
 
 static void draw_kms_overlays(KmsOutput *output,
@@ -2011,6 +2064,12 @@ void blit_kms_request_animation(BlitKms *kms, uint32_t output_mask)
     if (kms != NULL) kms->animation_mask |= output_mask;
 }
 
+unsigned long long blit_kms_hud_frames(const BlitKms *kms, int index)
+{
+    if (kms == NULL || index < 0 || index >= kms->output_count) return 0;
+    return kms_output(kms, index)->info.hud_frames;
+}
+
 int blit_kms_output_presenting(const BlitKms *kms, int index)
 {
     if (kms == NULL || index < 0 || index >= kms->output_count) return 0;
@@ -2075,6 +2134,15 @@ void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art)
     }
     for (i = 0; i < kms->output_count; ++i)
         kms_output(kms,i)->pointer_state_valid = 0;
+}
+
+void blit_kms_set_hud(BlitKms *kms, const BlitKmsHud *huds, int count)
+{
+    if (kms == NULL) return;
+    if (count < 0 || huds == NULL) count = 0;
+    if (count > KMS_MAX_OUTPUTS) count = KMS_MAX_OUTPUTS;
+    if (count > 0) memcpy(kms->huds, huds, sizeof(huds[0]) * (size_t)count);
+    kms->hud_count = count;
 }
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
@@ -2159,9 +2227,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             continue;
         }
         output_started = kms_now_us();
-        int output_changed, animated_only;
+        int output_changed, animated_only, hud_only;
+        const BlitKmsHud *hud = output_hud(kms, output);
         full_redraw = !output->initialized ||
-            output->last_visual_revision != visual_revision;
+            output->last_visual_revision != visual_revision ||
+            !output_hud_in_place(output, hud);
         for (view_index = 0; view_index < view_count; ++view_index)
             if (views[view_index].display_id == output->info.id)
                 ++output_view_count;
@@ -2173,6 +2243,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         /* An animated effect due on this output: presented with the scene as
            it is (ADR 0188). Counted only when nothing else asked for it. */
         animated_only = !output_changed && (kms->animation_mask & (1U << i)) != 0;
+        /* ADR 0203: the panel changed and nothing else did; counted apart,
+           so the frame rate it shows leaves its own frames out. */
+        hud_only = !output_changed && !hold_scene && hud != NULL &&
+            hud->revision != output->hud_revision;
         /* Inspect scene changes even when pointer/capture work has already
            scheduled this output. Relocation must clear the old bounds. */
         for (view_index = 0; !hold_scene && view_index < view_count; ++view_index) {
@@ -2204,6 +2278,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (animated_only && !output_changed) {
             output_changed = 1;
             ++output->info.effects_animation_frames;
+        }
+        if (hud_only && !output_changed) {
+            output_changed = 1;
+            ++output->info.hud_frames;
         }
         kms->animation_mask &= ~(1U << i);
         if (!output_changed)
@@ -2397,6 +2475,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             }
         if (!hold_scene) {
             draw_kms_overlays(output, overlays, overlay_count);
+            if (hud != NULL)
+                draw_kms_hud(output, hud);
         }
         if (pointer_intersects_output(output, pointer_x, pointer_y, pointer_visible)) {
             int x = (int)pointer_x - output->info.x;
@@ -2493,6 +2573,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 output->initialized = 1;
                 if (!hold_scene) {
                     output->last_visual_revision = visual_revision;
+                    remember_output_hud(output, hud);
                     remember_output_views(output, views, view_count,
                                           output_view_count);
                 }
@@ -2578,8 +2659,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 views[view_index].damage_consumed != NULL)
                 *views[view_index].damage_consumed = 1;
         output->initialized = 1;
-        if (!hold_scene)
+        if (!hold_scene) {
             output->last_visual_revision = visual_revision;
+            remember_output_hud(output, hud);
+        }
         if (trace_phases)
             fprintf(stderr,
                     "blit: KMS phase connector=%u draw_us=%lld flip_us=%lld total_us=%lld\n",

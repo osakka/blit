@@ -8,12 +8,20 @@
    holds. A client proves which session it is in with that session's random
    BLIT_FRAME_TOKEN, and its uid (SO_PEERCRED) must be one that session's
    frames may come from. Included into blit_server.c after the image and
-   damage helpers it uses. */
+   damage helpers it uses.
+
+   Version 2 (ADR 0203) adds two messages for the performance panel: Blit
+   sends a version 2 client `HUD1 on` or `HUD1 off` when the panel's Hibr
+   section starts or stops being shown for its session, and the client
+   sends STA1, the lines to show there. */
 
 #define BLIT_FRAME_CLIENTS 32
 #define BLIT_FRAME_HELLO_BYTES 16
 #define BLIT_FRAME_HEADER_BYTES 48
 #define BLIT_FRAME_BATCH 64
+/* STA1: magic, line count, then up to eight lines of up to 64 bytes and
+   their newlines. Anything longer arrives truncated, and is refused. */
+#define BLIT_FRAME_STATUS_BYTES (8 + BLIT_HUD_STATUS_LINES * (BLIT_HUD_STATUS_BYTES + 1))
 
 /* One line on the client's socket; nothing for an accepted frame. */
 static void frame_reply(int fd, const char *line)
@@ -66,6 +74,7 @@ static void frame_refuse(BlitRuntime *runtime, BlitSession *session, int fd,
         snprintf(session->frames_last_error, sizeof(session->frames_last_error), "%s", reason);
     }
     ++runtime->frames_refused;
+    snprintf(runtime->frames_last_error, sizeof(runtime->frames_last_error), "%s", reason);
     snprintf(line, sizeof(line), "ERROR %u %s\n", image_id, code);
     frame_reply(fd, line);
 }
@@ -295,6 +304,84 @@ static void frame_apply(BlitRuntime *runtime, BlitSession *session, int client_f
     runtime->render_pending = 1;
 }
 
+/* STA1 (version 2): "STA1", a little-endian line count of 1 to 8, then
+   exactly that many lines, each at most 64 bytes of UTF-8 before its
+   newline, filling the message. The count is a check: a message whose
+   lines disagree with it is refused, rather than either being trusted.
+   Kept, with its time, as the session's latest status. */
+static int frame_status(BlitSession *session, const unsigned char *message, ssize_t length)
+{
+    char lines[BLIT_HUD_STATUS_LINES][BLIT_HUD_STATUS_BYTES + 1];
+    uint32_t count;
+    ssize_t at = 8;
+    int found = 0, i;
+
+    if (length < 8)
+        return 0;
+    count = frame_u32(message + 4);
+    if (count < 1 || count > BLIT_HUD_STATUS_LINES)
+        return 0;
+    while (at < length) {
+        ssize_t start = at;
+        int more = 0;
+        if (found == (int)count)
+            return 0;
+        for (; at < length && message[at] != '\n'; ++at) {
+            unsigned char c = message[at];
+            /* UTF-8 by its shape: a lead byte, then its continuations.
+               No control characters. */
+            if (more > 0) {
+                if ((c & 0xc0) != 0x80) return 0;
+                --more;
+            } else if (c < 0x20 || c == 0x7f || (c >= 0x80 && c < 0xc2) || c > 0xf4) {
+                return 0;
+            } else if (c >= 0xc0) {
+                more = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : 1;
+            }
+        }
+        if (at == length || more > 0 || at - start > BLIT_HUD_STATUS_BYTES)
+            return 0;
+        memcpy(lines[found], message + start, (size_t)(at - start));
+        lines[found][at - start] = '\0';
+        ++found;
+        ++at;
+    }
+    if (found != (int)count)
+        return 0;
+    for (i = 0; i < found; ++i)
+        memcpy(session->status_lines[i], lines[i], sizeof(lines[i]));
+    session->status_count = found;
+    session->status_us = monotonic_us();
+    return 1;
+}
+
+/* Whether the panel shows the Hibr section for this session's output. */
+static int frame_hud_applies(BlitRuntime *runtime, const BlitSession *session)
+{
+    return session != NULL && runtime->hud_enabled &&
+        (runtime->hud_sections & BLIT_HUD_SECTION_HIBR) &&
+        hud_shows_output(runtime, session_output_index(runtime, session));
+}
+
+/* ADR 0203: tell each version 2 client when that changes, one line, HUD1
+   on or HUD1 off. Called at the hello and once a turn (hud_reconcile), so
+   a settings change or a session that moves displays is told too. */
+static void frame_hud_notify(BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        int on;
+        if (!client->used || !client->authenticated || client->version < 2)
+            continue;
+        on = frame_hud_applies(runtime, find_session_id(runtime, client->session_id));
+        if (on == client->hud_on)
+            continue;
+        client->hud_on = on;
+        frame_reply(client->fd, on ? "HUD1 on\n" : "HUD1 off\n");
+    }
+}
+
 /* The hello: magic, version, token. On success the client is bound to the
    session the token names, if its uid may send that session frames. */
 static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *message,
@@ -308,7 +395,7 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
     int i;
 
     if (length < BLIT_FRAME_HELLO_BYTES || memcmp(message, "BLITFRM1", 8) != 0 ||
-        frame_u32(message + 8) != 1) {
+        (frame_u32(message + 8) != 1 && frame_u32(message + 8) != 2)) {
         frame_reply(client->fd, "ERROR 0 EINVAL\n");
         frame_client_close(runtime, index);
         return;
@@ -331,8 +418,10 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
             client->session_id = session->id;
             client->authenticated = 1;
             client->uid = peer.uid;
+            client->version = (int)frame_u32(message + 8);
             ++session->frame_connections;
             frame_reply(client->fd, "OK\n");
+            frame_hud_notify(runtime);
             return;
         }
     }
@@ -352,7 +441,7 @@ static void frame_client_service(BlitRuntime *runtime, int index)
     BlitSession *session = NULL;
 
     for (;;) {
-        unsigned char message[BLIT_FRAME_HELLO_BYTES + 64];
+        unsigned char message[BLIT_FRAME_STATUS_BYTES];
         union { struct cmsghdr header; char space[CMSG_SPACE(sizeof(int) * 4)]; } control;
         struct iovec vector;
         struct msghdr header;
@@ -409,6 +498,14 @@ static void frame_client_service(BlitRuntime *runtime, int index)
             frame_reply(client->fd, "ERROR 0 EACCES\n");
             frame_client_close(runtime, index);
             break;
+        }
+        if (got >= 4 && memcmp(message, "STA1", 4) == 0) {
+            for (j = 0; j < fd_count; ++j) close(fds[j]);
+            if (client->version < 2 || fd_count != 0 ||
+                (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) ||
+                !frame_status(session, message, got))
+                frame_reply(client->fd, "ERROR 0 EINVAL\n");
+            continue;
         }
         if (got != BLIT_FRAME_HEADER_BYTES || memcmp(message, "FRM1", 4) != 0 ||
             fd_count != 1 || (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {

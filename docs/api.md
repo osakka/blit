@@ -1607,6 +1607,10 @@ the hello should fall back the same way. Each session reports
 `frames.accepted`, `refused`, `stale`, `superseded` and `last_error`; the
 server reports `graphics.frames` in `/v1/diagnostics`.
 
+A client that says version 2 in its hello may also be sent `HUD1 on` or
+`HUD1 off` lines, and may send STA1 status lines for the performance panel;
+see "Performance panel".
+
 ## Diagnostics and screenshots
 
 `GET /v1/diagnostics/observation` is the canonical incident snapshot. It is
@@ -1696,6 +1700,43 @@ queue pressure, and the trace window used. “The screen looked slow” is a
 useful observation, but it is not enough to identify whether the producer,
 surface commit, scheduler, compositor, KMS submission, or physical scanout is
 the limiting boundary.
+
+## Performance panel
+
+Blit can draw a small panel of its own counters over the panes ("stats for
+nerds", [ADR 0203](adr/0203-performance-panel.md)). It is set in the
+settings document's `hud` object and changed live with `PUT /v1/settings`:
+
+```json
+"hud": {"enabled": true, "display_id": "all", "corner": "top-right",
+        "hz": 2, "sections": ["blit", "hibr", "graph"]}
+```
+
+Those are the defaults, except `enabled`, which defaults to `BLIT_HUD=1` at
+start. `display_id` is a display or `all`; `hz` (1–10) is the most updates
+a second. An unknown or repeated member, or a value out of range, is
+`400 invalid_settings_hud`. `settings.effective.hud` is what is in force.
+
+- **blit:** per display, the frame rate and refresh, the mode, missed
+  deadlines and late flips, the compositor (and why, on the CPU) with its
+  renderer, render, present, loop-gap and input times, Kitty and Sixel
+  payloads and descriptor frames per second, refusals, errors, and glyph
+  cache hits/misses. Each is a value `/v1/diagnostics` or
+  `/v1/diagnostics/runtime` reports.
+- **graph:** the last 60 s of the output's worst frame time each second,
+  against a line at the refresh interval; bars over it are red.
+- **hibr:** the lines the session's frame client sends as STA1 (version 2
+  of the frame socket, ADR 0202), with their age, while younger than 5 s.
+  The session reports them as `status`.
+
+The panel uses the boot PSF whatever font is chosen, is identical on both
+compositors, and is not an overlay (it takes no `/v1/overlays` slot). It is
+rebuilt only while on and redrawn only when its pixels change. A frame
+presented only for it is counted in the output's `hud_frames` (and in
+`present_calls`), never in `frame_rate_hz`. Off, it costs nothing.
+`/v1/diagnostics` reports `hud`: the settings, `frames`, `updates`, the
+update cost (`last_update_ms`, `mean_update_ms`, `max_update_ms`) and each
+panel with its place and lines.
 
 ## Effects, overlays, and control
 

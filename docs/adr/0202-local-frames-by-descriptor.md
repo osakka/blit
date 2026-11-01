@@ -158,7 +158,7 @@ one message per `recvmsg` (`SOCK_SEQPACKET`).
   | offset | size | field |
   |---|---|---|
   | 0 | 8 | magic `BLITFRM1` |
-  | 8 | 4 | version, `1` |
+  | 8 | 4 | version, `1` or `2` (below) |
   | 12 | 4 | token length, 1–64 |
   | 16 | n | `BLIT_FRAME_TOKEN` |
 
@@ -194,6 +194,36 @@ one message per `recvmsg` (`SOCK_SEQPACKET`).
 - **Newest wins.** Frames are read as they arrive; of several waiting for
   one image only the newest is applied, the others' descriptors closed
   unread.
+
+## Wire format, version 2
+
+Added in Blit 0.3.22 for the performance panel's Hibr section
+([ADR 0203](0203-performance-panel.md)). A client whose hello says version
+2 gets everything above, and two more messages. A version 1 client never
+receives `HUD1`, and its `STA1` is refused.
+
+- **`HUD1`**, Blit to client, one line, no descriptor: `HUD1 on\n` when the
+  panel is shown with its `hibr` section on a display the client's session
+  feeds, `HUD1 off\n` when that stops. Sent on a change only, and
+  `HUD1 on\n` right after the `OK\n` when it already applies. A client
+  reads it where it reads `OK` and `ERROR`: it is a line whose first word is
+  `HUD1`.
+- **`STA1`**, client to Blit, all in one message, no descriptor:
+
+  | offset | size | field |
+  |---|---|---|
+  | 0 | 4 | magic `STA1` |
+  | 4 | 4 | line count, 1–8, little-endian like the frame header |
+  | 8 | n | the lines: UTF-8, no control characters, each at most 64 bytes before its `\n` |
+
+  The message ends with the last line's newline. The count is a check, not
+  a length: a message whose newline-terminated lines number other than the
+  count, or with bytes after the last newline, is refused rather than
+  either being trusted. Refused, too: more than 8 lines, a longer line, a
+  descriptor attached, and a version 1 client. A refusal is
+  `ERROR 0 EINVAL\n`; an accepted `STA1` is not answered. Blit keeps the
+  latest per session with its arrival time, shows it while younger than
+  5 s and reports it in the session's `status`.
 
 ## Consequences
 
