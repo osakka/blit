@@ -1,5 +1,41 @@
 # Verification status
 
+## 2026-11-01: 0.3.28 a pointer lock can't outlive the desktop's release
+
+- **The incident.** On the owner's mini PC, Boxer, full screen on the HDMI
+  view, held the pointer lock (ADR 0198). The owner pressed the desktop's
+  Release Pointer, and afterwards raw motion reports
+  (`ESC [ < 35 ; -5 ; -5 M`, signed deltas, which Blit sends only to a
+  locked session) were typed into the focused terminal and shown as
+  notifications. It started again after a reboot. The machine had to be
+  restarted.
+- **Blit's hole.** A Hibr desktop is several Blit sessions, one per view.
+  Only the session holding the lock could give it back. "Focus moved away"
+  can't happen while the pointer is still, and the stall check saw a
+  program reading normally. A give-back on another view, which is where
+  the desktop's key goes, ended nothing.
+- **Fixed:** `?7701l` from any view of the same desktop (the frame barrier's
+  membership) releases the lock wherever that desktop holds it, with the
+  usual unasked notice. Every engage and release is a journal line
+  (`blit: pointer lock engaged|released: session=… display=… reason=…`) and
+  a trace event. `performance.pointer_lock_engages` and
+  `pointer_lock_released.{program,desktop_view,focus,stall,reset,exit}`
+  count them. (`pointer_lock_releases` counted only Blit's own take-backs,
+  so on the night it read 0 and couldn't say whether a give-back had
+  arrived.)
+- **Gate:** `pointer_lock_desktop_gate.rb` (in the suite with
+  pointer_lock_gate) fails without the fix ("timed out waiting for the
+  desktop-view release") and passes with it.
+- **Not Blit's:** the desktop turning unrouted mouse reports into
+  keystrokes, and a restored session re-taking the lock without a click.
+  Hibr and Boxer are fixing those (Boxer 1.33: release on game end and
+  close, and no lock from restored state).
+- **Also from this release's investigation:** the stale right-edge strip
+  under Boxer full screen on HDMI (a full repaint cleared it) isn't from
+  the displacing effects, which the GPU path recomputes every frame;
+  reproductions of that theory were all clean. Cause still open.
+- **Suites:** font 38/38, full 161/161 (6 skips), GLES renderer 69/69 (1 skip).
+
 ## 2026-11-01: 0.3.27 restart after an update; zoom in 25 % steps, kept per connector
 
 - **Restart after an update (ADR 0205, accepted).** An `apt upgrade` used to

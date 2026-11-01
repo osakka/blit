@@ -43,6 +43,21 @@ behaviour.
     an unsolicited `CSI ? 7701 ; 2 $ y`, and retries it if the program's
     input was full.
   - The pointer reappears where it was locked.
+- **A desktop's views are one program** (revised 2026-11-01, 0.3.28). A
+  Hibr desktop is several Blit sessions, one per view. On the owner's mini
+  PC, Boxer's lock was held by the HDMI view while the desktop's Release
+  Pointer gave `?7701l` back on another view. The lock stayed on, because
+  "focus moves away" can't happen while the pointer is still, and the
+  stall check saw a program reading normally. So nothing ended it, and the
+  raw reports reached a window as typing, again after a reboot. Now a
+  `?7701l` from any view of the same desktop (the frame barrier's
+  membership: the login desktop, or primaries and joins of one
+  `--session`) releases the lock wherever that desktop holds it, with the
+  usual unasked notice to the holder. Every engage and release is a
+  journal line and a trace event with its session, display and reason, and
+  `performance.pointer_lock_released` counts releases by reason. Turning
+  unrouted reports into keystrokes is the desktop's to stop, and Hibr is
+  fixing it there.
 - **No release key in Blit.** The owner chose one release key, the
   desktop's Release Pointer shortcut, which Hibr turns into
   `CSI ? 7701 l`. A fixed Blit chord would be a second key, and would
@@ -88,3 +103,11 @@ are sent to a file. It checks:
 - the bystander session hears nothing;
 - a program's own release gets no notice;
 - a program that stops reading loses the lock within seconds.
+
+## Verification (0.3.28)
+
+- `pointer_lock_desktop_gate.rb`: a primary and a `--join` of one desktop.
+  The join takes the lock. A session outside the desktop giving it back
+  changes nothing. The primary's give-back ends it, with the unasked
+  notice to the holder, the journal lines and the `desktop_view` count,
+  and no signed motion follows. It fails without the fix.

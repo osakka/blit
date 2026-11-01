@@ -1054,6 +1054,15 @@ typedef struct {
     /* Blit took the lock back but the program's input was full, so the
        notice that says so is still to be written. */
     int terminal_pointer_lock_notice;
+    /* The program sent `?7701l`. Resolved by service_pointer_lock, which
+       can see the other sessions: a give-back from any view of a desktop
+       releases the lock wherever that desktop holds it. */
+    int terminal_pointer_lock_giveback;
+    /* Whether this session's lock has been logged as engaged, and why it
+       was taken back when it was: every engage and release is logged once,
+       with its reason, so an incident leaves a record. */
+    int terminal_pointer_lock_logged;
+    const char *terminal_pointer_lock_reason;
     /* Requests for the lock refused because the session lacked focus or had
        ended: which session a program asked on, and that it was refused, is
        otherwise invisible from outside. */
@@ -1225,6 +1234,14 @@ typedef struct {
     uint64_t pointer_lock_checked_us;
     unsigned long long diagnostic_pointer_lock_reports;
     unsigned long long diagnostic_pointer_lock_releases;
+    /* Every engage, and every release by its reason. */
+    unsigned long long diagnostic_pointer_lock_engages;
+    unsigned long long diagnostic_pointer_lock_released_program;
+    unsigned long long diagnostic_pointer_lock_released_desktop_view;
+    unsigned long long diagnostic_pointer_lock_released_focus;
+    unsigned long long diagnostic_pointer_lock_released_stall;
+    unsigned long long diagnostic_pointer_lock_released_reset;
+    unsigned long long diagnostic_pointer_lock_released_exit;
     int font_scale_tenths;
     /* Exactly one size policy: positive pixels imply scale_tenths == 0. */
     int font_size_px;
@@ -3317,6 +3334,9 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"input_keys_dropped\":%llu,"
         "\"input_reports_dropped\":%llu,"
         "\"pointer_lock_reports\":%llu,\"pointer_lock_releases\":%llu,"
+        "\"pointer_lock_engages\":%llu,\"pointer_lock_released\":{\"program\":%llu,"
+        "\"desktop_view\":%llu,\"focus\":%llu,\"stall\":%llu,\"reset\":%llu,"
+        "\"exit\":%llu},"
         "\"evdev_service_budget_yields\":%llu,"
         "\"last_evdev_keyboard_event_age_ms\":%llu,"
         "\"last_evdev_keyboard_path\":\"%s\","
@@ -3405,6 +3425,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_input_reports_dropped,
         runtime->diagnostic_pointer_lock_reports,
         runtime->diagnostic_pointer_lock_releases,
+        runtime->diagnostic_pointer_lock_engages,
+        runtime->diagnostic_pointer_lock_released_program,
+        runtime->diagnostic_pointer_lock_released_desktop_view,
+        runtime->diagnostic_pointer_lock_released_focus,
+        runtime->diagnostic_pointer_lock_released_stall,
+        runtime->diagnostic_pointer_lock_released_reset,
+        runtime->diagnostic_pointer_lock_released_exit,
         runtime->diagnostic_evdev_service_budget_yields,
         runtime->diagnostic_last_evdev_keyboard_event_us > 0 &&
                 now >= runtime->diagnostic_last_evdev_keyboard_event_us ?
@@ -9668,7 +9695,10 @@ static void terminal_write_reply(BlitSession *session, const char *reply)
 static void terminal_set_pointer_lock(BlitSession *session, int enabled)
 {
     if (!enabled) {
+        if (session->terminal_pointer_lock)
+            session->terminal_pointer_lock_reason = "program";
         session->terminal_pointer_lock = 0;
+        session->terminal_pointer_lock_giveback = 1;
         return;
     }
     if (session->focused && !session->child_exited && session->pty_fd >= 0) {
@@ -9683,13 +9713,14 @@ static void terminal_set_pointer_lock(BlitSession *session, int enabled)
 /* Blit takes the lock back: on a reset, focus leaving, or a program that has
    stopped reading. The program is told, unasked, so it can show its own
    pointer again; a program that gave it back itself is not. */
-static void terminal_drop_pointer_lock(BlitSession *session)
+static void terminal_drop_pointer_lock(BlitSession *session, const char *reason)
 {
     static const char notice[] = "\033[?7701;2$y";
 
     if (!session->terminal_pointer_lock)
         return;
     session->terminal_pointer_lock = 0;
+    session->terminal_pointer_lock_reason = reason;
     session->terminal_pointer_lock_notice = session->pty_fd < 0 ||
         write(session->pty_fd, notice, sizeof(notice) - 1) !=
             (ssize_t)(sizeof(notice) - 1);
@@ -13133,7 +13164,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_mouse_mode = 0;
         session->terminal_mouse_sgr = 0;
         session->terminal_mouse_pixels = 0;
-        terminal_drop_pointer_lock(session);
+        terminal_drop_pointer_lock(session, "reset");
         session->terminal_pointer_depth = 0;
         session->terminal_synchronized = 0;
         terminal_sixel_reset_palette(session);
@@ -13962,7 +13993,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_mouse_mode = 0;
                 session->terminal_mouse_sgr = 0;
                 session->terminal_mouse_pixels = 0;
-                terminal_drop_pointer_lock(session);
+                terminal_drop_pointer_lock(session, "reset");
                 session->terminal_pointer_depth = 0;
                 session->terminal_synchronized = 0;
                 session->terminal_alternate_mode = 0;
@@ -26765,6 +26796,92 @@ static int pty_unread_input(const BlitSession *session)
     return unread;
 }
 
+/* The desktop a session is a view of, or NULL: the login desktop's own
+   session and every primary or join of one name are views of it, as the
+   frame barrier counts them. */
+static const char *pointer_lock_desktop(const BlitSession *session, uint64_t now)
+{
+    if (native_login_ready(session, now))
+        return "desktop";
+    if ((session->hibr_desktop_primary || session->hibr_desktop_join) &&
+        session->hibr_desktop_session[0] != '\0')
+        return session->hibr_desktop_session;
+    return NULL;
+}
+
+/* A desktop's views are one program to the person at it, so `?7701l` on any
+   of them gives back a lock another of them holds. The give-back otherwise
+   reached only the view that sent it, and a lock held by a different view
+   (the one the game's window was on) stayed on with nothing left to end it:
+   the pointer is still while locked, so focus cannot move away either. */
+static void pointer_lock_givebacks(BlitRuntime *runtime, uint64_t now)
+{
+    BlitSession *holder = pointer_lock_session(runtime);
+    const char *held = holder != NULL ? pointer_lock_desktop(holder, now) : NULL;
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        const char *desktop;
+        if (!session->used || !session->terminal_pointer_lock_giveback)
+            continue;
+        session->terminal_pointer_lock_giveback = 0;
+        if (holder == NULL || holder == session || held == NULL)
+            continue;
+        desktop = pointer_lock_desktop(session, now);
+        if (desktop == NULL || strcmp(desktop, held) != 0)
+            continue;
+        diagnostic_trace(runtime, "pointer_lock_released", "reason=desktop_view");
+        terminal_drop_pointer_lock(holder, "desktop-view");
+        holder = NULL;
+    }
+}
+
+/* Every engage and release, once each, to the journal and the trace, and
+   counted by reason. */
+static void pointer_lock_log(BlitRuntime *runtime)
+{
+    int i;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        char detail[160];
+        const char *reason;
+        if (!session->used)
+            continue;
+        if (session->terminal_pointer_lock && !session->terminal_pointer_lock_logged) {
+            session->terminal_pointer_lock_logged = 1;
+            ++runtime->diagnostic_pointer_lock_engages;
+            snprintf(detail, sizeof(detail), "session=%llu display=%s",
+                     session->id, session->display_id);
+            diagnostic_trace(runtime, "pointer_lock_engaged", detail);
+            fprintf(stderr, "blit: pointer lock engaged: %s\n", detail);
+        } else if (!session->terminal_pointer_lock && session->terminal_pointer_lock_logged) {
+            session->terminal_pointer_lock_logged = 0;
+            reason = session->terminal_pointer_lock_reason != NULL ?
+                session->terminal_pointer_lock_reason : "program";
+            session->terminal_pointer_lock_reason = NULL;
+            if (strcmp(reason, "program") == 0)
+                ++runtime->diagnostic_pointer_lock_released_program;
+            else if (strcmp(reason, "desktop-view") == 0)
+                ++runtime->diagnostic_pointer_lock_released_desktop_view;
+            else if (strcmp(reason, "focus") == 0)
+                ++runtime->diagnostic_pointer_lock_released_focus;
+            else if (strcmp(reason, "stall") == 0)
+                ++runtime->diagnostic_pointer_lock_released_stall;
+            else if (strcmp(reason, "reset") == 0)
+                ++runtime->diagnostic_pointer_lock_released_reset;
+            else
+                ++runtime->diagnostic_pointer_lock_released_exit;
+            snprintf(detail, sizeof(detail), "session=%llu display=%s reason=%s",
+                     session->id, session->display_id, reason);
+            if (strcmp(reason, "program") == 0)
+                diagnostic_trace(runtime, "pointer_lock_released", detail);
+            fprintf(stderr, "blit: pointer lock released: %s\n", detail);
+        }
+    }
+}
+
 /* Each pass: a lock whose session has lost focus, exited or closed is given
    back, and a notice the program could not take before is tried again. A
    few times a second, the holder is checked for reading: input left unread
@@ -26789,7 +26906,7 @@ static void service_pointer_lock(BlitRuntime *runtime)
         else if (now - runtime->pointer_lock_stalled_us >= 2000000ULL) {
             diagnostic_trace(runtime, "pointer_lock_released",
                              "reason=program_not_reading");
-            terminal_drop_pointer_lock(holder);
+            terminal_drop_pointer_lock(holder, "stall");
             ++runtime->diagnostic_pointer_lock_releases;
             runtime->pointer_lock_stalled_us = 0;
         }
@@ -26803,7 +26920,7 @@ static void service_pointer_lock(BlitRuntime *runtime)
             (!session->focused || session->child_exited || session->pty_fd < 0)) {
             diagnostic_trace(runtime, "pointer_lock_released",
                              !session->focused ? "reason=focus_moved" : "reason=program_ended");
-            terminal_drop_pointer_lock(session);
+            terminal_drop_pointer_lock(session, !session->focused ? "focus" : "exit");
             ++runtime->diagnostic_pointer_lock_releases;
         }
         if (session->terminal_pointer_lock_notice && session->pty_fd >= 0 &&
@@ -26812,6 +26929,8 @@ static void service_pointer_lock(BlitRuntime *runtime)
                 (ssize_t)(sizeof(notice) - 1))
             session->terminal_pointer_lock_notice = 0;
     }
+    pointer_lock_givebacks(runtime, now);
+    pointer_lock_log(runtime);
 }
 
 /* Writes the motion report held back by the frame limit, if any. */
