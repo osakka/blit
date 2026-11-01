@@ -387,6 +387,7 @@ suite_lifecycle() {
     run_gate update_idle_timeout_gate.sh "$ROOT"/tools/tests/update_idle_timeout_gate.sh
     run_gate update_reset_gate.sh "$ROOT"/tools/tests/update_reset_gate.sh
     run_gate update_restart_gate.sh "$ROOT"/tools/tests/update_restart_gate.sh
+    run_gate restart_after_update_gate.rb ruby tools/tests/restart_after_update_gate.rb
     run_gate update_cancel_gate.sh "$ROOT"/tools/tests/update_cancel_gate.sh
 }
 

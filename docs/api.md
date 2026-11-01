@@ -884,8 +884,8 @@ is attributed, the write is refused with 422
 `display_brightness_unsupported`.
 
 **`zoom`** is pixel zoom (ADR 0204): the whole display, pictures included,
-magnified as an image. It is a percentage, 100 (none), 125, 150, 175, 200,
-250, 300 or 400; anything else is a 400 `invalid_display_zoom`. A zoomed
+magnified as an image. It is a percentage, a multiple of 25 from 100 (none)
+through 400; anything else is a 400 `invalid_display_zoom`. A zoomed
 display's logical size, its `bounds`, is the mode times 100 / zoom rounded
 down (2560x1440 at 150% is 1706x960); panes, cell grids, the topology, hit
 testing and the pointer's position all work in it, and its sessions are
@@ -900,8 +900,10 @@ enlargement at their normal size, relative pointer motion is physical
 screenshots are physical. Presentation effects (curvature, glow) are not
 drawn on a zoomed display composed by GLES; its `presentation_unavailable`
 says `zoomed display`. A zoom other than 100 is persisted in the settings
-document as `displays.<connector>.zoom`, so it follows the monitor and is
-applied before the first frame.
+document as `displays.<connector>.zoom`, keyed by `state.connector` (`DP-1`,
+not the display's `name`; `name` only where there is no connector), so it
+follows the monitor and is applied before the first frame. An entry under
+the `name`, as 0.3.26 wrote it, is read and moved on the next save.
 
 **Power is reported and not settable.** `state.power` carries the connector's
 DPMS state where a DRM connector was matched to the display, so an operator can
@@ -1081,7 +1083,8 @@ stored document, `effective` is what this process is using now, and
 holds `font` (`font_id` with `scale` or `size_px`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
-`effects_animation_hz`, `expect_desktop` and `shutdown_key`. The other
+`effects_animation_hz`, `restart_after_update`, `expect_desktop` and
+`shutdown_key`. The other
 sections are `display_layouts`, `effects`, `pointer`, `login`,
 `auxiliary_displays`, `input_devices`, `audio_devices` and `displays`.
 Environment variables such as `BLIT_RENDER_INTERVAL_MS`, `BLIT_PANE_LAYOUT`,
@@ -1769,7 +1772,10 @@ video   9/s  by descriptor  (kitty 0  sixel 0)
   the refresh interval. Bars over it are red.
 - **blit**, once, on the first panel shown: the worst loop gap in 10 s,
   input (`idle`, or the last and worst dispatch time), the glyph cache's hit
-  rate, and errors in 10 s (`none`, or the nonzero counts).
+  rate, and errors in 10 s (`none`, or the nonzero counts). While an
+  installed update waits for a restart, one more line:
+  `update  0.3.27 installed, at login screen`, or `restart to apply` under
+  `manual` (see "Restart after an update").
 - **hibr** (section `hibr`): the lines the session's frame client sends as
   STA1 (version 2 of the frame socket, ADR 0202), with their age, while
   younger than 5 s. The session reports them as `status`.
@@ -1801,10 +1807,35 @@ replace it.
 managed child process groups and releases outputs; it cannot restart itself.
 Use the host supervisor to start it again. `/v1/control/restart` requests an
 orderly restart of the exact executable currently serving the API, preserving
-the listen port; this also works for a TCC-built development fixture without
-silently switching to another installed binary. Package installation uses the
+the listen port, or, when that file was replaced on disk by an update, of the
+new one at its path; this also works for a TCC-built development fixture
+without silently switching to another installed binary. Package installation uses the
 separate `/v1/control/update` flow and must be verified through
 `/v1/control/update/status` and `/v1/version`.
+
+### Restart after an update
+
+The package never restarts Blit (ADR 0008), and an update through the API
+restarts it as before. A package installed another way -- an `apt upgrade`
+typed into a terminal inside Blit -- leaves the old Blit running, so Blit
+checks every 5 s whether the binary it was started from was replaced and
+reads the installed version from `/usr/lib/blit/VERSION`
+([ADR 0205](adr/0205-restart-after-update.md)). A restart is pending when
+that version is not its own. `document.server.restart_after_update`
+decides what happens:
+
+- `at-login-screen` (the default): Blit restarts itself, as
+  `POST /v1/control/restart` does, at the first safe moment: the login
+  manager is running and waiting for a sign-in (its identity `waiting`; a
+  verified, rejected or unavailable identity counts as signed in), no other
+  terminal session runs, no input has come for 10 s, and no API update is
+  in progress. It does so at most once for an installed version.
+- `manual`: Blit only reports it.
+
+`/v1/diagnostics` reports `update`: `running_version`, `installed_version`,
+`executable_replaced`, `restart_pending`, `restart_after_update` and, while
+pending, `waiting_for`, what the safe moment still lacks (`login-screen`,
+`signed-in`, `user-session`, `input`, `update`, `restart-attempted`).
 
 ## Stopping the server from the keyboard
 

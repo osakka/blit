@@ -253,9 +253,9 @@ paths:
         `brightness_percent` is a 422 `display_brightness_unsupported` where
         no backlight is attributed.
 
-        `zoom` (ADR 0204) is a percentage: 100 (none), 125, 150, 175, 200,
-        250, 300 or 400; any other value, or one that is not a whole number,
-        is a 400 `invalid_display_zoom`. The display's `bounds` become its
+        `zoom` (ADR 0204) is a percentage, a multiple of 25 from 100 (none)
+        through 400; any other value, or one that is not a whole number, is a
+        400 `invalid_display_zoom`. The display's `bounds` become its
         mode times 100 / zoom, rounded down, and its sessions are resized to
         that logical size.
       requestBody:
@@ -276,7 +276,9 @@ paths:
                       maximum: 100
                     zoom:
                       type: integer
-                      enum: [100, 125, 150, 175, 200, 250, 300, 400]
+                      minimum: 100
+                      maximum: 400
+                      multipleOf: 25
                   additionalProperties: false
               additionalProperties: false
       responses:
@@ -2272,7 +2274,7 @@ components:
             `displays` section under the connector name when it is not 100.
           properties:
             brightness_percent: {type: integer, minimum: 0, maximum: 100}
-            zoom: {type: integer, enum: [100, 125, 150, 175, 200, 250, 300, 400]}
+            zoom: {type: integer, minimum: 100, maximum: 400, multipleOf: 25}
           additionalProperties: false
         revision:
           $ref: '#/components/schemas/Revision'
@@ -2757,6 +2759,15 @@ components:
                   minimum: 10
                   maximum: 30
                   description: Frame rate of animated pane effects (ADR 0188).
+                restart_after_update:
+                  type: string
+                  enum: [at-login-screen, manual]
+                  description: >-
+                    When a package installed under a running Blit takes
+                    effect (ADR 0205): at the first safe moment at the login
+                    screen (`at-login-screen`, the default), or only when
+                    someone restarts it (`manual`). Any other value is a 400
+                    `invalid_settings_server`.
                 expect_desktop: {type: boolean}
                 shutdown_key:
                   $ref: '#/components/schemas/ShutdownKey'
@@ -2767,6 +2778,7 @@ components:
                      display_backend_requested, display_backend_active,
                      presentation_configuration, kms_async_pageflip,
                      kms_compositor, kms_frame_timing, effects_animation_hz,
+                     restart_after_update,
                      expect_desktop, login, login_restart_required, pointer,
                      pointer_shown, hud]
           properties:
@@ -2795,6 +2807,7 @@ components:
                 uses is `render.outputs[].compositor` in `/v1/diagnostics`.
             kms_frame_timing: {type: string, enum: [immediate, late]}
             effects_animation_hz: {type: integer, minimum: 10, maximum: 30}
+            restart_after_update: {type: string, enum: [at-login-screen, manual]}
             expect_desktop: {type: boolean}
             login: {$ref: '#/components/schemas/LoginPolicy'}
             login_restart_required: {type: boolean}
@@ -2863,7 +2876,7 @@ components:
       additionalProperties: false
     Diagnostics:
       type: object
-      required: [revision, health, resources, render, graphics, hud, errors, warnings]
+      required: [revision, health, resources, render, graphics, hud, update, errors, warnings]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         health:
@@ -3287,6 +3300,37 @@ components:
                     type: array
                     items: {type: string}
                 additionalProperties: false
+          additionalProperties: false
+        update:
+          type: object
+          description: >-
+            A package installed under this Blit (ADR 0205). Checked every
+            5 s: `installed_version` is the install root's VERSION (null
+            when unreadable), and a restart is pending when it is not
+            `running_version` and this process runs the installed binary.
+            Under `at-login-screen` Blit restarts itself, as
+            `POST /v1/control/restart` does, once nothing is in
+            `waiting_for`: `login-screen` (the login manager is not
+            running), `signed-in` (it is not waiting for a sign-in),
+            `user-session` (another session runs), `input` (input in the
+            last 10 s), `update` (an API update in progress),
+            `restart-attempted` (a restart was already made for this
+            version). Empty while nothing is pending.
+          required: [running_version, installed_version, executable_replaced,
+                     restart_pending, restart_after_update, waiting_for]
+          properties:
+            running_version: {type: string}
+            installed_version: {type: [string, 'null']}
+            executable_replaced:
+              type: boolean
+              description: The binary this process was started from has been replaced on disk.
+            restart_pending: {type: boolean}
+            restart_after_update: {type: string, enum: [at-login-screen, manual]}
+            waiting_for:
+              type: array
+              items:
+                type: string
+                enum: [login-screen, signed-in, user-session, input, update, restart-attempted]
           additionalProperties: false
         errors:
           type: array

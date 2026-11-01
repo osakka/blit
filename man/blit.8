@@ -320,12 +320,28 @@ They are not for production use.
 Must be
 .B 1
 for
-.B BLIT_TEST_REFRESH_HZ
+.BR BLIT_TEST_REFRESH_HZ ,
+.B BLIT_INSTALL_ROOT
+and
+.B BLIT_TEST_VERSION
 to apply.
 .TP
 .B BLIT_TEST_REFRESH_HZ
 Comma-separated refresh rates, one per display, replacing the measured
 ones.
+.TP
+.B BLIT_INSTALL_ROOT
+The install root watched for an update instead of
+.IR /usr/lib/blit :
+its
+.I VERSION
+and
+.IR bin/blit-server ,
+the binary the server must have been started from.
+.TP
+.B BLIT_TEST_VERSION
+The version the server reports instead of its own, for this process only:
+it is not passed on to a restart.
 .TP
 .B BLIT_GLES_PLATFORM
 .B surfaceless
@@ -450,6 +466,22 @@ To restart the server without a reboot, use
 .B "POST /v1/control/restart"
 (Restart Blit in Hibr's Control Panel) or
 .BR "systemctl restart blit" .
+.PP
+The package does not restart Blit. After an
+.B apt upgrade
+the old Blit keeps running; it notices within 5 seconds that
+.I /usr/lib/blit/VERSION
+differs from its own version and, by default, restarts itself the same
+way once the login screen shows with nobody signed in, no other session
+runs and nothing has been typed for 10 seconds, at most once for each
+installed version.
+.B server.restart_after_update
+set to
+.B manual
+leaves the restart to you;
+.B /v1/diagnostics
+reports it as
+.BR update .
 .SH SIGNALS
 .TP
 .BR SIGTERM ", " SIGINT
@@ -493,6 +525,9 @@ The update token.
 .TP
 .I /var/lib/blit/settings.json
 The saved settings document.
+.TP
+.I /usr/lib/blit/VERSION
+The installed version.
 .TP
 .I /var/lib/blit/updates/
 Packages uploaded for installation.

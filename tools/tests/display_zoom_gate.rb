@@ -15,10 +15,11 @@
 # logical frame and, by the formula, the physical frame: pixel (x, y) shows
 # logical (min(x * 100 / zoom, w - 1), min(y * 100 / zoom, h - 1)).
 #
-#   * maths: at 200%, 150% and 175% every physical pixel of display-1 is
-#     that prediction, exactly -- at 200% each logical pixel an exact 2x2
+#   * maths: at 200%, 150%, 175% and 225% every physical pixel of display-1
+#     is that prediction, exactly -- at 200% each logical pixel an exact 2x2
 #     block; at 150% the uneven 2,1 repeat and the last column and row
-#     through the clamp; at 175% another uneven repeat. The same exact
+#     through the clamp; at 175% and 225%, a step only the slider reaches,
+#     other uneven repeats. The same exact
 #     prediction on both compositors is the parity: CPU and GLES draw the
 #     same pixels
 #   * size: the session's grid (surface summary) and its winsize follow the
@@ -394,7 +395,7 @@ Dir.mktmpdir('blit-display-zoom') do |root|
   results = []
   pointer = nil
   panel200 = nil
-  [200, 150, 175].each do |zoom|
+  [200, 150, 175, 225].each do |zoom|
     item = set_zoom(zoom)
     check(item.dig('state', 'physical') == { 'width' => W, 'height' => H },
           "#{zoom}%: the physical size changed: #{item['state']}")
@@ -481,7 +482,7 @@ Dir.mktmpdir('blit-display-zoom') do |root|
   check(settled('display-2') == before2, "display-2's pixels changed")
 
   puts "DISPLAY_ZOOM_PASS backend=#{backend} sizes=100=#{W}x#{H}:#{want100[1]}x#{want100[0]} #{results.join(' ')} " \
-       "formula_exact=#{checked}px(200=2x2_blocks,150=column+row_clamp,175=uneven) " \
+       "formula_exact=#{checked}px(200=2x2_blocks,150=column+row_clamp,175+225=uneven) " \
        "pointer=absolute_logical+relative_#{pointer&.join(',')} pointer_art=#{art100.length}px_unenlarged " \
        "panel=#{panel200[2]}x#{panel200[3]}@#{panel200[0]},#{panel200[1]}_unenlarged " \
        'scanlines_under_curvature=enlarged display-2=untouched back_to_100=byte_identical' \

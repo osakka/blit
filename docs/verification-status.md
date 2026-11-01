@@ -1,5 +1,48 @@
 # Verification status
 
+## 2026-11-01: 0.3.27 restart after an update; zoom in 25 % steps, kept per connector
+
+- **Restart after an update (ADR 0205, accepted).** An `apt upgrade` used to
+  leave the old Blit running: on 10.52, 0.3.25 was installed at 13:23 while
+  0.3.24 ran for hours. The postinst still never restarts Blit, because the
+  upgrade usually runs in a terminal inside it.
+  - **Detection:** every 5 s Blit reads `/usr/lib/blit/VERSION` (now in the
+    package, and checked by the package gate) and notices that its
+    executable has been replaced.
+  - **The setting:** `server.restart_after_update`, `at-login-screen`
+    (default) or `manual`.
+  - **The safe moment:** the login manager's session is running, nobody is
+    signed in (identity waiting), no other session is running, there has
+    been no input for 10 s and no API update is in progress. At most one
+    restart per installed version.
+  - **Reporting:** `/v1/diagnostics` `update`, with `running_version`,
+    `installed_version`, `executable_replaced`, `restart_pending`, the
+    policy and `waiting_for`; one line on the performance panel.
+
+  `POST /v1/control/restart` now runs the replaced binary at the same path,
+  not the fallback. `restart_after_update_gate.rb` (lifecycle, sudo) works
+  on a mock install root:
+  - signed in: holds 15 s;
+  - manual: holds, and the panel says "restart to apply";
+  - at the login screen with a session and input: waits, then restarts
+    once 10 s after the last input and comes back as the new version with
+    nothing pending;
+  - a VERSION the binary doesn't carry: exactly one restart.
+
+  Control Panel pane 0.1.24 has the choice and an "Update waiting" row.
+- **Zoom (ADR 0204):**
+  - It is kept under the connector name (`DP-1`), not the display name
+    ("KMS connector 93"). An entry under the old name is read and dropped on
+    the next save (#103 for zoom).
+  - It takes any 25 % step from 100 to 400, for the Control Panel's slider
+    (pane 0.1.24); display_zoom_gate checks 225 against the formula on both
+    compositors.
+- **Also seen on hardware this release:** YouTube 3.22 pinned Hibr's
+  desktop at ~100 % CPU on both machines, all of it user time
+  (utime +295 ticks in 3 s on 10.52, every syscall sample "running"). It was
+  rolled back as 3.23.
+- **Suites:** font 38/38, full 160/160 (6 skips), GLES renderer 68/68 (1 skip).
+
 ## 2026-11-01: 0.3.26 pixel zoom per display (ADR 0204)
 
 - **What:** the owner asked for a zoom per monitor that is not the font

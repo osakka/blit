@@ -144,6 +144,9 @@ test ! -e "$stage/usr/share/blit/hibr/session.hibr"
 test ! -e "$stage/usr/share/blit/hibr/system"
 test -f "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
 strings "$stage/usr/lib/blit/bin/blit-server" | grep -Fx "$release" >/dev/null
+# ADR 0205: the installed version a running Blit compares with its own.
+test -f "$stage/usr/lib/blit/VERSION"
+test "$(cat "$stage/usr/lib/blit/VERSION")" = "$release"
 cmp -s "$root/build/blit/blit-server" "$stage/usr/lib/blit/bin/blit-server"
 cmp -s "$root/openapi/blit-0.1.yaml" "$stage/usr/lib/blit/openapi/blit-0.1.yaml"
 documentation_commit=$(sed -n 's/^package_documentation_commit: //p' "$manifest")

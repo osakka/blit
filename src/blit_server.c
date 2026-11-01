@@ -1527,6 +1527,25 @@ typedef struct {
     char update_token[256];
     char update_state[32];
     char update_detail[256];
+    /* ADR 0205: an update installed under a running Blit. The install root
+       (/usr/lib/blit; BLIT_INSTALL_ROOT under test), whether this process
+       runs its bin/blit-server and that file as it was at start, what the
+       5 s check last found, the version a restart was already attempted
+       for (carried across the exec), and the policy. */
+    char install_root[PATH_MAX];
+    int update_watched;
+    dev_t update_exe_dev;
+    ino_t update_exe_ino;
+    struct timespec update_exe_mtime;
+    int update_replaced;
+    int update_restart_pending;
+    unsigned update_waiting;
+    char update_installed_version[64];
+    char update_attempted_version[64];
+    uint64_t update_checked_us;
+    uint64_t last_input_us;
+    int restart_after_update_manual;
+    int restart_after_update_configured;
     /* Graphics payloads as they enter the terminal parser, counted before
        anything can reject them. Without these, "the producer sent no image"
        and "Blit discarded the image" look identical from outside: both leave
@@ -1753,6 +1772,8 @@ static void recent_note_present(BlitRuntime *runtime, int output,
 static void recent_tick(BlitRuntime *runtime, uint64_t now);
 static void recent_json(const BlitRuntime *runtime, int output, char *out, size_t capacity);
 static void frame_hud_notify(BlitRuntime *runtime);
+/* ADR 0205: restart after an update, at a safe moment. */
+static void update_json(const BlitRuntime *runtime, char *out, size_t capacity);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
 static void discover_panes(BlitRuntime *runtime);
@@ -2470,6 +2491,10 @@ static int restart_server_process(const BlitRuntime *runtime)
     length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
     if (length > 0 && length < (ssize_t)sizeof(executable)) {
         executable[length] = '\0';
+        /* Replaced on disk (an update, ADR 0205): the same path now holds
+           the new binary, which is the one to run. */
+        if (length > 10 && strcmp(executable + length - 10, " (deleted)") == 0)
+            executable[length - 10] = '\0';
         execl(executable, "blit-server", port_text, (char *)NULL);
     }
     /* Package updates normally reach this path only if procfs is unavailable.
@@ -2956,6 +2981,7 @@ static void record_input_dispatch(BlitRuntime *runtime, uint64_t started_us)
     now = monotonic_us();
     elapsed = now >= started_us ? (double)(now - started_us) / 1000.0 : 0.0;
     ++runtime->diagnostic_input_events;
+    runtime->last_input_us = now;
     runtime->diagnostic_last_input_dispatch_ms = elapsed;
     if (elapsed > runtime->diagnostic_max_input_dispatch_ms)
         runtime->diagnostic_max_input_dispatch_ms = elapsed;
@@ -3686,6 +3712,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     static char scheduler[BLIT_MAX_DISPLAYS * 3072 + 64];
     /* ADR 0203: a panel's lines with its place, per output. */
     static char hud[BLIT_MAX_DISPLAYS * 2048 + 512];
+    char update[512];
     char hotplug[512];
     char hotplug_error[256];
     BlitKmsHotplugInfo hotplug_info;
@@ -3712,6 +3739,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         if (runtime->input_devices[i].used) ++input_devices;
     render_scheduler_json(runtime, scheduler, sizeof(scheduler));
     hud_json(runtime, hud, sizeof(hud));
+    update_json(runtime, update, sizeof(update));
     blit_kms_hotplug_info(runtime->kms, &hotplug_info);
     json_escape(hotplug_info.error, hotplug_error, sizeof(hotplug_error));
     snprintf(hotplug, sizeof(hotplug),
@@ -3882,7 +3910,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"sixel_color_registers\":%d,"
              "\"frames\":{\"socket\":\"%s%s\",\"accepted\":%llu,\"refused\":%llu,"
              "\"last_error\":\"%s\"}},"
-             "\"hud\":%s,"
+             "\"hud\":%s,\"update\":%s,"
              "\"errors\":%s,\"warnings\":%s}",
              runtime->kms != NULL && runtime->display_count > 0 ?
                  "true" : "false", backend, escaped_error,
@@ -3911,7 +3939,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              BLIT_SIXEL_COLOR_REGISTERS,
              runtime->frame_fd >= 0 ? "@" : "", runtime->frame_fd >= 0 ? runtime->frame_name : "",
              runtime->frames_accepted, runtime->frames_refused,
-             runtime->frames_last_error, hud,
+             runtime->frames_last_error, hud, update,
              errors,
              warnings);
 }
@@ -19959,15 +19987,11 @@ static int json_whole_number(const char *json, const char *key, int *value)
     return 1;
 }
 
-/* ADR 0204: the zooms a display takes, in percent; 100 is none. */
+/* ADR 0204: the zooms a display takes, in percent, every 25 from 100
+   (none) to 400; the Control Panel sets it with a slider. */
 static int display_zoom_valid(int zoom)
 {
-    static const int steps[] = {100, 125, 150, 175, 200, 250, 300, 400};
-    size_t i;
-    for (i = 0; i < sizeof(steps) / sizeof(steps[0]); ++i)
-        if (zoom == steps[i])
-            return 1;
-    return 0;
+    return zoom >= 100 && zoom <= 400 && zoom % 25 == 0;
 }
 
 /* A display's zoom: its logical rectangle, from its mode, and the
@@ -20078,8 +20102,8 @@ static int apply_display_configuration(BlitRuntime *runtime,
     if (json_key_cursor(scalars, "zoom") != NULL &&
         (!zoom_requested || !display_zoom_valid(zoom))) {
         config_problem(problem, 400, "Bad Request", "invalid_display_zoom",
-                       "zoom is a percentage: 100 (none), 125, 150, 175, "
-                       "200, 250, 300 or 400.");
+                       "zoom is a percentage, a multiple of 25 from 100 "
+                       "(none) through 400.");
         return 0;
     }
     if (brightness_requested && (brightness < 0 || brightness > 100)) {
@@ -20639,20 +20663,42 @@ static size_t settings_merge_object(const BlitInputDevice *device,
    attached at all since boot has to keep them too, or the first save after a
    restart would quietly delete every entry for hardware that happens to be
    unplugged today. */
-/* Issue #69. A display's stored key is its name, which is the hardware's
-   own: native KMS names a display after its connector. ADR 0064's stability test
-   is what is being applied here -- stage 1 refused to persist against
-   `input-node-<n>` because the kernel reassigns node numbers, and
-   `display-<n>` is enumeration order in exactly the same way, while a
-   connector name is the physical port. */
+/* Issue #69. A display's stored key is its connector name, the physical
+   port (`DP-1`), and its `name` only where it has none (issue #103: native
+   KMS names a display after its DRM object id, "KMS connector 93"). ADR
+   0064's stability test is what is being applied here -- stage 1 refused
+   to persist against `input-node-<n>` because the kernel reassigns node
+   numbers, and `display-<n>` is enumeration order in exactly the same way. */
+static const char *display_settings_key(const BlitDisplay *display)
+{
+    return display->connector[0] != '\0' ? display->connector : display->name;
+}
+
+/* A live display answers to its connector key and to its name, the key
+   documents before 0.3.27 used, so a save drops an entry under the old key:
+   it was read as this display's, and is now written under the new one. */
 static int find_display_name(const BlitRuntime *runtime, const char *name)
 {
     int i;
 
     for (i = 0; i < runtime->display_count; ++i)
-        if (strcmp(runtime->displays[i].name, name) == 0)
+        if (strcmp(display_settings_key(&runtime->displays[i]), name) == 0 ||
+            strcmp(runtime->displays[i].name, name) == 0)
             return i;
     return -1;
+}
+
+/* The stored entry for a display: under its connector key, else under the
+   name it had before (read, and migrated on the next save). */
+static int settings_display_member(const BlitRuntime *runtime,
+                                   const BlitDisplay *display,
+                                   char *configuration, size_t capacity)
+{
+    return settings_member(runtime->settings_document, "displays",
+                           display_settings_key(display), configuration,
+                           capacity) ||
+        settings_member(runtime->settings_document, "displays",
+                        display->name, configuration, capacity);
 }
 
 static void settings_copy_unseen(BlitRuntime *runtime, const char *section,
@@ -20697,7 +20743,7 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
     static const char *const known[] = {
         "render_interval_ms", "pane_layout", "display_backend",
         "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor",
-        "kms_frame_timing", "effects_animation_hz"
+        "kms_frame_timing", "effects_animation_hz", "restart_after_update"
     };
     const char *cursor = json_key_cursor(runtime->settings_document, "server");
     char key[64];
@@ -21437,7 +21483,7 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     settings_copy_unseen(runtime, "audio_devices", BLIT_SETTINGS_AUDIO, out,
                          capacity, &used, &first);
     /* Of a live display only its zoom is persisted (ADR 0204), under its
-       connector name and only when it is not 100: rotation went with SDL
+       connector name (display_settings_key) and only when it is not 100: rotation went with SDL
        (ADR 0184); power is not, because startup's modeset turns the panel
        on and a stored `off` would be a dark boot; brightness is not,
        because systemd-backlight already restores it and two restorers
@@ -21449,7 +21495,8 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
         char name[256];
         if (runtime->displays[i].zoom <= 100)
             continue;
-        json_escape(runtime->displays[i].name, name, sizeof(name));
+        json_escape(display_settings_key(&runtime->displays[i]), name,
+                    sizeof(name));
         json_appendf(out, capacity, &used, "%s\"%s\":{\"zoom\":%d}",
                      first ? "" : ",", name, runtime->displays[i].zoom);
         first = 0;
@@ -21500,6 +21547,12 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     if (runtime->effects_animation_hz_configured) {
         json_appendf(out, capacity, &used, "%s\"effects_animation_hz\":%d",
                      first ? "" : ",", runtime->effects_animation_hz);
+        first = 0;
+    }
+    if (runtime->restart_after_update_configured) {
+        json_appendf(out, capacity, &used, "%s\"restart_after_update\":\"%s\"",
+                     first ? "" : ",", runtime->restart_after_update_manual ?
+                         "manual" : "at-login-screen");
         first = 0;
     }
     if (runtime->kms_async_configured) {
@@ -21991,6 +22044,8 @@ static void settings_apply_server(BlitRuntime *runtime)
     runtime->display_backend_configured = 0;
     runtime->kms_async_configured = 0;
     runtime->expect_desktop_configured = 0;
+    runtime->restart_after_update_manual = 0;
+    runtime->restart_after_update_configured = 0;
     runtime->render_interval_ms = runtime->boot_render_interval_ms;
     runtime->pane_columns = runtime->boot_pane_columns;
     runtime->pane_rows = runtime->boot_pane_rows;
@@ -22027,6 +22082,11 @@ static void settings_apply_server(BlitRuntime *runtime)
                 runtime->effects_animation_hz = hz;
                 runtime->effects_animation_hz_configured = 1;
             }
+        }
+        if (json_string(server, "restart_after_update", chord, sizeof(chord)) &&
+            (strcmp(chord, "at-login-screen") == 0 || strcmp(chord, "manual") == 0)) {
+            runtime->restart_after_update_manual = strcmp(chord, "manual") == 0;
+            runtime->restart_after_update_configured = 1;
         }
         if (json_bool(server, "kms_async_pageflip", &value)) {
             runtime->kms_async_pageflip = value;
@@ -22108,6 +22168,10 @@ static int settings_server_backend_valid(const char *document)
         if (!json_int(server, "effects_animation_hz", &hz) || hz < 10 || hz > 30)
             return 0;
     }
+    if (json_key_cursor(server, "restart_after_update") != NULL &&
+        !(json_string(server, "restart_after_update", backend, sizeof(backend)) &&
+          (strcmp(backend, "at-login-screen") == 0 || strcmp(backend, "manual") == 0)))
+        return 0;
     if (json_key_cursor(server, "display_backend") == NULL) return 1;
     return json_string(server, "display_backend", backend, sizeof(backend)) &&
         strcmp(backend, "kms") == 0;
@@ -22214,9 +22278,8 @@ static void settings_apply_displays(BlitRuntime *runtime)
         char configuration[128];
         BlitConfigProblem problem;
 
-        if (!settings_member(runtime->settings_document, "displays",
-                             runtime->displays[i].name, configuration,
-                             sizeof(configuration)))
+        if (!settings_display_member(runtime, &runtime->displays[i],
+                                     configuration, sizeof(configuration)))
             continue;
         memset(&problem, 0, sizeof(problem));
         if (!apply_display_configuration(runtime, i, configuration, &problem))
@@ -22283,6 +22346,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"configuration_valid\":%s},"
                  "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
                  "\"kms_frame_timing\":\"%s\",\"effects_animation_hz\":%d,"
+                 "\"restart_after_update\":\"%s\","
                  "\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
@@ -22308,6 +22372,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->kms_compositor_gles ? "gles" : "cpu",
                  runtime->kms_frame_timing_immediate ? "immediate" : "late",
                  runtime->effects_animation_hz,
+                 runtime->restart_after_update_manual ? "manual" : "at-login-screen",
                  runtime->expect_desktop ? "true" : "false", login,
                  restart_required ? "true" : "false",
                  blit_pointer_shapes[runtime->pointer_art.config.shape],
@@ -22419,6 +22484,8 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->kms_frame_timing_configured = 0;
     runtime->effects_animation_hz = 30;
     runtime->effects_animation_hz_configured = 0;
+    runtime->restart_after_update_manual = 0;
+    runtime->restart_after_update_configured = 0;
     runtime->expect_desktop = runtime->boot_expect_desktop;
     runtime->expect_desktop_configured = 0;
     if (runtime->kms_async_pageflip)
@@ -23830,7 +23897,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_server_backend_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
-                             "server.display_backend must be kms, server.kms_compositor cpu or gles, and server.kms_frame_timing late or immediate.");
+                             "server.display_backend must be kms, server.kms_compositor cpu or gles, server.kms_frame_timing late or immediate, server.effects_animation_hz 10 through 30, and server.restart_after_update at-login-screen or manual.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -25101,7 +25168,7 @@ static void reconcile_kms_topology(BlitRuntime *runtime)
         runtime->outputs[i].display_id = info.id;
         if (prior < 0) {
             char configuration[128]; BlitConfigProblem problem;
-            if (settings_member(runtime->settings_document, "displays", info.name, configuration, sizeof(configuration))) {
+            if (settings_display_member(runtime, &runtime->displays[i], configuration, sizeof(configuration))) {
                 memset(&problem, 0, sizeof(problem));
                 apply_display_configuration(runtime, i, configuration, &problem);
             }
@@ -29377,6 +29444,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
 }
 
 #include "blit_hud.h"
+#include "blit_update_restart.h"
 #include "blit_frames.h"
 
 int main(int argc, char **argv)
@@ -29432,6 +29500,7 @@ int main(int argc, char **argv)
     runtime.snd_watch_fd = -1;
     runtime.started_us = monotonic_us();
     diagnostic_log(&runtime, "info", "server_start", "Blit gateway starting");
+    update_init(&runtime);
     blit_font_load(&runtime.font);
     blit_font_load_wide(&runtime.wide_font);
     runtime.font_scale_tenths = BLIT_FONT_SCALE_MIN_TENTHS;
@@ -30239,6 +30308,7 @@ int main(int argc, char **argv)
             kms_check_slots(&runtime, now, held);
             effects_animation_tick(&runtime, now);
             recent_tick(&runtime, now);
+            update_tick(&runtime, now);
             hud_reconcile(&runtime);
             hud_tick(&runtime, now);
             if (blit_vt_active() && runtime.render_pending &&

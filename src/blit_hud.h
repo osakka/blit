@@ -7,7 +7,8 @@
    Each panel is about its own output: what it drew in the last second and
    why, its draw and flip times over the last ten, its gpu, the pictures its
    sessions sent, and a graph of the last minute. Blit as a whole -- loop,
-   input, glyph cache, errors -- is said once, on the first panel shown.
+   input, glyph cache, errors, and an update waiting for a restart (ADR
+   0205) -- is said once, on the first panel shown.
    Those figures (recent_tick) are kept whether or not the panel is on, and
    /v1/diagnostics reports each one.
 
@@ -553,6 +554,12 @@ static void hud_blit_lines(BlitRuntime *runtime, BlitHudPanel *panel, int *headi
             used += (size_t)snprintf(line + used, sizeof(line) - used, "keys %llu  ", keys);
         hud_line(panel, heading, 0, "errors  %sin 10 s", line);
     }
+    /* ADR 0205: an update installed under this Blit, while pending; the
+       version cut at 11 keeps the longer form inside BLIT_HUD_COLUMNS. */
+    if (runtime->update_restart_pending)
+        hud_line(panel, heading, 0, "update  %.11s installed, %s",
+                 runtime->update_installed_version,
+                 runtime->restart_after_update_manual ? "restart to apply" : "at login screen");
 }
 
 /* One output's panel: its text, then only the lines and graph that

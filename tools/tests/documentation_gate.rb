@@ -12,9 +12,11 @@
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root)
 
-# Names that are deliberately not documented: the server sets and clears this
-# one itself, after a GPU start that crashed; setting it does nothing.
-INTERNAL = %w[BLIT_KMS_GLES_BLOCKED].freeze
+# Names that are deliberately not documented: the server sets and clears
+# these itself -- the first after a GPU start that crashed, the second for
+# the process it execs after an update (ADR 0205); setting them does nothing
+# useful.
+INTERNAL = %w[BLIT_KMS_GLES_BLOCKED BLIT_UPDATE_RESTARTED].freeze
 
 names = Dir['src/*.{c,h}'].flat_map { |f| File.read(f).scan(/"(BLIT_[A-Z0-9_]+)"/).flatten }.uniq.sort
 raise 'no BLIT_ names found in src/' if names.size < 40

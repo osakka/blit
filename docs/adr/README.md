@@ -222,6 +222,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0202 — Local picture frames by descriptor, not through the terminal](0202-local-frames-by-descriptor.md)
 - [0203 — A performance panel drawn by Blit, with a section Hibr feeds](0203-performance-panel.md)
 - [0204 — Pixel zoom per display](0204-display-pixel-zoom.md)
+- [0205 — Restart after an update at a safe moment](0205-restart-after-update.md)
 
 ## Status
 

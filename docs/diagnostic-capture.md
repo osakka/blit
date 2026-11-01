@@ -444,9 +444,12 @@ The device sections are `input_devices`, `audio_devices` and `displays`;
 the document also holds `font`, `server`, `login`, `display_layouts`,
 `auxiliary_displays` and pane `effects`
 ([blit(8)](../man/blit.8) names the saved setting behind each environment
-variable). A display is keyed by its **name**, not by `display-<n>`, for the
-same stability reason — the name is the connector (`DP-1` on the live host)
-while `display-<n>` is enumeration order. The `displays` section is also the
+variable). A display is keyed by its **connector name** (`state.connector`,
+`DP-1` on the live host), not by `display-<n>`, for the same stability
+reason: `display-<n>` is enumeration order. Its `name` is not the connector
+(native KMS names it after its DRM object id, "KMS connector 93") and is the
+key only for a display that has no connector name; an entry under the name,
+as 0.3.26 wrote it, is read and moved to the connector key on the next save. The `displays` section is also the
 one whose subjects do not exist yet when the document loads, so it is applied
 after the outputs are initialised and before the first frame.
 

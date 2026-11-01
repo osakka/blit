@@ -172,13 +172,34 @@ if first
   end
 end
 
-# ADR 0204: zoom.
+# ADR 0204: zoom, any multiple of 25 from 100 to 400 (the Control Panel's
+# slider), kept under the connector name (`state.connector`, DP-1 on the
+# mock as on the owner's machine), not under `name` ("KMS connector 93",
+# the DRM object id). An entry under the old name key is still read, and
+# the next save leaves only the connector key (issue #103).
+def stored_displays
+  File.exist?(SETTINGS) ? JSON.parse(File.read(SETTINGS)).fetch('displays', {}) : {}
+rescue JSON::ParserError
+  {}
+end
+
+migrated = 'no'
 if first
   id = first.fetch('id')
-  [110, 0, 500, '200', 150.5].each do |bad|
+  name = first.fetch('name')
+  connector = first.dig('state', 'connector')
+  failures << "#{id}: the mock reports no connector name, so the connector key is untested" unless
+    connector.is_a?(String) && !connector.empty? && connector != name
+  [110, 0, 75, 410, 500, '200', 150.5].each do |bad|
     code, problem = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => bad } })
     failures << "zoom #{bad.inspect} -> #{code} #{problem.inspect}" unless
       code == 400 && problem.is_a?(Hash) && problem['code'] == 'invalid_display_zoom'
+  end
+  [225, 375].each do |step|
+    code, item = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => step } })
+    failures << "zoom #{step} -> #{code} #{item.inspect}" unless
+      code == 200 && item.dig('configuration', 'zoom') == step &&
+      item.dig('bounds', 'width') == first.dig('bounds', 'width') * 100 / step
   end
   code, item = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => 200 } })
   wanted = { 'width' => first.dig('bounds', 'width') / 2, 'height' => first.dig('bounds', 'height') / 2 }
@@ -186,13 +207,31 @@ if first
     code == 200 && item.dig('configuration', 'zoom') == 200 &&
     item['bounds'].slice('width', 'height') == wanted &&
     item.dig('state', 'physical') == first.dig('state', 'physical')
-  Timeout.timeout(10) { sleep 0.1 until File.exist?(SETTINGS) && File.read(SETTINGS).include?('"zoom":200') }
+  Timeout.timeout(10) { sleep 0.1 until stored_displays[connector] == { 'zoom' => 200 } }
+  failures << "zoom stored under the name too: #{stored_displays.inspect}" if stored_displays.key?(name)
   stop_server
   start_server
   _, again = request('GET', "/v1/displays/#{id}")
   failures << "zoom was not kept across a restart: #{again.inspect}" unless
     again.is_a?(Hash) && again.dig('configuration', 'zoom') == 200 &&
     again['bounds'].slice('width', 'height') == wanted
+  # A document written before the connector key: read, then migrated by
+  # the next save, which this unchanged PATCH makes.
+  stop_server
+  document = JSON.parse(File.read(SETTINGS))
+  document['displays'] = { name => { 'zoom' => 150 } }
+  File.write(SETTINGS, JSON.generate(document))
+  start_server
+  _, again = request('GET', "/v1/displays/#{id}")
+  failures << "a zoom under the old name key was not read: #{again.inspect}" unless
+    again.is_a?(Hash) && again.dig('configuration', 'zoom') == 150
+  request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => 150 } })
+  Timeout.timeout(10) { sleep 0.1 until stored_displays[connector] == { 'zoom' => 150 } }
+  if stored_displays.key?(name)
+    failures << "the old name key survived the save: #{stored_displays.inspect}"
+  else
+    migrated = 'yes'
+  end
   code, item = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => 100 } })
   failures << "zoom 100 -> #{code} #{item.inspect}" unless
     code == 200 && item['bounds'] == first['bounds']
@@ -209,4 +248,5 @@ end
 
 puts "DISPLAY_DEVICE_API_PASS displays=#{displays.length} envelope=11 " \
      'item_matches_collection=yes capabilities=derived mode=refused unknown_id=404 ' \
-     'zoom=capability+configuration+refused+halves_bounds+kept_across_restart+cleared'
+     'zoom=capability+configuration+refused+steps_of_25+halves_bounds+kept_across_restart+cleared ' \
+     "zoom_key=#{first&.dig('state', 'connector')} name_key_migrated=#{migrated}"

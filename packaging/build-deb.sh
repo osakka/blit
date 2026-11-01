@@ -164,6 +164,9 @@ for page in "$ROOT"/man/*.[1-9]; do
 done
 cp -a "$ROOT/README.md" "$stage/usr/share/doc/blit/"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
+# What a running Blit reads to notice it was updated under it (ADR 0205).
+printf '%s\n' "$version" > "$stage/usr/lib/blit/VERSION"
+chmod 0644 "$stage/usr/lib/blit/VERSION"
 cp -a "$HIBR_VERSION_FILE" "$stage/usr/share/doc/blit/HIBR_VERSION"
 cp -a "$HIBR_ABI_FILE" "$stage/usr/share/doc/blit/HIBR_ABI"
 if [ -n "${BLIT_PACKAGE_DOCUMENTATION_COMMIT:-}" ]; then

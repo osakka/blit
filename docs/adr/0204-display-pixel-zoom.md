@@ -19,12 +19,18 @@ zoom**: the whole display, pictures included, magnified as an image.
 ## Decision
 
 - **The setting.** `PATCH /v1/displays/{id}` takes `zoom`, a percentage:
-  100 (off), 125, 150, 175, 200, 250, 300 or 400. `capabilities` lists
-  `zoom` on every KMS display and `configuration` reports it. It is kept in
-  the settings document's `displays` section under the connector name
-  (`DP-1`), so it survives restarts and follows the monitor, and is applied
-  before the first frame. This is the first thing that section keeps for an
-  attached display.
+  any multiple of 25 from 100 (off) to 400, so the Control Panel can offer
+  it as a slider. `capabilities` lists `zoom` on every KMS display and
+  `configuration` reports it. It is kept in the settings document's
+  `displays` section under the connector name, the display's
+  `state.connector` (`DP-1`), so it survives restarts and follows the
+  monitor, and is applied before the first frame. The display's `name` is
+  not that: native KMS names a display after its DRM object id ("KMS
+  connector 93"), which is why 0.3.26, keying by `name`, was corrected
+  (issue #103). Only a display with no connector name is keyed by `name`.
+  An entry under the old `name` key is still read, and the next save
+  writes it under the connector key and drops the old one. This is the
+  first thing that section keeps for an attached display.
 - **The logical display.** A zoomed display has a logical size of its mode
   divided by the zoom, rounded down to whole pixels: 2560x1440 at 200% is
   1280x720, at 150% is 1706x960. Everything above the compositor works in
@@ -104,5 +110,7 @@ zoom**: the whole display, pictures included, magnified as an image.
   reported position is logical; the panel and pointer are not enlarged;
   100% is byte-identical to today.
 - The display API gate: `zoom` in `capabilities` and `configuration`,
-  invalid values refused (400 `invalid_display_zoom`), persisted per
-  connector across a restart.
+  invalid values refused (400 `invalid_display_zoom`), any step of 25
+  accepted, persisted per connector across a restart, and an entry under
+  the old `name` key read and migrated to the connector key by the next
+  save.
