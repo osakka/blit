@@ -846,7 +846,7 @@ remainder. Clients must use these reported values rather than reconstructing
 positions from font names, display modes, or hard-coded halves. See ADRs 0075
 and 0076 in docs/adr.
 
-### Display settings: rotation, brightness, and what power costs
+### Display settings: rotation, brightness, zoom, and what power costs
 
 A display's mode is not writable (ADR 0064): selecting a mode changes the
 render output size and therefore every surface on the display, and a Hibr
@@ -854,8 +854,8 @@ desktop's cells come from its owner (ADR 0063), so applying one needs a
 resize protocol with that owner (issue #60). A PATCH naming `mode` is a 400
 `invalid_display_property`.
 
-What is writable is the settings that resize nothing, and `capabilities`
-says which of them this hardware can actually perform. It is derived, not
+What is writable is the settings that leave the mode alone, and
+`capabilities` says which of them this hardware can actually perform. It is derived, not
 declared: `configuration` offers exactly what `capabilities` claims, and a
 PATCH accepts exactly that. A property that takes a value and does nothing
 is worse than its absence.
@@ -863,6 +863,7 @@ is worse than its absence.
 ```text
 mode-report   always
 brightness    only where a backlight is attributed to the display.
+zoom          every KMS display (ADR 0204).
 ```
 
 **`rotation`** is not a capability: native KMS composes straight into the
@@ -881,6 +882,26 @@ exactly one display**: sysfs does not say which panel a backlight drives, and a
 control that dims the wrong screen is worse than one that is absent. Where none
 is attributed, the write is refused with 422
 `display_brightness_unsupported`.
+
+**`zoom`** is pixel zoom (ADR 0204): the whole display, pictures included,
+magnified as an image. It is a percentage, 100 (none), 125, 150, 175, 200,
+250, 300 or 400; anything else is a 400 `invalid_display_zoom`. A zoomed
+display's logical size, its `bounds`, is the mode times 100 / zoom rounded
+down (2560x1440 at 150% is 1706x960); panes, cell grids, the topology, hit
+testing and the pointer's position all work in it, and its sessions are
+resized to it as a font change resizes them, that display's only. The
+winsize is logical too: `ws_xpixel` is the columns times the unchanged cell
+width (rows likewise). The image is composed at the logical size and
+enlarged nearest-neighbour: physical (x, y) shows logical (x·100/zoom,
+y·100/zoom), the last logical row and column repeated where the mode is not
+a whole multiple. The pointer and the performance panel are drawn after the
+enlargement at their normal size, relative pointer motion is physical
+(the pointer crosses a zoomed display as fast as any other), and
+screenshots are physical. Presentation effects (curvature, glow) are not
+drawn on a zoomed display composed by GLES; its `presentation_unavailable`
+says `zoomed display`. A zoom other than 100 is persisted in the settings
+document as `displays.<connector>.zoom`, so it follows the monitor and is
+applied before the first frame.
 
 **Power is reported and not settable.** `state.power` carries the connector's
 DPMS state where a DRM connector was matched to the display, so an operator can

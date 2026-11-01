@@ -32,6 +32,7 @@ release. What is not here yet is in the [roadmap](roadmap.md).
 | Text grid centred in each pane, whole rows only | 0.1.536 | 0075, 0123 | Used |
 | Display list with modes, size, refresh and connector | 0.1 | 0064 | Used |
 | Backlight brightness (laptops with one panel) | 0.1.456 | 0064 | Hardware pending (a laptop panel) |
+| Pixel zoom per monitor (125–400%): the whole display magnified, pointer and panel kept normal size | 0.3.26 | 0204 | Tested |
 | Screenshots of what is on screen, read back from the GPU | 0.1; GPU 0.2.13 | 0105 | Used |
 | Overlays placed by API clients | 0.1 | 0002 | Tested |
 

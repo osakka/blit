@@ -205,6 +205,9 @@ typedef struct {
     BlitRect bounds;
     int physical_width;
     int physical_height;
+    /* ADR 0204: pixel zoom, a percentage (0 or 100: none). The logical
+       rectangle is then the mode times 100 / zoom, rounded down. */
+    int zoom;
     double refresh_hz;
     int mode_count;
     int active_mode;
@@ -1925,16 +1928,18 @@ static int refresh_period_ms(double refresh_hz)
 
 /* Issue #69. The one place a display's rectangle is written: the mode the
    connector drives, at its place in the arrangement. Native KMS has no
-   rotation (ADR 0184), so the logical rectangle is the mode. */
+   rotation (ADR 0184), so the logical rectangle is the mode, divided by
+   the display's zoom when it has one (ADR 0204). */
 static void set_display_geometry(BlitDisplay *display, int x, int y,
                                  int width, int height)
 {
+    int zoom = display->zoom > 100 ? display->zoom : 100;
     display->physical_width = width;
     display->physical_height = height;
     display->bounds.x = x;
     display->bounds.y = y;
-    display->bounds.w = width;
-    display->bounds.h = height;
+    display->bounds.w = width * 100 / zoom;
+    display->bounds.h = height * 100 / zoom;
 }
 
 static int display_index_for_output(const BlitRuntime *runtime,
@@ -4211,13 +4216,16 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
 
        `rotation` is absent: the native KMS compositor has no transform and
        says so by omission. `brightness` is present only where a backlight was
-       attributed. `power` is readable here but is not a capability: nothing
-       can set it yet (#69 continues). */
+       attributed. `zoom` is present on every KMS display (ADR 0204). `power`
+       is readable here but is not a capability: nothing can set it yet (#69
+       continues). */
     complete &= json_appendf(body, capacity, &used,
         ",\"presentation_state\":\"%s\",\"capabilities\":[\"mode-report\"",
         display_presentation_state(runtime, index));
     if (display->backlight[0] != '\0')
         complete &= json_appendf(body, capacity, &used, ",\"brightness\"");
+    if (runtime->kms != NULL)
+        complete &= json_appendf(body, capacity, &used, ",\"zoom\"");
     complete &= json_appendf(body, capacity, &used,
         "],\"state\":{\"present\":true,\"presentation_state\":\"%s\","
         "\"physical\":{\"width\":%d,\"height\":%d}",
@@ -4243,11 +4251,20 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
                                  escaped_backlight);
     }
     complete &= json_appendf(body, capacity, &used, "},\"configuration\":{");
-    if (display->backlight[0] != '\0') {
-        int percent = display_brightness_percent(display);
-        if (percent >= 0)
-            complete &= json_appendf(body, capacity, &used,
-                                     "\"brightness_percent\":%d", percent);
+    {
+        int listed = 0;
+        if (display->backlight[0] != '\0') {
+            int percent = display_brightness_percent(display);
+            if (percent >= 0) {
+                complete &= json_appendf(body, capacity, &used,
+                                         "\"brightness_percent\":%d", percent);
+                listed = 1;
+            }
+        }
+        if (runtime->kms != NULL)
+            complete &= json_appendf(body, capacity, &used, "%s\"zoom\":%d",
+                                     listed ? "," : "",
+                                     display->zoom > 100 ? display->zoom : 100);
     }
     complete &= json_appendf(body, capacity, &used,
                              "},\"revision\":%llu}",
@@ -14711,6 +14728,16 @@ static int display_index_at(const BlitRuntime *runtime, float x, float y)
     return -1;
 }
 
+/* ADR 0204: relative motion is physical. On a zoomed display a count moves
+   the logical pointer 100 / zoom of a pixel, so the pointer crosses that
+   panel at the speed it crosses any other. */
+static float pointer_zoom_scale(const BlitRuntime *runtime)
+{
+    int display = display_index_at(runtime, runtime->evdev_mouse_x, runtime->evdev_mouse_y);
+    return display >= 0 && runtime->displays[display].zoom > 100 ?
+        100.0f / (float)runtime->displays[display].zoom : 1.0f;
+}
+
 static void apply_display_placements(BlitRuntime *runtime,
                                      char ids[][128], int *xs, int *ys,
                                      int count)
@@ -19901,11 +19928,79 @@ static void audio_cards_json(BlitRuntime *runtime, char *body, size_t capacity)
 static const char *display_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
-        "rotation", "brightness_percent"
+        "rotation", "brightness_percent", "zoom"
     };
 
     return json_rejected_property(configuration, writable,
                                   sizeof(writable) / sizeof(writable[0]));
+}
+
+/* ADR 0204: a member that is a whole number and nothing more, so 150.5
+   is not read as 150. */
+static int json_whole_number(const char *json, const char *key, int *value)
+{
+    const char *cursor = json_key_cursor(json, key);
+    char *end;
+    long number;
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(key) + 2;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') ++cursor;
+    if (*cursor++ != ':')
+        return 0;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' || *cursor == '\n') ++cursor;
+    if (*cursor < '0' || *cursor > '9')
+        return 0;
+    number = strtol(cursor, &end, 10);
+    while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') ++end;
+    if ((*end != ',' && *end != '}' && *end != '\0') || number > 100000)
+        return 0;
+    *value = (int)number;
+    return 1;
+}
+
+/* ADR 0204: the zooms a display takes, in percent; 100 is none. */
+static int display_zoom_valid(int zoom)
+{
+    static const int steps[] = {100, 125, 150, 175, 200, 250, 300, 400};
+    size_t i;
+    for (i = 0; i < sizeof(steps) / sizeof(steps[0]); ++i)
+        if (zoom == steps[i])
+            return 1;
+    return 0;
+}
+
+/* A display's zoom: its logical rectangle, from its mode, and the
+   compositor's. Displays that sat against its right or bottom edge are
+   moved to the new edge, so the arrangement stays joined and the pointer
+   still crosses. The panes and sessions follow where the caller re-lays
+   them: at boot and on hotplug that comes after, on a PATCH at once. */
+static void display_apply_zoom(BlitRuntime *runtime, int display_index, int zoom)
+{
+    BlitDisplay *display = &runtime->displays[display_index];
+    int right = display->bounds.x + display->bounds.w;
+    int bottom = display->bounds.y + display->bounds.h;
+    int i;
+    display->zoom = zoom > 100 ? zoom : 0;
+    set_display_geometry(display, display->bounds.x, display->bounds.y,
+                         display->physical_width, display->physical_height);
+    blit_kms_set_zoom(runtime->kms, display_index, zoom);
+    for (i = 0; i < runtime->display_count; ++i) {
+        BlitDisplay *other = &runtime->displays[i];
+        int moved = 0;
+        if (i == display_index || other->bounds.w < 1)
+            continue;
+        if (other->bounds.x == right && right != display->bounds.x + display->bounds.w) {
+            other->bounds.x = display->bounds.x + display->bounds.w;
+            moved = 1;
+        }
+        if (other->bounds.y == bottom && bottom != display->bounds.y + display->bounds.h) {
+            other->bounds.y = display->bounds.y + display->bounds.h;
+            moved = 1;
+        }
+        if (moved)
+            blit_kms_set_display_position(runtime->kms, i, other->bounds.x, other->bounds.y);
+    }
 }
 
 static int apply_display_rotation(BlitRuntime *runtime, int display_index,
@@ -19945,6 +20040,8 @@ static int apply_display_configuration(BlitRuntime *runtime,
     int rotation_requested;
     int brightness = 0;
     int brightness_requested;
+    int zoom = 100;
+    int zoom_requested;
 
     if (!json_object_scalars(configuration, scalars, sizeof(scalars))) {
         config_problem(problem, 400, "Bad Request",
@@ -19958,7 +20055,7 @@ static int apply_display_configuration(BlitRuntime *runtime,
         char detail[320];
         snprintf(detail, sizeof(detail),
                  "A display configuration carries \"%s\", which is not a "
-                 "writable property. Writable: rotation, and "
+                 "writable property. Writable: rotation, zoom, and "
                  "brightness_percent where a backlight exists. A mode change "
                  "resizes every surface and needs issue #60.", rejected);
         config_problem(problem, 400, "Bad Request", "invalid_display_property",
@@ -19975,6 +20072,14 @@ static int apply_display_configuration(BlitRuntime *runtime,
         config_problem(problem, 400, "Bad Request",
                        "invalid_display_configuration",
                        "rotation and brightness_percent must be integers.");
+        return 0;
+    }
+    zoom_requested = json_whole_number(scalars, "zoom", &zoom);
+    if (json_key_cursor(scalars, "zoom") != NULL &&
+        (!zoom_requested || !display_zoom_valid(zoom))) {
+        config_problem(problem, 400, "Bad Request", "invalid_display_zoom",
+                       "zoom is a percentage: 100 (none), 125, 150, 175, "
+                       "200, 250, 300 or 400.");
         return 0;
     }
     if (brightness_requested && (brightness < 0 || brightness > 100)) {
@@ -20005,6 +20110,8 @@ static int apply_display_configuration(BlitRuntime *runtime,
                        "written.");
         return 0;
     }
+    if (zoom_requested && zoom != (display->zoom > 100 ? display->zoom : 100))
+        display_apply_zoom(runtime, display_index, zoom);
     return 1;
 }
 
@@ -21329,14 +21436,24 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     }
     settings_copy_unseen(runtime, "audio_devices", BLIT_SETTINGS_AUDIO, out,
                          capacity, &used, &first);
-    /* Nothing of a live display is persisted: rotation went with SDL (ADR
-       0184); power is not, because startup's modeset turns the panel on and
-       a stored `off` would be a dark boot; brightness is not, because
-       systemd-backlight already restores it and two restorers fight. A live
-       display's old entry is dropped; one for a display not attached now is
-       kept for when it returns. */
+    /* Of a live display only its zoom is persisted (ADR 0204), under its
+       connector name and only when it is not 100: rotation went with SDL
+       (ADR 0184); power is not, because startup's modeset turns the panel
+       on and a stored `off` would be a dark boot; brightness is not,
+       because systemd-backlight already restores it and two restorers
+       fight. A live display's old entry is replaced by this one; one for a
+       display not attached now is kept for when it returns. */
     json_appendf(out, capacity, &used, "},\"displays\":{");
     first = 1;
+    for (i = 0; i < runtime->display_count; ++i) {
+        char name[256];
+        if (runtime->displays[i].zoom <= 100)
+            continue;
+        json_escape(runtime->displays[i].name, name, sizeof(name));
+        json_appendf(out, capacity, &used, "%s\"%s\":{\"zoom\":%d}",
+                     first ? "" : ",", name, runtime->displays[i].zoom);
+        first = 0;
+    }
     settings_copy_unseen(runtime, "displays", BLIT_SETTINGS_DISPLAY, out,
                          capacity, &used, &first);
     json_appendf(out, capacity, &used, "},\"font\":{");
@@ -22063,6 +22180,28 @@ static void settings_apply_pane_layout(BlitRuntime *runtime, int old_columns,
         runtime->outputs[i].initialized = 0;
     runtime->render_pending = 1;
     ++runtime->topology_revision;
+}
+
+/* ADR 0204: after a live zoom change, that display's panes and their
+   sessions take its logical size (the others' are as they were), and a
+   pointer on it stays over the same physical spot. */
+static void display_zoom_relayout(BlitRuntime *runtime, int display_index,
+                                  const BlitRect *old_bounds)
+{
+    const BlitRect *bounds = &runtime->displays[display_index].bounds;
+    settings_apply_pane_layout(runtime, runtime->pane_columns, runtime->pane_rows);
+    if (runtime->pointer_valid && old_bounds->w > 0 && old_bounds->h > 0 &&
+        runtime->pointer_x >= old_bounds->x && runtime->pointer_x < old_bounds->x + old_bounds->w &&
+        runtime->pointer_y >= old_bounds->y && runtime->pointer_y < old_bounds->y + old_bounds->h) {
+        runtime->evdev_mouse_x = bounds->x + (runtime->pointer_x - old_bounds->x) *
+            (float)bounds->w / (float)old_bounds->w;
+        runtime->evdev_mouse_y = bounds->y + (runtime->pointer_y - old_bounds->y) *
+            (float)bounds->h / (float)old_bounds->h;
+        update_pointer_position(runtime, "display-zoom");
+    }
+    runtime->pointer_dirty_outputs = all_output_mask(runtime);
+    runtime->pointer_dirty = 1;
+    ++runtime->displays_revision;
 }
 
 static void settings_apply_displays(BlitRuntime *runtime)
@@ -24096,10 +24235,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             /* The same accumulation a REL_X/REL_Y pair takes, scaled by the
                same per-device sensitivity. */
-            runtime->evdev_mouse_x += scale_pointer_delta(dx, sensitivity,
-                                                          adaptive);
-            runtime->evdev_mouse_y += scale_pointer_delta(dy, sensitivity,
-                                                          adaptive);
+            {
+                float zoom_scale = pointer_zoom_scale(runtime);
+                runtime->evdev_mouse_x += scale_pointer_delta(dx, sensitivity,
+                                                              adaptive) * zoom_scale;
+                runtime->evdev_mouse_y += scale_pointer_delta(dy, sensitivity,
+                                                              adaptive) * zoom_scale;
+            }
             runtime->pointer_lock_dx += dx;
             runtime->pointer_lock_dy += dy;
             /* Applied as absolute injection is, whether or not a physical
@@ -24172,6 +24314,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         char display_configuration[512];
         const char *display_cursor = json_key_cursor(payload, "configuration");
         BlitConfigProblem display_problem;
+        int old_zoom;
+        BlitRect old_bounds;
 
         if (*display_id == '\0' || display_index < 0) {
             send_problem(fd, 404, "Not Found", "display_not_found",
@@ -24190,6 +24334,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "A display update carries its writable properties under configuration, as a JSON object.");
             return;
         }
+        old_zoom = runtime->displays[display_index].zoom;
+        old_bounds = runtime->displays[display_index].bounds;
         if (!apply_display_configuration(runtime, display_index,
                                          display_configuration,
                                          &display_problem)) {
@@ -24197,6 +24343,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          display_problem.code, display_problem.detail);
             return;
         }
+        if (runtime->displays[display_index].zoom != old_zoom)
+            display_zoom_relayout(runtime, display_index, &old_bounds);
         settings_mark_dirty(runtime);
         refresh_display_power(runtime);
         if (display_item_json(runtime, display_index, body, sizeof(body)) >=
@@ -24943,6 +25091,9 @@ static void reconcile_kms_topology(BlitRuntime *runtime)
         snprintf(runtime->displays[i].connector, sizeof(runtime->displays[i].connector), "%s", info.connector);
         set_display_geometry(&runtime->displays[i], prior >= 0 ? previous[prior].bounds.x : info.x,
             prior >= 0 ? previous[prior].bounds.y : info.y, info.width, info.height);
+        /* ADR 0204: a display kept across the scan keeps its zoom, whatever
+           the compositor's output for it was made again with. */
+        blit_kms_set_zoom(runtime->kms, i, runtime->displays[i].zoom);
         runtime->displays[i].refresh_hz = info.refresh_hz;
         runtime->displays[i].mode_count = info.mode_count;
         runtime->displays[i].active_mode = info.active_mode;
@@ -27485,9 +27636,11 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                         if (configuration != NULL)
                             ++configuration->pointer_motion;
                         runtime->evdev_mouse_x +=
-                            scale_pointer_delta(pad.dx, sensitivity, adaptive);
+                            scale_pointer_delta(pad.dx, sensitivity, adaptive) *
+                            pointer_zoom_scale(runtime);
                         runtime->evdev_mouse_y +=
-                            scale_pointer_delta(pad.dy, sensitivity, adaptive);
+                            scale_pointer_delta(pad.dy, sensitivity, adaptive) *
+                            pointer_zoom_scale(runtime);
                         runtime->pointer_lock_dx += pad.dx;
                         runtime->pointer_lock_dy += pad.dy;
                     }
@@ -27520,13 +27673,15 @@ static void service_evdev_mouse(BlitRuntime *runtime)
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_x +=
-                        scale_pointer_delta(event.value, sensitivity, adaptive);
+                        scale_pointer_delta(event.value, sensitivity, adaptive) *
+                        pointer_zoom_scale(runtime);
                     runtime->pointer_lock_dx += event.value;
                 } else if (event.code == REL_Y) {
                     ++runtime->diagnostic_evdev_mouse_motion_events;
                     if (configuration != NULL) ++configuration->pointer_motion;
                     runtime->evdev_mouse_y +=
-                        scale_pointer_delta(event.value, sensitivity, adaptive);
+                        scale_pointer_delta(event.value, sensitivity, adaptive) *
+                        pointer_zoom_scale(runtime);
                     runtime->pointer_lock_dy += event.value;
                 }
             } else if (event.type == EV_SYN && event.code == SYN_REPORT) {

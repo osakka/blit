@@ -118,6 +118,12 @@ void blit_gles_scene_draw(BlitGles *gles, BlitGlesScene *scene);
    1 when this context can draw them: highp fragment floats and the present
    program. Otherwise they are unavailable, and nothing else changes. */
 int blit_gles_presents(const BlitGles *gles);
+/* ADR 0204: whether a zoomed scene can be enlarged here (highp), and,
+   inside blit_gles_frame_begin/end, the scene drawn to the whole frame
+   nearest-neighbour: frame (x, y) shows scene (x * 100 / zoom,
+   y * 100 / zoom), the last row and column clamped. */
+int blit_gles_zooms(const BlitGles *gles);
+void blit_gles_scene_zoom(BlitGles *gles, BlitGlesScene *scene, int zoom);
 /* A pane drawn by the presentation pass: its rectangle in target pixels
    (top-left origin), the curvature warp's k (blit_effect_curvature_k), the
    glass scanlines' alpha (0..255, 0 none), glow's gain (0 none) and RGB

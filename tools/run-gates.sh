@@ -322,6 +322,7 @@ suite_renderer() {
     run_gate pane_effects_gate.rb ruby tools/tests/pane_effects_gate.rb
     run_gate presentation_effects_gate.rb ruby tools/tests/presentation_effects_gate.rb
     run_gate performance_panel_gate.rb ruby tools/tests/performance_panel_gate.rb
+    run_gate display_zoom_gate.rb ruby tools/tests/display_zoom_gate.rb
     run_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb

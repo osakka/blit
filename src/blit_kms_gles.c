@@ -355,6 +355,8 @@ static const char *kms_gles_unsupported(BlitKms *kms, const KmsOutput *output,
                                         int view_count)
 {
     int v, d;
+    if (output->zoom > 100 && !blit_gles_zooms(kms->gles))
+        return "zoom needs highp fragment precision";
     for (v = 0; v < view_count; ++v) {
         BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
         int count;
@@ -437,17 +439,21 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
 /* At most this many panes per output get the presentation pass. */
 #define BLIT_KMS_PRESENT_PANES 16
 
-static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r,
+static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r, const KmsOutput *output,
                              const BlitKmsSurfaceView *view,
                              int x0, int y0, int x1, int y1)
 {
     const BlitEffectSet *set = &view->effects;
     int y, radius, corner;
+    /* ADR 0204: a zoomed output has no presentation pass, so what that pass
+       would draw for a pane (scanlines under curvature, corners under sync
+       or jitter) is drawn here, in the logical scene, as without highp. */
+    int presents = blit_gles_presents(kms->gles) && output->zoom <= 100;
     if (!blit_effect_set_has(set, BLIT_EFFECT_LOCAL) || x1 <= x0 || y1 <= y0) return;
     blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
     /* ADR 0187: a curved pane's scanlines are drawn on the glass instead. */
     if (set->value[BLIT_EFFECT_SCANLINES] > 0 &&
-        !blit_effect_scanlines_presented(set, blit_gles_presents(kms->gles)))
+        !blit_effect_scanlines_presented(set, presents))
         for (y = y0; y < y1; ++y) {
             unsigned alpha = blit_effect_scanline_alpha(set, y - view->effect_y);
             if (alpha) {
@@ -457,7 +463,7 @@ static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r,
         }
     /* ADR 0190: under horizontal sync or jitter the presentation pass
        applies the corners, so they stay still while the picture sways. */
-    radius = blit_effect_corners_presented(set, blit_gles_presents(kms->gles)) ? 0 :
+    radius = blit_effect_corners_presented(set, presents) ? 0 :
         blit_effect_corner_radius(set, view->effect_width, view->effect_height);
     if (radius > 0 && (r->corners == 0 || r->corners_radius != radius)) {
         int size = radius * 2, x;
@@ -650,7 +656,7 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
         }
     }
 effects:
-    kms_gles_effects(kms, r, view, cx0, cy0, cx1, cy1);
+    kms_gles_effects(kms, r, output, view, cx0, cy0, cx1, cy1);
     blit_gles_clip(kms->gles, 0, 0, 0, 0);
 }
 
@@ -672,6 +678,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
        a pane's glow copy is rebuilt only when that pane changed. */
     int drawn_x[BLIT_KMS_PRESENT_PANES], drawn_y[BLIT_KMS_PRESENT_PANES];
     int v, present_count = 0, drawn_count = 0, everything_drawn = 0;
+    int scene_width = output->mode.hdisplay, scene_height = output->mode.vdisplay;
     error[0] = '\0';
     if (r == NULL) {
         kms_gles_detach(kms, output, "no GPU atlas");
@@ -683,9 +690,13 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     r->effect_quads = 0;
     blit_gles_counters(kms->gles, &draws_before, &vertices_before);
     kms_gles_font_check(r, kms->font);
+    /* ADR 0204: a zoomed output's scene is its logical size. */
+    if (output->zoom > 100) {
+        scene_width = output->mode.hdisplay * 100 / output->zoom;
+        scene_height = output->mode.vdisplay * 100 / output->zoom;
+    }
     if (output->gles_scene == NULL) {
-        output->gles_scene = blit_gles_scene_open(kms->gles, output->mode.hdisplay,
-                                                  output->mode.vdisplay);
+        output->gles_scene = blit_gles_scene_open(kms->gles, scene_width, scene_height);
         output->gles_scene_fresh = 1;
         if (output->gles_scene == NULL) {
             kms_gles_detach(kms, output, "no GPU scene buffer");
@@ -700,8 +711,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         int everything = full || output->gles_scene_fresh;
         blit_gles_scene_begin(kms->gles, output->gles_scene);
         if (everything)
-            blit_gles_rect(kms->gles, 0, 0, output->mode.hdisplay,
-                           output->mode.vdisplay, 0, 255);
+            blit_gles_rect(kms->gles, 0, 0, scene_width, scene_height, 0, 255);
         for (v = 0; v < view_count; ++v) {
             const BlitKmsSurfaceView *view = &views[v];
             int partial = 0, dx = 0, dy = 0, dw = 0, dh = 0;
@@ -747,7 +757,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     }
     /* ADR 0187: panes with presentation effects are drawn again over the
        plain copy by the presentation program; with none, the copy is all. */
-    for (v = 0; blit_gles_presents(kms->gles) && v < view_count &&
+    for (v = 0; output->zoom <= 100 && blit_gles_presents(kms->gles) && v < view_count &&
          present_count < BLIT_KMS_PRESENT_PANES; ++v) {
         const BlitKmsSurfaceView *view = &views[v];
         BlitGlesPresentPane *pane = &present[present_count];
@@ -796,16 +806,25 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
             ++output->info.effects_glow_rebuilds;
         ++present_count;
     }
-    blit_gles_scene_present(kms->gles, output->gles_scene, present, present_count);
+    /* A zoomed scene is enlarged instead, and draws no presentation
+       effects: they are reported unavailable on a zoomed display. */
+    if (output->zoom > 100)
+        blit_gles_scene_zoom(kms->gles, output->gles_scene, output->zoom);
+    else
+        blit_gles_scene_present(kms->gles, output->gles_scene, present, present_count);
     output->info.effects_present_quads = (unsigned long long)present_count;
     for (v = 0; overlays != NULL && v < overlay_count; ++v) {
         const BlitKmsOverlay *overlay = &overlays[v];
         if (overlay->display_id != output->info.id || overlay->width < 1 ||
             overlay->height < 1 || overlay->opacity <= 0)
             continue;
-        blit_gles_rect(kms->gles, overlay->x, overlay->y, overlay->width,
-                       overlay->height, overlay->color,
-                       (unsigned)(overlay->opacity * 255 / 100));
+        {
+            int x = overlay->x, y = overlay->y, width = overlay->width, height = overlay->height;
+            if (output->zoom > 100)
+                zoom_physical_rect(output, &x, &y, &width, &height);
+            blit_gles_rect(kms->gles, x, y, width, height, overlay->color,
+                           (unsigned)(overlay->opacity * 255 / 100));
+        }
     }
     {
         /* ADR 0203: the panel, opaque, 1:1 -- the CPU path's copy. */

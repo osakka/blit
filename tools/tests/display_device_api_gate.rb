@@ -16,10 +16,16 @@
 # Also checked: the dead seventh argument this function used to pass to a
 # six-specifier format string, by asserting the bounds it reports are the
 # bounds it has rather than the height twice.
+#
+# ADR 0204: `zoom` is a capability of every KMS display and is reported in
+# `configuration`; a value off the list is 400 invalid_display_zoom; a zoom
+# halves the logical bounds at 200% and is kept, per connector, across a
+# restart.
 
 require 'json'
 require 'net/http'
 require 'timeout'
+require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
 require_relative 'gate_server'
@@ -54,24 +60,32 @@ def request(method, path, body: nil)
   [response.code.to_i, parsed]
 end
 
-server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
-                 },
-               BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
-at_exit do
-  Process.kill('TERM', server) rescue nil
-  Process.wait(server) rescue nil
-end
+SETTINGS = File.join(Dir.mktmpdir('blit-display-api'), 'settings.json')
+ENVIRONMENT = { **gate_display_env, 'BLIT_PSF_FONT' => FONT, 'BLIT_SETTINGS_PATH' => SETTINGS }.freeze
+$server = nil
 
-Timeout.timeout(15) do
-  loop do
-    begin
-      break if request('GET', '/v1/version').first == 200
-    rescue StandardError
-      nil
+def start_server
+  $server = spawn(ENVIRONMENT, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
+  Timeout.timeout(15) do
+    loop do
+      begin
+        break if request('GET', '/v1/version').first == 200
+      rescue StandardError
+        nil
+      end
+      sleep 0.2
     end
-    sleep 0.2
   end
 end
+
+def stop_server
+  return unless $server
+  Process.kill('TERM', $server) rescue nil
+  Process.wait($server) rescue nil
+  $server = nil
+end
+at_exit { stop_server }
+start_server
 
 code, collection = request('GET', '/v1/displays')
 failures << "GET /v1/displays -> #{code}" unless code == 200
@@ -115,7 +129,7 @@ displays.each do |display|
   claimed = display.fetch('capabilities', [])
   failures << "#{display['id']}: capabilities #{claimed.inspect} must include " \
               'mode-report' unless claimed.include?('mode-report')
-  unexpected = settable - %w[rotation brightness_percent]
+  unexpected = settable - %w[rotation brightness_percent zoom]
   failures << "#{display['id']}: configuration offers #{unexpected.inspect}; " \
               "mode selection still needs issue #60's resize protocol" unless
     unexpected.empty?
@@ -127,6 +141,9 @@ displays.each do |display|
     failures << "#{display['id']}: brightness_percent is settable without " \
                 'the capability'
   end
+  failures << "#{display['id']}: zoom is not a capability with a value: " \
+              "#{claimed.inspect} #{display['configuration'].inspect}" unless
+    claimed.include?('zoom') && display.dig('configuration', 'zoom') == 100
   failures << "#{display['id']}: state #{display['state'].inspect}" unless
     display.dig('state', 'present') == true
   failures << "#{display['id']}: revision #{display['revision'].inspect}" unless
@@ -155,6 +172,33 @@ if first
   end
 end
 
+# ADR 0204: zoom.
+if first
+  id = first.fetch('id')
+  [110, 0, 500, '200', 150.5].each do |bad|
+    code, problem = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => bad } })
+    failures << "zoom #{bad.inspect} -> #{code} #{problem.inspect}" unless
+      code == 400 && problem.is_a?(Hash) && problem['code'] == 'invalid_display_zoom'
+  end
+  code, item = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => 200 } })
+  wanted = { 'width' => first.dig('bounds', 'width') / 2, 'height' => first.dig('bounds', 'height') / 2 }
+  failures << "zoom 200 -> #{code} #{item.inspect}" unless
+    code == 200 && item.dig('configuration', 'zoom') == 200 &&
+    item['bounds'].slice('width', 'height') == wanted &&
+    item.dig('state', 'physical') == first.dig('state', 'physical')
+  Timeout.timeout(10) { sleep 0.1 until File.exist?(SETTINGS) && File.read(SETTINGS).include?('"zoom":200') }
+  stop_server
+  start_server
+  _, again = request('GET', "/v1/displays/#{id}")
+  failures << "zoom was not kept across a restart: #{again.inspect}" unless
+    again.is_a?(Hash) && again.dig('configuration', 'zoom') == 200 &&
+    again['bounds'].slice('width', 'height') == wanted
+  code, item = request('PATCH', "/v1/displays/#{id}", body: { 'configuration' => { 'zoom' => 100 } })
+  failures << "zoom 100 -> #{code} #{item.inspect}" unless
+    code == 200 && item['bounds'] == first['bounds']
+  Timeout.timeout(10) { sleep 0.1 while File.read(SETTINGS).include?('"zoom"') }
+end
+
 code, = request('GET', '/v1/displays/display-does-not-exist')
 failures << "an unknown display id -> #{code}, wanted 404" unless code == 404
 
@@ -164,4 +208,5 @@ unless failures.empty?
 end
 
 puts "DISPLAY_DEVICE_API_PASS displays=#{displays.length} envelope=11 " \
-     'item_matches_collection=yes capabilities=derived mode=refused unknown_id=404'
+     'item_matches_collection=yes capabilities=derived mode=refused unknown_id=404 ' \
+     'zoom=capability+configuration+refused+halves_bounds+kept_across_restart+cleared'

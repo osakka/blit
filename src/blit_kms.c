@@ -129,6 +129,16 @@ typedef struct {
     uint32_t *hud_under;
     size_t hud_under_capacity;
     int hud_under_valid, hud_under_x, hud_under_y, hud_under_width, hud_under_height;
+    /* ADR 0204: pixel zoom, a percentage (100 or 0: none). The views are
+       composed at the logical size in `zoom_scene`, at the scanout pitch,
+       then enlarged into the physical scene; `zoom_columns` maps each
+       physical column to its logical one. While composing, the logical
+       area drawn this frame is gathered in zoom_dirty_*. */
+    int zoom, zoom_width, zoom_height, zoom_columns_width;
+    void *zoom_scene;
+    size_t zoom_scene_size;
+    int *zoom_columns;
+    int zoom_tracking, zoom_dirty_x0, zoom_dirty_y0, zoom_dirty_x1, zoom_dirty_y1;
 } KmsOutput;
 
 typedef struct {
@@ -460,6 +470,37 @@ static int ensure_scene_buffer(KmsOutput *output)
     return 1;
 }
 
+/* ADR 0204: a logical area drawn while composing a zoomed output. */
+static void zoom_note_dirty(KmsOutput *output, int x0, int y0, int x1, int y1)
+{
+    if (!output->zoom_tracking || x1 <= x0 || y1 <= y0)
+        return;
+    if (x0 < output->zoom_dirty_x0) output->zoom_dirty_x0 = x0;
+    if (y0 < output->zoom_dirty_y0) output->zoom_dirty_y0 = y0;
+    if (x1 > output->zoom_dirty_x1) output->zoom_dirty_x1 = x1;
+    if (y1 > output->zoom_dirty_y1) output->zoom_dirty_y1 = y1;
+}
+
+/* The physical pixels that show the logical rectangle: (x, y) shows
+   (x * 100 / zoom, y * 100 / zoom), so its preimage runs from the first
+   multiple at or past each edge, and past the last logical row or column
+   to the panel's edge. Overlays and damage both go through this, on both
+   compositors, so a solid fill and the enlargement land on the same
+   pixels. Called with the output's physical mode in place. */
+static void zoom_physical_rect(const KmsOutput *output, int *x, int *y, int *width,
+                               int *height)
+{
+    int x0 = (*x * output->zoom + 99) / 100, y0 = (*y * output->zoom + 99) / 100;
+    int x1 = ((*x + *width) * output->zoom + 99) / 100;
+    int y1 = ((*y + *height) * output->zoom + 99) / 100;
+    if (*x + *width >= output->mode.hdisplay * 100 / output->zoom) x1 = output->mode.hdisplay;
+    if (*y + *height >= output->mode.vdisplay * 100 / output->zoom) y1 = output->mode.vdisplay;
+    *x = x0;
+    *y = y0;
+    *width = x1 - x0;
+    *height = y1 - y0;
+}
+
 static void copy_scene_to_back(KmsOutput *output)
 {
     int row;
@@ -474,6 +515,71 @@ static void copy_scene_to_back(KmsOutput *output)
                (size_t)output->mode.hdisplay * sizeof(uint32_t));
 }
 
+/* ADR 0204: whether this output is zoomed, its logical size and column
+   map made current for its mode. Without the memory it is drawn at 100%,
+   rather than not at all. */
+static int zoom_ready(KmsOutput *output)
+{
+    int x;
+    if (output->zoom <= 100 || output->back.size == 0)
+        return 0;
+    output->zoom_width = output->mode.hdisplay * 100 / output->zoom;
+    output->zoom_height = output->mode.vdisplay * 100 / output->zoom;
+    if (output->zoom_width < 1 || output->zoom_height < 1)
+        return 0;
+    if (output->zoom_scene == NULL || output->zoom_scene_size != output->back.size) {
+        free(output->zoom_scene);
+        output->zoom_scene = calloc(1, (size_t)output->back.size);
+        output->zoom_scene_size = output->zoom_scene != NULL ? output->back.size : 0;
+        if (output->zoom_scene == NULL)
+            return 0;
+    }
+    if (output->zoom_columns == NULL || output->zoom_columns_width != output->mode.hdisplay) {
+        free(output->zoom_columns);
+        output->zoom_columns = malloc((size_t)output->mode.hdisplay * sizeof(int));
+        output->zoom_columns_width = output->zoom_columns != NULL ? output->mode.hdisplay : 0;
+        if (output->zoom_columns == NULL)
+            return 0;
+        /* The last physical columns can map one past the logical width,
+           which is rounded down: they show its last column. */
+        for (x = 0; x < output->mode.hdisplay; ++x)
+            output->zoom_columns[x] = x * 100 / output->zoom < output->zoom_width ?
+                x * 100 / output->zoom : output->zoom_width - 1;
+    }
+    return 1;
+}
+
+/* Enlarge a logical rectangle into the physical scene, nearest-neighbour:
+   physical (x, y) shows logical (x * 100 / zoom, y * 100 / zoom). A row is
+   filled once by the column map, and the rows that show the same logical
+   row are copies of it. */
+static void zoom_enlarge(KmsOutput *output, void *physical, int x, int y, int width,
+                         int height)
+{
+    int row, column, previous = -1;
+    zoom_physical_rect(output, &x, &y, &width, &height);
+    if (x < 0) { width += x; x = 0; }
+    if (y < 0) { height += y; y = 0; }
+    if (x + width > output->mode.hdisplay) width = output->mode.hdisplay - x;
+    if (y + height > output->mode.vdisplay) height = output->mode.vdisplay - y;
+    for (row = y; row < y + height && width > 0; ++row) {
+        uint32_t *to = (uint32_t *)((unsigned char *)physical + (size_t)row * output->back.pitch);
+        const uint32_t *from;
+        int logical = row * 100 / output->zoom;
+        if (logical >= output->zoom_height) logical = output->zoom_height - 1;
+        if (logical == previous) {
+            memcpy(to + x, (const uint32_t *)((const unsigned char *)to - output->back.pitch) + x,
+                   (size_t)width * 4);
+            continue;
+        }
+        from = (const uint32_t *)((const unsigned char *)output->zoom_scene +
+                                  (size_t)logical * output->back.pitch);
+        for (column = x; column < x + width; ++column)
+            to[column] = from[output->zoom_columns[column]];
+        previous = logical;
+    }
+}
+
 static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
                       uint32_t color)
 {
@@ -486,6 +592,7 @@ static void fill_rect(KmsOutput *output, int x, int y, int width, int height,
     if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
     if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
     if (first_x >= last_x || first_y >= last_y) return;
+    zoom_note_dirty(output, first_x, first_y, last_x, last_y);
     for (row = first_y; row < last_y; ++row) {
         uint32_t *pixels = (uint32_t *)((unsigned char *)output->back.map +
                                         row * output->back.pitch);
@@ -532,6 +639,7 @@ static void blend_rect(KmsOutput *output, int x, int y, int width, int height,
     }
     if (alpha == 0U)
         return;
+    zoom_note_dirty(output, first_x, first_y, last_x, last_y);
     if (last_x > output->mode.hdisplay) last_x = output->mode.hdisplay;
     if (last_y > output->mode.vdisplay) last_y = output->mode.vdisplay;
     if (first_x >= last_x || first_y >= last_y) return;
@@ -736,9 +844,11 @@ static void draw_kms_hud(KmsOutput *output, const BlitKmsHud *hud)
     }
 }
 
+/* Overlays are placed in logical pixels; on a zoomed output each covers
+   the physical pixels that show its rectangle. */
 static void draw_kms_overlays(KmsOutput *output,
                               const BlitKmsOverlay *overlays,
-                              int overlay_count)
+                              int overlay_count, int zoomed)
 {
     int index;
 
@@ -750,9 +860,14 @@ static void draw_kms_overlays(KmsOutput *output,
             overlay->width < 1 || overlay->height < 1 ||
             overlay->opacity <= 0)
             continue;
-        blend_rect(output, overlay->x, overlay->y, overlay->width,
-                   overlay->height, overlay->color,
-                   (unsigned int)(overlay->opacity * 255 / 100));
+        {
+            int x = overlay->x, y = overlay->y;
+            int width = overlay->width, height = overlay->height;
+            if (zoomed)
+                zoom_physical_rect(output, &x, &y, &width, &height);
+            blend_rect(output, x, y, width, height, overlay->color,
+                       (unsigned int)(overlay->opacity * 255 / 100));
+        }
     }
 }
 
@@ -1174,6 +1289,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         clip_y1 = view->origin_y + view->rows * ch;
     if (last_row <= first_row || last_column <= first_column)
         return;
+    zoom_note_dirty(output, clip_x0, clip_y0, clip_x1, clip_y1);
     output->info.drawn_cells += (unsigned long long)(last_column-first_column) *
                                  (last_row-first_row);
     /* The terminal's default background is the floor of the view, not a quad
@@ -1899,6 +2015,7 @@ static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
     snprintf(output->info.compositor, sizeof(output->info.compositor), "gles");
     snprintf(output->info.presentation_unavailable,
              sizeof(output->info.presentation_unavailable), "%s",
+             output->zoom > 100 ? "zoomed display" :
              blit_gles_presents(kms->gles) ? "" : "no highp fragment precision");
     snprintf(output->info.compositor_renderer,
              sizeof(output->info.compositor_renderer), "%s",
@@ -2191,6 +2308,36 @@ int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y)
     return 0;
 }
 
+/* ADR 0204: an output's zoom. A change repaints it in full, at a size the
+   GPU's scene is made again for, and moves its pointer. */
+int blit_kms_set_zoom(BlitKms *kms, int index, int zoom)
+{
+    KmsOutput *output;
+    if (kms == NULL || index < 0 || index >= kms->output_count) return -1;
+    output = kms_output(kms, index);
+    if (zoom <= 100) zoom = 100;
+    if ((output->zoom <= 100 ? 100 : output->zoom) == zoom) return 0;
+    output->zoom = zoom;
+    free(output->zoom_columns);
+    output->zoom_columns = NULL;
+    output->zoom_columns_width = 0;
+    output->initialized = 0;
+    output->pointer_state_valid = 0;
+    output->pointer_background_valid = 0;
+    output->hud_under_valid = 0;
+    output->gles_scene_fresh = 1;
+    if (output->gles_scene != NULL && kms->gles != NULL) {
+        blit_gles_scene_close(kms->gles, output->gles_scene);
+        output->gles_scene = NULL;
+    }
+    if (output->gles_target != NULL)
+        snprintf(output->info.presentation_unavailable,
+                 sizeof(output->info.presentation_unavailable), "%s",
+                 zoom > 100 ? "zoomed display" :
+                 blit_gles_presents(kms->gles) ? "" : "no highp fragment precision");
+    return 0;
+}
+
 int blit_kms_cell_width(const BlitKms *kms)
 {
     if (kms != NULL && kms->cell_width_override > 0)
@@ -2235,7 +2382,7 @@ void blit_kms_set_hud(BlitKms *kms, const BlitKmsHud *huds, int count)
 }
 
 int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_count,
-                     float pointer_x, float pointer_y, int pointer_visible,
+                     float global_pointer_x, float global_pointer_y, int pointer_visible,
                      uint32_t output_mask, const BlitKmsOverlay *overlays,
                      int overlay_count, unsigned long long visual_revision,
                      int hold_scene,
@@ -2252,14 +2399,14 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     int completed_captures = 0;
     long long started = 0;
     const char *screenshot_ready_file = getenv("BLIT_KMS_SCREENSHOT_READY_FILE");
+    float hotspot_x = kms != NULL && kms->pointer_art ? (float)kms->pointer_art->hotspot_x : 0;
+    float hotspot_y = kms != NULL && kms->pointer_art ? (float)kms->pointer_art->hotspot_y : 0;
     if (kms == NULL) return -1;
     if (kms->suspended) return 0;
     /* The canonical state/hit-testing coordinates stay at the hotspot.
        Only the compositing coordinates are translated to the stamp origin. */
-    if (kms->pointer_art) {
-        pointer_x -= kms->pointer_art->hotspot_x;
-        pointer_y -= kms->pointer_art->hotspot_y;
-    }
+    global_pointer_x -= hotspot_x;
+    global_pointer_y -= hotspot_y;
     if (submitted_output_mask != NULL) *submitted_output_mask = 0;
     if (deferred_output_mask != NULL) *deferred_output_mask = 0;
     for (i = 0; i < view_count; ++i)
@@ -2290,6 +2437,18 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         int pointer_affects_output;
         int modeset_frame;
         int trace_phases = getenv("BLIT_KMS_TRACE_PHASES") != NULL;
+        /* ADR 0204: the pointer's position is logical; on a zoomed output it
+           is drawn at its normal size where that position shows, so here it
+           is offset from the output in physical pixels, hotspot kept. */
+        float pointer_x = global_pointer_x, pointer_y = global_pointer_y;
+        int zoomed = 0, physical_width = output->mode.hdisplay,
+            physical_height = output->mode.vdisplay;
+        if (output->zoom > 100) {
+            pointer_x = output->info.x + (global_pointer_x + hotspot_x - output->info.x) *
+                (float)output->zoom / 100.0f - hotspot_x;
+            pointer_y = output->info.y + (global_pointer_y + hotspot_y - output->info.y) *
+                (float)output->zoom / 100.0f - hotspot_y;
+        }
         output->pointer_width = kms->pointer_art ? kms->pointer_art->width : 12;
         output->pointer_height = kms->pointer_art ? kms->pointer_art->height : 18;
         if (output->info.presentation_state == BLIT_KMS_PRESENTATION_FAILED)
@@ -2449,6 +2608,10 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             }
             if (render_scene && !gpu_composed)
                 output->back.map = output->scene;
+            /* ADR 0204: a zoomed output's views are composed at the logical
+               size and enlarged into this scene; the panel, the overlays'
+               place and the pointer stay physical. */
+            zoomed = render_scene && !gpu_composed && zoom_ready(output);
         if (!gpu_composed) {
         if (trace_phases)
             fprintf(stderr, "blit: KMS phase connector=%u wait_us=%lld\n",
@@ -2464,6 +2627,17 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->hud_under_valid = 0;
         else if (!hold_scene)
             restore_hud_background(output);
+        if (zoomed && !hold_scene) {
+            output->back.map = output->zoom_scene;
+            output->mode.hdisplay = (uint16_t)output->zoom_width;
+            output->mode.vdisplay = (uint16_t)output->zoom_height;
+            if (full_redraw)
+                memset(output->zoom_scene, 0, output->zoom_scene_size);
+            output->zoom_tracking = 1;
+            output->zoom_dirty_x0 = output->zoom_width;
+            output->zoom_dirty_y0 = output->zoom_height;
+            output->zoom_dirty_x1 = output->zoom_dirty_y1 = 0;
+        }
         draw_started = kms_now_us();
         output->info.drawn_cells = 0;
         output->effects_frame_us = 0;
@@ -2480,7 +2654,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                    rather than a hole. */
                 if (views[view_index].synchronized && !full_redraw)
                     continue;
-                if (pointer_changed) {
+                /* A zoomed output's pointer is outside the logical scene. */
+                if (pointer_changed && !zoomed) {
                     int pointer_x0 = 0, pointer_y0 = 0;
                     int pointer_width = 0, pointer_height = 0;
                     include_pointer_damage(output, &views[view_index],
@@ -2585,13 +2760,30 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 draw_view(output, kms != NULL ? kms->font : NULL,
                           kms != NULL ? kms->wide_font : NULL, &draw);
             }
+        if (zoomed && !hold_scene) {
+            /* Back to the physical scene, and the logical area drawn this
+               frame enlarged into it: the whole of it after a full redraw. */
+            output->zoom_tracking = 0;
+            output->mode.hdisplay = (uint16_t)physical_width;
+            output->mode.vdisplay = (uint16_t)physical_height;
+            output->back.map = output->scene;
+            if (full_redraw)
+                zoom_enlarge(output, output->scene, 0, 0, output->zoom_width,
+                             output->zoom_height);
+            else if (output->zoom_dirty_x1 > output->zoom_dirty_x0 &&
+                     output->zoom_dirty_y1 > output->zoom_dirty_y0)
+                zoom_enlarge(output, output->scene, output->zoom_dirty_x0,
+                             output->zoom_dirty_y0,
+                             output->zoom_dirty_x1 - output->zoom_dirty_x0,
+                             output->zoom_dirty_y1 - output->zoom_dirty_y0);
+        }
         if (!hold_scene) {
             /* Kept before the overlays, which are drawn again each frame. */
             if (hud != NULL && hud->translucent)
                 save_hud_background(output, hud);
             else
                 output->hud_under_valid = 0;
-            draw_kms_overlays(output, overlays, overlay_count);
+            draw_kms_overlays(output, overlays, overlay_count, zoomed);
             if (hud != NULL)
                 draw_kms_hud(output, hud);
         }
@@ -2917,6 +3109,8 @@ void blit_kms_close(BlitKms *kms)
             free_buffer(-1, &output->front); free_buffer(-1, &output->back);
             free(output->scene);
             free(output->hud_under);
+            free(output->zoom_scene);
+            free(output->zoom_columns);
             if (output->old_crtc) drmModeFreeCrtc(output->old_crtc);
         }
     }

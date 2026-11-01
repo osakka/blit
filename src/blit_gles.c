@@ -72,6 +72,10 @@ struct BlitGles {
     GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
     GLint present_shift, present_line, present_phase;
     GLint present_flick, present_sync, present_jit, present_corner;
+    /* ADR 0204: the enlargement of a zoomed output's scene. 0 without highp
+       fragment floats, which the integer mapping needs at these sizes. */
+    GLuint zoom_program, zoom_buffer;
+    GLint zoom_target, zoom_scene, zoom_scene_size, zoom_percent;
     void (*Uniform1f)(GLint, GLfloat);
     void (*Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
     void (*Uniform3f)(GLint, GLfloat, GLfloat, GLfloat);
@@ -594,6 +598,71 @@ int blit_gles_presents(const BlitGles *gles)
     return gles != NULL && gles->presents;
 }
 
+/* ADR 0204: the zoom program. A fragment per frame pixel shows the scene
+   texel (x * 100 / zoom, y * 100 / zoom), the last row and column clamped,
+   sampled at its centre with the scene's nearest filter: the CPU
+   compositor's integer mapping, exactly. GLSL ES 1.00 has no texelFetch,
+   so the division is floored in highp, exact at these magnitudes when the
+   zoom arrives as a whole number. */
+static void gles_build_zoom(BlitGles *gles)
+{
+    static const char *vertex_source =
+        "precision highp float;\n"
+        "uniform vec2 target;\n"
+        "attribute vec2 position;\n"
+        "varying vec2 pixel;\n"
+        "void main() {\n"
+        "  pixel = position;\n"
+        "  gl_Position = vec4(position.x / target.x * 2.0 - 1.0,\n"
+        "                     1.0 - position.y / target.y * 2.0, 0.0, 1.0);\n"
+        "}\n";
+    static const char *fragment_source =
+        "precision highp float;\n"
+        "varying vec2 pixel;\n"
+        "uniform sampler2D scene;\n"
+        "uniform vec2 scene_size;\n"
+        "uniform float zoom;\n"
+        "void main() {\n"
+        "  vec2 l = min(floor(floor(pixel) * 100.0 / zoom), scene_size - 1.0);\n"
+        "  gl_FragColor = texture2D(scene, vec2(l.x + 0.5, scene_size.y - l.y - 0.5) / scene_size);\n"
+        "}\n";
+    GLint status = 0;
+    GLuint v, f;
+    char error[160];
+    if (!gles->presents)
+        return;
+    v = gles_compile(gles, GL_VERTEX_SHADER, vertex_source, error, sizeof(error));
+    f = v ? gles_compile(gles, GL_FRAGMENT_SHADER, fragment_source, error, sizeof(error)) : 0;
+    if (f == 0) {
+        if (v) gles->glDeleteShader(v);
+        return;
+    }
+    gles->zoom_program = gles->glCreateProgram();
+    gles->glAttachShader(gles->zoom_program, v);
+    gles->glAttachShader(gles->zoom_program, f);
+    gles->glBindAttribLocation(gles->zoom_program, 0, "position");
+    gles->glLinkProgram(gles->zoom_program);
+    gles->glDeleteShader(v);
+    gles->glDeleteShader(f);
+    gles->glGetProgramiv(gles->zoom_program, GL_LINK_STATUS, &status);
+    if (!status) {
+        gles->glDeleteProgram(gles->zoom_program);
+        gles->zoom_program = 0;
+        return;
+    }
+    gles->zoom_target = gles->glGetUniformLocation(gles->zoom_program, "target");
+    gles->zoom_scene = gles->glGetUniformLocation(gles->zoom_program, "scene");
+    gles->zoom_scene_size = gles->glGetUniformLocation(gles->zoom_program, "scene_size");
+    gles->zoom_percent = gles->glGetUniformLocation(gles->zoom_program, "zoom");
+    gles->glGenBuffers(1, &gles->zoom_buffer);
+    while (gles->glGetError() != GL_NO_ERROR) {}
+}
+
+int blit_gles_zooms(const BlitGles *gles)
+{
+    return gles != NULL && gles->zoom_program != 0;
+}
+
 static void gles_load_timer_queries(BlitGles *gles)
 {
     const char *extensions = (const char *)gles->glGetString(GL_EXTENSIONS);
@@ -748,6 +817,7 @@ static BlitGles *gles_open_common(int surfaceless, int drm_fd, char *error,
              (const char *)gles->glGetString(GL_VERSION));
     gles_load_timer_queries(gles);
     gles_build_present(gles);
+    gles_build_zoom(gles);
     return gles;
 failed:
     blit_gles_close(gles);
@@ -783,6 +853,8 @@ void blit_gles_close(BlitGles *gles)
             if (gles->quad) gles->glDeleteBuffers(1, &gles->quad);
             if (gles->present_program) gles->glDeleteProgram(gles->present_program);
             if (gles->present_buffer) gles->glDeleteBuffers(1, &gles->present_buffer);
+            if (gles->zoom_program) gles->glDeleteProgram(gles->zoom_program);
+            if (gles->zoom_buffer) gles->glDeleteBuffers(1, &gles->zoom_buffer);
             gles->MakeCurrent(gles->display, EGL_NO_SURFACE, EGL_NO_SURFACE,
                               EGL_NO_CONTEXT);
             gles->DestroyContext(gles->display, gles->context);
@@ -1541,6 +1613,38 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glUseProgram(gles->compose_program);
         gles->batch_texture = (GLuint)-1;
     }
+}
+
+void blit_gles_scene_zoom(BlitGles *gles, BlitGlesScene *scene, int zoom)
+{
+    GLfloat quad[12];
+    float w, h;
+    if (gles == NULL || scene == NULL || gles->frame_target == NULL || !gles->zoom_program)
+        return;
+    w = (float)gles->frame_target->width;
+    h = (float)gles->frame_target->height;
+    quad[0] = 0; quad[1] = 0; quad[2] = w; quad[3] = 0; quad[4] = 0; quad[5] = h;
+    quad[6] = w; quad[7] = 0; quad[8] = w; quad[9] = h; quad[10] = 0; quad[11] = h;
+    gles_flush(gles);
+    gles->glUseProgram(gles->zoom_program);
+    gles->glUniform2f(gles->zoom_target, w, h);
+    gles->glUniform2f(gles->zoom_scene_size, (GLfloat)scene->width, (GLfloat)scene->height);
+    gles->Uniform1f(gles->zoom_percent, (GLfloat)zoom);
+    gles->glUniform1i(gles->zoom_scene, 0);
+    gles->glActiveTexture(GL_TEXTURE0);
+    gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
+    gles->glBindBuffer(GL_ARRAY_BUFFER, gles->zoom_buffer);
+    gles->glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+    gles->glDisableVertexAttribArray(1);
+    gles->glDisableVertexAttribArray(2);
+    gles->glDisableVertexAttribArray(3);
+    gles->glEnableVertexAttribArray(0);
+    gles->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+    gles->glDrawArrays(GL_TRIANGLES, 0, 6);
+    ++gles->draw_calls;
+    gles->vertices_drawn += 6;
+    gles->glUseProgram(gles->compose_program);
+    gles->batch_texture = (GLuint)-1;
 }
 
 unsigned long long blit_gles_draw_calls(const BlitGles *gles)

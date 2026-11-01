@@ -1,5 +1,49 @@
 # Verification status
 
+## 2026-11-01: 0.3.26 pixel zoom per display (ADR 0204)
+
+- **What:** the owner asked for a zoom per monitor that is not the font
+  size, and chose pixel zoom over a crisp one. `PATCH /v1/displays/{id}`
+  takes `zoom` (100, 125, 150, 175, 200, 250, 300 or 400), saved per
+  connector. The display's logical size is mode × 100 / zoom. Panes,
+  grids, pictures, the winsize (columns × the unchanged cell), hit testing
+  and pointer position follow it, and Blit enlarges the image nearest-
+  neighbour: physical (x, y) shows logical (x·100/zoom, y·100/zoom), with
+  the last row and column clamped. The pointer and the performance panel
+  aren't enlarged; relative motion stays physical; screenshots are
+  physical. Hibr reviewed the design (the logical winsize is theirs).
+- **Effects:** curvature, glow and the other presentation effects aren't
+  drawn on a zoomed GLES display (reported "zoomed display"). Pane effects
+  and scanlines are drawn into the logical scene and enlarged.
+- **Found and fixed while gating:** on a zoomed GLES display, scanlines
+  under curvature and the corners under horizontal sync or jitter were
+  drawn by nothing. The scene left them to the presentation pass, which
+  zoom skips.
+- **Gate:** `display_zoom_gate.rb` (renderer suite, both compositors), on
+  two mock outputs, display-1 1021×769, sized so the clamp shows real
+  cells:
+  - at 100, 200, 150 and 175 % every physical pixel matches the formula
+    computed from a known pattern (5,496,043 pixels, identical on CPU and
+    GLES), and the logical bounds, grid and session winsize follow;
+  - an absolute pointer move reads logical, a relative 40,20 moves 20,10
+    logical at 200 %;
+  - the pointer art and the panel are unenlarged, with no residue after
+    they leave;
+  - scanlines under curvature are enlarged;
+  - display-2 is untouched;
+  - back to 100 % is byte-identical.
+
+  `display_device_api_gate` covers the capability, configuration,
+  refusals, halved bounds, persistence across a restart, and clearing at
+  100.
+- **Cost (CPU, 1024×768 mock at 200 %):** enlarging one changed cell takes
+  about 3 µs; a full-frame enlargement 1.2 ms. A full repaint draws faster
+  zoomed (2.6–2.9 ms against 5.5–6.4) because there are fewer cells. GLES
+  was measured only on llvmpipe, too noisy to quote.
+- **Not gated:** a hotplug rescan keeping the zoom (the code carries it),
+  and the pane grid after a boot with a saved zoom.
+- **Suites:** font 38/38; full 156/158 (6 skips) and GLES renderer 66/67 (1 skip). `display_settings_gate` failed in both: it expected a display with no backlight to have an empty configuration, and every KMS display now has `zoom`. The gate now expects `{zoom: 100}` and passes on both compositors. `frame_rate_gate` failed once under the full run and passed 3/3 alone.
+
 ## 2026-11-01: 0.3.25 a translucent performance panel
 
 - `hud.opacity` (10–100, default 100): the panel's background and graph

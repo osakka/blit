@@ -88,6 +88,12 @@ static int kms_release_output(BlitKms *kms, KmsOutput *output, int restore)
     output->hud_under = NULL;
     output->hud_under_capacity = 0;
     output->hud_under_valid = 0;
+    free(output->zoom_scene);
+    free(output->zoom_columns);
+    output->zoom_scene = NULL;
+    output->zoom_columns = NULL;
+    output->zoom_scene_size = 0;
+    output->zoom_columns_width = 0;
     if (output->old_crtc != NULL) drmModeFreeCrtc(output->old_crtc);
     output->old_crtc = NULL;
     output->allocated = 0;

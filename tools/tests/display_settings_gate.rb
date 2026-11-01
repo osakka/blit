@@ -133,8 +133,10 @@ Dir.mktmpdir('blit-display') do |root|
           "native KMS has no rotation transform: #{item['capabilities'].inspect}")
     check(!item.fetch('capabilities', []).include?('brightness'),
           'brightness is claimed with no backlight on the host')
-    check(item.fetch('configuration', {}) == {},
-          "configuration should be empty: #{item['configuration'].inspect}")
+    # Zoom (ADR 0204) is a setting of every KMS display; brightness is not
+    # offered without a backlight, so it is the only one.
+    check(item.fetch('configuration', {}) == { 'zoom' => 100 },
+          "configuration should hold only zoom: #{item['configuration'].inspect}")
     code, problem = patch('rotation' => 90)
     check(code == 422 && problem.to_h['code'] == 'display_rotation_unsupported',
           "rotation is refused -> #{code} #{problem.inspect}")

@@ -238,10 +238,11 @@ paths:
     patch:
       tags: [hardware]
       operationId: updateDisplay
-      summary: Set a display's brightness
+      summary: Set a display's brightness or pixel zoom
       description: >-
-        Writable: `brightness_percent` where a backlight is attributed, and
-        `rotation` 0. Any other property is a 400 `invalid_display_property`
+        Writable: `brightness_percent` where a backlight is attributed,
+        `zoom` on every KMS display, and `rotation` 0. Any other property is
+        a 400 `invalid_display_property`
         rather than ignored. Selecting a mode is deliberately not here: it
         resizes every surface on the display and needs issue #60's resize
         protocol.
@@ -251,6 +252,12 @@ paths:
         any other value a 400 `invalid_display_rotation`.
         `brightness_percent` is a 422 `display_brightness_unsupported` where
         no backlight is attributed.
+
+        `zoom` (ADR 0204) is a percentage: 100 (none), 125, 150, 175, 200,
+        250, 300 or 400; any other value, or one that is not a whole number,
+        is a 400 `invalid_display_zoom`. The display's `bounds` become its
+        mode times 100 / zoom, rounded down, and its sessions are resized to
+        that logical size.
       requestBody:
         required: true
         content:
@@ -267,6 +274,9 @@ paths:
                       type: integer
                       minimum: 0
                       maximum: 100
+                    zoom:
+                      type: integer
+                      enum: [100, 125, 150, 175, 200, 250, 300, 400]
                   additionalProperties: false
               additionalProperties: false
       responses:
@@ -2163,8 +2173,10 @@ components:
           type: object
           description: >-
             The display's rectangle in the desktop's coordinate space. Native
-            KMS has no rotation (ADR 0184), so its size is the active mode's;
-            `state.physical` carries the mode's own size beside it. The cell
+            KMS has no rotation (ADR 0184), so its size is the active mode's,
+            divided by `configuration.zoom` and rounded down on a zoomed
+            display (ADR 0204); `state.physical` carries the mode's own size
+            beside it. The cell
             grid, the pointer hit test and the topology placements all work in
             this one space.
           required: [x, y, width, height]
@@ -2191,10 +2203,11 @@ components:
             `rotation` is absent: native KMS composes straight into the
             connector's framebuffer and has no rotation transform (ADR 0184).
             `brightness` is present
-            only where a backlight is attributed to the display.
+            only where a backlight is attributed to the display. `zoom` is
+            present on every KMS display (ADR 0204).
           items:
             type: string
-            enum: [mode-report, brightness]
+            enum: [mode-report, brightness, zoom]
         state:
           type: object
           required: [present, presentation_state, physical]
@@ -2251,8 +2264,15 @@ components:
             to `brightness`, which is what was requested -- so a driver that
             ramps reports the old value until it arrives. It is not persisted:
             systemd-backlight already restores it across a boot.
+
+            `zoom` is the display's pixel zoom in percent, 100 when it has
+            none (ADR 0204). The display is composed at its logical size,
+            `bounds`, and enlarged nearest-neighbour to the mode in
+            `state.physical`. It is kept in the settings document's
+            `displays` section under the connector name when it is not 100.
           properties:
             brightness_percent: {type: integer, minimum: 0, maximum: 100}
+            zoom: {type: integer, enum: [100, 125, 150, 175, 200, 250, 300, 400]}
           additionalProperties: false
         revision:
           $ref: '#/components/schemas/Revision'

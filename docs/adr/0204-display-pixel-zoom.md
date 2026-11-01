@@ -1,6 +1,6 @@
 # ADR 0204: pixel zoom per display
 
-- Status: proposed
+- Status: accepted
 - Note: reviewed by the Hibr maintainers, 2026-11-01.
 - Date: 2026-11-01
 - Scope: displays API, settings, topology, both compositors, input mapping,
@@ -16,7 +16,7 @@ display's cells larger (crisp at any step), or composing the display at a
 lower resolution and enlarging the image (pixel zoom). They chose **pixel
 zoom**: the whole display, pictures included, magnified as an image.
 
-## Decision (proposed)
+## Decision
 
 - **The setting.** `PATCH /v1/displays/{id}` takes `zoom`, a percentage:
   100 (off), 125, 150, 175, 200, 250, 300 or 400. `capabilities` lists
@@ -44,14 +44,21 @@ zoom**: the whole display, pictures included, magnified as an image.
 - **The image.** The compositor composes the display at its logical size,
   then enlarges it to the mode with **nearest-neighbour** sampling: the
   physical pixel (x, y) shows logical pixel
-  (x·100/zoom, y·100/zoom), integer division. At 200%, 300% and 400% every
-  pixel becomes an even square; at 125%–250% some rows and columns repeat
-  once more than others, which is the look of pixel zoom and identical on
-  both compositors. GLES: the scene texture at the logical size, drawn to
-  the output with that integer mapping in the shader (`texelFetch`), not
-  the GPU's filtering. CPU: the scene buffer at the logical size, enlarged
-  into the scanout buffer by a row-replicating copy over the damaged rows
-  only.
+  (x·100/zoom, y·100/zoom), integer division, clamped to the last logical
+  column and row: the logical size is rounded down, so where the mode is
+  not a whole multiple of it the last physical columns or rows map one past
+  it and show its last column or row again (1024 wide at 150% is 682
+  logical columns; physical 1023 maps to 682 and shows 681). At 200%,
+  300% and 400% every pixel becomes an even square; at 125%–250% some rows
+  and columns repeat once more than others, which is the look of pixel
+  zoom and identical on both compositors. GLES: the scene texture at the logical size, drawn to
+  the output with that integer mapping in the shader, not the GPU's
+  filtering: GLSL ES 1.00 has no `texelFetch`, so the shader floors the
+  division in highp and samples the texel's centre with nearest filtering,
+  which is exact at these sizes. A context without highp fragment floats
+  composes a zoomed display on the CPU instead, with that reason
+  reported. CPU: the scene buffer at the logical size, enlarged into the
+  scanout buffer by a row-replicating copy over the damaged rows only.
 - **Not zoomed:** the pointer and the performance panel are drawn after
   the enlargement, at their normal size, so the pointer stays a normal
   pointer and the panel stays readable. Screenshots
@@ -61,6 +68,14 @@ zoom**: the whole display, pictures included, magnified as an image.
   testing, mouse reports and pointer lock.
 - **Damage.** A logical damaged rectangle becomes its enlarged physical
   rectangle; nothing else is repainted.
+- **Effects.** The presentation effects (curvature, glow and the others
+  the GLES presentation pass draws, ADR 0187) are not drawn on a zoomed
+  display: the enlargement takes the place of that pass. The display's
+  `presentation_unavailable` says `zoomed display`, as it says `cpu
+  compositor` on the CPU. The local effects (scanlines, corners) are drawn
+  into the logical scene and enlarged with it, including the ones the
+  presentation pass would otherwise draw on the glass (scanlines under
+  curvature, corners under horizontal sync or jitter), as on the CPU.
 
 ## Consequences
 

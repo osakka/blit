@@ -227,6 +227,11 @@ int blit_kms_output_presenting(const BlitKms *kms, int index);
 int blit_kms_display_info(const BlitKms *kms, int index,
                           BlitKmsDisplayInfo *info);
 int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y);
+/* ADR 0204: pixel zoom, a percentage; 100 is none. The output's views are
+   composed at the mode times 100 / zoom, rounded down, and enlarged
+   nearest-neighbour; its pointer and panel stay at their normal size, and
+   its pointer position, like its place, is logical. */
+int blit_kms_set_zoom(BlitKms *kms, int index, int zoom);
 int blit_kms_fd(const BlitKms *kms);
 int blit_kms_service(BlitKms *kms, int readable);
 int blit_kms_suspend(BlitKms *kms);
