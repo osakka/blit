@@ -189,7 +189,7 @@ typedef struct {
        presented for new picture pixels (Kitty, Sixel or a descriptor frame);
        frames for the pointer alone. With effects_animation_frames, each
        frame is counted under at most one of them. */
-    unsigned long long hud_frames, picture_frames, pointer_frames;
+    unsigned long long hud_frames, picture_frames, pointer_frames, text_frames;
 } BlitKmsDisplayInfo;
 
 typedef struct {

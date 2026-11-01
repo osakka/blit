@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-11-01: 0.3.24 the panel's why line names text
+
+- The owner asked for "other" to read "text". Most of "other" was text,
+  but not all of it, so text is now counted as a reason of its own rather
+  than renamed:
+  - a frame whose cells changed short of a full redraw counts as
+    `text_frames` per output, and as `why_hz.text` in `recent`;
+  - "other" stays for the rest, such as a full redraw or a capture, and is
+    shown only when nonzero.
+- Seen live on 0.3.23 with Hibr 0.99.407 (held desktop, YouTube): the
+  panel's hibr section carried the desktop's eight lines, also in each
+  session's `status` (about 0.4 s old). display-93 drew 40/s: effects 17,
+  video 10, pointer 11, other 2. Mean panel update 0.31 ms with the hibr
+  section, 0.16 ms without.
+- **Suites:** font 38/38, full 158/158 (6 skips), GLES renderer 67/67 (1 skip).
+
 ## 2026-11-01: 0.3.23 the performance panel, made readable and cheaper
 
 - **The owner's reading of 0.3.22 live:** "fps 60" while a 9 fps video

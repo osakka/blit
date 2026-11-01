@@ -61,8 +61,8 @@ Option 3.
   - the output, its mode and refresh;
   - its draws in the last second, less the panel's own, with late flips and
     missed deadlines in that second;
-  - why it drew: an animated effect, a picture, the pointer alone, or
-    anything else, each a rate, zeros left out;
+  - why it drew: an animated effect, a picture, the pointer alone, changed
+    text, or anything else, each a rate, zeros left out;
   - its draw and flip time, with the worst in the last 10 s;
   - its gpu (the renderer, shortened) or, on the CPU compositor, why;
   - the pictures its sessions sent: frames by descriptor, Kitty and Sixel

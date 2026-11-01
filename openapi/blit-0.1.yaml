@@ -2901,7 +2901,7 @@ components:
                            kms_scanout, kms_phases, render_width,
                            render_height, viewport_width, viewport_height,
                            scale_x, scale_y, compositor, effects, flip,
-                           hud_frames, picture_frames, pointer_frames, recent]
+                           hud_frames, picture_frames, pointer_frames, text_frames, recent]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
@@ -2936,12 +2936,18 @@ components:
                     description: >-
                       Frames presented because a picture on this output
                       changed (Kitty, Sixel or a frame by descriptor). With
-                      `effects.animation_frames`, `hud_frames` and
-                      `pointer_frames`, a frame is counted under at most one.
+                      `effects.animation_frames`, `hud_frames`,
+                      `pointer_frames` and `text_frames`, a frame is counted under at most one.
                   pointer_frames:
                     type: integer
                     minimum: 0
                     description: Frames presented for the pointer alone.
+                  text_frames:
+                    type: integer
+                    minimum: 0
+                    description: >-
+                      Frames presented because cells changed, short of a
+                      full redraw.
                   recent:
                     type: object
                     description: >-
@@ -2951,7 +2957,7 @@ components:
                       not the panel is on. `draws_hz` leaves out
                       `hud_frames`; `why_hz` splits it by the first reason
                       that applies (an animated effect, a picture, the
-                      pointer alone, anything else). The pictures are those
+                      pointer alone, changed cells, anything else). The pictures are those
                       of the sessions on this output. `draw_ms` and
                       `flip_ms` are the last frame's (`kms_phases.draw_ms`,
                       `flip.last_ms`).
@@ -2965,11 +2971,12 @@ components:
                       missed_deadlines_hz: {type: number, minimum: 0}
                       why_hz:
                         type: object
-                        required: [effects, video, pointer, other]
+                        required: [effects, video, pointer, text, other]
                         properties:
                           effects: {type: number, minimum: 0}
                           video: {type: number, minimum: 0}
                           pointer: {type: number, minimum: 0}
+                          text: {type: number, minimum: 0}
                           other: {type: number, minimum: 0}
                         additionalProperties: false
                       descriptor_frames_hz: {type: number, minimum: 0}

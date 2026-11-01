@@ -157,7 +157,8 @@ def short_renderer(renderer)
 end
 
 def display_lines(recent)
-  why = { 'effects' => 'effects', 'video' => 'video', 'pointer' => 'pointer', 'other' => 'other' }
+  why = { 'effects' => 'effects', 'video' => 'video', 'pointer' => 'pointer', 'text' => 'text',
+          'other' => 'other' }
         .filter_map { |key, word| "#{word} #{recent['why_hz'][key].round}" if recent['why_hz'][key] >= 0.5 }
   [format('draws   %.0f/s   late %.0f/s   missed %.0f/s', recent['draws_hz'], recent['late_flips_hz'],
           recent['missed_deadlines_hz']),

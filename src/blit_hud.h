@@ -284,7 +284,9 @@ static void recent_tick(BlitRuntime *runtime, uint64_t now)
             r->effects_hz = recent_rate(info.effects_animation_frames, r->effects, seconds);
             r->pictures_hz = recent_rate(info.picture_frames, r->pictures, seconds);
             r->pointer_hz = recent_rate(info.pointer_frames, r->pointer, seconds);
-            r->other_hz = r->draws_hz - r->effects_hz - r->pictures_hz - r->pointer_hz;
+            r->text_hz = recent_rate(info.text_frames, r->text, seconds);
+            r->other_hz = r->draws_hz - r->effects_hz - r->pictures_hz - r->pointer_hz -
+                r->text_hz;
             if (r->other_hz < 0) r->other_hz = 0;
             r->descriptor_hz = recent_rate(descriptor, r->descriptor, seconds);
             r->kitty_hz = recent_rate(kitty, r->kitty, seconds);
@@ -302,6 +304,7 @@ static void recent_tick(BlitRuntime *runtime, uint64_t now)
         r->effects = info.effects_animation_frames;
         r->pictures = info.picture_frames;
         r->pointer = info.pointer_frames;
+        r->text = info.text_frames;
         r->descriptor = descriptor;
         r->kitty = kitty;
         r->sixel = sixel;
@@ -481,6 +484,8 @@ static void hud_display_lines(BlitRuntime *runtime, int output, BlitHudPanel *pa
         used += (size_t)snprintf(why + used, sizeof(why) - used, "video %.0f  ", r->pictures_hz);
     if (r->pointer_hz >= 0.5 && used < sizeof(why))
         used += (size_t)snprintf(why + used, sizeof(why) - used, "pointer %.0f  ", r->pointer_hz);
+    if (r->text_hz >= 0.5 && used < sizeof(why))
+        used += (size_t)snprintf(why + used, sizeof(why) - used, "text %.0f  ", r->text_hz);
     if (r->other_hz >= 0.5 && used < sizeof(why))
         used += (size_t)snprintf(why + used, sizeof(why) - used, "other %.0f  ", r->other_hz);
     if (used >= 2 && used < sizeof(why))
@@ -815,12 +820,13 @@ static void recent_json(const BlitRuntime *runtime, int output, char *out, size_
     }
     json_appendf(out, capacity, &used,
                  "{\"draws_hz\":%.3f,\"late_flips_hz\":%.3f,\"missed_deadlines_hz\":%.3f,"
-                 "\"why_hz\":{\"effects\":%.3f,\"video\":%.3f,\"pointer\":%.3f,\"other\":%.3f},"
+                 "\"why_hz\":{\"effects\":%.3f,\"video\":%.3f,\"pointer\":%.3f,\"text\":%.3f,"
+                 "\"other\":%.3f},"
                  "\"descriptor_frames_hz\":%.3f,\"kitty_hz\":%.3f,\"sixel_hz\":%.3f,"
                  "\"frames_refused_hz\":%.3f,\"draw_ms\":%.3f,\"draw_max_ms\":%.3f,"
                  "\"flip_ms\":%.3f,\"flip_max_ms\":%.3f,\"window_s\":%d}",
                  r->draws_hz, r->late_hz, r->missed_hz, r->effects_hz, r->pictures_hz,
-                 r->pointer_hz, r->other_hz, r->descriptor_hz, r->kitty_hz, r->sixel_hz,
+                 r->pointer_hz, r->text_hz, r->other_hz, r->descriptor_hz, r->kitty_hz, r->sixel_hz,
                  r->refused_hz, r->draw_ms, recent_worst(r->draw_worst, r->draw_second),
                  r->flip_ms, recent_worst(r->flip_worst, r->flip_second),
                  BLIT_RECENT_SECONDS);

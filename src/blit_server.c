@@ -821,11 +821,11 @@ typedef struct {
    the API reports every number the panel does. The counts are the
    output's own and its sessions', as they stood when the second began. */
 typedef struct {
-    unsigned long long presents, hud, late, effects, pictures, pointer;
+    unsigned long long presents, hud, late, effects, pictures, pointer, text;
     unsigned long long descriptor, kitty, sixel, refused;
     unsigned long missed;
     double draws_hz, late_hz, missed_hz, effects_hz, pictures_hz, pointer_hz,
-        other_hz, descriptor_hz, kitty_hz, sixel_hz, refused_hz;
+        text_hz, other_hz, descriptor_hz, kitty_hz, sixel_hz, refused_hz;
     /* The last frame's draw and flip times; the worst of each in the
        current second and in each of the last ten; and the graph, each
        second's worst frame time. */
@@ -3620,6 +3620,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu,"
                 "\"submit_phase_ms\":{\"on_time\":[%s],\"late\":[%s]}},"
                 "\"hud_frames\":%llu,\"picture_frames\":%llu,\"pointer_frames\":%llu,"
+                "\"text_frames\":%llu,"
                 "\"recent\":%s}",
                 have_kms_info ? kms_info.compositor : "unavailable",
                 have_kms_info && kms_info.compositor_requested[0] ?
@@ -3660,7 +3661,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 phase_on_time, phase_late,
                 have_kms_info ? kms_info.hud_frames : 0ULL,
                 have_kms_info ? kms_info.picture_frames : 0ULL,
-                have_kms_info ? kms_info.pointer_frames : 0ULL, recent);
+                have_kms_info ? kms_info.pointer_frames : 0ULL,
+                have_kms_info ? kms_info.text_frames : 0ULL, recent);
         }
     }
     if (used < capacity)

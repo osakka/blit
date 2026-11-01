@@ -2294,12 +2294,15 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         if (!output_changed)
             continue;
         /* One reason a frame, the first that applies: an animation tick or
-           the panel (above), new picture pixels, the pointer alone. Frames
-           for anything else are the rest of present_calls. */
+           the panel (above), new picture pixels, the pointer alone, changed
+           cells. Frames for anything else -- a full redraw, a capture -- are
+           the rest of present_calls. */
         if (!reason_counted && pictures_changed)
             ++output->info.picture_frames;
         else if (!reason_counted && pointer_affects_output && !scene_changed && !full_redraw)
             ++output->info.pointer_frames;
+        else if (!reason_counted && scene_changed && !full_redraw)
+            ++output->info.text_frames;
         if (hold_scene)
             full_redraw = 0;
         /* A timeout requests one recovery modeset.  It must not turn the

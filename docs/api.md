@@ -1733,7 +1733,8 @@ video   9/s  by descriptor  (kitty 0  sixel 0)
   less the panel's own; **late** and **missed** are late flips and missed
   deadlines in that second. **why** splits the draws by the first reason
   that applies: an animated pane effect, a picture (Kitty, Sixel or a frame
-  by descriptor), the pointer alone, anything else (text, for one).
+  by descriptor), the pointer alone, changed text (cells), and anything
+  else, such as a full redraw.
 - **draw** and **flip** are the last frame's draw time and submit-to-flip
   time, with the worst in the last 10 s. **gpu** is the GLES renderer,
   shortened; on the CPU compositor the line says why.
