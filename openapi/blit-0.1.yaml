@@ -2529,7 +2529,9 @@ components:
         The performance panel (ADR 0203), drawn by Blit over the panes on
         each display it is shown on. `enabled` defaults to `BLIT_HUD=1` at
         start; `display_id` is a display or `all` (the default); `corner`
-        defaults to `top-right`; `hz`, the most updates a second, to 2; and
+        defaults to `top-right`; `hz`, the most updates a second, to 2;
+        `opacity`, in percent, to 100 (only the background and the graph's
+        fill take it: text, border, bars and lines stay opaque); and
         `sections` to all three: `blit` (Blit's counters for that display),
         `hibr` (the lines the session's frame client sends as STA1) and
         `graph` (the last 60 s of frame time against the refresh interval).
@@ -2542,6 +2544,7 @@ components:
           type: string
           enum: [top-left, top-right, bottom-left, bottom-right]
         hz: {type: integer, minimum: 1, maximum: 10}
+        opacity: {type: integer, minimum: 10, maximum: 100}
         sections:
           type: array
           uniqueItems: true
@@ -2792,7 +2795,7 @@ components:
               additionalProperties: false
             hud:
               allOf: [{$ref: '#/components/schemas/HudSettings'}]
-              required: [enabled, display_id, corner, hz, sections]
+              required: [enabled, display_id, corner, hz, opacity, sections]
               description: The performance panel's settings in force.
           additionalProperties: false
     LoginPolicy:
@@ -3200,7 +3203,7 @@ components:
             a rebuild cost, Blit's own last seconds (the panel's "blit"
             lines), and each panel shown, with its place on the output and
             the lines drawn in it.
-          required: [enabled, display_id, corner, hz, sections, frames,
+          required: [enabled, display_id, corner, hz, opacity, sections, frames,
                      updates, last_update_ms, mean_update_ms, max_update_ms,
                      recent, panels]
           properties:
@@ -3208,6 +3211,7 @@ components:
             display_id: {type: string}
             corner: {type: string, enum: [top-left, top-right, bottom-left, bottom-right]}
             hz: {type: integer, minimum: 1, maximum: 10}
+            opacity: {type: integer, minimum: 10, maximum: 100}
             sections:
               type: array
               items: {type: string, enum: [blit, hibr, graph]}

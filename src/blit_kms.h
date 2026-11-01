@@ -102,6 +102,9 @@ typedef struct {
     unsigned long long base_revision;
     int dirty_y;
     int dirty_height;
+    /* Some pixels are less than opaque: they are blended over what is
+       under the panel, out = (src * a + dst * (255 - a) + 127) / 255. */
+    int translucent;
 } BlitKmsHud;
 
 typedef struct {

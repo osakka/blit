@@ -92,6 +92,9 @@ already be fixed.
 - The gate runner must stop cleanly on Ctrl+C (#106); one entry point and CI
   for the gates (#27); a GPU in the gate suite (#79).
 - Intermittent loss of fake input devices in a gate (#124).
+- Translucent API overlays (`/v1/overlays`) may be blended into the CPU
+  scene buffer again on every frame and darken over time; the panel avoids
+  this by restoring what is under it (0.3.25). Check, and fix the same way.
 - Overlay `DELETE /v1/overlays/{id}` parses a bare number, so the
   `overlay-N` id that create and list return matches nothing.
 - The stream's `pixel_frame_end` and `pixel_frame_hide` client messages have

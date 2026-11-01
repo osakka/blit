@@ -1,5 +1,38 @@
 # Verification status
 
+## 2026-11-01: 0.3.25 a translucent performance panel
+
+- `hud.opacity` (10–100, default 100): the panel's background and graph
+  fill blend over what's under them; text, border, bars and the limit line
+  stay opaque. Both compositors use the same integer blend,
+  `(src·a + dst·(255−a) + 127) / 255` with `a = opacity·255/100`, and
+  match to the pixel.
+- **No build-up on the CPU compositor.** The panel is blended into the
+  scene buffer. So while it is translucent, each output keeps a copy of the
+  scene under it, taken after the panes and before overlays and the panel,
+  and puts it back before the next partial repaint, as the pointer's
+  background is. The copy is dropped on full redraws, GPU frames and VT
+  suspend. Opacity 100 keeps the old opaque path.
+- **Cost:** the panel build is unchanged (mean 0.07–0.10 ms). On the CPU
+  compositor a translucent 390×260 panel costs about 0.3 ms more per
+  present (table blend 0.58 ms against the opaque copy's 0.32); the GLES
+  quad costs nothing extra.
+- **Gate:** `performance_panel_gate` covers:
+  - opacity 50 over a pane of a known colour: the exact blend in the
+    padding and in a graph gap, on both compositors;
+  - three repaints under the panel, the pointer across it and several
+    panel updates, after which the pixels are byte-identical (without the
+    restore, the CPU background had crept from (28,53,90) to (18,21,29));
+  - opacity 100 opaque again;
+  - 9, 101 and "50" refused.
+- **Control Panel pane 0.1.21–0.1.22:** the corner and Hibr-section rows
+  never reached Blit in 0.1.20 (see hibr-apps docs/blit.md); fixed, and
+  `blit_panel_gate` now drives all four panel rows, Panel opacity included,
+  against this server and checks what it saved. `blit_ui_gate` and
+  `blit_mouse_gate` pass.
+- GLES exactness is shown on llvmpipe; radeonsi is untested.
+- **Suites:** font 38/38; full 157/158 (6 skips), the failure `settings_persistence_gate` (known intermittent), then 3/3 alone; GLES renderer 67/67 (1 skip).
+
 ## 2026-11-01: 0.3.24 the panel's why line names text
 
 - The owner asked for "other" to read "text". Most of "other" was text,

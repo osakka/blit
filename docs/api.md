@@ -1709,12 +1709,15 @@ settings document's `hud` object and changed live with `PUT /v1/settings`:
 
 ```json
 "hud": {"enabled": true, "display_id": "all", "corner": "top-right",
-        "hz": 2, "sections": ["blit", "hibr", "graph"]}
+        "hz": 2, "opacity": 100, "sections": ["blit", "hibr", "graph"]}
 ```
 
 Those are the defaults, except `enabled`, which defaults to `BLIT_HUD=1` at
 start. `display_id` is a display or `all`; `hz` (1–10) is the most updates
-a second. An unknown or repeated member, or a value out of range, is
+a second. `opacity` (10–100, percent) lets what is under the panel show
+through its background and its graph's fill; the text, border, bars and
+lines stay opaque, so it still reads. Both compositors blend the same way,
+to the same pixels, and a translucent panel does not darken with time. An unknown or repeated member, or a value out of range, is
 `400 invalid_settings_hud`. `settings.effective.hud` is what is in force.
 
 Each display's panel is about that display, one idea a line:

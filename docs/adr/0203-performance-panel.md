@@ -113,7 +113,11 @@ Option 3.
     Frames and bytes per display are Blit's own counts and aren't repeated.
 - **Control.** A `hud` object in the settings document: `enabled`,
   `display_id` (or `all`), `corner`, `hz`, `sections` (`blit`, `hibr`,
-  `graph`). It is persisted and revisioned like every setting and changed
+  `graph`), and `opacity` (10–100 %, default 100: only the background and
+  the graph's fill go translucent, so the text stays readable; both
+  compositors blend with the same integer rule, and the CPU one keeps what
+  is under the panel, as it does under the pointer, so blends never stack).
+  It is persisted and revisioned like every setting and changed
   with `PUT /v1/settings`, so the Control Panel's Blit pane toggles it with
   the token it already keeps. The startup default is `BLIT_HUD`. The live
   state is reported in `/v1/diagnostics`; the panel is not a client overlay

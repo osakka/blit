@@ -47,16 +47,17 @@ static const char *const hud_section_names[] = {"blit", "hibr", "graph"};
 #define BLIT_HUD_LIMIT BLIT_HUD_RGBA(0x90, 0x90, 0x9c)
 
 typedef struct {
-    int enabled, corner, hz;
+    int enabled, corner, hz, opacity;
     unsigned sections;
     char display_id[32];
 } BlitHudSettings;
 
 /* document.hud: {"enabled": bool, "display_id": "display-N" | "all",
-   "corner": one of hud_corners, "hz": 1..10, "sections": a subset of
-   hud_section_names}. Strict like effects: an unknown or repeated member or
-   a value out of range makes it invalid. What is absent takes the default:
-   enabled from BLIT_HUD=1, every display, top right, 2 Hz, every section. */
+   "corner": one of hud_corners, "hz": 1..10, "opacity": 10..100 (percent),
+   "sections": a subset of hud_section_names}. Strict like effects: an
+   unknown or repeated member or a value out of range makes it invalid. What
+   is absent takes the default: enabled from BLIT_HUD=1, every display, top
+   right, 2 Hz, opaque, every section. */
 static int settings_hud_parse(const char *document, BlitHudSettings *out)
 {
     static char section[BLIT_SETTINGS_CAPACITY];
@@ -70,6 +71,7 @@ static int settings_hud_parse(const char *document, BlitHudSettings *out)
     out->enabled = boot != NULL && strcmp(boot, "1") == 0;
     out->corner = 1;
     out->hz = 2;
+    out->opacity = 100;
     out->sections = BLIT_HUD_SECTIONS_ALL;
     snprintf(out->display_id, sizeof(out->display_id), "all");
     if (document == NULL || document[0] == '\0') return 1;
@@ -117,6 +119,11 @@ static int settings_hud_parse(const char *document, BlitHudSettings *out)
             if ((seen & 8u) || !effects_integer(value, 10, &out->hz) || out->hz < 1)
                 return 0;
             seen |= 8u;
+        } else if (strcmp(key, "opacity") == 0) {
+            if ((seen & 32u) || !effects_integer(value, 100, &out->opacity) ||
+                out->opacity < 10)
+                return 0;
+            seen |= 32u;
         } else if (strcmp(key, "sections") == 0) {
             const char *item = value;
             if ((seen & 16u) || *item++ != '[') return 0;
@@ -182,6 +189,7 @@ static void hud_attach(BlitRuntime *runtime)
         huds[count].base_revision = panel->base_revision;
         huds[count].dirty_y = panel->dirty_y;
         huds[count].dirty_height = panel->dirty_height;
+        huds[count].translucent = runtime->hud_opacity < 100;
         ++count;
     }
     blit_kms_set_hud(runtime->kms, huds, count);
@@ -563,6 +571,11 @@ static int hud_build(BlitRuntime *runtime, int output, int first, uint64_t now)
     int inner, graph_top = 0;
     double refresh_hz = output_refresh_hz(runtime, output), interval_ms = 1000.0 / 60.0;
     unsigned long long layout = 1469598103934665603ULL, graph_signature = 0;
+    /* Only the background and the graph's fill take hud.opacity; ink,
+       border, bars and the limit line stay opaque, so it still reads. */
+    uint32_t alpha = (uint32_t)(runtime->hud_opacity * 255 / 100);
+    uint32_t background = (BLIT_HUD_BACKGROUND & 0x00ffffffU) | alpha << 24;
+    uint32_t graph_fill = (BLIT_HUD_GRAPH_FILL & 0x00ffffffU) | alpha << 24;
     BlitKmsDisplayInfo info;
 
     if (display_index < 0 || blit_kms_display_info(runtime->kms, display_index, &info) != 0)
@@ -620,6 +633,7 @@ static int hud_build(BlitRuntime *runtime, int output, int first, uint64_t now)
     layout = hud_hash(layout, &graph, sizeof(graph));
     layout = hud_hash(layout, &graph_after, sizeof(graph_after));
     layout = hud_hash(layout, &panel->line_count, sizeof(panel->line_count));
+    layout = hud_hash(layout, &runtime->hud_opacity, sizeof(runtime->hud_opacity));
     full = layout != panel->layout || panel->width != width || panel->rgba == NULL;
     if (full) {
         if ((size_t)width * (size_t)height * 4 > panel->capacity) {
@@ -638,7 +652,7 @@ static int hud_build(BlitRuntime *runtime, int output, int first, uint64_t now)
         hud_fill(panel, 0, height - 1, width, 1, BLIT_HUD_BORDER);
         hud_fill(panel, 0, 1, 1, height - 2, BLIT_HUD_BORDER);
         hud_fill(panel, width - 1, 1, 1, height - 2, BLIT_HUD_BORDER);
-        hud_fill(panel, 1, 1, width - 2, height - 2, BLIT_HUD_BACKGROUND);
+        hud_fill(panel, 1, 1, width - 2, height - 2, background);
     }
     dirty_top = height;
     dirty_bottom = 0;
@@ -652,7 +666,7 @@ static int hud_build(BlitRuntime *runtime, int output, int first, uint64_t now)
             continue;
         panel->line_signature[i] = signature;
         if (!full)
-            hud_fill(panel, 1 + BLIT_HUD_PAD, top, inner, ch, BLIT_HUD_BACKGROUND);
+            hud_fill(panel, 1 + BLIT_HUD_PAD, top, inner, ch, background);
         hud_text(font, panel, 1 + BLIT_HUD_PAD, top, panel->lines[i], BLIT_HUD_COLUMNS,
                  heading[i] ? BLIT_HUD_HEADING : BLIT_HUD_TEXT);
         if (top < dirty_top) dirty_top = top;
@@ -667,7 +681,7 @@ static int hud_build(BlitRuntime *runtime, int output, int first, uint64_t now)
         /* Sixty bars across what is left of the width, one pixel apart. */
         int left = 1 + BLIT_HUD_PAD + 5 * cw, span = inner - 5 * cw;
         panel->graph_signature = graph_signature;
-        hud_fill(panel, left, graph_top, span, BLIT_HUD_GRAPH_HEIGHT, BLIT_HUD_GRAPH_FILL);
+        hud_fill(panel, left, graph_top, span, BLIT_HUD_GRAPH_HEIGHT, graph_fill);
         for (i = 0; i < BLIT_HUD_GRAPH; ++i) {
             int x0 = left + i * span / BLIT_HUD_GRAPH;
             int x1 = left + (i + 1) * span / BLIT_HUD_GRAPH - 1;
@@ -749,6 +763,7 @@ static void settings_apply_hud(BlitRuntime *runtime)
     runtime->hud_enabled = settings.enabled;
     runtime->hud_corner = settings.corner;
     runtime->hud_hz = settings.hz;
+    runtime->hud_opacity = settings.opacity;
     runtime->hud_sections = settings.sections;
     snprintf(runtime->hud_display_id, sizeof(runtime->hud_display_id), "%s",
              settings.display_id);
@@ -794,9 +809,10 @@ static size_t hud_settings_json(const BlitRuntime *runtime, char *out, size_t ca
     out[0] = '\0';
     json_appendf(out, capacity, &used,
                  "{\"enabled\":%s,\"display_id\":\"%s\",\"corner\":\"%s\",\"hz\":%d,"
-                 "\"sections\":[",
+                 "\"opacity\":%d,\"sections\":[",
                  runtime->hud_enabled ? "true" : "false", runtime->hud_display_id,
-                 hud_corners[runtime->hud_corner & 3], runtime->hud_hz);
+                 hud_corners[runtime->hud_corner & 3], runtime->hud_hz,
+                 runtime->hud_opacity);
     for (i = 0; i < 3; ++i)
         if (runtime->hud_sections & (1u << i)) {
             json_appendf(out, capacity, &used, "%s\"%s\"", first ? "" : ",",

@@ -1589,7 +1589,7 @@ typedef struct {
     char frames_last_error[32];
     /* ADR 0203: the performance panel. The settings document's hud section
        as applied, the update clock, its cost, and each output's panel. */
-    int hud_enabled, hud_corner, hud_hz;
+    int hud_enabled, hud_corner, hud_hz, hud_opacity;
     unsigned hud_sections;
     char hud_display_id[32];
     uint64_t hud_next_us;

@@ -17,9 +17,13 @@
 #     them counted as hud_frames, and neither the frame rate nor the panel's
 #     draws count them
 #   * an update costs under 0.5 ms on average (hud.mean_update_ms)
+#   * opacity 50: the background inside the panel is the integer blend of
+#     its colour and the pane's, exactly, and stays that after updates,
+#     repaints of the cells under it and the pointer crossing it (nothing
+#     accumulates); opacity 100 is the opaque panel again, pixel for pixel
 #   * off again: the region it covered is the pixels it covered before
 #   * strict: a bad hz, section, corner or member is refused
-# BLIT_HUD_GATE_SHOT=<path> keeps the screenshot with the panel on.
+# BLIT_HUD_GATE_SHOT=<path> keeps the screenshot of the panel at opacity 50.
 
 require 'json'
 require 'net/http'
@@ -203,8 +207,10 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   code, = request('POST', '/v1/terminal-sessions',
                   { command: '/bin/sh', pane_id: 'pane-display-1-1',
-                    arguments: ['-c', "printf '\\033[?25l\\033[48;2;#{FLAT.join(';')}m\\033[2J'; sleep 600"] })
+                    arguments: ['-c', "stty -echo; fill='\\033[?25l\\033[48;2;#{FLAT.join(';')}m\\033[2J'; " \
+                                      "printf \"$fill\"; while read -r line; do printf \"$fill\"; done"] })
   check(code == 201, "session: #{code}")
+  session = get('/v1/terminal-sessions')['sessions'].first['id']
   request('POST', '/v1/input/inject', { kind: 'pointer_motion', x: 0, y: H - 1 })
   backend = GATE_BACKEND == 'gles' ? 'gles' : 'cpu'
   wait_until("the #{backend} compositor is not presenting") do
@@ -214,7 +220,7 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   # BLIT_HUD=1 with nothing in the document: on.
   hud = get('/v1/settings').dig('effective', 'hud')
   check(hud == { 'enabled' => true, 'display_id' => 'all', 'corner' => 'top-right', 'hz' => 2,
-                 'sections' => %w[blit hibr graph] }, "BLIT_HUD=1 default: #{hud}")
+                 'opacity' => 100, 'sections' => %w[blit hibr graph] }, "BLIT_HUD=1 default: #{hud}")
   wait_until('BLIT_HUD=1 drew no panel') { !get('/v1/diagnostics')['hud']['panels'].empty? }
 
   # Off: absent, and no timer.
@@ -232,7 +238,7 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   # Strict.
   [{ 'hz' => 11 }, { 'hz' => 0 }, { 'sections' => ['blit', 'blit'] }, { 'sections' => ['cpu'] },
    { 'corner' => 'middle' }, { 'display_id' => 'screen-1' }, { 'enabled' => 'yes' },
-   { 'opacity' => 50 }].each do |bad|
+   { 'opacity' => 9 }, { 'opacity' => 101 }, { 'opacity' => '50' }, { 'shadow' => 50 }].each do |bad|
     code, reply = hud_settings({ 'enabled' => false }.merge(bad))
     check(code == 400 && reply['code'] == 'invalid_settings_hud', "#{bad} was not refused: #{code} #{reply}")
   end
@@ -278,7 +284,6 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   bar = ->(px) { [[0x4c, 0xb0, 0x6e], [0xff, 0x5a, 0x4a]].include?(shot.pixel(px, bottom)) }
   check(newest.all?(&bar), "the newest bar is not at the graph's right edge: #{newest.map { |px| shot.pixel(px, bottom) }}")
   check(text_at?(shot, font, x + 1 + PAD, graph_top + 16, '60 s', TEXT), 'the graph has no 60 s label')
-  File.binwrite(ENV['BLIT_HUD_GATE_SHOT'], bytes) if ENV['BLIT_HUD_GATE_SHOT']
 
   # Idle: only the panel's own frames, at most hz a second.
   before = output
@@ -297,6 +302,49 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   cost = get('/v1/diagnostics')['hud']
   check(cost['mean_update_ms'] < 0.5, "an update costs #{cost['mean_update_ms']} ms on average")
 
+  # Translucent: the background is the pane's colour blended with the
+  # panel's, (src * a + dst * (255 - a) + 127) / 255 with a = 50 * 255 / 100.
+  on = { 'enabled' => true, 'display_id' => 'display-1', 'corner' => 'top-right',
+         'hz' => HZ, 'sections' => %w[blit hibr graph] }
+  alpha = 50 * 255 / 100
+  blended = BACKGROUND.zip(FLAT).map { |s, d| (s * alpha + d * (255 - alpha) + 127) / 255 }
+  code, reply = hud_settings(on.merge('opacity' => 50))
+  check(code == 200 && get('/v1/diagnostics')['hud']['opacity'] == 50, "opacity 50: #{code} #{reply}")
+  sleep 1.2
+  bytes = screenshot_bytes
+  File.binwrite(ENV['BLIT_HUD_GATE_SHOT'], bytes) if ENV['BLIT_HUD_GATE_SHOT']
+  first = GateBmp.new(bytes)
+  pad = ->(shot) { region(shot, x + 1, y + 1, width - 2, PAD) }
+  check(first.pixel(x + 2, y + 2) == blended && first.pixel(x, y) == BORDER,
+        "opacity 50 drew #{first.pixel(x + 2, y + 2)} over #{FLAT}, not #{blended}")
+  check(pad.call(first).uniq == [blended], "the panel's top padding is not one blend: #{pad.call(first).uniq}")
+  # The graph's fill too, in the one-pixel gap after the first bar.
+  gap = [left + span / 60 - 1, graph_top + 1]
+  fill = [0x18, 0x18, 0x20].zip(FLAT).map { |s, d| (s * alpha + d * (255 - alpha) + 127) / 255 }
+  check(first.pixel(*gap) == fill, "the graph's fill at 50% is #{first.pixel(*gap)}, not #{fill}")
+  # Updates, the cells under it repainted, the pointer across it: no drift.
+  3.times do
+    request('POST', "/v1/terminal-sessions/#{session}/input", { data: "\n" })
+    sleep 0.3
+  end
+  [[x + 20, y + 3], [x + width / 2, y + 4], [0, H - 1]].each do |px, py|
+    request('POST', '/v1/input/inject', { kind: 'pointer_motion', x: px, y: py })
+    sleep 0.3
+  end
+  sleep 1.6
+  later = GateBmp.new(screenshot_bytes)
+  check(pad.call(later) == pad.call(first), "the translucent panel drifted: #{pad.call(later).uniq}")
+  check(region(later, x, y, width, height).include?(blended), 'no translucent pixel left')
+  # Opaque again: today's pixels.
+  code, reply = hud_settings(on.merge('opacity' => 100))
+  check(code == 200, "opacity 100: #{code} #{reply}")
+  sleep 1.2
+  opaque = GateBmp.new(screenshot_bytes)
+  check(pad.call(opaque).uniq == [BACKGROUND] && opaque.pixel(x, y) == BORDER,
+        "opacity 100 is not the opaque panel: #{pad.call(opaque).uniq}")
+  check(text_at?(opaque, font, x + 1 + PAD, y + 1 + PAD, lines[0], HEADING),
+        'the opaque heading is not the boot PSF after opacity 50')
+
   # Off again: what it covered, exactly as before.
   code, reply = hud_settings({ 'enabled' => false, 'corner' => 'top-right' })
   check(code == 200, "hud off again: #{code} #{reply}")
@@ -312,5 +360,6 @@ Dir.mktmpdir('blit-performance-panel') do |root|
        'lines=api graph=spans_width ' \
        "idle_presents=#{presents} idle_hud_frames=#{hud_frames} fps=#{fps.round(2)} " \
        "update_ms=last:#{cost['last_update_ms']},mean:#{cost['mean_update_ms']},max:#{cost['max_update_ms']} " \
+       "opacity50=background:#{blended.join(',')}+graph:#{fill.join(',')}_exact no_drift=updates+repaints+pointer opacity100=opaque " \
        'off_again=repainted'
 end
