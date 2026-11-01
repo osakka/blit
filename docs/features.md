@@ -195,7 +195,7 @@ Errors are `application/problem+json` with stable codes.
 | Event log, correlated trace, observation snapshot, process view | 0.1; processes 0.2.17 | Used |
 | Console watchdog: restores the screen and reports where the loop stalled | 0.1.587; report 0.2.26 | Used |
 | Screenshots and session output capture | 0.1; capture 0.2.31 | Used |
-| Performance panel: Blit's counters, a frame-time graph and Hibr's STA1 lines over the panes, both compositors; `hud` setting, `BLIT_HUD` | 0.3.22 | Tested |
+| Performance panel: per display, what it drew, why, its times, pictures and a frame-time graph; Blit-wide loop, input, glyphs and errors once; Hibr's STA1 lines; both compositors; `hud` setting, `BLIT_HUD` | 0.3.22 | Tested |
 | Glyph cache hits and misses; desktop CPU over the desktop's whole process tree | 0.3.22 | Tested |
 
 ## Retired

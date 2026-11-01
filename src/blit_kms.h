@@ -97,6 +97,11 @@ typedef struct {
     int height;
     const unsigned char *rgba;
     unsigned long long revision;
+    /* The rows that differ from revision `base_revision` (0: unknown), so
+       a texture holding that one need upload only them. */
+    unsigned long long base_revision;
+    int dirty_y;
+    int dirty_height;
 } BlitKmsHud;
 
 typedef struct {
@@ -180,8 +185,11 @@ typedef struct {
        and the glowing line's phase in the last frame that drew it. */
     unsigned long long effects_animation_frames;
     double effects_animation_phase;
-    /* ADR 0203: frames presented only because the panel changed. */
-    unsigned long long hud_frames;
+    /* ADR 0203: frames presented only because the panel changed; frames
+       presented for new picture pixels (Kitty, Sixel or a descriptor frame);
+       frames for the pointer alone. With effects_animation_frames, each
+       frame is counted under at most one of them. */
+    unsigned long long hud_frames, picture_frames, pointer_frames;
 } BlitKmsDisplayInfo;
 
 typedef struct {

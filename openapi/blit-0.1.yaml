@@ -2901,7 +2901,7 @@ components:
                            kms_scanout, kms_phases, render_width,
                            render_height, viewport_width, viewport_height,
                            scale_x, scale_y, compositor, effects, flip,
-                           hud_frames]
+                           hud_frames, picture_frames, pointer_frames, recent]
                 properties:
                   display_id: {type: string}
                   refresh_hz: {type: number, minimum: 1}
@@ -2930,6 +2930,58 @@ components:
                       Frames presented to this output only because the
                       performance panel changed (ADR 0203). Counted in
                       `present_calls`, left out of the runtime `frame_rate_hz`.
+                  picture_frames:
+                    type: integer
+                    minimum: 0
+                    description: >-
+                      Frames presented because a picture on this output
+                      changed (Kitty, Sixel or a frame by descriptor). With
+                      `effects.animation_frames`, `hud_frames` and
+                      `pointer_frames`, a frame is counted under at most one.
+                  pointer_frames:
+                    type: integer
+                    minimum: 0
+                    description: Frames presented for the pointer alone.
+                  recent:
+                    type: object
+                    description: >-
+                      This output over the last whole second, and its worst
+                      times over the last `window_s` seconds (ADR 0203): the
+                      numbers its performance panel shows, kept whether or
+                      not the panel is on. `draws_hz` leaves out
+                      `hud_frames`; `why_hz` splits it by the first reason
+                      that applies (an animated effect, a picture, the
+                      pointer alone, anything else). The pictures are those
+                      of the sessions on this output. `draw_ms` and
+                      `flip_ms` are the last frame's (`kms_phases.draw_ms`,
+                      `flip.last_ms`).
+                    required: [draws_hz, late_flips_hz, missed_deadlines_hz,
+                               why_hz, descriptor_frames_hz, kitty_hz, sixel_hz,
+                               frames_refused_hz, draw_ms, draw_max_ms, flip_ms,
+                               flip_max_ms, window_s]
+                    properties:
+                      draws_hz: {type: number, minimum: 0}
+                      late_flips_hz: {type: number, minimum: 0}
+                      missed_deadlines_hz: {type: number, minimum: 0}
+                      why_hz:
+                        type: object
+                        required: [effects, video, pointer, other]
+                        properties:
+                          effects: {type: number, minimum: 0}
+                          video: {type: number, minimum: 0}
+                          pointer: {type: number, minimum: 0}
+                          other: {type: number, minimum: 0}
+                        additionalProperties: false
+                      descriptor_frames_hz: {type: number, minimum: 0}
+                      kitty_hz: {type: number, minimum: 0}
+                      sixel_hz: {type: number, minimum: 0}
+                      frames_refused_hz: {type: number, minimum: 0}
+                      draw_ms: {type: number, minimum: 0}
+                      draw_max_ms: {type: number, minimum: 0}
+                      flip_ms: {type: number, minimum: 0}
+                      flip_max_ms: {type: number, minimum: 0}
+                      window_s: {type: integer, minimum: 1}
+                    additionalProperties: false
                   kms_scanout:
                     type: object
                     description: >-
@@ -3138,11 +3190,12 @@ components:
             The performance panel (ADR 0203): its settings in force, the
             frames presented only for it (the sum of the outputs'
             `hud_frames`), how many times its pictures were rebuilt and what
-            a rebuild cost, and each panel shown, with its place on the
-            output and the lines drawn in it.
+            a rebuild cost, Blit's own last seconds (the panel's "blit"
+            lines), and each panel shown, with its place on the output and
+            the lines drawn in it.
           required: [enabled, display_id, corner, hz, sections, frames,
                      updates, last_update_ms, mean_update_ms, max_update_ms,
-                     panels]
+                     recent, panels]
           properties:
             enabled: {type: boolean}
             display_id: {type: string}
@@ -3156,6 +3209,32 @@ components:
             last_update_ms: {type: number, minimum: 0}
             mean_update_ms: {type: number, minimum: 0}
             max_update_ms: {type: number, minimum: 0}
+            recent:
+              type: object
+              description: >-
+                Over the last `window_s` seconds: the worst loop gap and
+                input dispatch, whether any input came in the last second,
+                the share of glyph lookups the cache answered (null with
+                none), and the errors counted. Kept whether or not the
+                panel is on.
+              required: [window_s, loop_gap_max_ms, input_idle, input_last_ms,
+                         input_max_ms, glyph_hit_percent, errors]
+              properties:
+                window_s: {type: integer, minimum: 1}
+                loop_gap_max_ms: {type: number, minimum: 0}
+                input_idle: {type: boolean}
+                input_last_ms: {type: number, minimum: 0}
+                input_max_ms: {type: number, minimum: 0}
+                glyph_hit_percent: {type: [integer, 'null'], minimum: 0, maximum: 100}
+                errors:
+                  type: object
+                  required: [graphics_rejected, stream_dropped_events, keys_dropped]
+                  properties:
+                    graphics_rejected: {type: integer, minimum: 0}
+                    stream_dropped_events: {type: integer, minimum: 0}
+                    keys_dropped: {type: integer, minimum: 0}
+                  additionalProperties: false
+              additionalProperties: false
             panels:
               type: array
               items:
@@ -3170,7 +3249,9 @@ components:
                   revision:
                     type: integer
                     minimum: 1
-                    description: Changes only when the panel's pixels or place do.
+                    description: >-
+                      Changes only when the panel's pixels or place do; a
+                      changed line or the graph is redrawn alone.
                   lines:
                     type: array
                     items: {type: string}

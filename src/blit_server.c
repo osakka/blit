@@ -795,24 +795,45 @@ typedef struct {
 #define BLIT_HUD_STATUS_LINES 8
 #define BLIT_HUD_STATUS_BYTES 64
 #define BLIT_HUD_STATUS_US 5000000ULL
-#define BLIT_HUD_LINES (12 + 1 + BLIT_HUD_STATUS_LINES)
-#define BLIT_HUD_COLUMNS 64
+#define BLIT_HUD_LINES (14 + 1 + BLIT_HUD_STATUS_LINES)
+#define BLIT_HUD_COLUMNS 47
 #define BLIT_HUD_GRAPH 60
+#define BLIT_RECENT_SECONDS 10
 
 /* ADR 0203: the performance panel on one output: its pixels and place,
-   the text drawn into it (also reported), a revision that changes only
-   with the pixels, and the graph's samples, one a second. */
+   the text drawn into it (also reported), and a revision that changes only
+   with the pixels. A line or the graph is redrawn only when it changed;
+   the rows that changed since `base_revision` are the dirty band. */
 typedef struct {
     unsigned char *rgba;
     size_t capacity;
     int x, y, width, height;
-    unsigned long long revision, signature;
+    unsigned long long revision, base_revision, layout;
+    int dirty_y, dirty_height;
     char lines[BLIT_HUD_LINES][BLIT_HUD_COLUMNS * 4 + 1];
+    unsigned long long line_signature[BLIT_HUD_LINES];
+    unsigned long long graph_signature;
     int line_count;
+} BlitHudPanel;
+
+/* ADR 0203: what one output did over the last whole second, and its worst
+   times over the last ten, kept whether or not the panel is shown so that
+   the API reports every number the panel does. The counts are the
+   output's own and its sessions', as they stood when the second began. */
+typedef struct {
+    unsigned long long presents, hud, late, effects, pictures, pointer;
+    unsigned long long descriptor, kitty, sixel, refused;
+    unsigned long missed;
+    double draws_hz, late_hz, missed_hz, effects_hz, pictures_hz, pointer_hz,
+        other_hz, descriptor_hz, kitty_hz, sixel_hz, refused_hz;
+    /* The last frame's draw and flip times; the worst of each in the
+       current second and in each of the last ten; and the graph, each
+       second's worst frame time. */
+    double draw_ms, flip_ms, draw_second, flip_second, frame_second;
+    double draw_worst[BLIT_RECENT_SECONDS], flip_worst[BLIT_RECENT_SECONDS];
     float graph[BLIT_HUD_GRAPH];
     int graph_next;
-    double graph_second_ms;
-} BlitHudPanel;
+} BlitOutputRecent;
 #define BLIT_FRAME_PENDING_US 2000000ULL
 
 /* ADR 0202: an a=p that arrived on the PTY before its image's first frame
@@ -912,6 +933,9 @@ typedef struct {
     char status_lines[BLIT_HUD_STATUS_LINES][BLIT_HUD_STATUS_BYTES + 1];
     int status_count;
     uint64_t status_us;
+    /* Kitty and Sixel payloads parsed, so a display's panel can say which
+       pictures are its own. */
+    unsigned long long graphics_kitty, graphics_sixel;
     int terminal_escape;
     /* Hibr emits a single SGR containing bold plus truecolor foreground and
        background (three decimal components each).  A 32-byte buffer cuts
@@ -1568,14 +1592,25 @@ typedef struct {
     int hud_enabled, hud_corner, hud_hz;
     unsigned hud_sections;
     char hud_display_id[32];
-    uint64_t hud_next_us, hud_graph_us, hud_rates_us;
+    uint64_t hud_next_us;
     unsigned long long hud_updates;
     double hud_last_update_ms, hud_max_update_ms, hud_update_total_ms;
-    unsigned long long hud_rates_kitty, hud_rates_sixel, hud_rates_frames;
-    double hud_kitty_hz, hud_sixel_hz, hud_frames_hz;
     BlitFont hud_font;
     int hud_font_loaded;
     BlitHudPanel hud_panels[BLIT_MAX_DISPLAYS];
+    /* ADR 0203: the last seconds, per output and for Blit as a whole: the
+       worst loop gap and input dispatch of each of the last ten seconds,
+       whether any input came in the last one, and the error counts as each
+       of the last ten began. */
+    uint64_t recent_us;
+    int recent_ring;
+    BlitOutputRecent output_recent[BLIT_MAX_DISPLAYS];
+    double loop_second, loop_worst[BLIT_RECENT_SECONDS];
+    double input_second, input_worst[BLIT_RECENT_SECONDS];
+    unsigned long long recent_input_seen, recent_input_start;
+    int input_idle;
+    unsigned long long errors_rejected[BLIT_RECENT_SECONDS],
+        errors_dropped[BLIT_RECENT_SECONDS], errors_keys[BLIT_RECENT_SECONDS];
 } BlitRuntime;
 
 static unsigned long long blit_graphics_generation;
@@ -1710,7 +1745,10 @@ static size_t hud_settings_json(const BlitRuntime *runtime, char *out, size_t ca
 static void hud_json(const BlitRuntime *runtime, char *body, size_t capacity);
 static void hud_tick(BlitRuntime *runtime, uint64_t now);
 static void hud_reconcile(BlitRuntime *runtime);
-static void hud_note_present(BlitRuntime *runtime, int output, double present_ms);
+static void recent_note_present(BlitRuntime *runtime, int output,
+                                const BlitKmsDisplayInfo *info);
+static void recent_tick(BlitRuntime *runtime, uint64_t now);
+static void recent_json(const BlitRuntime *runtime, int output, char *out, size_t capacity);
 static void frame_hud_notify(BlitRuntime *runtime);
 static const char *pane_surface_id(const BlitRuntime *runtime,
                                    const BlitPane *pane);
@@ -3545,7 +3583,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
         if (used < capacity) {
             char reason[384];
             char renderer[256];
-            char phase_on_time[224], phase_late[224];
+            char phase_on_time[224], phase_late[224], recent[640];
             size_t on_used = 0, late_used = 0;
             int bucket;
             phase_on_time[0] = phase_late[0] = '\0';
@@ -3557,6 +3595,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                                               "%s%u", bucket ? "," : "",
                                               have_kms_info ? kms_info.flip_phase_late[bucket] : 0U);
             }
+            recent_json(runtime, i, recent, sizeof(recent));
             json_escape(have_kms_info ? kms_info.compositor_reason : "", reason,
                         sizeof(reason));
             json_escape(have_kms_info ? kms_info.compositor_renderer : "", renderer,
@@ -3580,7 +3619,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
                 "\"on_time\":%llu,\"late\":%llu,\"slot_misses\":%llu,"
                 "\"submit_phase_ms\":{\"on_time\":[%s],\"late\":[%s]}},"
-                "\"hud_frames\":%llu}",
+                "\"hud_frames\":%llu,\"picture_frames\":%llu,\"pointer_frames\":%llu,"
+                "\"recent\":%s}",
                 have_kms_info ? kms_info.compositor : "unavailable",
                 have_kms_info && kms_info.compositor_requested[0] ?
                     kms_info.compositor_requested : (have_kms_info ? "cpu" : "unavailable"),
@@ -3618,7 +3658,9 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.flips_late : 0ULL,
                 (unsigned long long)(i < BLIT_MAX_DISPLAYS ? runtime->kms_slot_misses[i] : 0),
                 phase_on_time, phase_late,
-                have_kms_info ? kms_info.hud_frames : 0ULL);
+                have_kms_info ? kms_info.hud_frames : 0ULL,
+                have_kms_info ? kms_info.picture_frames : 0ULL,
+                have_kms_info ? kms_info.pointer_frames : 0ULL, recent);
         }
     }
     if (used < capacity)
@@ -11920,10 +11962,13 @@ static void trace_graphics_payload(BlitRuntime *runtime, BlitSession *session,
     unsigned long rejected = session->graphics_rejected - rejected_before;
 
     ++runtime->graphics_payloads;
-    if (strcmp(protocol, "kitty") == 0)
+    if (strcmp(protocol, "kitty") == 0) {
         ++runtime->graphics_payloads_kitty;
-    else
+        ++session->graphics_kitty;
+    } else {
         ++runtime->graphics_payloads_sixel;
+        ++session->graphics_sixel;
+    }
     if (rejected > 0)
         ++runtime->graphics_payloads_rejected;
     snprintf(detail, sizeof(detail),
@@ -30036,6 +30081,7 @@ int main(int argc, char **argv)
                 all_output_mask(&runtime) : hibr_frame_barrier_held(&runtime, now);
             kms_check_slots(&runtime, now, held);
             effects_animation_tick(&runtime, now);
+            recent_tick(&runtime, now);
             hud_reconcile(&runtime);
             hud_tick(&runtime, now);
             if (blit_vt_active() && runtime.render_pending &&
@@ -30066,7 +30112,7 @@ int main(int argc, char **argv)
                     if (kms_info.present_calls != runtime.output_present_calls[i]) {
                         runtime.output_present_calls[i] = kms_info.present_calls;
                         runtime.output_presented_us[i] = now;
-                        hud_note_present(&runtime, i, kms_info.last_present_ms);
+                        recent_note_present(&runtime, i, &kms_info);
                     }
                 }
                 blit_vt_phase("loop: after render");

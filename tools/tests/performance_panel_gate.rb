@@ -8,10 +8,14 @@
 #   * off: no panel pixel in the screenshot, no updates
 #   * on: the panel is in the chosen corner, 16 px in, its border and
 #     background exact; its heading and compositor lines match, pixel for
-#     pixel, the boot PSF drawn by this gate, and the compositor line says
-#     what /v1/diagnostics says -- the same reference on both compositors
+#     pixel, the boot PSF drawn by this gate -- the same reference on both
+#     compositors -- and its lines say what /v1/diagnostics says: the
+#     compositor, the output's draws, why and pictures (render.outputs[].
+#     recent), Blit's errors (hud.recent)
+#   * the graph's sixty bars span its width: the newest is at the right edge
 #   * idle for 5 s: the output presents at most hz x 5 + 2 frames, all of
-#     them counted as hud_frames, and the frame rate leaves them out
+#     them counted as hud_frames, and neither the frame rate nor the panel's
+#     draws count them
 #   * an update costs under 0.5 ms on average (hud.mean_update_ms)
 #   * off again: the region it covered is the pixels it covered before
 #   * strict: a bad hz, section, corner or member is refused
@@ -146,6 +150,39 @@ def output
   get('/v1/diagnostics')['render']['outputs'].first
 end
 
+# The panel's renderer: the name before " (" and the first item inside.
+def short_renderer(renderer)
+  name, rest = renderer.split(' | ').first.split(' (', 2)
+  rest ? "#{name} (#{rest.split(/[,)]/).first})" : name
+end
+
+def display_lines(recent)
+  why = { 'effects' => 'effects', 'video' => 'video', 'pointer' => 'pointer', 'other' => 'other' }
+        .filter_map { |key, word| "#{word} #{recent['why_hz'][key].round}" if recent['why_hz'][key] >= 0.5 }
+  [format('draws   %.0f/s   late %.0f/s   missed %.0f/s', recent['draws_hz'], recent['late_flips_hz'],
+          recent['missed_deadlines_hz']),
+   "why     #{why.empty? ? 'nothing drawn' : why.join('  ')}",
+   format('video   %.0f/s  by descriptor  (kitty %.0f  sixel %.0f)', recent['descriptor_frames_hz'],
+          recent['kitty_hz'], recent['sixel_hz'])]
+end
+
+# The panel's lines and the API's numbers from one response, until they
+# agree (the panel is rebuilt at hz, the figures roll once a second).
+def panel_agrees(wanted_compositor)
+  last = nil
+  20.times do
+    diagnostics = get('/v1/diagnostics')
+    lines = diagnostics['hud']['panels'].first['lines']
+    want = display_lines(diagnostics['render']['outputs'].first['recent'])
+    errors = diagnostics['hud']['recent']['errors'].values.sum
+    last = [lines, want]
+    return lines if [lines[1], lines[2], lines[6]] == want && lines[5] == wanted_compositor &&
+                    lines.include?(errors.zero? ? 'errors  none' : lines.find { |l| l.start_with?('errors') })
+    sleep 0.25
+  end
+  check(false, "panel lines disagree with the API: #{last.inspect}")
+end
+
 font = Psf.new(FONT)
 env = gate_display_env(width: W, height: H).merge(
   'BLIT_PSF_FONT' => FONT, 'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0',
@@ -205,7 +242,8 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   check(code == 200, "hud on: #{code} #{reply}")
   check(get('/v1/settings').dig('document', 'hud', 'corner') == 'top-right', 'hud was not kept in the document')
   wait_until('no panel with hud on') { !get('/v1/diagnostics')['hud']['panels'].empty? }
-  sleep 0.6
+  # Long enough for a whole second with the panel's own frames in the graph.
+  sleep 2.6
   bytes = screenshot_bytes
   shot = GateBmp.new(bytes)
   diagnostics = get('/v1/diagnostics')
@@ -219,17 +257,26 @@ Dir.mktmpdir('blit-performance-panel') do |root|
         "panel edges: #{shot.pixel(x, y)} #{shot.pixel(x + 1, y + 1)} #{shot.pixel(x - 1, y)}")
   lines = panel['lines']
   compositor = diagnostics['render']['outputs'].first['compositor']
-  wanted = if backend == 'cpu'
-             'compositor cpu (requested)'
-           else
-             "compositor gles  #{compositor['renderer'].split(' | ').first}"
-           end
-  check(lines[0] == 'blit  display-1' && lines[3] == wanted,
-        "panel lines #{lines[0..3]} against the compositor #{compositor['active']} #{compositor['renderer']}")
+  wanted = backend == 'cpu' ? 'cpu (requested)' : "gpu     #{short_renderer(compositor['renderer'])}"
+  check(lines[0] == "display-1  #{W}x#{H}  60 Hz" && lines[5] == wanted,
+        "panel lines #{lines[0..5]} against the compositor #{compositor['active']} #{compositor['renderer']}")
+  check(lines.all? { |line| line.length <= 47 }, "a line wider than the panel: #{lines}")
   check(text_at?(shot, font, x + 1 + PAD, y + 1 + PAD, lines[0], HEADING),
         'the heading is not drawn as the boot PSF draws it')
-  check(text_at?(shot, font, x + 1 + PAD, y + 1 + PAD + 3 * font.height, wanted, TEXT),
+  check(text_at?(shot, font, x + 1 + PAD, y + 1 + PAD + 5 * font.height, wanted, TEXT),
         'the compositor line is not drawn as the boot PSF draws it')
+  check(lines.include?('blit') && lines.include?('errors  none'), "no blit block: #{lines}")
+  panel_agrees(wanted)
+  # The graph: under the display's lines, sixty bars across the width after
+  # a four-character label, the newest at the right edge.
+  graph_top = y + 1 + PAD + lines.index('blit') * font.height + PAD / 2
+  left = x + 1 + PAD + 5 * font.width
+  span = width - 2 - 2 * PAD - 5 * font.width
+  bottom = graph_top + 47
+  newest = [left + 59 * span / 60, left + span - 2]
+  bar = ->(px) { [[0x4c, 0xb0, 0x6e], [0xff, 0x5a, 0x4a]].include?(shot.pixel(px, bottom)) }
+  check(newest.all?(&bar), "the newest bar is not at the graph's right edge: #{newest.map { |px| shot.pixel(px, bottom) }}")
+  check(text_at?(shot, font, x + 1 + PAD, graph_top + 16, '60 s', TEXT), 'the graph has no 60 s label')
   File.binwrite(ENV['BLIT_HUD_GATE_SHOT'], bytes) if ENV['BLIT_HUD_GATE_SHOT']
 
   # Idle: only the panel's own frames, at most hz a second.
@@ -239,10 +286,13 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   presents = after['present_calls'] - before['present_calls']
   hud_frames = after['hud_frames'] - before['hud_frames']
   check(presents <= HZ * 5 + 2, "#{presents} presents in an idle 5 s at #{HZ} Hz")
-  check(hud_frames == presents && hud_frames >= HZ * 5 - 3,
+  check(hud_frames == presents,
         "#{presents} idle presents, #{hud_frames} of them hud_frames")
   fps = get('/v1/diagnostics/runtime')['performance']['frame_rate_hz']
   check(fps < 0.5, "the frame rate counts the panel's frames: #{fps}")
+  idle = panel_agrees(wanted)
+  check(idle[1].start_with?('draws   0/s') && idle[2] == 'why     nothing drawn',
+        "the panel counts its own frames as draws: #{idle[1..2]}")
   cost = get('/v1/diagnostics')['hud']
   check(cost['mean_update_ms'] < 0.5, "an update costs #{cost['mean_update_ms']} ms on average")
 
@@ -257,7 +307,8 @@ Dir.mktmpdir('blit-performance-panel') do |root|
   check(again.count(BACKGROUND).zero? && again.count(BORDER).zero?, 'panel pixels left behind')
 
   puts "PERFORMANCE_PANEL_PASS backend=#{backend} default=BLIT_HUD off=absent strict=refused " \
-       "on=top-right@#{x},#{y} size=#{width}x#{height} text=psf_exact compositor=\"#{lines[3]}\" " \
+       "on=top-right@#{x},#{y} size=#{width}x#{height} text=psf_exact compositor=\"#{lines[5]}\" " \
+       'lines=api graph=spans_width ' \
        "idle_presents=#{presents} idle_hud_frames=#{hud_frames} fps=#{fps.round(2)} " \
        "update_ms=last:#{cost['last_update_ms']},mean:#{cost['mean_update_ms']},max:#{cost['max_update_ms']} " \
        'off_again=repainted'

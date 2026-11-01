@@ -297,6 +297,22 @@ def main():
         api('PUT', '/v1/settings', {'document': document}, settings['revision'])
         check(v2.reply(0.6) == b'' and late.reply(0.2) == b'',
               'an unrelated settings write sent HUD1')
+        # A video by descriptor: its display's panel says so, as the API does.
+        client.send(frame(21, 1, 16, 16), memfd(red))
+        wait_for(lambda: image(session, 21)[0], 'the video image did not land')
+        run('\\033[1;1H\\033_Ga=p,i=21,q=2,C=1\\033\\\\')
+        for n in range(30):
+            client.send(frame(21, 2 + n, 16, 16), memfd(red if n % 2 else blue))
+            time.sleep(0.08)
+        recent = wait_for(lambda: (lambda r: r if r['descriptor_frames_hz'] >= 5 and
+                                   r['why_hz']['video'] >= 3 else None)(
+                              api('GET', '/v1/diagnostics')['render']['outputs'][0]['recent']),
+                          'descriptor frames are not counted as the display\'s video', 2)
+        video = [l for l in api('GET', '/v1/diagnostics')['hud']['panels'][0]['lines']
+                 if l.startswith('video') or l.startswith('why')]
+        check(any(l.startswith('why') and 'video ' in l for l in video) and
+              any(l.startswith('video') and not l.startswith('video   0/s') for l in video),
+              'the panel does not say the display is drawing a video: %s (%s)' % (video, recent))
         client.say(status([b'fps=1']))
         check(client.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 from a version 1 client was not refused')
         v2.say(status([b'fps=60 wakes=12', b'cpu=31%', b'slow=paint 4.2']))
@@ -350,7 +366,7 @@ def main():
               'newest=wins stale=dropped edit=rectangle refused=unsealed+short+efbig+unknown '
               'kitty_into_descriptor=refused frame_into_kitty=refused after_delete=enoent '
               'placement_before_frame=held_then_placed expired_placement=refused delete_all=frees_descriptor_images '
-              'v2_hud1=on+off+after_ok+steady_on_unrelated_write v1_hud1=never sta1=session+panel+screen '
+              'video_by_descriptor=panel+api v2_hud1=on+off+after_ok+steady_on_unrelated_write v1_hud1=never sta1=session+panel+screen '
               'sta1_refused=v1+9_lines+65_bytes+count_mismatch+no_newline+control+count_0+descriptor '
               'sta1_expiry=5s accepted=%d refused=%d stale=%d wrong_uid=not_tested_without_root'
               % (frames['accepted'], frames['refused'], frames['stale']))

@@ -4,11 +4,19 @@
    text uses the boot PSF, loaded once into a font of its own, so it looks
    the same whatever font the terminals use.
 
-   It is rebuilt at most hud.hz times a second and only while enabled; a
-   rebuild that changes no pixel keeps the revision, and an output is
-   presented for the panel only when its revision changed. Such a frame is
-   counted as the output's hud_frames and left out of the frame rate the
-   panel shows. Off, there is no timer and no cost.
+   Each panel is about its own output: what it drew in the last second and
+   why, its draw and flip times over the last ten, its gpu, the pictures its
+   sessions sent, and a graph of the last minute. Blit as a whole -- loop,
+   input, glyph cache, errors -- is said once, on the first panel shown.
+   Those figures (recent_tick) are kept whether or not the panel is on, and
+   /v1/diagnostics reports each one.
+
+   It is rebuilt at most hud.hz times a second and only while enabled, and
+   only the lines and graph that changed are redrawn; a rebuild that changes
+   no pixel keeps the revision, and an output is presented for the panel
+   only when its revision changed. Such a frame is counted as the output's
+   hud_frames and left out of every rate the panel shows. Off, there is no
+   timer and no cost but the figures' bookkeeping, once a second.
 
    Hibr's section is the latest STA1 its frame client sent (ADR 0202,
    version 2), shown while younger than five seconds. Included into
@@ -21,7 +29,6 @@
 #define BLIT_HUD_MARGIN 16
 #define BLIT_HUD_PAD 6
 #define BLIT_HUD_GRAPH_HEIGHT 48
-#define BLIT_HUD_BAR 4  /* a sample's bar; one pixel apart */
 
 static const char *const hud_corners[] = {"top-left", "top-right", "bottom-left",
                                           "bottom-right"};
@@ -156,7 +163,7 @@ static int hud_shows_output(const BlitRuntime *runtime, int output)
     return strcmp(runtime->hud_display_id, id) == 0;
 }
 
-/* The panels the compositor draws now. Called before every present. */
+/* The panels the compositor draws now, with the rows each changed. */
 static void hud_attach(BlitRuntime *runtime)
 {
     BlitKmsHud huds[BLIT_MAX_DISPLAYS];
@@ -172,6 +179,9 @@ static void hud_attach(BlitRuntime *runtime)
         huds[count].height = panel->height;
         huds[count].rgba = panel->rgba;
         huds[count].revision = panel->revision;
+        huds[count].base_revision = panel->base_revision;
+        huds[count].dirty_y = panel->dirty_y;
+        huds[count].dirty_height = panel->dirty_height;
         ++count;
     }
     blit_kms_set_hud(runtime->kms, huds, count);
@@ -199,14 +209,143 @@ static unsigned long long hud_next_revision(void)
     return ++revision;
 }
 
-/* The worst frame time of each output in the current second, for the graph:
-   read where the main loop sees that output present. */
-static void hud_note_present(BlitRuntime *runtime, int output, double present_ms)
+/* A present the main loop saw on an output: its draw, flip and whole frame
+   times, into the current second's worst. */
+static void recent_note_present(BlitRuntime *runtime, int output,
+                                const BlitKmsDisplayInfo *info)
 {
-    if (!runtime->hud_enabled || output < 0 || output >= BLIT_MAX_DISPLAYS)
+    BlitOutputRecent *recent;
+    if (output < 0 || output >= BLIT_MAX_DISPLAYS)
         return;
-    if (present_ms > runtime->hud_panels[output].graph_second_ms)
-        runtime->hud_panels[output].graph_second_ms = present_ms;
+    recent = &runtime->output_recent[output];
+    recent->draw_ms = info->draw_ms;
+    recent->flip_ms = info->last_flip_ms;
+    if (info->draw_ms > recent->draw_second) recent->draw_second = info->draw_ms;
+    if (info->last_flip_ms > recent->flip_second) recent->flip_second = info->last_flip_ms;
+    if (info->last_present_ms > recent->frame_second)
+        recent->frame_second = info->last_present_ms;
+}
+
+static double recent_rate(unsigned long long now, unsigned long long then, double seconds)
+{
+    return now >= then && seconds > 0 ? (double)(now - then) / seconds : 0.0;
+}
+
+/* The worst of the last ten seconds and the current one. */
+static double recent_worst(const double *seconds, double current)
+{
+    double worst = current;
+    int i;
+    for (i = 0; i < BLIT_RECENT_SECONDS; ++i)
+        if (seconds[i] > worst) worst = seconds[i];
+    return worst;
+}
+
+/* Once a turn: the loop gap and input dispatch into the current second.
+   At each whole second, each output's rates over it -- presents, and why;
+   late flips; missed deadlines; its sessions' pictures -- and the worst
+   times move on. A few comparisons a turn, the rest once a second. */
+static void recent_tick(BlitRuntime *runtime, uint64_t now)
+{
+    int i, j, start = runtime->recent_us == 0, slot = runtime->recent_ring;
+    double seconds;
+    if (runtime->diagnostic_last_loop_gap_ms > runtime->loop_second)
+        runtime->loop_second = runtime->diagnostic_last_loop_gap_ms;
+    if (runtime->diagnostic_input_events != runtime->recent_input_seen) {
+        runtime->recent_input_seen = runtime->diagnostic_input_events;
+        if (runtime->diagnostic_last_input_dispatch_ms > runtime->input_second)
+            runtime->input_second = runtime->diagnostic_last_input_dispatch_ms;
+    }
+    if (!start && now - runtime->recent_us < 1000000ULL)
+        return;
+    seconds = start ? 0.0 : (double)(now - runtime->recent_us) / 1000000.0;
+    for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
+        BlitOutputRecent *r = &runtime->output_recent[i];
+        BlitKmsDisplayInfo info;
+        int display_index = display_index_for_output(runtime, i);
+        unsigned long long descriptor = 0, kitty = 0, sixel = 0, refused = 0;
+        if (display_index < 0 || blit_kms_display_info(runtime->kms, display_index, &info) != 0)
+            continue;
+        for (j = 0; j < BLIT_MAX_SESSIONS; ++j) {
+            const BlitSession *session = &runtime->sessions[j];
+            if (!session->used || session_output_index(runtime, session) != i)
+                continue;
+            descriptor += session->frames_accepted;
+            kitty += session->graphics_kitty;
+            sixel += session->graphics_sixel;
+            refused += session->frames_refused;
+        }
+        if (!start) {
+            double draws = recent_rate(info.present_calls, r->presents, seconds) -
+                recent_rate(info.hud_frames, r->hud, seconds);
+            r->draws_hz = draws > 0 ? draws : 0;
+            r->late_hz = recent_rate(info.flips_late, r->late, seconds);
+            r->missed_hz = recent_rate(runtime->render_missed_deadlines[i], r->missed, seconds);
+            r->effects_hz = recent_rate(info.effects_animation_frames, r->effects, seconds);
+            r->pictures_hz = recent_rate(info.picture_frames, r->pictures, seconds);
+            r->pointer_hz = recent_rate(info.pointer_frames, r->pointer, seconds);
+            r->other_hz = r->draws_hz - r->effects_hz - r->pictures_hz - r->pointer_hz;
+            if (r->other_hz < 0) r->other_hz = 0;
+            r->descriptor_hz = recent_rate(descriptor, r->descriptor, seconds);
+            r->kitty_hz = recent_rate(kitty, r->kitty, seconds);
+            r->sixel_hz = recent_rate(sixel, r->sixel, seconds);
+            r->refused_hz = recent_rate(refused, r->refused, seconds);
+            r->draw_worst[slot] = r->draw_second;
+            r->flip_worst[slot] = r->flip_second;
+            r->graph[r->graph_next] = (float)r->frame_second;
+            r->graph_next = (r->graph_next + 1) % BLIT_HUD_GRAPH;
+        }
+        r->presents = info.present_calls;
+        r->hud = info.hud_frames;
+        r->late = info.flips_late;
+        r->missed = runtime->render_missed_deadlines[i];
+        r->effects = info.effects_animation_frames;
+        r->pictures = info.picture_frames;
+        r->pointer = info.pointer_frames;
+        r->descriptor = descriptor;
+        r->kitty = kitty;
+        r->sixel = sixel;
+        r->refused = refused;
+        r->draw_second = r->flip_second = r->frame_second = 0;
+    }
+    if (start) {
+        /* The error counts ten seconds ago are, for now, these. */
+        for (j = 0; j < BLIT_RECENT_SECONDS; ++j) {
+            runtime->errors_rejected[j] = runtime->graphics_payloads_rejected;
+            runtime->errors_dropped[j] = runtime->diagnostic_stream_dropped_events;
+            runtime->errors_keys[j] = runtime->diagnostic_input_keys_dropped;
+        }
+        runtime->input_idle = 1;
+    } else {
+        runtime->loop_worst[slot] = runtime->loop_second;
+        runtime->input_worst[slot] = runtime->input_second;
+        runtime->input_idle = runtime->recent_input_seen == runtime->recent_input_start;
+        runtime->errors_rejected[slot] = runtime->graphics_payloads_rejected;
+        runtime->errors_dropped[slot] = runtime->diagnostic_stream_dropped_events;
+        runtime->errors_keys[slot] = runtime->diagnostic_input_keys_dropped;
+        runtime->recent_ring = (slot + 1) % BLIT_RECENT_SECONDS;
+    }
+    runtime->recent_input_start = runtime->recent_input_seen;
+    runtime->loop_second = runtime->input_second = 0;
+    runtime->recent_us = now;
+}
+
+/* Errors in the last ten seconds: now, less the counts as they began. */
+static void recent_errors(const BlitRuntime *runtime, unsigned long long *rejected,
+                          unsigned long long *dropped, unsigned long long *keys)
+{
+    int oldest = runtime->recent_ring;
+    *rejected = runtime->graphics_payloads_rejected - runtime->errors_rejected[oldest];
+    *dropped = runtime->diagnostic_stream_dropped_events - runtime->errors_dropped[oldest];
+    *keys = runtime->diagnostic_input_keys_dropped - runtime->errors_keys[oldest];
+}
+
+/* The share of glyph lookups the cache answered, or -1 with none. */
+static int recent_glyph_percent(const BlitRuntime *runtime)
+{
+    unsigned long long hits = 0, misses = 0;
+    blit_raster_cache_counts(runtime->font.raster_state, &hits, &misses);
+    return hits + misses ? (int)(hits * 100ULL / (hits + misses)) : -1;
 }
 
 static uint32_t hud_utf8_next(const char **text)
@@ -219,16 +358,6 @@ static uint32_t hud_utf8_next(const char **text)
         cp = cp << 6 | (*p++ & 0x3fu);
     *text = (const char *)p;
     return cp;
-}
-
-static int hud_columns(const char *text)
-{
-    int columns = 0;
-    while (*text) {
-        hud_utf8_next(&text);
-        ++columns;
-    }
-    return columns;
 }
 
 static void hud_fill(BlitHudPanel *panel, int x, int y, int width, int height,
@@ -251,14 +380,20 @@ static void hud_fill(BlitHudPanel *panel, int x, int y, int width, int height,
     }
 }
 
+/* Ink only; the background is already there. At most `columns` cells. */
 static void hud_text(const BlitFont *font, BlitHudPanel *panel, int x, int y,
-                     const char *text, uint32_t rgba)
+                     const char *text, int columns, uint32_t rgba)
 {
     int cw = blit_font_width(font), ch = blit_font_height(font);
-    while (*text && x + cw <= panel->width) {
+    while (*text && columns-- > 0 && x + cw <= panel->width) {
         uint32_t cp = hud_utf8_next(&text);
-        size_t glyph = blit_font_glyph_index(font, cp);
+        size_t glyph;
         int row;
+        if (cp == ' ') {
+            x += cw;
+            continue;
+        }
+        glyph = blit_font_glyph_index(font, cp);
         for (row = 0; row < ch && y + row < panel->height; ++row) {
             uint32_t bits = blit_font_glyph_row(font, glyph, cp, row);
             uint32_t *pixel = (uint32_t *)panel->rgba + (size_t)(y + row) * panel->width + x;
@@ -290,7 +425,8 @@ static const BlitSession *hud_status_session(BlitRuntime *runtime, int output,
     return best;
 }
 
-static void hud_line(BlitHudPanel *panel, const char *format, ...)
+static void hud_line(BlitHudPanel *panel, int *heading, int is_heading,
+                     const char *format, ...)
 {
     va_list arguments;
     if (panel->line_count >= BLIT_HUD_LINES)
@@ -298,166 +434,254 @@ static void hud_line(BlitHudPanel *panel, const char *format, ...)
     va_start(arguments, format);
     vsnprintf(panel->lines[panel->line_count], sizeof(panel->lines[0]), format, arguments);
     va_end(arguments);
-    ++panel->line_count;
+    heading[panel->line_count++] = is_heading;
 }
 
-/* One output's panel: its text, from the values /v1/diagnostics and
-   /v1/diagnostics/runtime report, then its pixels if they changed. Returns
-   1 when the revision changed. */
-static int hud_build(BlitRuntime *runtime, int output, uint64_t now)
+/* The renderer, short: its name before " (" and the first item inside,
+   "AMD Radeon Graphics (radeonsi)". */
+static void hud_renderer(const char *renderer, char *out, size_t capacity)
+{
+    const char *open = strstr(renderer, " (");
+    const char *bar = strstr(renderer, " | ");
+    if (open != NULL && (bar == NULL || open < bar))
+        snprintf(out, capacity, "%.*s (%.*s)", (int)(open - renderer), renderer,
+                 (int)strcspn(open + 2, ",)"), open + 2);
+    else
+        snprintf(out, capacity, "%.*s",
+                 (int)(bar != NULL ? (size_t)(bar - renderer) : strlen(renderer)), renderer);
+}
+
+static unsigned long long hud_hash(unsigned long long hash, const void *data, size_t length)
+{
+    const unsigned char *byte = data;
+    while (length-- > 0) {
+        hash ^= *byte++;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+/* This output's lines: what it drew in the last second and why, its own
+   times and pictures, all as /v1/diagnostics reports them per output. */
+static void hud_display_lines(BlitRuntime *runtime, int output, BlitHudPanel *panel,
+                              int *heading, const BlitKmsDisplayInfo *info,
+                              double refresh_hz)
+{
+    const BlitOutputRecent *r = &runtime->output_recent[output];
+    char why[96], renderer[96];
+    size_t used = 0;
+    hud_line(panel, heading, 1, "display-%llu  %dx%d  %.0f Hz",
+             runtime->outputs[output].display_id, info->width, info->height, refresh_hz);
+    hud_line(panel, heading, 0, "draws   %.0f/s   late %.0f/s   missed %.0f/s",
+             r->draws_hz, r->late_hz, r->missed_hz);
+    why[0] = '\0';
+    if (r->effects_hz >= 0.5)
+        used += (size_t)snprintf(why + used, sizeof(why) - used, "effects %.0f  ", r->effects_hz);
+    if (r->pictures_hz >= 0.5 && used < sizeof(why))
+        used += (size_t)snprintf(why + used, sizeof(why) - used, "video %.0f  ", r->pictures_hz);
+    if (r->pointer_hz >= 0.5 && used < sizeof(why))
+        used += (size_t)snprintf(why + used, sizeof(why) - used, "pointer %.0f  ", r->pointer_hz);
+    if (r->other_hz >= 0.5 && used < sizeof(why))
+        used += (size_t)snprintf(why + used, sizeof(why) - used, "other %.0f  ", r->other_hz);
+    if (used >= 2 && used < sizeof(why))
+        why[used - 2] = '\0';
+    hud_line(panel, heading, 0, "why     %s", why[0] ? why : "nothing drawn");
+    hud_line(panel, heading, 0, "draw    %.1f ms  (max %.1f in 10 s)", r->draw_ms,
+             recent_worst(r->draw_worst, r->draw_second));
+    hud_line(panel, heading, 0, "flip    %.1f ms  (max %.1f in 10 s)", r->flip_ms,
+             recent_worst(r->flip_worst, r->flip_second));
+    if (strcmp(info->compositor, "gles") == 0) {
+        hud_renderer(info->compositor_renderer, renderer, sizeof(renderer));
+        hud_line(panel, heading, 0, "gpu     %s", renderer);
+    } else if (strcmp(info->compositor_requested, "gles") != 0) {
+        hud_line(panel, heading, 0, "cpu (requested)");
+    } else {
+        hud_line(panel, heading, 0, "cpu: %s",
+                 info->compositor_reason[0] ? info->compositor_reason : "fallback");
+    }
+    hud_line(panel, heading, 0, "video   %.0f/s  by descriptor  (kitty %.0f  sixel %.0f)",
+             r->descriptor_hz, r->kitty_hz, r->sixel_hz);
+    if (r->refused_hz >= 0.5)
+        hud_line(panel, heading, 0, "refused %.0f/s  %s", r->refused_hz,
+                 runtime->frames_last_error);
+}
+
+/* Blit as a whole, once, on the first panel shown. */
+static void hud_blit_lines(BlitRuntime *runtime, BlitHudPanel *panel, int *heading)
+{
+    unsigned long long rejected, dropped, keys;
+    int glyphs = recent_glyph_percent(runtime);
+    hud_line(panel, heading, 1, "blit");
+    hud_line(panel, heading, 0, "loop    worst %.1f ms in 10 s",
+             recent_worst(runtime->loop_worst, runtime->loop_second));
+    if (runtime->input_idle)
+        hud_line(panel, heading, 0, "input   idle");
+    else
+        hud_line(panel, heading, 0, "input   %.1f ms last, %.1f max",
+                 runtime->diagnostic_last_input_dispatch_ms,
+                 recent_worst(runtime->input_worst, runtime->input_second));
+    if (glyphs < 0)
+        hud_line(panel, heading, 0, "glyphs  %s", runtime->font.raster_state == NULL ?
+                 "bitmap font, no cache" : "no lookups yet");
+    else
+        hud_line(panel, heading, 0, "glyphs  %d%% hit", glyphs);
+    recent_errors(runtime, &rejected, &dropped, &keys);
+    if (rejected + dropped + keys == 0) {
+        hud_line(panel, heading, 0, "errors  none");
+    } else {
+        char line[96];
+        size_t used = 0;
+        line[0] = '\0';
+        if (rejected) used += (size_t)snprintf(line + used, sizeof(line) - used,
+                                               "rejected %llu  ", rejected);
+        if (dropped && used < sizeof(line))
+            used += (size_t)snprintf(line + used, sizeof(line) - used, "dropped %llu  ", dropped);
+        if (keys && used < sizeof(line))
+            used += (size_t)snprintf(line + used, sizeof(line) - used, "keys %llu  ", keys);
+        hud_line(panel, heading, 0, "errors  %sin 10 s", line);
+    }
+}
+
+/* One output's panel: its text, then only the lines and graph that
+   changed, unless its size or place did. Returns 1 when the revision
+   changed. */
+static int hud_build(BlitRuntime *runtime, int output, int first, uint64_t now)
 {
     BlitHudPanel *panel = &runtime->hud_panels[output];
+    const BlitOutputRecent *recent = &runtime->output_recent[output];
     int display_index = display_index_for_output(runtime, output);
     const BlitFont *font = &runtime->hud_font;
     int cw = blit_font_width(font), ch = blit_font_height(font);
     int graph = (runtime->hud_sections & BLIT_HUD_SECTION_GRAPH) != 0;
-    int heading[BLIT_HUD_LINES];
-    int bars[BLIT_HUD_GRAPH], columns = 0, width, height, x, y, i;
-    double interval_ms = 1000.0 / 60.0;
-    unsigned long long signature = 1469598103934665603ULL;
+    int heading[BLIT_HUD_LINES], bars[BLIT_HUD_GRAPH];
+    int graph_after = 0, width, height, x, y, i, full, dirty_top, dirty_bottom;
+    int inner, graph_top = 0;
+    double refresh_hz = output_refresh_hz(runtime, output), interval_ms = 1000.0 / 60.0;
+    unsigned long long layout = 1469598103934665603ULL, graph_signature = 0;
     BlitKmsDisplayInfo info;
-
-    double refresh_hz = output_refresh_hz(runtime, output);
 
     if (display_index < 0 || blit_kms_display_info(runtime->kms, display_index, &info) != 0)
         return 0;
     if (refresh_hz >= 1.0)
         interval_ms = 1000.0 / refresh_hz;
     panel->line_count = 0;
-    memset(heading, 0, sizeof(heading));
-    if (runtime->hud_sections & BLIT_HUD_SECTION_BLIT) {
-        double fps = runtime->diagnostic_frame_rate_hz;
-        unsigned long long hits = 0, misses = 0;
-        char reason[48];
-        if (runtime->diagnostic_frame_rate_last_us == 0 ||
-            now < runtime->diagnostic_frame_rate_last_us ||
-            now - runtime->diagnostic_frame_rate_last_us > 2000000ULL)
-            fps = 0.0;
-        blit_raster_cache_counts(runtime->font.raster_state, &hits, &misses);
-        heading[panel->line_count] = 1;
-        hud_line(panel, "blit  display-%llu", runtime->outputs[output].display_id);
-        hud_line(panel, "fps %.1f / %.1f Hz  %dx%d", fps, refresh_hz,
-                 info.width, info.height);
-        hud_line(panel, "missed %llu  late flips %llu",
-                 runtime->diagnostic_frame_rate_missed_deadlines, info.flips_late);
-        if (strcmp(info.compositor, "cpu") == 0)
-            snprintf(reason, sizeof(reason), " (%s)",
-                     strcmp(info.compositor_requested, "gles") != 0 ? "requested" :
-                     info.compositor_reason[0] ? info.compositor_reason : "fallback");
-        else
-            reason[0] = '\0';
-        /* The renderer's name, without the version after " | ". */
-        hud_line(panel, "compositor %s%s%s%.*s", info.compositor, reason,
-                 info.compositor_renderer[0] ? "  " : "",
-                 (int)(strstr(info.compositor_renderer, " | ") != NULL ?
-                       strstr(info.compositor_renderer, " | ") - info.compositor_renderer :
-                       (long)strlen(info.compositor_renderer)),
-                 info.compositor_renderer);
-        hud_line(panel, "render %.1f/%.1f ms  present %.1f/%.1f ms",
-                 runtime->diagnostic_last_render_ms,
-                 runtime->diagnostic_frame_rate_max_render_ms,
-                 info.last_present_ms, info.max_present_ms);
-        hud_line(panel, "loop gap %.1f ms  input %.1f ms",
-                 runtime->diagnostic_loop_window_max_gap_ms,
-                 runtime->diagnostic_last_input_dispatch_ms);
-        hud_line(panel, "kitty %.0f/s  sixel %.0f/s", runtime->hud_kitty_hz,
-                 runtime->hud_sixel_hz);
-        hud_line(panel, "frames %.0f/s  refused %llu  %s", runtime->hud_frames_hz,
-                 runtime->frames_refused,
-                 runtime->frames_last_error[0] ? runtime->frames_last_error : "-");
-        hud_line(panel, "errors: rejected %llu  dropped events %llu  keys %llu",
-                 runtime->graphics_payloads_rejected,
-                 runtime->diagnostic_stream_dropped_events,
-                 runtime->diagnostic_input_keys_dropped);
-        hud_line(panel, "glyph cache %llu/%llu", hits, misses);
-    }
+    if (runtime->hud_sections & BLIT_HUD_SECTION_BLIT)
+        hud_display_lines(runtime, output, panel, heading, &info, refresh_hz);
+    graph_after = panel->line_count;
     if (runtime->hud_sections & BLIT_HUD_SECTION_HIBR) {
         const BlitSession *session = hud_status_session(runtime, output, now);
         if (session != NULL) {
-            heading[panel->line_count] = 1;
-            hud_line(panel, "hibr  (%llu s)",
+            hud_line(panel, heading, 1, "hibr  (%llu s)",
                      (unsigned long long)((now - session->status_us) / 1000000ULL));
             for (i = 0; i < session->status_count; ++i)
-                hud_line(panel, "%s", session->status_lines[i]);
+                hud_line(panel, heading, 0, "%s", session->status_lines[i]);
         }
     }
-    for (i = 0; i < panel->line_count; ++i) {
-        int n = hud_columns(panel->lines[i]);
-        if (n > BLIT_HUD_COLUMNS) n = BLIT_HUD_COLUMNS;
-        if (n > columns) columns = n;
-    }
-    /* A bar per second, the full height twice the refresh interval, so the
-       interval is the line through the middle. */
-    for (i = 0; graph && i < BLIT_HUD_GRAPH; ++i) {
-        double ms = panel->graph[(panel->graph_next + i) % BLIT_HUD_GRAPH];
-        int h = (int)(ms / (2.0 * interval_ms) * BLIT_HUD_GRAPH_HEIGHT + 0.5);
-        bars[i] = (h > BLIT_HUD_GRAPH_HEIGHT ? BLIT_HUD_GRAPH_HEIGHT : h) |
-            (ms > interval_ms ? 0x100 : 0);
-    }
-    width = columns * cw;
-    if (graph && width < BLIT_HUD_GRAPH * (BLIT_HUD_BAR + 1) - 1)
-        width = BLIT_HUD_GRAPH * (BLIT_HUD_BAR + 1) - 1;
-    width += 2 * BLIT_HUD_PAD + 2;
-    height = panel->line_count * ch + (graph ? BLIT_HUD_GRAPH_HEIGHT +
-        (panel->line_count ? BLIT_HUD_PAD : 0) : 0) + 2 * BLIT_HUD_PAD + 2;
+    if (graph && panel->line_count > graph_after)
+        graph_after = panel->line_count;  /* the graph after hibr's lines */
+    if (first && (runtime->hud_sections & BLIT_HUD_SECTION_BLIT))
+        hud_blit_lines(runtime, panel, heading);
     if (panel->line_count == 0 && !graph) {
         int had = panel->width > 0;
         panel->width = panel->height = 0;
+        panel->layout = 0;
         if (had) panel->revision = hud_next_revision();
         return had;
     }
+    width = BLIT_HUD_COLUMNS * cw + 2 * BLIT_HUD_PAD + 2;
+    inner = width - 2 - 2 * BLIT_HUD_PAD;
+    height = panel->line_count * ch + (graph ? BLIT_HUD_GRAPH_HEIGHT + BLIT_HUD_PAD : 0) +
+        2 * BLIT_HUD_PAD + 2;
     x = runtime->hud_corner & 1 ? info.width - BLIT_HUD_MARGIN - width : BLIT_HUD_MARGIN;
     y = runtime->hud_corner & 2 ? info.height - BLIT_HUD_MARGIN - height : BLIT_HUD_MARGIN;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
-    /* What the pixels and their place depend on; equal, nothing changed. */
-#define HUD_MIX(v) do { signature ^= (unsigned long long)(v); signature *= 1099511628211ULL; } while (0)
-    HUD_MIX(x); HUD_MIX(y); HUD_MIX(width); HUD_MIX(height); HUD_MIX(graph);
-    HUD_MIX(font->data != NULL);
-    for (i = 0; i < panel->line_count; ++i) {
-        const char *c;
-        HUD_MIX(heading[i]);
-        for (c = panel->lines[i]; *c; ++c) HUD_MIX((unsigned char)*c);
-        HUD_MIX(0x0a);
+    /* The bars, oldest left, newest at the right edge: each second's worst
+       frame time (render.outputs[].last_present_ms), the full height twice
+       the refresh interval, so the interval is the line through the
+       middle. */
+    for (i = 0; graph && i < BLIT_HUD_GRAPH; ++i) {
+        double ms = recent->graph[(recent->graph_next + i) % BLIT_HUD_GRAPH];
+        int h = (int)(ms / (2.0 * interval_ms) * BLIT_HUD_GRAPH_HEIGHT + 0.5);
+        if (ms > 0 && h < 1) h = 1;  /* a second that drew anything shows */
+        bars[i] = (h > BLIT_HUD_GRAPH_HEIGHT ? BLIT_HUD_GRAPH_HEIGHT : h) |
+            (ms > interval_ms ? 0x100 : 0);
     }
-    for (i = 0; graph && i < BLIT_HUD_GRAPH; ++i) HUD_MIX(bars[i]);
-#undef HUD_MIX
-    if (signature == panel->signature && panel->width > 0)
-        return 0;
-    if ((size_t)width * (size_t)height * 4 > panel->capacity) {
-        unsigned char *rgba = realloc(panel->rgba, (size_t)width * (size_t)height * 4);
-        if (rgba == NULL)
-            return 0;
-        panel->rgba = rgba;
-        panel->capacity = (size_t)width * (size_t)height * 4;
-    }
-    panel->x = x;
-    panel->y = y;
-    panel->width = width;
-    panel->height = height;
-    panel->signature = signature;
-    hud_fill(panel, 0, 0, width, 1, BLIT_HUD_BORDER);
-    hud_fill(panel, 0, height - 1, width, 1, BLIT_HUD_BORDER);
-    hud_fill(panel, 0, 1, 1, height - 2, BLIT_HUD_BORDER);
-    hud_fill(panel, width - 1, 1, 1, height - 2, BLIT_HUD_BORDER);
-    hud_fill(panel, 1, 1, width - 2, height - 2, BLIT_HUD_BACKGROUND);
-    for (i = 0; i < panel->line_count; ++i)
-        hud_text(font, panel, 1 + BLIT_HUD_PAD, 1 + BLIT_HUD_PAD + i * ch, panel->lines[i],
-                 heading[i] ? BLIT_HUD_HEADING : BLIT_HUD_TEXT);
-    if (graph) {
-        int top = 1 + BLIT_HUD_PAD + panel->line_count * ch +
-            (panel->line_count ? BLIT_HUD_PAD : 0);
-        int left = 1 + BLIT_HUD_PAD;
-        hud_fill(panel, left, top, width - 2 - 2 * BLIT_HUD_PAD, BLIT_HUD_GRAPH_HEIGHT,
-                 BLIT_HUD_GRAPH_FILL);
-        for (i = 0; i < BLIT_HUD_GRAPH; ++i) {
-            int h = bars[i] & 0xff;
-            hud_fill(panel, left + i * (BLIT_HUD_BAR + 1), top + BLIT_HUD_GRAPH_HEIGHT - h,
-                     BLIT_HUD_BAR, h, bars[i] & 0x100 ? BLIT_HUD_BAR_LATE : BLIT_HUD_BAR_OK);
+    if (graph)
+        graph_signature = hud_hash(1469598103934665603ULL, bars, sizeof(bars));
+    layout = hud_hash(layout, &x, sizeof(x));
+    layout = hud_hash(layout, &y, sizeof(y));
+    layout = hud_hash(layout, &height, sizeof(height));
+    layout = hud_hash(layout, &graph, sizeof(graph));
+    layout = hud_hash(layout, &graph_after, sizeof(graph_after));
+    layout = hud_hash(layout, &panel->line_count, sizeof(panel->line_count));
+    full = layout != panel->layout || panel->width != width || panel->rgba == NULL;
+    if (full) {
+        if ((size_t)width * (size_t)height * 4 > panel->capacity) {
+            unsigned char *rgba = realloc(panel->rgba, (size_t)width * (size_t)height * 4);
+            if (rgba == NULL)
+                return 0;
+            panel->rgba = rgba;
+            panel->capacity = (size_t)width * (size_t)height * 4;
         }
-        hud_fill(panel, left, top + BLIT_HUD_GRAPH_HEIGHT / 2,
-                 width - 2 - 2 * BLIT_HUD_PAD, 1, BLIT_HUD_LIMIT);
+        panel->x = x;
+        panel->y = y;
+        panel->width = width;
+        panel->height = height;
+        panel->layout = layout;
+        hud_fill(panel, 0, 0, width, 1, BLIT_HUD_BORDER);
+        hud_fill(panel, 0, height - 1, width, 1, BLIT_HUD_BORDER);
+        hud_fill(panel, 0, 1, 1, height - 2, BLIT_HUD_BORDER);
+        hud_fill(panel, width - 1, 1, 1, height - 2, BLIT_HUD_BORDER);
+        hud_fill(panel, 1, 1, width - 2, height - 2, BLIT_HUD_BACKGROUND);
     }
+    dirty_top = height;
+    dirty_bottom = 0;
+    for (i = 0; i < panel->line_count; ++i) {
+        int top = 1 + BLIT_HUD_PAD + i * ch +
+            (graph && i >= graph_after ? BLIT_HUD_GRAPH_HEIGHT + BLIT_HUD_PAD : 0);
+        unsigned long long signature = hud_hash(1469598103934665603ULL, panel->lines[i],
+                                                strlen(panel->lines[i]));
+        signature = hud_hash(signature, &heading[i], sizeof(heading[i]));
+        if (!full && signature == panel->line_signature[i])
+            continue;
+        panel->line_signature[i] = signature;
+        if (!full)
+            hud_fill(panel, 1 + BLIT_HUD_PAD, top, inner, ch, BLIT_HUD_BACKGROUND);
+        hud_text(font, panel, 1 + BLIT_HUD_PAD, top, panel->lines[i], BLIT_HUD_COLUMNS,
+                 heading[i] ? BLIT_HUD_HEADING : BLIT_HUD_TEXT);
+        if (top < dirty_top) dirty_top = top;
+        if (top + ch > dirty_bottom) dirty_bottom = top + ch;
+    }
+    if (graph)
+        graph_top = 1 + BLIT_HUD_PAD + graph_after * ch + BLIT_HUD_PAD / 2;
+    if (graph && full)
+        hud_text(font, panel, 1 + BLIT_HUD_PAD,
+                 graph_top + (BLIT_HUD_GRAPH_HEIGHT - ch) / 2, "60 s", 4, BLIT_HUD_TEXT);
+    if (graph && (full || graph_signature != panel->graph_signature)) {
+        /* Sixty bars across what is left of the width, one pixel apart. */
+        int left = 1 + BLIT_HUD_PAD + 5 * cw, span = inner - 5 * cw;
+        panel->graph_signature = graph_signature;
+        hud_fill(panel, left, graph_top, span, BLIT_HUD_GRAPH_HEIGHT, BLIT_HUD_GRAPH_FILL);
+        for (i = 0; i < BLIT_HUD_GRAPH; ++i) {
+            int x0 = left + i * span / BLIT_HUD_GRAPH;
+            int x1 = left + (i + 1) * span / BLIT_HUD_GRAPH - 1;
+            int h = bars[i] & 0xff;
+            hud_fill(panel, x0, graph_top + BLIT_HUD_GRAPH_HEIGHT - h, x1 - x0, h,
+                     bars[i] & 0x100 ? BLIT_HUD_BAR_LATE : BLIT_HUD_BAR_OK);
+        }
+        hud_fill(panel, left, graph_top + BLIT_HUD_GRAPH_HEIGHT / 2, span, 1, BLIT_HUD_LIMIT);
+        if (graph_top < dirty_top) dirty_top = graph_top;
+        if (graph_top + BLIT_HUD_GRAPH_HEIGHT > dirty_bottom)
+            dirty_bottom = graph_top + BLIT_HUD_GRAPH_HEIGHT;
+    }
+    if (!full && dirty_bottom <= dirty_top)
+        return 0;
+    /* The rows that differ from the picture before, for a texture holding
+       that one; after a full redraw, every row. */
+    panel->base_revision = full ? 0 : panel->revision;
+    panel->dirty_y = full ? 0 : dirty_top;
+    panel->dirty_height = full ? height : dirty_bottom - dirty_top;
     panel->revision = hud_next_revision();
     return 1;
 }
@@ -466,39 +690,16 @@ static int hud_build(BlitRuntime *runtime, int output, uint64_t now)
 static uint32_t hud_update(BlitRuntime *runtime, uint64_t now)
 {
     uint32_t changed = 0;
-    int i;
-    /* The graph takes one sample a second; the rates are per second too. */
-    if (runtime->hud_graph_us == 0 || now - runtime->hud_graph_us >= 1000000ULL) {
-        for (i = 0; i < BLIT_MAX_DISPLAYS; ++i) {
-            BlitHudPanel *panel = &runtime->hud_panels[i];
-            if (runtime->hud_graph_us != 0) {
-                panel->graph[panel->graph_next] = (float)panel->graph_second_ms;
-                panel->graph_next = (panel->graph_next + 1) % BLIT_HUD_GRAPH;
-            }
-            panel->graph_second_ms = 0;
-        }
-        if (runtime->hud_graph_us != 0) {
-            double seconds = (double)(now - runtime->hud_rates_us) / 1000000.0;
-            runtime->hud_kitty_hz = (double)(runtime->graphics_payloads_kitty -
-                                             runtime->hud_rates_kitty) / seconds;
-            runtime->hud_sixel_hz = (double)(runtime->graphics_payloads_sixel -
-                                             runtime->hud_rates_sixel) / seconds;
-            runtime->hud_frames_hz = (double)(runtime->frames_accepted -
-                                              runtime->hud_rates_frames) / seconds;
-        }
-        runtime->hud_graph_us = runtime->hud_rates_us = now;
-        runtime->hud_rates_kitty = runtime->graphics_payloads_kitty;
-        runtime->hud_rates_sixel = runtime->graphics_payloads_sixel;
-        runtime->hud_rates_frames = runtime->frames_accepted;
-    }
+    int i, first = 1;
     for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
         BlitHudPanel *panel = &runtime->hud_panels[i];
         if (hud_shows_output(runtime, i)) {
-            if (hud_build(runtime, i, now))
+            if (hud_build(runtime, i, first, now))
                 changed |= 1U << i;
+            first = 0;
         } else if (panel->width > 0) {
             panel->width = panel->height = 0;
-            panel->signature = 0;
+            panel->layout = 0;
             panel->revision = hud_next_revision();
             changed |= 1U << i;
         }
@@ -571,7 +772,7 @@ static void hud_reconcile(BlitRuntime *runtime)
             continue;
         cleared |= 1U << i;
         panel->width = panel->height = 0;
-        panel->signature = 0;
+        panel->layout = 0;
         panel->revision = hud_next_revision();
     }
     if (cleared) {
@@ -601,15 +802,39 @@ static size_t hud_settings_json(const BlitRuntime *runtime, char *out, size_t ca
     return used;
 }
 
+/* render.outputs[].recent in /v1/diagnostics: the output's last second and
+   its worst times in the last ten, the numbers its panel shows. */
+static void recent_json(const BlitRuntime *runtime, int output, char *out, size_t capacity)
+{
+    const BlitOutputRecent *r = &runtime->output_recent[output];
+    size_t used = 0;
+    out[0] = '\0';
+    if (output < 0 || output >= BLIT_MAX_DISPLAYS) {
+        json_appendf(out, capacity, &used, "null");
+        return;
+    }
+    json_appendf(out, capacity, &used,
+                 "{\"draws_hz\":%.3f,\"late_flips_hz\":%.3f,\"missed_deadlines_hz\":%.3f,"
+                 "\"why_hz\":{\"effects\":%.3f,\"video\":%.3f,\"pointer\":%.3f,\"other\":%.3f},"
+                 "\"descriptor_frames_hz\":%.3f,\"kitty_hz\":%.3f,\"sixel_hz\":%.3f,"
+                 "\"frames_refused_hz\":%.3f,\"draw_ms\":%.3f,\"draw_max_ms\":%.3f,"
+                 "\"flip_ms\":%.3f,\"flip_max_ms\":%.3f,\"window_s\":%d}",
+                 r->draws_hz, r->late_hz, r->missed_hz, r->effects_hz, r->pictures_hz,
+                 r->pointer_hz, r->other_hz, r->descriptor_hz, r->kitty_hz, r->sixel_hz,
+                 r->refused_hz, r->draw_ms, recent_worst(r->draw_worst, r->draw_second),
+                 r->flip_ms, recent_worst(r->flip_worst, r->flip_second),
+                 BLIT_RECENT_SECONDS);
+}
+
 /* /v1/diagnostics "hud": the settings in force, the panel's cost, frames
-   presented only for it (the outputs' hud_frames), and each panel as drawn,
-   its lines included. */
+   presented only for it (the outputs' hud_frames), Blit's own last seconds
+   (the panel's "blit" lines), and each panel as drawn, its lines included. */
 static void hud_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
-    char settings[256];
-    unsigned long long frames = 0;
+    char settings[256], glyph_percent[16] = "null";
+    unsigned long long frames = 0, rejected, dropped, keys;
     size_t used = 0;
-    int i, j, first = 1;
+    int i, j, first = 1, glyphs;
     for (i = 0; i < runtime->output_count; ++i) {
         BlitKmsDisplayInfo info;
         int display_index = display_index_for_output(runtime, i);
@@ -618,15 +843,27 @@ static void hud_json(const BlitRuntime *runtime, char *body, size_t capacity)
             frames += info.hud_frames;
     }
     hud_settings_json(runtime, settings, sizeof(settings));
+    recent_errors(runtime, &rejected, &dropped, &keys);
+    glyphs = recent_glyph_percent(runtime);
+    if (glyphs >= 0) snprintf(glyph_percent, sizeof(glyph_percent), "%d", glyphs);
     body[0] = '\0';
     json_appendf(body, capacity, &used,
                  "%.*s,\"frames\":%llu,\"updates\":%llu,\"last_update_ms\":%.3f,"
-                 "\"mean_update_ms\":%.3f,\"max_update_ms\":%.3f,\"panels\":[",
+                 "\"mean_update_ms\":%.3f,\"max_update_ms\":%.3f,"
+                 "\"recent\":{\"window_s\":%d,\"loop_gap_max_ms\":%.3f,\"input_idle\":%s,"
+                 "\"input_last_ms\":%.3f,\"input_max_ms\":%.3f,\"glyph_hit_percent\":%s,"
+                 "\"errors\":{\"graphics_rejected\":%llu,\"stream_dropped_events\":%llu,"
+                 "\"keys_dropped\":%llu}},\"panels\":[",
                  (int)strlen(settings) - 1, settings, frames, runtime->hud_updates,
                  runtime->hud_last_update_ms,
                  runtime->hud_updates ? runtime->hud_update_total_ms /
                      (double)runtime->hud_updates : 0.0,
-                 runtime->hud_max_update_ms);
+                 runtime->hud_max_update_ms, BLIT_RECENT_SECONDS,
+                 recent_worst(runtime->loop_worst, runtime->loop_second),
+                 runtime->input_idle ? "true" : "false",
+                 runtime->diagnostic_last_input_dispatch_ms,
+                 recent_worst(runtime->input_worst, runtime->input_second),
+                 glyph_percent, rejected, dropped, keys);
     for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
         const BlitHudPanel *panel = &runtime->hud_panels[i];
         if (!runtime->hud_enabled || panel->width < 1)

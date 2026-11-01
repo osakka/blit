@@ -815,15 +815,24 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
             if (r->hud[slot] == 0 || r->hud_revision[slot] != hud->revision ||
                 r->hud_width[slot] != hud->width || r->hud_height[slot] != hud->height) {
                 long long started = kms_now_us();
+                int y = 0, rows = hud->height;
                 if (r->hud[slot] == 0 || r->hud_width[slot] != hud->width ||
                     r->hud_height[slot] != hud->height) {
                     blit_gles_texture_delete(kms->gles, r->hud[slot]);
                     r->hud[slot] = blit_gles_texture_create(kms->gles, hud->width,
                                                             hud->height, 4);
+                } else if (hud->base_revision != 0 &&
+                           hud->base_revision == r->hud_revision[slot] &&
+                           hud->dirty_height > 0) {
+                    /* It holds the picture the change is from: only the
+                       changed rows go up. */
+                    y = hud->dirty_y;
+                    rows = hud->dirty_height;
                 }
                 if (r->hud[slot])
-                    blit_gles_texture_update(kms->gles, r->hud[slot], 4, 0, 0, hud->width,
-                                             hud->height, hud->rgba, hud->width * 4);
+                    blit_gles_texture_update(kms->gles, r->hud[slot], 4, 0, y, hud->width,
+                                             rows, hud->rgba + (size_t)y * hud->width * 4,
+                                             hud->width * 4);
                 r->hud_revision[slot] = hud->revision;
                 r->hud_width[slot] = hud->width;
                 r->hud_height[slot] = hud->height;

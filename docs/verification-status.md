@@ -1,5 +1,42 @@
 # Verification status
 
+## 2026-11-01: 0.3.23 the performance panel, made readable and cheaper
+
+- **The owner's reading of 0.3.22 live:** "fps 60" while a 9 fps video
+  played, "kitty 0/s sixel 0/s", "render 20.7/0.8", "late flips 14284",
+  "input 0.0 ms", identical numbers on both panels, a graph covering
+  only two-thirds of the panel, and a renderer name too long to fit.
+  Every complaint was right:
+  - most lines were global;
+  - the timings mixed last values with windowed maxima;
+  - the counts were totals since start;
+  - the panel grew wider than its 60 bars.
+- **Now per display**, at most 47 columns:
+  - `draws` (this output's presents per second, without `hud_frames`), and
+    `late`/`missed` per second;
+  - `why`, splitting the draws into effects, video, pointer and other;
+  - `draw` and `flip`, each as now with the max over 10 s;
+  - `gpu` (the renderer shortened), or `cpu` and why;
+  - `video`, frames by descriptor and Kitty/Sixel per second for this
+    display's sessions;
+  - a 60 s graph across the full width, newest on the right.
+
+  The Blit-wide block (loop, input `idle` or times, glyph hit %, errors in
+  10 s) shows once, on the first panel. Every line is also in
+  `/v1/diagnostics`: per output `recent`, `picture_frames`,
+  `pointer_frames`; `hud.recent`.
+- **Cost:** only changed lines and the graph are redrawn, and GLES uploads
+  only the changed rows. Mean update 0.089 ms (CPU) and 0.083 ms (GLES),
+  against 0.33/0.38 ms; on the owner's two displays 0.65 ms mean before,
+  to be measured.
+- **Gates:**
+  - `performance_panel_gate` checks the draws, why, video and gpu lines
+    against the API in the same response, the 47-column limit, a graph
+    spanning the width, and an idle `draws 0/s` / `why nothing drawn`.
+  - `frame_descriptor_gate` sends 30 descriptor frames and checks the
+    panel's why/video lines against the API.
+- **Suites:** font 38/38, full 158/158 (6 skips), GLES renderer 67/67 (1 skip).
+
 ## 2026-11-01: 0.3.22 the performance panel (ADR 0203)
 
 - **What:** a "stats for nerds" panel drawn by Blit over everything, asked

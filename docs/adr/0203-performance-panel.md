@@ -49,23 +49,31 @@ Option 3.
   (`hud.hz`, default 2, at most 10) and damages only its own rectangle. A
   frame presented only to update the panel is counted apart
   (`hud_frames`) and left out of the frame rate and missed deadlines it
-  shows. Budget: under 0.5 ms of compositor time per update, gated.
+  shows. Only a line or graph that changed is redrawn, and the GPU uploads
+  only those rows. Budget: under 0.5 ms of compositor time per update,
+  gated.
 - **Every number is the API's.** The panel reads counters the server
   already keeps; it measures nothing of its own. Each line can be
   reproduced from `/v1/diagnostics/runtime` or `/v1/diagnostics`.
-- **Blit's lines**, per output on the panel's display:
-  - frame rate and refresh (`frame_rate_hz`, the output's `refresh_hz`), and
-    the mode;
-  - missed deadlines in the window, and late flips (`flip.submit_phase_ms`);
-  - the compositor (`gles`/`cpu`) and why, and the driver;
-  - render and present time (last and max over the window), the worst loop
-    gap, and input dispatch time;
-  - pictures: Kitty and Sixel payloads, frames by descriptor accepted and
-    refused per second, with the last error;
-  - errors: Kitty rejections, frame refusals, dropped stream events, dropped
-    keys, watchdog reports;
-  - a graph of the last 60 s of frame time against the refresh interval,
-    with missed frames marked.
+- **Blit's lines**, per output, about that output only (revised after the
+  first week live, when a panel of Blit-wide numbers on every display read
+  as nonsense: "fps 60" while a 9 fps video played):
+  - the output, its mode and refresh;
+  - its draws in the last second, less the panel's own, with late flips and
+    missed deadlines in that second;
+  - why it drew: an animated effect, a picture, the pointer alone, or
+    anything else, each a rate, zeros left out;
+  - its draw and flip time, with the worst in the last 10 s;
+  - its gpu (the renderer, shortened) or, on the CPU compositor, why;
+  - the pictures its sessions sent: frames by descriptor, Kitty and Sixel
+    payloads, a second, and refusals when there are any;
+  - a graph of the last 60 s: each second's worst frame time against the
+    refresh interval, newest at the right, over-interval bars marked.
+  Blit as a whole is said once, on the first panel: the worst loop gap and
+  input dispatch in 10 s (or "idle"), the glyph cache's hit rate, and the
+  errors (Kitty rejections, dropped stream events, dropped keys) in 10 s.
+  Every one of these is in `/v1/diagnostics`, kept whether or not the panel
+  is on.
 - **Counters to fix first**, because the panel will only show what is
   true: `desktop_cpu_ms` follows the login wrapper, not the desktop process,
   and reads 0. Either it follows the desktop or it goes. Glyph cache hits

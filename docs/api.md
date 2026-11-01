@@ -1717,23 +1717,49 @@ start. `display_id` is a display or `all`; `hz` (1–10) is the most updates
 a second. An unknown or repeated member, or a value out of range, is
 `400 invalid_settings_hud`. `settings.effective.hud` is what is in force.
 
-- **blit:** per display, the frame rate and refresh, the mode, missed
-  deadlines and late flips, the compositor (and why, on the CPU) with its
-  renderer, render, present, loop-gap and input times, Kitty and Sixel
-  payloads and descriptor frames per second, refusals, errors, and glyph
-  cache hits/misses. Each is a value `/v1/diagnostics` or
-  `/v1/diagnostics/runtime` reports.
-- **graph:** the last 60 s of the output's worst frame time each second,
-  against a line at the refresh interval; bars over it are red.
-- **hibr:** the lines the session's frame client sends as STA1 (version 2
-  of the frame socket, ADR 0202), with their age, while younger than 5 s.
-  The session reports them as `status`.
+Each display's panel is about that display, one idea a line:
+
+```text
+display-102  2560x1440  60 Hz
+draws   58/s   late 2/s   missed 0/s
+why     effects 49  video 9
+draw    12.3 ms  (max 20.9 in 10 s)
+flip    0.8 ms  (max 2.1 in 10 s)
+gpu     AMD Radeon Graphics (radeonsi)
+video   9/s  by descriptor  (kitty 0  sixel 0)
+```
+
+- **draws** are the frames presented to that output in the last second,
+  less the panel's own; **late** and **missed** are late flips and missed
+  deadlines in that second. **why** splits the draws by the first reason
+  that applies: an animated pane effect, a picture (Kitty, Sixel or a frame
+  by descriptor), the pointer alone, anything else (text, for one).
+- **draw** and **flip** are the last frame's draw time and submit-to-flip
+  time, with the worst in the last 10 s. **gpu** is the GLES renderer,
+  shortened; on the CPU compositor the line says why.
+- **video** is the pictures the display's sessions sent in the last second;
+  `refused N/s` follows when any were refused.
+- **graph** (section `graph`): the last 60 s, one bar a second, newest at
+  the right: that second's worst frame time on the output, against a line at
+  the refresh interval. Bars over it are red.
+- **blit**, once, on the first panel shown: the worst loop gap in 10 s,
+  input (`idle`, or the last and worst dispatch time), the glyph cache's hit
+  rate, and errors in 10 s (`none`, or the nonzero counts).
+- **hibr** (section `hibr`): the lines the session's frame client sends as
+  STA1 (version 2 of the frame socket, ADR 0202), with their age, while
+  younger than 5 s. The session reports them as `status`.
+
+Every figure is in `/v1/diagnostics`: an output's under
+`render.outputs[].recent` (with the raw `picture_frames` and
+`pointer_frames`), Blit's under `hud.recent`. They are kept whether or not
+the panel is on.
 
 The panel uses the boot PSF whatever font is chosen, is identical on both
 compositors, and is not an overlay (it takes no `/v1/overlays` slot). It is
-rebuilt only while on and redrawn only when its pixels change. A frame
-presented only for it is counted in the output's `hud_frames` (and in
-`present_calls`), never in `frame_rate_hz`. Off, it costs nothing.
+rebuilt only while on; a line or the graph is redrawn only when it changed,
+and the output presented only when a pixel did. A frame presented only for
+it is counted in the output's `hud_frames` (and in `present_calls`), never
+in `frame_rate_hz` or the panel's draws. Off, it costs nothing.
 `/v1/diagnostics` reports `hud`: the settings, `frames`, `updates`, the
 update cost (`last_update_ms`, `mean_update_ms`, `max_update_ms`) and each
 panel with its place and lines.

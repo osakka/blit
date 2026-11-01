@@ -2228,6 +2228,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         }
         output_started = kms_now_us();
         int output_changed, animated_only, hud_only;
+        /* ADR 0203: what changed, for why this frame is presented. */
+        int scene_changed = 0, pictures_changed = 0, reason_counted = 0;
         const BlitKmsHud *hud = output_hud(kms, output);
         full_redraw = !output->initialized ||
             output->last_visual_revision != visual_revision ||
@@ -2257,6 +2259,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 if (output_view_origin_changed(output, &views[view_index]))
                     full_redraw = 1;
                 output_changed = 1;
+                scene_changed = 1;
+                if (!output_graphics_unchanged(output, &views[view_index]))
+                    pictures_changed = 1;
             }
         }
         /* A page-flipped buffer is owned by the CRTC until its event arrives.
@@ -2277,15 +2282,24 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            a CPU and event slot on every display. */
         if (animated_only && !output_changed) {
             output_changed = 1;
+            reason_counted = 1;
             ++output->info.effects_animation_frames;
         }
         if (hud_only && !output_changed) {
             output_changed = 1;
+            reason_counted = 1;
             ++output->info.hud_frames;
         }
         kms->animation_mask &= ~(1U << i);
         if (!output_changed)
             continue;
+        /* One reason a frame, the first that applies: an animation tick or
+           the panel (above), new picture pixels, the pointer alone. Frames
+           for anything else are the rest of present_calls. */
+        if (!reason_counted && pictures_changed)
+            ++output->info.picture_frames;
+        else if (!reason_counted && pointer_affects_output && !scene_changed && !full_redraw)
+            ++output->info.pointer_frames;
         if (hold_scene)
             full_redraw = 0;
         /* A timeout requests one recovery modeset.  It must not turn the
