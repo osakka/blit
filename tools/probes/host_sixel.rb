@@ -32,6 +32,13 @@ def call(method, path, body = nil)
 end
 
 $failures = []
+# graphics_diagnostics is always present; nothing went wrong when it
+# counts no rejection or eviction and names no error.
+def nothing_rejected?(state)
+  diagnostics = state['graphics_diagnostics']
+  diagnostics.nil? || diagnostics.values_at('rejected', 'evicted', 'last_error') == [0, 0, '']
+end
+
 def check(condition, message)
   return if condition
 
@@ -139,7 +146,7 @@ scenario([HIDE + '\\033[1;1H\\033Pq"1;1;1920;6#0;2;0;100;0!1920~\\033\\\\'],
     check(image.fetch('placement_width') == 60 * CELL_W,
           "clipped to the surface, got #{image['placement_width']}")
   end
-  check(state['graphics_diagnostics'].nil?,
+  check(nothing_rejected?(state),
         "nothing rejected, got #{state['graphics_diagnostics'].inspect}")
 end
 
@@ -157,7 +164,7 @@ SH
     puts "last band: height=#{image['height']}"
     check(image.fetch('height') == 4096, "height #{image['height']}")
   end
-  check(state['graphics_diagnostics'].nil?,
+  check(nothing_rejected?(state),
         "nothing rejected, got #{state['graphics_diagnostics'].inspect}")
 end
 

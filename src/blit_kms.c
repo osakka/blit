@@ -33,6 +33,9 @@
 #define KMS_FONT_H 8
 #define KMS_POINTER_W BLIT_POINTER_MAX
 #define KMS_POINTER_H BLIT_POINTER_MAX
+/* The rectangles kept under translucent layers: the server's sixteen
+   overlays (BLIT_MAX_OVERLAYS) and the panel. */
+#define KMS_MAX_UNDER 17
 #define KMS_WHITE 0xbed2beU
 #define KMS_ATTR_WIDE 16
 #define KMS_ATTR_CONTINUATION 32
@@ -122,13 +125,15 @@ typedef struct {
     /* ADR 0203: the panel as last presented here (width 0: none). */
     int hud_x, hud_y, hud_width, hud_height, hud_translucent;
     unsigned long long hud_revision;
-    /* A translucent panel is blended over the scene, so what was under it
-       is kept, as the pointer's background is, and put back before the next
-       repaint: blended again over its own last blend it would creep to
-       opaque. */
-    uint32_t *hud_under;
-    size_t hud_under_capacity;
-    int hud_under_valid, hud_under_x, hud_under_y, hud_under_width, hud_under_height;
+    /* A translucent panel or overlay is blended over the scene, so what
+       was under it is kept, as the pointer's background is, and put back
+       before the next repaint: blended again over its own last blend it
+       would creep to opaque. The overlays did, on every partial frame,
+       until they were kept with the panel's. under_count 0: nothing kept. */
+    uint32_t *under;
+    size_t under_capacity, under_used;
+    int under_count;
+    struct { int x, y, width, height; size_t offset; } under_rect[KMS_MAX_UNDER];
     /* ADR 0204: pixel zoom, a percentage (100 or 0: none). The views are
        composed at the logical size in `zoom_scene`, at the scanout pitch,
        then enlarged into the physical scene; `zoom_columns` maps each
@@ -652,11 +657,13 @@ static void blend_rect(KmsOutput *output, int x, int y, int width, int height,
             unsigned int red = (old >> 16) & 0xffU;
             unsigned int green = (old >> 8) & 0xffU;
             unsigned int blue = old & 0xffU;
+            /* Rounded, as the panel's blend and the GLES compositor's:
+               truncated, half the channels came out one below. */
             pixels[column] = (((((color >> 16) & 0xffU) * alpha) +
-                               red * inverse) / 255U << 16) |
+                               red * inverse + 127U) / 255U << 16) |
                 (((((color >> 8) & 0xffU) * alpha) +
-                  green * inverse) / 255U << 8) |
-                ((((color & 0xffU) * alpha) + blue * inverse) / 255U);
+                  green * inverse + 127U) / 255U << 8) |
+                ((((color & 0xffU) * alpha) + blue * inverse + 127U) / 255U);
         }
     }
 }
@@ -748,50 +755,56 @@ static void remember_output_hud(KmsOutput *output, const BlitKmsHud *hud)
     output->hud_revision = hud ? hud->revision : 0;
 }
 
-/* Keep the scene under a translucent panel, before it is drawn. */
-static void save_hud_background(KmsOutput *output, const BlitKmsHud *hud)
+/* Keep the scene under one translucent layer, before any is drawn: every
+   rectangle kept is then the scene itself, so where two overlap they hold
+   the same pixels and put back in any order. Without the memory the layer
+   is still drawn, and only that one can creep. */
+static void save_under(KmsOutput *output, int x, int y, int width, int height)
 {
-    int x0 = hud->x < 0 ? 0 : hud->x, y0 = hud->y < 0 ? 0 : hud->y;
-    int x1 = hud->x + hud->width, y1 = hud->y + hud->height, row;
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + width, y1 = y + height, row;
     size_t bytes;
     if (x1 > output->mode.hdisplay) x1 = output->mode.hdisplay;
     if (y1 > output->mode.vdisplay) y1 = output->mode.vdisplay;
-    output->hud_under_valid = 0;
-    if (x0 >= x1 || y0 >= y1)
+    if (x0 >= x1 || y0 >= y1 || output->under_count >= KMS_MAX_UNDER)
         return;
     bytes = (size_t)(x1 - x0) * (size_t)(y1 - y0) * 4;
-    if (bytes > output->hud_under_capacity) {
-        uint32_t *under = realloc(output->hud_under, bytes);
+    if (output->under_used + bytes > output->under_capacity) {
+        uint32_t *under = realloc(output->under, output->under_used + bytes);
         if (under == NULL)
             return;
-        output->hud_under = under;
-        output->hud_under_capacity = bytes;
+        output->under = under;
+        output->under_capacity = output->under_used + bytes;
     }
     for (row = y0; row < y1; ++row)
-        memcpy(output->hud_under + (size_t)(row - y0) * (size_t)(x1 - x0),
+        memcpy((unsigned char *)output->under + output->under_used +
+                   (size_t)(row - y0) * (size_t)(x1 - x0) * 4,
                (const unsigned char *)output->back.map + (size_t)row * output->back.pitch +
                    (size_t)x0 * 4, (size_t)(x1 - x0) * 4);
-    output->hud_under_x = x0;
-    output->hud_under_y = y0;
-    output->hud_under_width = x1 - x0;
-    output->hud_under_height = y1 - y0;
-    output->hud_under_valid = 1;
+    output->under_rect[output->under_count].x = x0;
+    output->under_rect[output->under_count].y = y0;
+    output->under_rect[output->under_count].width = x1 - x0;
+    output->under_rect[output->under_count].height = y1 - y0;
+    output->under_rect[output->under_count].offset = output->under_used;
+    output->under_used += bytes;
+    ++output->under_count;
 }
 
-/* Put it back, after the pointer's background and before anything is
+/* Put it all back, after the pointer's background and before anything is
    drawn: the cells repainted this frame then land on the real scene. */
-static void restore_hud_background(KmsOutput *output)
+static void restore_under(KmsOutput *output)
 {
-    int row;
-    if (!output->hud_under_valid)
-        return;
-    for (row = 0; row < output->hud_under_height; ++row)
-        memcpy((unsigned char *)output->back.map +
-                   (size_t)(output->hud_under_y + row) * output->back.pitch +
-                   (size_t)output->hud_under_x * 4,
-               output->hud_under + (size_t)row * (size_t)output->hud_under_width,
-               (size_t)output->hud_under_width * 4);
-    output->hud_under_valid = 0;
+    int i, row;
+    for (i = 0; i < output->under_count; ++i)
+        for (row = 0; row < output->under_rect[i].height; ++row)
+            memcpy((unsigned char *)output->back.map +
+                       (size_t)(output->under_rect[i].y + row) * output->back.pitch +
+                       (size_t)output->under_rect[i].x * 4,
+                   (const unsigned char *)output->under + output->under_rect[i].offset +
+                       (size_t)row * (size_t)output->under_rect[i].width * 4,
+                   (size_t)output->under_rect[i].width * 4);
+    output->under_count = 0;
+    output->under_used = 0;
 }
 
 /* Opaque pixels are copied; the others blended over what is there, as
@@ -845,30 +858,33 @@ static void draw_kms_hud(KmsOutput *output, const BlitKmsHud *hud)
 }
 
 /* Overlays are placed in logical pixels; on a zoomed output each covers
-   the physical pixels that show its rectangle. */
+   the physical pixels that show its rectangle. What is under the
+   translucent ones is kept first, all of it before the first is drawn. */
 static void draw_kms_overlays(KmsOutput *output,
                               const BlitKmsOverlay *overlays,
                               int overlay_count, int zoomed)
 {
-    int index;
+    int pass, index;
 
     if (overlays == NULL)
         return;
-    for (index = 0; index < overlay_count; ++index) {
-        const BlitKmsOverlay *overlay = &overlays[index];
-        if (overlay->display_id != output->info.id ||
-            overlay->width < 1 || overlay->height < 1 ||
-            overlay->opacity <= 0)
-            continue;
-        {
+    for (pass = 0; pass < 2; ++pass)
+        for (index = 0; index < overlay_count; ++index) {
+            const BlitKmsOverlay *overlay = &overlays[index];
             int x = overlay->x, y = overlay->y;
             int width = overlay->width, height = overlay->height;
+            if (overlay->display_id != output->info.id ||
+                overlay->width < 1 || overlay->height < 1 ||
+                overlay->opacity <= 0)
+                continue;
             if (zoomed)
                 zoom_physical_rect(output, &x, &y, &width, &height);
-            blend_rect(output, x, y, width, height, overlay->color,
-                       (unsigned int)(overlay->opacity * 255 / 100));
+            if (pass == 0 && overlay->opacity < 100)
+                save_under(output, x, y, width, height);
+            else if (pass == 1)
+                blend_rect(output, x, y, width, height, overlay->color,
+                           (unsigned int)(overlay->opacity * 255 / 100));
         }
-    }
 }
 
 static uint32_t view_cell_background(const BlitKmsSurfaceView *view,
@@ -2174,7 +2190,7 @@ int blit_kms_resume(BlitKms *kms)
         output->modeset_fallback = 1;
         output->pointer_state_valid = 0;
         output->pointer_background_valid = 0;
-        output->hud_under_valid = 0;
+        output->under_count = 0;
     }
     kms->suspended = 0;
     return 0;
@@ -2324,7 +2340,7 @@ int blit_kms_set_zoom(BlitKms *kms, int index, int zoom)
     output->initialized = 0;
     output->pointer_state_valid = 0;
     output->pointer_background_valid = 0;
-    output->hud_under_valid = 0;
+    output->under_count = 0;
     output->gles_scene_fresh = 1;
     if (output->gles_scene != NULL && kms->gles != NULL) {
         blit_gles_scene_close(kms->gles, output->gles_scene);
@@ -2590,7 +2606,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             if (gpu_composed) {
                 output->cpu_scene_stale = 1;
                 output->pointer_background_valid = 0;
-                output->hud_under_valid = 0;
+                output->under_count = 0;
                 flip_started = kms_now_us();
                 output->info.draw_ms = (double)(flip_started - draw_started) / 1000.0;
                 output->info.copy_ms = 0;
@@ -2622,11 +2638,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            the pointer moved; terminal damage can otherwise preserve a
            pointer-shaped hole in the scene cache. */
         prepare_repaint_buffer(output, full_redraw, render_scene);
-        /* A held scene keeps its panel as drawn, and what was under it. */
+        /* A held scene keeps its panel and overlays as drawn, and what was
+           under them. */
         if (full_redraw)
-            output->hud_under_valid = 0;
+            output->under_count = 0;
         else if (!hold_scene)
-            restore_hud_background(output);
+            restore_under(output);
         if (zoomed && !hold_scene) {
             output->back.map = output->zoom_scene;
             output->mode.hdisplay = (uint16_t)output->zoom_width;
@@ -2778,11 +2795,11 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                              output->zoom_dirty_y1 - output->zoom_dirty_y0);
         }
         if (!hold_scene) {
-            /* Kept before the overlays, which are drawn again each frame. */
+            /* Kept before any is drawn: they are drawn again each frame. */
+            output->under_count = 0;
+            output->under_used = 0;
             if (hud != NULL && hud->translucent)
-                save_hud_background(output, hud);
-            else
-                output->hud_under_valid = 0;
+                save_under(output, hud->x, hud->y, hud->width, hud->height);
             draw_kms_overlays(output, overlays, overlay_count, zoomed);
             if (hud != NULL)
                 draw_kms_hud(output, hud);
@@ -3108,7 +3125,7 @@ void blit_kms_close(BlitKms *kms)
             kms_gles_detach(kms, output, NULL);
             free_buffer(-1, &output->front); free_buffer(-1, &output->back);
             free(output->scene);
-            free(output->hud_under);
+            free(output->under);
             free(output->zoom_scene);
             free(output->zoom_columns);
             if (output->old_crtc) drmModeFreeCrtc(output->old_crtc);

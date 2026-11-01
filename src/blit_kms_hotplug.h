@@ -84,10 +84,11 @@ static int kms_release_output(BlitKms *kms, KmsOutput *output, int restore)
     free(output->scene);
     output->scene = NULL;
     output->scene_size = 0;
-    free(output->hud_under);
-    output->hud_under = NULL;
-    output->hud_under_capacity = 0;
-    output->hud_under_valid = 0;
+    free(output->under);
+    output->under = NULL;
+    output->under_capacity = 0;
+    output->under_used = 0;
+    output->under_count = 0;
     free(output->zoom_scene);
     free(output->zoom_columns);
     output->zoom_scene = NULL;

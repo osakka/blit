@@ -42,7 +42,7 @@ overlay=$(curl --connect-timeout 2 --max-time 3 --fail --silent \
     --request POST --header 'Content-Type: application/json' \
     --data '{"display_id":"display-1","x":0,"y":0,"width":12,"height":12,"color":"#ff0000","opacity":100}' \
     "http://127.0.0.1:$port/v1/overlays")
-overlay_id=$(printf '%s' "$overlay" | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("id").sub("overlay-", "")')
+overlay_id=$(printf '%s' "$overlay" | ruby -rjson -e 'puts JSON.parse(STDIN.read).fetch("id")')
 sleep 1
 curl --connect-timeout 2 --max-time 3 --fail --silent \
     "http://127.0.0.1:$port/v1/diagnostics/screenshots/display-1" -o "$before"

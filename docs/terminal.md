@@ -124,6 +124,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | OSC | Effect |
 | --- | --- |
 | 0, 1, 2 | Window title (up to 127 bytes) |
+| 4 | Query palette colours: each `n;?` pair (n 0–255) is answered with the colour index n paints, as `rgb:rrrr/gggg/bbbb` ended by ST; a set is ignored (below) |
 | 8 | Hyperlinks (up to 32 per session) |
 | 9, 777 | Desktop notifications |
 | 10, 11 | Set or query the default text and background colour |
@@ -167,7 +168,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Formats | `f=24` RGB, `f=32` RGBA, `f=100` PNG; `o=z` zlib compression |
 | Placement | source rectangle `x y w h`, cell offset `X Y`, size in cells `c r`, layer `z`, placement id `p`, `C=1` to keep the cursor |
 | Replacing | transmitting to an existing id replaces its pixels and keeps its placements |
-| Delete | `a i z c p q x y`, and their capitals to free the image too |
+| Delete | `a i z c p q x y`, and their capitals to free the image too. Each is counted by letter in the session's `graphics_diagnostics.deletes`, with the images capitals freed in `delete_freed`, and traced as `kitty_delete`; an image freed any other way (eviction, a failed upload) is traced as `image_freed` with its reason |
 | Replies | `OK`, or an error for every failure (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`); only to a request with `i=`; `q=1` hides OK, `q=2` hides everything |
 | Frames by descriptor | A program in a session can send an image's pixels as a sealed memfd over `BLIT_FRAME_SOCKET` instead of base64, and place and delete it with Kitty escapes ([ADR 0202](adr/0202-local-frames-by-descriptor.md)). Local only: over ssh, pictures stay Kitty escapes |
 | Limits | 16 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
@@ -212,9 +213,11 @@ What Blit does not do, and why:
 
 - **No bell.** There is nothing to ring; a desktop that wants one can watch
   its own output.
-- **No OSC 4 / 104 palette changes.** Colours are resolved when text is
-  written, so a palette change could only affect new text; doing it
-  properly means keeping palette indices per cell.
+- **No OSC 4 / 104 palette changes.** OSC 4 queries are answered; a set
+  (`OSC 4 ; n ; spec`) and OSC 104 are ignored. Colours are resolved when
+  text is written, so there is no per-session palette to change: a change
+  could only affect new text, and doing it properly means keeping palette
+  indices per cell.
 - **OSC 52 writes the clipboard but never reads it**, so a program cannot
   read what another one copied.
 - **Kitty:** only direct transmission (`t=d`). File, temporary-file and

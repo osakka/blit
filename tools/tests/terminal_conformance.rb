@@ -210,10 +210,17 @@ assert_equal(overlay_display, overlay.fetch('display_id'),
              'overlay display target')
 assert_equal(75, overlay.fetch('opacity'), 'overlay opacity')
 overlays = request(base, 'GET', '/v1/overlays')
-assert_equal(1, overlays.fetch('overlays').length, 'overlay listing')
-request(base, 'DELETE', "/v1/overlays/#{overlay.fetch('id').sub('overlay-', '')}")
+assert_equal([overlay.fetch('id')], overlays.fetch('overlays').map { |o| o.fetch('id') },
+             'overlay listing')
+# Deleted by the id create and list return. The route used to read only the
+# leading digits, so this id matched nothing and the gate stripped it.
+delete_status, = request_with_status(base, 'DELETE', "/v1/overlays/#{overlay.fetch('id')}")
+assert_equal(204, delete_status, 'overlay deleted by its own id')
 assert_equal(0, request(base, 'GET', '/v1/overlays').fetch('overlays').length,
              'overlay deletion')
+gone_status, gone = request_with_status(base, 'DELETE', "/v1/overlays/#{overlay.fetch('id')}")
+assert_equal([404, 'overlay_not_found'], [gone_status, gone.fetch('code')],
+             'a deleted overlay is gone')
 puts 'PASS bounded-overlay-lifecycle'
 
 def run_case(base, name, command, width: 20, height: 4, environment: {})
@@ -1770,6 +1777,17 @@ snapshot = run_case(base, 'osc-theme-colour-query',
                                     'DT_FACE' => '#101820' })
 assert_equal('got:E]11;rgb:1010/1818/2020EB', row_text(snapshot),
              'OSC 11 theme background query')
+
+# OSC 4: every n;? pair in one OSC is answered, in the OSC 10/11 form and
+# terminator, with xterm's palette (an ANSI colour, the cube, the grey ramp).
+# The set in the middle is ignored -- Blit has no palette to change -- and
+# the query after it still sees index 7 unchanged.
+snapshot = run_case(base, 'osc-palette-query',
+                    "stty raw -echo min 0 time 5; printf '\\033]4;1;?;7;rgb:ffff/0000/0000;7;?;196;?;250;?\\033\\\\'; r=$(dd bs=1 count=108 2>/dev/null); printf 'got:%s' \"$(printf %s \"${r}\" | tr '\\033\\\\' EB)\"",
+                    width: 120)
+assert_equal('got:E]4;1;rgb:cdcd/0000/0000EBE]4;7;rgb:e5e5/e5e5/e5e5EB' \
+             'E]4;196;rgb:ffff/0000/0000EBE]4;250;rgb:bcbc/bcbc/bcbcEB',
+             row_text(snapshot), 'OSC 4 palette queries')
 
 snapshot = run_case(base, 'scroll-region', "printf 'A\\nB\\n\\033[2;3r\\033[2;1H1\\n2\\n3'", height: 4)
 cells = cell_map(snapshot)

@@ -259,6 +259,7 @@ suite_font() {
         skip_gate emoji_font_audit_gate.rb "needs explicit HarfBuzz shared library for offline font audit"
     fi
     run_gate modern_nerd_gate.sh sh tools/tests/modern_nerd_gate.sh
+    run_gate font_fallback_gate.sh sh tools/tests/font_fallback_gate.sh
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
         "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/text/Hack-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
@@ -300,6 +301,7 @@ suite_renderer() {
     run_gate kitty_query_gate.rb ruby tools/tests/kitty_query_gate.rb
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate kitty_frame_edit_gate.rb ruby tools/tests/kitty_frame_edit_gate.rb
+    run_gate kitty_delete_gate.rb ruby tools/tests/kitty_delete_gate.rb
     run_gate kms_frame_timing_gate.rb ruby tools/tests/kms_frame_timing_gate.rb
     run_gate graphics_reset_gate.rb ruby tools/tests/graphics_reset_gate.rb
     run_gate sixel_decoder_gate.rb ruby tools/tests/sixel_decoder_gate.rb
@@ -323,6 +325,8 @@ suite_renderer() {
     run_gate pane_effects_gate.rb ruby tools/tests/pane_effects_gate.rb
     run_gate presentation_effects_gate.rb ruby tools/tests/presentation_effects_gate.rb
     run_gate performance_panel_gate.rb ruby tools/tests/performance_panel_gate.rb
+    run_gate overlay_translucency_gate.rb ruby tools/tests/overlay_translucency_gate.rb
+    run_gate under_text_picture_gate.rb ruby tools/tests/under_text_picture_gate.rb
     run_gate display_zoom_gate.rb ruby tools/tests/display_zoom_gate.rb
     run_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb

@@ -307,10 +307,13 @@ Kitty images with different z values and a two-pixel image positioned partly
 outside the pane. `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` requires the higher-z
 pixel and the clipped image's visible second pixel at their exact coordinates.
 
-The fixture accepts `blit.kitty_limits=1` for the resource-lifecycle gate. It
-fills the bounded store with incomplete uploads, submits an oversized upload,
-and requires `KITTY_LIMITS_PASS` from the session API: one incomplete image
-is evicted, the invalid upload is rejected, and both counts are observable.
+The fixture accepts `blit.kitty_limits=1` for the resource-lifecycle gate.
+`pty_input_echo.c --kitty-limits` sends one incomplete upload more than the
+store holds (`BLIT_GRAPHICS_MAX_IMAGES` + 1, so 17 since the store grew to 16
+in 0.3.17), then an upload one pixel wider than `BLIT_GRAPHICS_MAX_WIDTH`.
+Both sizes come from `src/blit_graphics.h`, so the probe follows the store.
+`KITTY_LIMITS_PASS` requires the session's `graphics_diagnostics` to report
+one eviction and one rejection.
 This mode is diagnostic-only and intentionally does not run the pixel oracle.
 
 The fixture accepts `blit.kitty_query=1` for the PTY acknowledgement gate. A

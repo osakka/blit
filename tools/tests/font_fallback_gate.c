@@ -17,11 +17,11 @@ int main(void)
         font.ascii_glyph[i] = -1;
     font.ascii_glyph[(unsigned char)'?'] = 2;
     if (blit_font_glyph_index(&font, 0x1f600U) != 2) {
-        fprintf(stderr, "FONT_FALLBACK_FAIL: missing scalar was not mapped to '?'");
+        fprintf(stderr, "FONT_FALLBACK_FAIL: missing scalar was not mapped to '?'\n");
         return 1;
     }
     if (blit_font_glyph_index(&font, 2U) != 2) {
-        fprintf(stderr, "FONT_FALLBACK_FAIL: mapped scalar changed");
+        fprintf(stderr, "FONT_FALLBACK_FAIL: mapped scalar changed\n");
         return 1;
     }
     printf("FONT_FALLBACK_PASS replacement_glyph=2\n");

@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Live diagnostic gate. When BLIT_AUTH_TOKEN is set, both requests carry it as
+# a bearer token, so the gate also runs against an installed host; without it
+# the server must be one that has no token configured.
+
 base=${1:?usage: screenshot_nonblocking_gate.sh http://host:8080 [display-id]}
 display=${2:-display-1}
 shot=$(mktemp /tmp/blit-screenshot-gate.XXXXXX.bmp)
 version=$(mktemp /tmp/blit-screenshot-gate.XXXXXX.json)
 shot_pid=''
+auth=()
+if [ -n "${BLIT_AUTH_TOKEN:-}" ]; then
+    auth=(--header "Authorization: Bearer $BLIT_AUTH_TOKEN")
+fi
 cleanup() {
     if [ -n "$shot_pid" ]; then
         kill "$shot_pid" 2>/dev/null || true
@@ -18,12 +26,12 @@ trap cleanup EXIT HUP INT TERM
 # Keep the reader deliberately slow. The render/input loop must remain able to
 # answer a small API request while the framebuffer response is draining.
 curl --fail --silent --show-error --max-time 8 --limit-rate 4k \
-    "$base/v1/diagnostics/screenshots/$display" > "$shot" &
+    ${auth[@]+"${auth[@]}"} "$base/v1/diagnostics/screenshots/$display" > "$shot" &
 shot_pid=$!
 sleep 0.1
 start_ms=$(date +%s%3N)
 curl --fail --silent --show-error --connect-timeout 1 --max-time 2 \
-    "$base/v1/version" > "$version"
+    ${auth[@]+"${auth[@]}"} "$base/v1/version" > "$version"
 elapsed_ms=$(( $(date +%s%3N) - start_ms ))
 wait "$shot_pid" 2>/dev/null || true
 shot_pid=''

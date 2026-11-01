@@ -2,7 +2,9 @@
 # frozen_string_literal: true
 
 # Hardware acceptance gate. Unlike the VKMS fixtures, this gate must be run
-# against a real Blit instance owning a physical DRM device.
+# against a real Blit instance owning a physical DRM device. Every request
+# carries BLIT_AUTH_TOKEN as a bearer token when it is set, as an installed
+# host requires.
 
 require 'json'
 require 'net/http'
@@ -12,6 +14,7 @@ base = URI(ENV.fetch('BLIT_GATE_SERVER', 'http://127.0.0.1:8080'))
 hibr_command = ENV.fetch('BLIT_HIBR_COMMAND', '/usr/bin/desktop')
 hibr_session = ENV.fetch('BLIT_HIBR_SESSION', '/usr/share/hibr/desktop/session.hibr')
 hibr_name = "blit-physical-gate-#{Process.pid}"
+AUTH_TOKEN = ENV.fetch('BLIT_AUTH_TOKEN', '')
 
 def request(base, method, path, body = nil, headers = {})
   uri = base + path
@@ -23,6 +26,7 @@ def request(base, method, path, body = nil, headers = {})
   }.fetch(method)
   req = klass.new(uri)
   req['Content-Type'] = 'application/json' if body
+  req['Authorization'] = "Bearer #{AUTH_TOKEN}" unless AUTH_TOKEN.empty?
   headers.each { |key, value| req[key] = value }
   req.body = JSON.generate(body) if body
   response = Net::HTTP.start(uri.hostname, uri.port,

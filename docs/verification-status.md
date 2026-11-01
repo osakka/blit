@@ -1,5 +1,48 @@
 # Verification status
 
+## 2026-11-01: 0.3.29 erased cells repaint; translucent overlays; tidy-up
+
+- **Erased cells never repainted** (the owner's wallpaper showing beside
+  Boxer's full screen, twice, cleared each time by a full repaint).
+  `terminal_erase_cell` wrote the erase background without damaging the
+  cell; `terminal_clear_cell` damages only cells that weren't blank. So
+  erasing blank default-background cells to an explicit colour (ED, EL or
+  ECH with a background set, as Boxer's Full Screen Border and Hibr's
+  windows do) changed the model and not the screen: the floor, or a
+  picture under the text, stayed visible over cells the model holds
+  opaque. The cell is now damaged when its erase colour is written.
+  `under_text_picture_gate.rb` (both compositors) fails without the fix
+  (784,638 wrong pixels) and passes with it. It covers delete and re-place,
+  replace in place, and synchronized output; erased-to-default cells still
+  show the picture.
+- **Translucent overlays darkened on the CPU compositor:** blended into the
+  scene on every frame, converging to the overlay colour (147,109,80 →
+  253,126,0 after 12 frames). They now use the panel's kept-copy store
+  (ADR 0203), and `blend_rect` rounds like GLES.
+  `overlay_translucency_gate.rb` gives the exact blend with no drift on
+  both compositors.
+- **Kitty deletes observable:** every session's `graphics_diagnostics` is
+  always present, with deletes counted by `d=` kind and images freed. Each
+  delete and each image freed for any reason (delete, eviction,
+  frame-abandoned and the rest) is a trace event with session, id and
+  reason. `kitty_delete_gate.rb`. (Prompted by the HDMI wallpaper vanishing
+  while Hibr believed it placed; Hibr found the cause in hold, fixed in
+  0.99.418.)
+- **OSC 4** palette queries answered with the colour each index paints
+  (a set is ignored: Blit has no per-session palette).
+- **Overlay DELETE** takes the `overlay-N` id that create and list return.
+  The bare number is no longer accepted.
+- **Zoom-related fields:** `/v1/diagnostics` per output: `viewport_*` is
+  the logical size and `scale_*` is zoom/100. `render_*` is now the mode
+  (the framebuffer).
+- **Live gates** send the bearer token when `BLIT_AUTH_TOKEN` is set. The
+  kitty-limits probe is sized from the real image limit.
+  `font_fallback_gate` runs in the font suite. The OpenAPI has the stream's
+  `pixel_frame_end` and `pixel_frame_hide`, and api_schema_gate now
+  requires a schema for every stream message the server parses.
+- **Suites:** font 39/39, all 165 pass (6 skip), renderer on GLES 72 pass
+  (1 skip); no failures.
+
 ## 2026-11-01: 0.3.28 a pointer lock can't outlive the desktop's release
 
 - **The incident.** On the owner's mini PC, Boxer, full screen on the HDMI

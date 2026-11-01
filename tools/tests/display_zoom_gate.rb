@@ -185,6 +185,19 @@ def output(id)
   get('/v1/diagnostics')['render']['outputs'].find { |o| o['display_id'] == id }
 end
 
+# /v1/diagnostics per output: rendered at the mode, laid out at the logical
+# size, scaled by zoom / 100. These were rotation-era fields that always gave
+# the render size and 1.
+def reports_zoom(zoom, logical_width, logical_height)
+  [['display-1', W, H, logical_width, logical_height, zoom / 100.0],
+   ['display-2', 640, 384, 640, 384, 1.0]].each do |id, rw, rh, vw, vh, scale|
+    got = output(id).values_at('render_width', 'render_height', 'viewport_width', 'viewport_height',
+                               'scale_x', 'scale_y')
+    check(got == [rw, rh, vw, vh, scale, scale],
+          "#{zoom}%: #{id} reports render, viewport, scale #{got}, not #{[rw, rh, vw, vh, scale, scale]}")
+  end
+end
+
 def set_zoom(zoom)
   code, item = request('PATCH', '/v1/displays/display-1', { 'configuration' => { 'zoom' => zoom } })
   check(code == 200 && item.dig('configuration', 'zoom') == zoom, "PATCH zoom #{zoom}: #{code} #{item}")
@@ -372,6 +385,7 @@ Dir.mktmpdir('blit-display-zoom') do |root|
 
   # 100%: the model holds, and this is the frame 100% must return to.
   _, _, want100 = sizes_follow(100, files, surfaces, inset)
+  reports_zoom(100, W, H)
   wait_until('the session never painted display-1') { GateBmp.new(screenshot_bytes).pixel(W / 2, H / 2) == BG }
   floor = rows_of(settled)[2][0][W - 1]
   check(floor != int(BG), 'display-1 has no floor past its last cell at 100%')
@@ -415,6 +429,7 @@ Dir.mktmpdir('blit-display-zoom') do |root|
     checked += count
 
     if zoom == 200
+      reports_zoom(200, wl, hl)
       # Absolute moves are logical; relative counts are physical.
       request('POST', '/v1/input/inject', { kind: 'pointer_motion', x: 100, y: 100 })
       at = get('/v1/diagnostics')['render']['pointer'].values_at('x', 'y')
@@ -485,6 +500,7 @@ Dir.mktmpdir('blit-display-zoom') do |root|
        "formula_exact=#{checked}px(200=2x2_blocks,150=column+row_clamp,175+225=uneven) " \
        "pointer=absolute_logical+relative_#{pointer&.join(',')} pointer_art=#{art100.length}px_unenlarged " \
        "panel=#{panel200[2]}x#{panel200[3]}@#{panel200[0]},#{panel200[1]}_unenlarged " \
-       'scanlines_under_curvature=enlarged display-2=untouched back_to_100=byte_identical' \
+       'scanlines_under_curvature=enlarged display-2=untouched back_to_100=byte_identical ' \
+       "diagnostics=render+viewport+scale@100,200" \
        "#{GLES ? ' effects=unavailable_zoomed' : ''}"
 end

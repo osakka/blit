@@ -1089,9 +1089,9 @@ paths:
         in: path
         required: true
         description: >-
-          The number in the overlay's id: `3` for `overlay-3`. The server
-          reads the leading digits only, so the full id does not match.
-        schema: {type: string, pattern: '^[0-9]+$'}
+          The overlay's id exactly as create and list return it, such as
+          `overlay-3`. Any other spelling is a 404 `overlay_not_found`.
+        schema: {type: string, pattern: '^overlay-[0-9]+$'}
     delete:
       tags: [effects]
       operationId: deleteOverlay
@@ -1839,6 +1839,8 @@ paths:
               After pixel_frame_begin is accepted, the client sends one or
               more masked binary WebSocket messages containing tightly packed
               RGB or RGBA pixels. The final message completes the frame.
+          - $ref: '#/components/schemas/StreamPixelFrameEnd'
+          - $ref: '#/components/schemas/StreamPixelFrameHide'
           - $ref: '#/components/schemas/StreamDiagnosticEvent'
 
 components:
@@ -3047,15 +3049,25 @@ components:
                       pointer_change_requests: {type: integer, minimum: 0, description: Per-output KMS present attempts for which the pointer's old or new footprint intersects this output. A request may recur while another output's flip is pending.}
                       pointer_frame_deferred: {type: integer, minimum: 0, description: Pointer-affecting output attempts deferred because this output was not initialized or its prior page flip was pending.}
                       pointer_frame_submissions: {type: integer, minimum: 0, description: Submitted output frames that include a changed pointer position.}
-                  render_width: {type: integer, minimum: 0}
-                  render_height: {type: integer, minimum: 0}
+                  render_width:
+                    type: integer
+                    minimum: 0
+                    description: The mode's width in pixels, what the output scans out.
+                  render_height: {type: integer, minimum: 0, description: The mode's height in pixels.}
                   viewport_width:
                     type: integer
                     minimum: 0
-                    description: Always the render size; native KMS does not scale.
-                  viewport_height: {type: integer, minimum: 0}
-                  scale_x: {type: number, const: 1}
-                  scale_y: {type: number, const: 1}
+                    description: >-
+                      The logical width panes are laid out in: the render
+                      width divided by the display's zoom (ADR 0204), rounded
+                      down; the render width at 100 %.
+                  viewport_height: {type: integer, minimum: 0, description: The logical height, as viewport_width.}
+                  scale_x:
+                    type: number
+                    minimum: 1
+                    maximum: 4
+                    description: The display's zoom as a factor, zoom / 100; 1 when it is not zoomed.
+                  scale_y: {type: number, minimum: 1, maximum: 4, description: Equal to scale_x; zoom is uniform.}
                   compositor:
                     type: object
                     description: >-
@@ -4795,7 +4807,8 @@ components:
       required: [id, revision, surface_revision, state, surface_id, title,
         terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop,
         text_layout, login_manager, process_id, focused, surface_mode,
-        mouse_reporting, pointer_shape, graphics, frames]
+        mouse_reporting, pointer_shape, graphics, graphics_diagnostics,
+        frames]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -5003,11 +5016,26 @@ components:
       additionalProperties: false
     GraphicsDiagnostics:
       type: object
-      required: [rejected, evicted, last_error]
+      description: >-
+        Always present; zeros and an empty `last_error` when nothing has
+        gone wrong. `deletes` counts the session's Kitty deletes (`a=d`) by
+        their `d=` letter, lowercase and capital apart; the API's graphics
+        reset counts as `A`. `delete_freed` counts the images a capital-letter
+        delete freed. Each delete is also traced as `kitty_delete`
+        (`session=… d=… i=… freed=N`), and an image freed for any other
+        reason as `image_freed` with its reason, in /v1/diagnostics/trace.
+      required: [rejected, evicted, last_error, deletes, delete_freed]
       properties:
         rejected: {type: integer, minimum: 0}
         evicted: {type: integer, minimum: 0}
         last_error: {type: string}
+        deletes:
+          type: object
+          required: [a, A, i, I, z, Z, c, C, p, P, q, Q, x, X, y, Y]
+          additionalProperties: false
+          patternProperties:
+            '^[aAiIzZcCpPqQxXyY]$': {type: integer, minimum: 0}
+        delete_freed: {type: integer, minimum: 0}
       additionalProperties: false
     GraphicsImage:
       type: object
@@ -5363,6 +5391,34 @@ components:
           type: boolean
           default: false
           description: Send the binary pixels as bounded WebSocket chunks followed by pixel_frame_end.
+      additionalProperties: false
+    StreamPixelFrameEnd:
+      type: object
+      description: >-
+        Completes a frame begun with `chunked: true` from the chunks received
+        so far. Without an active chunked frame the reply is a
+        `pixel_frame_error` with code `invalid_end`; when the chunks do not
+        make the whole frame it is `frame_incomplete`, then `invalid_end`,
+        and the frame is dropped.
+      required: [type]
+      properties:
+        type: {type: string, const: pixel_frame_end}
+      additionalProperties: false
+    StreamPixelFrameHide:
+      type: object
+      description: >-
+        Stops showing a session's image without deleting it; the next frame
+        for it shows it again. Nothing is sent back, and an unknown session
+        or image is ignored.
+      required: [type, session_id, image_id]
+      properties:
+        type: {type: string, const: pixel_frame_hide}
+        session_id:
+          type: string
+          description: Read as `session-` and the number after it.
+          pattern: '^session-[0-9]+'
+          maxLength: 63
+        image_id: {type: integer, minimum: 1, maximum: 2147483647}
       additionalProperties: false
     StreamPixelFrameReceipt:
       type: object

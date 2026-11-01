@@ -9,6 +9,7 @@
 #   #42 italic is a slant, and is not bold
 #   #40 an unstyled cell uses the session's DT_INK/DT_FACE pair
 #   #49 a bold glyph stays inside its own cell
+#   OSC 4's answer for a palette index is the colour that index paints
 #
 # Captures use ?cached=1 deliberately: a fresh capture invalidates the output
 # it inspects and can answer from a frame that was never presented (#45).
@@ -16,6 +17,7 @@
 require 'json'
 require 'net/http'
 require 'timeout'
+require 'tmpdir'
 require 'uri'
 require_relative 'gate_port'
 require_relative 'gate_server'
@@ -222,6 +224,32 @@ unless osc.fetch(0x00ff00, 0) >= 10
   failures << "OSC 10 set to green painted no green glyph pixels: #{osc.inspect}"
 end
 
+# OSC 4 tells a program the colour of a palette index; that must be the
+# colour the index paints. The answers are kept in a file and compared with
+# the two cells the same session then paints with those indices.
+answers = File.join(Dir.tmpdir, "blit-cell-paint-osc4-#{Process.pid}")
+id = session("stty raw -echo min 0 time 10; printf '\\033[?25l\\033]4;67;?;250;?\\033\\\\'; " \
+             "r=$(dd bs=1 count=56 2>/dev/null); printf '%s' \"$r\" > #{answers}; " \
+             "printf '\\033[48;5;67m \\033[48;5;250m '; sleep 60")
+sleep 2.0
+palette_shot = screenshot
+request('DELETE', "/v1/terminal-sessions/#{id}")
+told = File.exist?(answers) ? File.binread(answers) : ''
+File.delete(answers) if File.exist?(answers)
+replies = told.scan(%r{\e\]4;(\d+);rgb:(\h{2})\h{2}/(\h{2})\h{2}/(\h{2})\h{2}\e\\})
+if replies.map(&:first) != %w[67 250]
+  failures << "OSC 4 67;?;250;? was not answered pair by pair: #{told.inspect}"
+else
+  replies.each_with_index do |(index, red, green, blue), column|
+    want = "#{red}#{green}#{blue}".to_i(16)
+    painted = cell(palette_shot, inset, column, 0).values.tally
+    next if painted == { want => CELL_W * CELL_H }
+
+    failures << "OSC 4 said index #{index} is ##{format('%06x', want)}, " \
+                "and it painted #{painted.inspect}"
+  end
+end
+
 # #49. Bold is an overstrike one pixel to the right, so a glyph that reaches
 # its own right edge used to put a pixel in the next cell. A box-drawing
 # glyph spans the full cell width, which is what makes this visible at all.
@@ -264,4 +292,4 @@ end
 puts "CELL_PAINT_PASS block_cursor_keeps_glyph=#{glyph.length}px " \
      "bold=#{shapes['bold'].length}px italic=#{shapes['italic'].length}px " \
      "plain=#{shapes['plain'].length}px session_defaults=ink,face,osc10 " \
-     "bold_stays_in_cell=#{drawn}px_drawn_0_spilled"
+     "osc4_answers_paint=67,250 bold_stays_in_cell=#{drawn}px_drawn_0_spilled"

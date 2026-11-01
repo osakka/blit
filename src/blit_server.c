@@ -1085,6 +1085,18 @@ typedef struct {
     unsigned long graphics_rejected;
     unsigned long graphics_evicted;
     char graphics_last_error[64];
+    /* Kitty deletes by their d= letter, in kitty_delete_kinds order, and
+       the images a capital-letter delete freed. An image a program still
+       believed placed vanished once with nothing able to say what removed
+       it; these and the trace below say. */
+    unsigned long kitty_deletes[16];
+    unsigned long kitty_delete_freed;
+    /* Deletes and other frees waiting for the trace: the parser has no
+       runtime, so they are logged in the service pass, as the pointer
+       lock's give-back is. A full queue counts what it could not keep. */
+    char graphics_trace_pending[BLIT_GRAPHICS_MAX_IMAGES + 8][112];
+    int graphics_trace_pending_count;
+    unsigned long graphics_trace_dropped;
     /* A diagnostic capture of this session's raw PTY output, armed with
        POST .../output-capture and read with GET: the bytes exactly as they
        arrived, before the parser, with each read's offset and time. Bounded,
@@ -1851,6 +1863,8 @@ static BlitSession *hibr_render_source(BlitRuntime *runtime,
 static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id);
 static void graphics_image_release(BlitGraphicsImage *image);
+static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
+                                const char *reason);
 static void frame_note_deleted(BlitSession *session, const BlitGraphicsImage *image);
 static int surface_targets_output(BlitRuntime *runtime,
                                   BlitSurface *surface, int output_index);
@@ -3632,11 +3646,17 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
             have_kms_info ? kms_info.copy_ms : 0.0,
             have_kms_info ? kms_info.submit_ms : 0.0,
             have_kms_info ? kms_info.drawn_cells : 0ULL,
+            /* ADR 0204: rendered at the mode, laid out at the logical size,
+               the one enlarged to the other by the zoom. These were the
+               rotation-era viewport, always the render size at scale 1. */
+            runtime->displays[display_index].physical_width,
+            runtime->displays[display_index].physical_height,
             runtime->displays[display_index].bounds.w,
             runtime->displays[display_index].bounds.h,
-            runtime->displays[display_index].bounds.w,
-            runtime->displays[display_index].bounds.h,
-            1.0f, 1.0f);
+            (runtime->displays[display_index].zoom > 100 ?
+                runtime->displays[display_index].zoom : 100) / 100.0,
+            (runtime->displays[display_index].zoom > 100 ?
+                runtime->displays[display_index].zoom : 100) / 100.0);
         /* ADR 0181: which compositor made this output's frames. */
         if (used < capacity) {
             char reason[384];
@@ -8908,8 +8928,15 @@ static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
     terminal_clear_cell(surface, x, y);
     if (x < 0 || y < 0 || x >= surface->width || y >= surface->height)
         return;
-    if (session->terminal_background_set)
+    /* The erase colour is a change of its own. terminal_clear_cell only
+       damages a cell that was not already blank, so a blank cell erased to
+       an explicit background was left undamaged: the screen kept what it
+       showed -- the floor, or a picture under the text -- over a cell the
+       model holds opaque, until a full repaint. */
+    if (session->terminal_background_set) {
         surface->background[y][x] = session->terminal_background + 1;
+        mark_surface_damage(surface, x, y);
+    }
 }
 
 /* Erase a run of cells on one row. `selective` is DECSED/DECSEL/DECSERA:
@@ -9166,7 +9193,7 @@ static void terminal_scroll_graphics(BlitSession *session,
                scrolled off nothing can ever show it. Keeping it only held
                one of the eight slots for good (Gitea #85). */
             if (!image->visible && strcmp(image->protocol, "sixel") == 0)
-                graphics_image_release(image);
+                graphics_image_free(session, image, "sixel-scrolled-off");
         }
     }
     if (moved) mark_surface_full_damage(surface);
@@ -9971,6 +9998,43 @@ static void terminal_apply_pointer_shape(BlitSession *session,
     }
 }
 
+/* OSC 4: each `n;?` pair is answered with the colour palette index n is
+   painted with, in the form and terminator of the OSC 10/11 replies. A set
+   (`n;spec`) is read past and ignored: an index is resolved to its colour
+   when text is written, so there is no palette to change (docs/terminal.md).
+   A malformed pair ends the walk; the pairs before it have been answered. */
+static void terminal_palette_query(BlitSession *session, const char *payload)
+{
+    const char *cursor = payload;
+
+    while (*cursor != '\0') {
+        const char *spec;
+        const char *end;
+        char *number_end;
+        long index = strtol(cursor, &number_end, 10);
+        if (number_end == cursor || *number_end != ';')
+            return;
+        spec = number_end + 1;
+        end = strchr(spec, ';');
+        if (end == NULL)
+            end = spec + strlen(spec);
+        if (end - spec == 1 && spec[0] == '?' && index >= 0 && index <= 255) {
+            uint32_t colour;
+            char hex[8];
+            char value[32];
+            char reply[64];
+            terminal_indexed_colour((int)index, &colour);
+            snprintf(hex, sizeof(hex), "#%06x", (unsigned)(colour & 0xffffffU));
+            terminal_colour_reply(hex, value, sizeof(value));
+            snprintf(reply, sizeof(reply), "\033]4;%ld;%s\033\\", index, value);
+            terminal_write_reply(session, reply);
+        }
+        if (*end == '\0')
+            return;
+        cursor = end + 1;
+    }
+}
+
 static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
 {
     char *separator;
@@ -9990,6 +10054,8 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
                  "%s", payload);
     } else if (command == 22) {
         terminal_apply_pointer_shape(session, payload);
+    } else if (command == 4) {
+        terminal_palette_query(session, payload);
     } else if ((command == 10 || command == 11) &&
                strcmp(payload, "?") == 0) {
         char colour[32];
@@ -10753,6 +10819,36 @@ static int kitty_image_has_placement(const BlitGraphicsImage *image)
     return 0;
 }
 
+/* The d= letters counted, lowercase then its capital. One array, not a
+   macro'd literal: an index is taken as a difference of pointers into it. */
+static const char kitty_delete_kinds[] = "aAiIzZcCpPqQxXyY";
+
+static void graphics_trace_note(BlitSession *session, const char *kind,
+                                const char *detail)
+{
+    if (session->graphics_trace_pending_count >=
+        (int)(sizeof(session->graphics_trace_pending) /
+              sizeof(session->graphics_trace_pending[0]))) {
+        ++session->graphics_trace_dropped;
+        return;
+    }
+    snprintf(session->graphics_trace_pending[session->graphics_trace_pending_count++],
+             sizeof(session->graphics_trace_pending[0]), "%s %s", kind, detail);
+}
+
+/* An image freed, with why, then released. */
+static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
+                                const char *reason)
+{
+    if (image->used) {
+        char detail[96];
+        snprintf(detail, sizeof(detail), "session=session-%llu i=%u protocol=%s complete=%d reason=%s",
+                 session->id, image->id, image->protocol, image->complete, reason);
+        graphics_trace_note(session, "image_freed", detail);
+    }
+    graphics_image_release(image);
+}
+
 /* A slot for a new image when the store is full: the least recently changed
    complete Kitty or sixel image that nothing shows. Anything still on screen,
    still uploading, or owned by the API is left alone. */
@@ -10772,7 +10868,7 @@ static BlitGraphicsImage *graphics_reclaim_unshown(BlitSession *session)
             oldest = image;
     }
     if (oldest != NULL) {
-        graphics_image_release(oldest);
+        graphics_image_free(session, oldest, "evicted-unshown");
         ++session->graphics_evicted;
     }
     return oldest;
@@ -10794,8 +10890,14 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
     int slot;
     int by_position = kind == 'c' || kind == 'p' || kind == 'q' ||
         kind == 'x' || kind == 'y';
+    int freed = 0;
+    char detail[112];
+    char reason[16];
     if (!(kind == 'a' || kind == 'i' || kind == 'z' || by_position))
         return 0;
+    /* Each image freed is traced by id; the line after says the delete. */
+    snprintf(reason, sizeof(reason), "delete-d=%c", target);
+    ++session->kitty_deletes[strchr(kitty_delete_kinds, target) - kitty_delete_kinds];
     for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
         BlitGraphicsImage *image = &session->graphics[index];
         int removed = 0;
@@ -10852,9 +10954,14 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
         if (free_data && (removed > 0 || kind == 'a') &&
             !kitty_image_has_placement(image)) {
             frame_note_deleted(session, image);
-            graphics_image_release(image);
+            graphics_image_free(session, image, reason);
+            ++freed;
         }
     }
+    session->kitty_delete_freed += (unsigned long)freed;
+    snprintf(detail, sizeof(detail), "session=session-%llu d=%c i=%u freed=%d",
+             session->id, target, image_id, freed);
+    graphics_trace_note(session, "kitty_delete", detail);
     if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
     return 1;
 }
@@ -11260,7 +11367,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
                 if (session->graphics[index].used &&
                     !session->graphics[index].complete) {
-                    graphics_image_release(&session->graphics[index]);
+                    graphics_image_free(session, &session->graphics[index],
+                                        "evicted-incomplete");
                     ++session->graphics_evicted;
                     image = &session->graphics[index];
                     break;
@@ -11274,7 +11382,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                     session->graphics[index].complete &&
                     strcmp(session->graphics[index].protocol, "kitty") == 0 &&
                     !kitty_image_has_placement(&session->graphics[index])) {
-                    graphics_image_release(&session->graphics[index]);
+                    graphics_image_free(session, &session->graphics[index],
+                                        "evicted-unplaced");
                     ++session->graphics_evicted;
                     image = &session->graphics[index];
                     break;
@@ -11304,13 +11413,13 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
             (size_t)width * (size_t)height * (format == 24 ? 3U : 4U);
         if (image->capacity > BLIT_GRAPHICS_MAX_BYTES) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "image-bounds", "EFBIG");
             return;
         }
         image->pixels = (unsigned char *)malloc(image->capacity);
         if (image->pixels == NULL) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "allocation-failed", "ENOMEM");
             return;
         }
@@ -11323,14 +11432,14 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
            image data. */
         if (image->width > 0 && image->height > 0 &&
             (src_x >= image->width || src_y >= image->height)) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "placement-bounds", "EINVAL");
             return;
         }
         /* A staged replacement is placed on the image it replaces, which
            keeps showing its old pixels until the new ones are complete. */
         if (!kitty_place(stage ? shown : image, &placement)) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "placement-store-full", "ENOSPC");
             return;
         }
@@ -11338,7 +11447,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
     if (image->width != width || image->height != height || image->format != format ||
         !kitty_decode_chunk(image, separator + 1)) {
-        graphics_image_release(image);
+        graphics_image_free(session, image, "transmit-failed");
         kitty_fail(session, image_id, quiet, "invalid-data", "EINVAL");
         return;
     }
@@ -11346,7 +11455,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         if (image->base64_tail_length != 0 ||
             (!image->encoded && !image->compressed &&
              image->bytes != image->capacity)) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "incomplete-data", "EINVAL");
             return;
         }
@@ -11365,7 +11474,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                 expected > 0 ? expected : 1U);
             uLongf produced = (uLongf)expected;
             if (inflated == NULL) {
-                graphics_image_release(image);
+                graphics_image_free(session, image, "transmit-failed");
                 kitty_fail(session, image_id, quiet, "allocation-failed", "ENOMEM");
                 return;
             }
@@ -11373,7 +11482,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                            (uLong)image->bytes) != Z_OK ||
                 (!image->encoded && (size_t)produced != expected)) {
                 free(inflated);
-                graphics_image_release(image);
+                graphics_image_free(session, image, "transmit-failed");
                 kitty_fail(session, image_id, quiet, "invalid-compressed-data", "EINVAL");
                 return;
             }
@@ -11392,7 +11501,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             int decoded_height = 0;
             if (!png_decode(image->pixels, image->bytes, &decoded,
                             &decoded_width, &decoded_height)) {
-                graphics_image_release(image);
+                graphics_image_free(session, image, "transmit-failed");
                 kitty_fail(session, image_id, quiet, "invalid-png", "EINVAL");
                 return;
             }
@@ -11408,7 +11517,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         /* A PNG's size is only known now, so a source rectangle that starts
            outside it could not be refused when the placement was made. */
         if (!kitty_placements_in_bounds(image)) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "placement-bounds", "EINVAL");
             return;
         }
@@ -15585,17 +15694,26 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         }
     }
     used += (size_t)snprintf(body + used, capacity - used, "]");
-    if (session->graphics_rejected > 0 || session->graphics_evicted > 0 ||
-        session->graphics_last_error[0] != '\0') {
+    /* Always present: a session nothing went wrong in says so with zeros. */
+    {
         char escaped_graphics_error[128];
+        int kind;
         json_escape(session->graphics_last_error, escaped_graphics_error,
                     sizeof(escaped_graphics_error));
         used += (size_t)snprintf(
             body + used, capacity - used,
             ",\"graphics_diagnostics\":{\"rejected\":%lu,"
-            "\"evicted\":%lu,\"last_error\":\"%s\"}",
+            "\"evicted\":%lu,\"last_error\":\"%s\",\"deletes\":{",
             session->graphics_rejected, session->graphics_evicted,
             escaped_graphics_error);
+        for (kind = 0; kind < 16 && used < capacity; ++kind)
+            used += (size_t)snprintf(body + used, capacity - used, "%s\"%c\":%lu",
+                                     kind ? "," : "", kitty_delete_kinds[kind],
+                                     session->kitty_deletes[kind]);
+        if (used < capacity)
+            used += (size_t)snprintf(body + used, capacity - used,
+                                     "},\"delete_freed\":%lu}",
+                                     session->kitty_delete_freed);
     }
     /* ADR 0202: frames by descriptor into this session's images. */
     used += (size_t)snprintf(
@@ -18566,7 +18684,7 @@ static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
             session, stream->pixel_frame_image_id) : NULL;
         if (image != NULL && strcmp(image->protocol, "api") == 0 &&
             !image->complete)
-            graphics_image_release(image);
+            graphics_image_free(session, image, "frame-abandoned");
     }
     stream->pixel_frame_session_id = 0;
     stream->pixel_frame_image_id = 0;
@@ -18693,7 +18811,7 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
         image->complete = 0;
         image->visible = 0;
     } else {
-        graphics_image_release(image);
+        graphics_image_free(session, image, "frame-resized");
         image->used = 1;
         image->id = (unsigned int)image_id;
         snprintf(image->protocol, sizeof(image->protocol), "api");
@@ -18703,7 +18821,7 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
         image->capacity = bytes;
         image->pixels = (unsigned char *)malloc(bytes);
         if (image->pixels == NULL) {
-            graphics_image_release(image);
+            graphics_image_free(session, image, "frame-alloc-failed");
             return 0;
         }
     }
@@ -23660,7 +23778,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         /* Explicit lifecycle recovery. Do not infer this from CSI clear:
-           Kitty images intentionally persist until explicitly deleted. */
+           Kitty images intentionally persist until explicitly deleted.
+           Counted and traced as the program's d=A would be; this line says
+           the API asked. */
+        {
+            char detail[64];
+            snprintf(detail, sizeof(detail), "session=session-%llu", session->id);
+            diagnostic_trace(runtime, "graphics_reset", detail);
+        }
         kitty_delete(session, surface, 'A', 0, 0, 0, 0, 0);
         ++session->revision;
         session_json(runtime, session, body, sizeof(body));
@@ -24789,12 +24914,18 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strncmp(path, "/v1/overlays/", strlen("/v1/overlays/")) == 0 &&
         strcmp(method, "DELETE") == 0) {
-        unsigned long long overlay_id = strtoull(
-            path + strlen("/v1/overlays/"), NULL, 10);
+        /* The id exactly as create and list return it. This read the
+           leading digits of the path, so `overlay-3` matched nothing and a
+           client had to strip the prefix itself. */
+        const char *requested = path + strlen("/v1/overlays/");
         int i;
-        for (i = 0; i < BLIT_MAX_OVERLAYS; ++i)
-            if (runtime->overlays[i].used &&
-                runtime->overlays[i].id == overlay_id) {
+        for (i = 0; i < BLIT_MAX_OVERLAYS; ++i) {
+            char overlay_id[32];
+            if (!runtime->overlays[i].used)
+                continue;
+            snprintf(overlay_id, sizeof(overlay_id), "overlay-%llu",
+                     runtime->overlays[i].id);
+            if (strcmp(requested, overlay_id) == 0) {
                 memset(&runtime->overlays[i], 0, sizeof(runtime->overlays[i]));
                 for (i = 0; i < runtime->output_count; ++i)
                     runtime->outputs[i].initialized = 0;
@@ -24802,6 +24933,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 send_http(fd, 204, "No Content", "application/json", "");
                 return;
             }
+        }
         send_problem(fd, 404, "Not Found", "overlay_not_found",
                      "The requested overlay does not exist.");
         return;
@@ -26878,6 +27010,35 @@ static void pointer_lock_log(BlitRuntime *runtime)
             if (strcmp(reason, "program") == 0)
                 diagnostic_trace(runtime, "pointer_lock_released", detail);
             fprintf(stderr, "blit: pointer lock released: %s\n", detail);
+        }
+    }
+}
+
+/* Each pass: the Kitty deletes and image frees the parser noted, to the
+   trace, in the order they happened. */
+static void service_graphics_trace(BlitRuntime *runtime)
+{
+    int i, n;
+
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSession *session = &runtime->sessions[i];
+        if (!session->used)
+            continue;
+        for (n = 0; n < session->graphics_trace_pending_count; ++n) {
+            char *note = session->graphics_trace_pending[n];
+            char *space = strchr(note, ' ');
+            if (space == NULL)
+                continue;
+            *space = '\0';
+            diagnostic_trace(runtime, note, space + 1);
+        }
+        session->graphics_trace_pending_count = 0;
+        if (session->graphics_trace_dropped > 0) {
+            char detail[96];
+            snprintf(detail, sizeof(detail), "session=session-%llu dropped=%lu",
+                     session->id, session->graphics_trace_dropped);
+            diagnostic_trace(runtime, "graphics_trace_dropped", detail);
+            session->graphics_trace_dropped = 0;
         }
     }
 }
@@ -30088,6 +30249,7 @@ int main(int argc, char **argv)
         service_auxiliary_displays(&runtime, monotonic_us());
 
         service_pointer_lock(&runtime);
+        service_graphics_trace(&runtime);
         if (mouse_motion_wait_ms(&runtime, monotonic_us()) == 0)
             flush_mouse_motion(&runtime);
         pending_before_events = runtime.render_pending;

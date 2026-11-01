@@ -6,6 +6,8 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#include "../../src/blit_graphics.h"
+
 int main(int argc, char **argv)
 {
     struct termios saved;
@@ -58,11 +60,17 @@ int main(int argc, char **argv)
             fputs("\033_Ga=p,i=7;\033\\", stdout);
     }
     if (kitty_limits) {
+        /* One incomplete upload more than the store holds evicts exactly
+           one, and an upload a pixel wider than the bound is rejected before
+           it takes a slot. Both bounds are the server's own: sized for the
+           old 8-image, 512-wide store, nothing was evicted and the
+           "oversized" upload took a slot, refused only for its short
+           payload. */
         int image_id;
-        for (image_id = 1; image_id <= 8; ++image_id)
+        for (image_id = 1; image_id <= BLIT_GRAPHICS_MAX_IMAGES + 1; ++image_id)
             printf("\033_Ga=t,f=24,s=1,v=1,i=%d,m=1;/w\033\\", image_id);
-        fputs("\033_Ga=t,f=24,s=1,v=1,i=9,m=1;/w\033\\"
-              "\033_Ga=t,f=24,s=513,v=1,i=10;AAAA\033\\", stdout);
+        printf("\033_Ga=t,f=24,s=%d,v=1,i=%d;AAAA\033\\",
+               BLIT_GRAPHICS_MAX_WIDTH + 1, BLIT_GRAPHICS_MAX_IMAGES + 2);
     }
     if (kitty_query)
         fputs("\033_Ga=q,i=31,f=24,s=1,v=1;/wAA\033\\", stdout);

@@ -24,6 +24,18 @@ pixel_begin=schema.dig('components','schemas','StreamPixelFrameBegin')
   other=key=='placement_width' ? 'placement_height' : 'placement_width'
   raise 'pixel destination dimensions must be paired' unless pixel_begin.dig('dependentRequired',key)==[other]
 end
+# Every client message the stream dispatcher recognises by its type has a
+# schema in x-blit-stream. pixel_frame_end and pixel_frame_hide were accepted
+# for releases with none.
+stream_types = schema.dig('paths','/v1/stream','get','x-blit-stream','messages').filter_map do |message|
+  ref = message['$ref'] or next
+  schema.dig('components','schemas',ref.split('/').last,'properties','type','const')
+end
+parsed_types = File.read(File.join(__dir__,'../../src/blit_server.c'))
+  .scan(/strstr\(message, "\\"type\\":\\"([a-z_]+)\\""\)/).flatten.uniq
+raise 'the stream dispatcher parses no typed message: this check is stale' if parsed_types.empty?
+missing_types = parsed_types - stream_types
+raise "stream messages without a schema in x-blit-stream: #{missing_types.join(', ')}" unless missing_types.empty?
 font_configuration = schema.dig('components','schemas','FontConfiguration')
 raise 'font size controls must be exclusive' unless
   font_configuration.dig('not','required') == %w[scale size_px]

@@ -85,6 +85,13 @@ def pixel(bmp, x, y)
 end
 
 $failures = []
+# graphics_diagnostics is always present; nothing went wrong when it
+# counts no rejection or eviction and names no error.
+def nothing_rejected?(state)
+  diagnostics = state['graphics_diagnostics']
+  diagnostics.nil? || diagnostics.values_at('rejected', 'evicted', 'last_error') == [0, 0, '']
+end
+
 def check(condition, message)
   return if condition
 
@@ -193,7 +200,7 @@ verdict('sixel-palette-defaults-and-persistence') do
     check(at(bmp, 16, 32) == YELLOW,
           'a register defined by an earlier DCS survives into the next, got ' \
           "#{at(bmp, 16, 32).inspect}")
-    check(state['graphics_diagnostics'].nil?,
+    check(nothing_rejected?(state),
           "no image was rejected, got #{state['graphics_diagnostics'].inspect}")
   end
 end
@@ -226,7 +233,7 @@ verdict('sixel-hls-colour') do
     check(at(bmp, 16, 32) == WHITE,
           'an unmodelled colour space leaves the register alone rather than ' \
           "discarding the image, got #{at(bmp, 16, 32).inspect}")
-    check(state['graphics_diagnostics'].nil?,
+    check(nothing_rejected?(state),
           "no image was rejected, got #{state['graphics_diagnostics'].inspect}")
   end
 end
@@ -261,7 +268,7 @@ verdict('sixel-wide-image-clips') do
     check(!clamped.nil?,
           'a raster declaration past the bound clamps to it rather than ' \
           "rejecting, got #{state.fetch('graphics').map { |g| g['width'] }.inspect}")
-    check(state['graphics_diagnostics'].nil?,
+    check(nothing_rejected?(state),
           "no image was rejected, got #{state['graphics_diagnostics'].inspect}")
   end
 end
@@ -281,7 +288,7 @@ verdict('sixel-last-band-at-the-bound') do
             "the last in-range row is kept and the next clipped, got height " \
             "#{tall.fetch('height')}")
     end
-    check(state['graphics_diagnostics'].nil?,
+    check(nothing_rejected?(state),
           "no image was rejected, got #{state['graphics_diagnostics'].inspect}")
   end
 end
@@ -309,7 +316,7 @@ verdict('sixel-background-select') do
           "#{at(bmp, 1, 32).inspect}")
     opaque = state.fetch('graphics').map { |g| g['width'] }
     check(opaque.length == 2, "both forms decode, got #{opaque.inspect}")
-    check(state['graphics_diagnostics'].nil?,
+    check(nothing_rejected?(state),
           "no image was rejected, got #{state['graphics_diagnostics'].inspect}")
   end
 end

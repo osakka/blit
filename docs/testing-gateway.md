@@ -100,8 +100,10 @@ tools/tests/screenshot_nonblocking_gate.sh http://DESKTOP_IP:8080 display-1
 ```
 
 The gate requires the version endpoint to respond within one second while a
-framebuffer-sized screenshot is still being downloaded. It sends no bearer
-token, so it runs only against a server without `BLIT_AUTH_TOKEN`.
+framebuffer-sized screenshot is still being downloaded. When
+`BLIT_AUTH_TOKEN` is set in its environment, both requests carry it as a
+bearer token, so it also runs against an installed host; without it the
+server must have no token configured.
 
 Poll `/v1/control/update/status` until the supervisor reports the new
 version; an interrupted upload or `403` response is not an installation.
@@ -153,8 +155,9 @@ diagnostics, and resource counts. It removes the sessions and restores the
 original topology afterward. `BLIT_HIBR_COMMAND` and `BLIT_HIBR_SESSION` can
 override the installed Hibr paths. Exit status `77` means the host does not
 currently expose enough physical displays and is not a pass. Like the
-screenshot gate it sends no bearer token, so a host with `BLIT_AUTH_TOKEN`
-set (every package install) answers it with `401`.
+screenshot gate it sends `BLIT_AUTH_TOKEN` as a bearer token when that
+variable is set; a package install has a token, and without it the host
+answers `401`.
 
 ### Font and input fixtures
 
@@ -164,7 +167,8 @@ mapped, non-blank and not `.notdef` fallback output, in the fixed 8×16
 geometry; geometric block elements must cover exact cell rows, not a cropped
 fallback bitmap. `tools/tests/font_fallback_gate.c` checks that an unmapped
 scalar outside the PSF range selects the visible replacement glyph while a
-mapped one is unchanged; no suite runs it, so build it with TCC by hand.
+mapped one is unchanged; the font suite builds it with TCC and runs it
+through `tools/tests/font_fallback_gate.sh`.
 
 The QEMU input gate needs the kernel fragment in
 `tools/probes/qemu-kernel.input.config` (`CONFIG_INPUT_EVDEV=y`,

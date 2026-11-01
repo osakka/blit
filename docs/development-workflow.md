@@ -217,7 +217,8 @@ hub that resets 66 times.
 **The deployment path is partly unexercised.** The default run drives the
 KMS code against the DRM mock, not a real card. `physical_multi_display_gate.rb`
 and `screenshot_nonblocking_gate.sh` run only with `BLIT_GATE_LIVE` (otherwise
-they are skips), and the QEMU oracle only when invoked.
+they are skips; an installed host also needs `BLIT_AUTH_TOKEN`, which both
+send as a bearer token), and the QEMU oracle only when invoked.
 `tools/probes/host_cell_pixel_agreement.rb`, which states the
 cells-versus-pixels invariant, is run by no automated path at all.
 Unprivileged-profile access to backlight and control devices is unmeasured.
