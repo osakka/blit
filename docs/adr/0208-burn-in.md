@@ -249,7 +249,25 @@ The gates that list the registry (`presentation_effects_gate`,
 
 The renderer suite on gles passes (75 passed, 1 skipped for want of QEMU).
 
-GPU time on the owner's Radeon is still to be measured. The cases are:
-- a pane with burn-in idle;
-- a pane with burn-in during a fade;
-- each with and without the pane's other effects.
+Measured on the owner's mini PC (Radeon, 0.3.33, 2026-11-03): the DP-1
+pane holding the Hibr desktop, already drawing curvature, glow, RGB shift,
+scanlines, corners, the glowing line, flicker, horizontal sync and jitter
+(so its frame clock runs at 30 Hz regardless); `gpu_total_us / gpu_frames`
+over 15 s each, ordinary desktop use with a terminal updating, the owner's
+settings restored after:
+
+| Burn-in | GPU per frame | Frames in 15 s | `burn_in_panes` |
+| --- | --- | --- | --- |
+| off | 1.782 ms | 493 | 0 |
+| 50 | 2.242 ms | 496 | 1 |
+| 100 | 2.298 ms | 496 | 1 |
+| off again | 1.747 ms | 497 | 0 |
+
+Burn-in costs about 0.5 ms of GPU time per frame on this pane (a 1920x1080
+history), and adds no frames where the clock already runs. The pass stays
+near ADR 0187's 2 ms budget. A pane without other animated effects, burning
+idle, is still to be measured.
+
+A first attempt measured nothing: the effects saved for DP-1 pane 1 apply
+to no view, because the desktop is one session in pane 2. `GET /v1/effects`
+does not say so (follow-up).
