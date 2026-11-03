@@ -1,5 +1,25 @@
 # Verification status
 
+## 2026-11-03: 0.3.31 built against Hibr 0.99.430 (module ABI 17)
+
+- **Hibr 0.99.430 moved its module ABI from 16 to 17** (`struct ent` and
+  `struct var` shrink to 56 bytes). The pins move with it:
+  `packaging/HIBR_VERSION` 0.99.430 and `packaging/HIBR_ABI` 17. The
+  optional `console-blit` adapter is compiled against the v0.99.430 header
+  (identical to b745f9a's, checked) and the server reports
+  `pinned_abi` 17. No Blit code changed; the adapter uses none of the
+  changed structures.
+- The ABI guard was seen working: before this build host had Hibr 0.99.430,
+  `native_child_provider_gate` failed with Hibr refusing the new adapter
+  (`console-blit: abi 17, shell expects 16`). With 0.99.430 installed it
+  passes.
+- No package relation to Hibr is added: the adapter is optional and the
+  packaged desktop does not load it, and ADR 0094's runtime ABI check is the
+  contract. A host still on ABI 16 logs `hibr_abi_mismatch` until Hibr is
+  upgraded.
+- **Suites** (against the 0.99.430 header): font 39/39, all 166 pass
+  (6 skip), renderer on GLES 73 pass (1 skip); no failures.
+
 ## 2026-11-03: 0.3.30 presentation effects on zoomed displays
 
 - **Zoomed displays draw every effect** (ADR 0204 revised). On the GLES
