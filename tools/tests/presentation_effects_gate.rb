@@ -181,7 +181,8 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
                      'flicker' => 'presentation', 'horizontal_sync' => 'presentation',
                      'jitter' => 'presentation', 'static_noise' => 'presentation',
                      'chroma' => 'presentation', 'phosphor' => 'presentation',
-                     'brightness' => 'presentation', 'contrast' => 'presentation' },
+                     'brightness' => 'presentation', 'contrast' => 'presentation',
+                     'burn_in' => 'presentation' },
         "effect classes: #{classes}")
   titles = get('/v1/effects')['available'].to_h { |e| [e['name'], e['title']] }
   check(titles['rgb_shift'] == 'RGB shift' && titles['corners'] == 'Corners', "effect titles: #{titles}")

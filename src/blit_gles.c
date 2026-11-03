@@ -73,6 +73,11 @@ struct BlitGles {
     GLint present_shift, present_line, present_phase;
     GLint present_flick, present_sync, present_jit, present_corner, present_zoom;
     GLint present_noise, present_tube, present_phosphor;
+    GLint present_burn, present_history;
+    /* ADR 0208: burn-in histories are faded and refreshed by blending,
+       which needs GL_EXT_blend_minmax's GL_MAX_EXT. 0 without it. */
+    int burns;
+    void (*BlendEquation)(GLenum);
     /* ADR 0204: the enlargement of a zoomed output's scene. 0 without highp
        fragment floats, which the integer mapping needs at these sizes. */
     GLuint zoom_program, zoom_buffer;
@@ -172,11 +177,22 @@ struct BlitGlesGlow {
     unsigned long long used;
 };
 
+/* ADR 0208: a burning pane's history, the size of its rectangle of the
+   scene, rows bottom-up as everything rendered here. */
+#define BLIT_GLES_BURN_SLOTS 8
+struct BlitGlesBurnSlot {
+    int x, y, width, height;
+    GLuint texture, framebuffer;
+    int claimed;
+    BlitGlesBurn state;
+};
+
 struct BlitGlesScene {
     int width, height;
     GLuint texture, framebuffer;
     struct BlitGlesGlow glow[BLIT_GLES_GLOW_SLOTS];
     unsigned long long glow_clock;
+    struct BlitGlesBurnSlot burn[BLIT_GLES_BURN_SLOTS];
 };
 
 #define BLIT_GLES_QUERIES 4
@@ -450,6 +466,12 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
    Each is behind its own uniform test, so a pane without it draws exactly
    the pixels it drew before.
 
+   ADR 0208: burn-in is in the sampling. Every read of the picture (the
+   centre and RGB shift's taps) is the brighter of the scene and the
+   pane's history, at the same point, so the trail is content: warped,
+   shifted, swayed and coloured like the rest. The history has the pane's
+   own size, its rows bottom-up as glow's copy.
+
    ADR 0204: on a zoomed output the screen pixel first becomes the logical
    pixel the zoom program shows there (the same expression), and every
    effect is evaluated at that pixel's centre: the 100% picture, enlarged
@@ -488,6 +510,8 @@ static void gles_build_present(BlitGles *gles)
         "uniform vec2 noise;\n"
         "uniform vec3 tube;\n"
         "uniform vec3 phosphor;\n"
+        "uniform sampler2D history;\n"
+        "uniform float burn;\n"
         "float hash(vec2 q, float s) { return fract(sin(dot(q, vec2(12.9898, 78.233)) + s) * 43758.5453); }\n"
         "vec2 vnoise(vec2 q) {\n"
         "  vec2 i = floor(q), f = q - i;\n"
@@ -496,6 +520,12 @@ static void gles_build_present(BlitGles *gles)
         "  vec2 c = vec2(hash(i + vec2(0.0, 1.0), jit.w), hash(i + vec2(17.0, 32.0), jit.w));\n"
         "  vec2 d = vec2(hash(i + vec2(1.0, 1.0), jit.w), hash(i + vec2(18.0, 32.0), jit.w));\n"
         "  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);\n"
+        "}\n"
+        "vec3 pick(vec2 p) {\n"
+        "  vec3 c = texture2D(scene, vec2(p.x, scene_size.y - p.y) / scene_size).rgb;\n"
+        "  if (burn > 0.0)\n"
+        "    c = max(c, texture2D(history, vec2(p.x - rect.x, rect.y + rect.w - p.y) / rect.zw).rgb);\n"
+        "  return c;\n"
         "}\n"
         "float cover(vec2 local) {\n"
         "  float outside = 0.0;\n"
@@ -521,11 +551,10 @@ static void gles_build_present(BlitGles *gles)
         "  if (jit.x > 0.0) t += (vnoise(t * rect.zw / jit.z) - 0.5) * jit.xy;\n"
         "  vec2 lo = rect.xy + 0.5, hi = rect.xy + rect.zw - 0.5;\n"
         "  vec2 p = clamp(rect.xy + t * rect.zw, lo, hi);\n"
-        "  vec3 c = texture2D(scene, vec2(p.x, scene_size.y - p.y) / scene_size).rgb;\n"
+        "  vec3 c = pick(p);\n"
         "  if (shift > 0.0) {\n"
         "    vec2 pl = clamp(p - vec2(shift, 0.0), lo, hi), pr = clamp(p + vec2(shift, 0.0), lo, hi);\n"
-        "    vec3 l = texture2D(scene, vec2(pl.x, scene_size.y - pl.y) / scene_size).rgb;\n"
-        "    vec3 r = texture2D(scene, vec2(pr.x, scene_size.y - pr.y) / scene_size).rgb;\n"
+        "    vec3 l = pick(pl), r = pick(pr);\n"
         "    c = vec3(dot(vec3(l.r, c.r, r.r), vec3(0.1, 0.6, 0.3)),\n"
         "             dot(vec3(l.g, c.g, r.g), vec3(0.2, 0.6, 0.2)),\n"
         "             dot(vec3(l.b, c.b, r.b), vec3(0.3, 0.6, 0.1)));\n"
@@ -614,6 +643,8 @@ static void gles_build_present(BlitGles *gles)
     gles->present_noise = gles->glGetUniformLocation(gles->present_program, "noise");
     gles->present_tube = gles->glGetUniformLocation(gles->present_program, "tube");
     gles->present_phosphor = gles->glGetUniformLocation(gles->present_program, "phosphor");
+    gles->present_burn = gles->glGetUniformLocation(gles->present_program, "burn");
+    gles->present_history = gles->glGetUniformLocation(gles->present_program, "history");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -687,6 +718,26 @@ static void gles_build_zoom(BlitGles *gles)
 int blit_gles_zooms(const BlitGles *gles)
 {
     return gles != NULL && gles->zoom_program != 0;
+}
+
+/* ADR 0208: burn-in fades its history by a reverse-subtract blend and
+   refreshes it by a max blend. glBlendEquation is GLES 2; GL_MAX_EXT is
+   GL_EXT_blend_minmax, which every Mesa driver exposes. Without the
+   presentation pass there is nothing to draw a history with. */
+static void gles_load_burn(BlitGles *gles)
+{
+    const char *extensions = (const char *)gles->glGetString(GL_EXTENSIONS);
+    gles->burns = 0;
+    if (!gles->presents || extensions == NULL ||
+        strstr(extensions, "GL_EXT_blend_minmax") == NULL ||
+        !BLIT_LOAD(gles->gl_library, BlendEquation, "glBlendEquation"))
+        return;
+    gles->burns = 1;
+}
+
+int blit_gles_burns(const BlitGles *gles)
+{
+    return gles != NULL && gles->burns;
 }
 
 static void gles_load_timer_queries(BlitGles *gles)
@@ -844,6 +895,7 @@ static BlitGles *gles_open_common(int surfaceless, int drm_fd, char *error,
     gles_load_timer_queries(gles);
     gles_build_present(gles);
     gles_build_zoom(gles);
+    gles_load_burn(gles);
     return gles;
 failed:
     blit_gles_close(gles);
@@ -1408,12 +1460,20 @@ static void gles_glow_free(BlitGles *gles, struct BlitGlesGlow *glow)
     memset(glow, 0, sizeof(*glow));
 }
 
+static void gles_burn_free(BlitGles *gles, struct BlitGlesBurnSlot *slot)
+{
+    if (slot->framebuffer) gles->glDeleteFramebuffers(1, &slot->framebuffer);
+    if (slot->texture) gles->glDeleteTextures(1, &slot->texture);
+    memset(slot, 0, sizeof(*slot));
+}
+
 void blit_gles_scene_close(BlitGles *gles, BlitGlesScene *scene)
 {
     int i;
     if (gles == NULL || scene == NULL) return;
     gles_flush(gles);
     for (i = 0; i < BLIT_GLES_GLOW_SLOTS; ++i) gles_glow_free(gles, &scene->glow[i]);
+    for (i = 0; i < BLIT_GLES_BURN_SLOTS; ++i) gles_burn_free(gles, &scene->burn[i]);
     if (scene->framebuffer) gles->glDeleteFramebuffers(1, &scene->framebuffer);
     if (scene->texture) gles->glDeleteTextures(1, &scene->texture);
     gles->batch_texture = (GLuint)-1;
@@ -1562,6 +1622,114 @@ int blit_gles_scene_glow(BlitGles *gles, BlitGlesScene *scene,
     return 0;
 }
 
+/* ADR 0208: draw the scene's rectangle into a history, 1:1 with the
+   scene's nearest filter: a copy with blending off, or with the max blend
+   after `levels` (0..255) have been subtracted from every texel. In whole
+   levels of 1/255 both are exact in 8 bits, and a texel never drops
+   below 0. */
+static void gles_burn_draw(BlitGles *gles, BlitGlesScene *scene,
+                           struct BlitGlesBurnSlot *slot, int levels, int copy)
+{
+    gles->glBindFramebuffer(GL_FRAMEBUFFER, slot->framebuffer);
+    gles->bound_height = slot->height;
+    gles->glViewport(0, 0, slot->width, slot->height);
+    gles->glUniform2f(gles->compose_size, (GLfloat)slot->width, (GLfloat)slot->height);
+    gles->glDisable(GL_SCISSOR_TEST);
+    if (copy) {
+        gles->glDisable(GL_BLEND);
+    } else {
+        if (levels > 0) {
+            unsigned grey = (unsigned)(levels > 255 ? 255 : levels);
+            gles->BlendEquation(GL_FUNC_REVERSE_SUBTRACT);
+            gles->glBlendFunc(GL_ONE, GL_ONE);
+            blit_gles_rect(gles, 0, 0, slot->width, slot->height,
+                           (grey << 16) | (grey << 8) | grey, 255);
+            gles_flush(gles);
+        }
+        gles->BlendEquation(GL_MAX_EXT);
+    }
+    blit_gles_quad(gles, BLIT_GLES_PREMULT, scene->texture, scene->width, scene->height,
+                   slot->x, scene->height - slot->y, slot->width, -slot->height,
+                   0, 0, slot->width, slot->height, 0);
+    gles_flush(gles);
+    gles->BlendEquation(GL_FUNC_ADD);
+    gles->glEnable(GL_BLEND);
+    gles->glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    /* Back to the frame being composed. */
+    blit_gles_scene_end(gles);
+}
+
+BlitGlesBurn *blit_gles_scene_burn(BlitGles *gles, BlitGlesScene *scene,
+                                   int x, int y, int width, int height,
+                                   int create, int *fresh)
+{
+    struct BlitGlesBurnSlot *slot = NULL;
+    int i;
+    if (fresh != NULL) *fresh = 0;
+    if (gles == NULL || scene == NULL || !gles->burns || width < 1 || height < 1 ||
+        x < 0 || y < 0 || x + width > scene->width || y + height > scene->height)
+        return NULL;
+    for (i = 0; i < BLIT_GLES_BURN_SLOTS; ++i) {
+        struct BlitGlesBurnSlot *at = &scene->burn[i];
+        if (at->texture && at->x == x && at->y == y &&
+            at->width == width && at->height == height) {
+            at->claimed = 1;
+            return &at->state;
+        }
+        if (slot == NULL && at->texture == 0) slot = at;
+    }
+    /* No free slot is a pane past the present list's limit: none. */
+    if (!create || slot == NULL) return NULL;
+    gles_flush(gles);
+    slot->x = x; slot->y = y; slot->width = width; slot->height = height;
+    slot->texture = gles_new_texture(gles, width, height);
+    gles->glGenFramebuffers(1, &slot->framebuffer);
+    gles->glBindFramebuffer(GL_FRAMEBUFFER, slot->framebuffer);
+    gles->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                 GL_TEXTURE_2D, slot->texture, 0);
+    gles->batch_texture = (GLuint)-1;
+    if (gles->glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        gles_burn_free(gles, slot);
+        blit_gles_scene_end(gles);
+        return NULL;
+    }
+    gles_burn_draw(gles, scene, slot, 0, 1);
+    slot->claimed = 1;
+    if (fresh != NULL) *fresh = 1;
+    return &slot->state;
+}
+
+void blit_gles_scene_burn_fade(BlitGles *gles, BlitGlesScene *scene,
+                               BlitGlesBurn *burn, int levels)
+{
+    int i;
+    if (gles == NULL || scene == NULL || burn == NULL || !gles->burns) return;
+    for (i = 0; i < BLIT_GLES_BURN_SLOTS; ++i)
+        if (&scene->burn[i].state == burn && scene->burn[i].texture) {
+            gles_flush(gles);
+            gles_burn_draw(gles, scene, &scene->burn[i], levels, 0);
+            return;
+        }
+}
+
+int blit_gles_scene_burn_release(BlitGles *gles, BlitGlesScene *scene)
+{
+    int i, kept = 0;
+    if (gles == NULL || scene == NULL) return 0;
+    for (i = 0; i < BLIT_GLES_BURN_SLOTS; ++i) {
+        struct BlitGlesBurnSlot *slot = &scene->burn[i];
+        if (slot->texture == 0) continue;
+        if (!slot->claimed) {
+            gles_flush(gles);
+            gles_burn_free(gles, slot);
+            continue;
+        }
+        slot->claimed = 0;
+        ++kept;
+    }
+    return kept;
+}
+
 /* ADR 0204: the plain copy of a zoomed scene, to the whole frame. */
 static void gles_scene_zoom(BlitGles *gles, BlitGlesScene *scene, int zoom)
 {
@@ -1608,6 +1776,8 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
     for (i = 0; i < count; ++i) {
         const BlitGlesPresentPane *pane = &panes[i];
         struct BlitGlesGlow *glow = NULL;
+        struct BlitGlesBurnSlot *burn = NULL;
+        int linear;
         /* The quad covers the pane's frame pixels; the program works in
            its scene rectangle (ADR 0204: logical on a zoomed output). */
         float x0 = (float)pane->frame_x, y0 = (float)pane->frame_y;
@@ -1622,6 +1792,12 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
                     scene->glow[j].y == pane->y && scene->glow[j].width == pane->width &&
                     scene->glow[j].height == pane->height)
                     glow = &scene->glow[j];
+        if (pane->burn)
+            for (j = 0; j < BLIT_GLES_BURN_SLOTS; ++j)
+                if (scene->burn[j].texture && scene->burn[j].x == pane->x &&
+                    scene->burn[j].y == pane->y && scene->burn[j].width == pane->width &&
+                    scene->burn[j].height == pane->height)
+                    burn = &scene->burn[j];
         quad[0] = x0; quad[1] = y0; quad[2] = x1; quad[3] = y0; quad[4] = x0; quad[5] = y1;
         quad[6] = x1; quad[7] = y0; quad[8] = x1; quad[9] = y1; quad[10] = x0; quad[11] = y1;
         gles_flush(gles);
@@ -1655,15 +1831,25 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glUniform2f(gles->present_glow_size,
                           glow ? (GLfloat)glow->quarter_width : 1.0f,
                           glow ? (GLfloat)glow->quarter_height : 1.0f);
+        gles->Uniform1f(gles->present_burn, burn ? 1.0f : 0.0f);
         gles->glUniform1i(gles->present_scene, 0);
         gles->glUniform1i(gles->present_glow, 1);
+        gles->glUniform1i(gles->present_history, 2);
         gles->glActiveTexture(GL_TEXTURE1);
         gles->glBindTexture(GL_TEXTURE_2D, glow ? glow->quarter : gles->white);
+        /* Under a warp, or between pixels for RGB shift, the mapping is not
+           1:1: linear, or glyph edges jag. The history is read as the scene
+           is. */
+        linear = pane->k > 0 || pane->shift_px > 0 || pane->sync_scale > 0 || pane->jitter > 0;
+        gles->glActiveTexture(GL_TEXTURE2);
+        gles->glBindTexture(GL_TEXTURE_2D, burn ? burn->texture : gles->white);
+        if (burn) {
+            gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+            gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+        }
         gles->glActiveTexture(GL_TEXTURE0);
         gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
-        /* Under a warp, or between pixels for RGB shift, the mapping is not
-           1:1: linear, or glyph edges jag. */
-        if (pane->k > 0 || pane->shift_px > 0 || pane->sync_scale > 0 || pane->jitter > 0) {
+        if (linear) {
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         }
@@ -1677,7 +1863,7 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glDrawArrays(GL_TRIANGLES, 0, 6);
         ++gles->draw_calls;
         gles->vertices_drawn += 6;
-        if (pane->k > 0 || pane->shift_px > 0 || pane->sync_scale > 0 || pane->jitter > 0) {
+        if (linear) {
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }

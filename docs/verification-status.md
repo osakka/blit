@@ -1,5 +1,29 @@
 # Verification status
 
+## 2026-11-03: 0.3.33 burn-in
+
+- **Burn-in** (ADR 0208): `burn_in {amount}`, phosphor persistence. Each
+  burning pane keeps one RGBA8 history texture in logical scene
+  coordinates. Before the scene is recomposed the history fades by whole
+  levels (linear, as cool-retro-term: gone 0.16 s + 1.44 s x amount/100
+  after a change, the remainder carried so the speed does not depend on
+  the frame rate); after it, a max blend keeps the brighter of history and
+  scene. The pass reads max(scene, history) at every sample, so the trail
+  is warped, shifted and tinted like the content; glow is still built from
+  the scene. The frame clock runs only while a trail is fading. A history
+  is keyed by its pane's logical rectangle and freed when no pane claims it
+  (off, resize, layout change); a new one starts as a copy of the scene.
+  Without `GL_EXT_blend_minmax` only burn-in is unavailable (`no blend
+  minmax`); on the CPU compositor it is kept and reported `cpu compositor`.
+  Off: no texture, no draw, byte-identical (zoomed gate's 100% capture).
+  `burn_in_gate` checks the fade against the C rule, black by 1.6 s, the
+  clock stopping after, amount 30 gone by 0.59 s, layout reset, zoomed 2x2,
+  off and pane isolation. It fails on 0.3.32 and on three mutants (shader
+  not reading history; clock not extended; fade after recompose).
+  GPU memory: 4 bytes per logical pixel per burning pane.
+- **Suites:** font 39/39, all 169 pass (6 skip), renderer on GLES 75 pass
+  (1 skip); no failures.
+
 ## 2026-11-03: 0.3.32 tube colour and static noise; Hibr identity follows the disk
 
 - **Five presentation effects** (ADR 0207): `static_noise` (animated grain,

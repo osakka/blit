@@ -657,6 +657,27 @@ effects:
     blit_gles_clip(kms->gles, 0, 0, 0, 0);
 }
 
+/* ADR 0208: fade a pane's burn-in history up to `now`, against the scene
+   as it still is: the picture the pane showed until this frame, which
+   stays lit at full in the history however long it was held, and only
+   then starts to fade. A history with nothing left to fade is the scene
+   itself, so it is left alone, and only its clock moves on. */
+static void kms_gles_burn_fade(BlitKms *kms, KmsOutput *output, BlitGlesBurn *burn,
+                               long long fade_us, long long now)
+{
+    int levels;
+    if (burn->faded_us == now) return;   /* the same pane, twice */
+    levels = blit_effect_burn_in_levels(fade_us, now - burn->faded_us, &burn->carry);
+    burn->faded_us = now;
+    if (burn->faded >= BLIT_EFFECT_BURN_IN_LEVELS) {
+        burn->carry = 0;
+        return;
+    }
+    blit_gles_scene_burn_fade(kms->gles, output->gles_scene, burn, levels);
+    burn->faded += levels;
+    if (burn->faded > BLIT_EFFECT_BURN_IN_LEVELS) burn->faded = BLIT_EFFECT_BURN_IN_LEVELS;
+}
+
 /* The output's frame: the scene (views recomposed as needed, held ones
    kept), then overlays, the panel and the pointer over it, as the CPU path
    layers them.
@@ -676,6 +697,8 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     int drawn_x[BLIT_KMS_PRESENT_PANES], drawn_y[BLIT_KMS_PRESENT_PANES];
     int v, present_count = 0, drawn_count = 0, everything_drawn = 0;
     int scene_width = output->mode.hdisplay, scene_height = output->mode.vdisplay;
+    int burn_fading = 0, burn_faded = BLIT_EFFECT_BURN_IN_LEVELS;
+    long long now = kms_now_us();
     error[0] = '\0';
     if (r == NULL) {
         kms_gles_detach(kms, output, "no GPU atlas");
@@ -703,6 +726,19 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     if (blit_gles_frame_begin(kms->gles, output->gles_target, error, sizeof(error)) < 0) {
         kms_gles_detach(kms, output, error);
         return -1;
+    }
+    /* ADR 0208: each burning pane's history fades to now, before the scene
+       changes under it. A pane without one yet gets it after composing,
+       from the new scene. */
+    for (v = 0; blit_gles_burns(kms->gles) && v < view_count; ++v) {
+        const BlitKmsSurfaceView *view = &views[v];
+        long long fade_us = blit_effect_burn_in_us(&view->effects);
+        BlitGlesBurn *burn;
+        if (view->display_id != output->info.id || fade_us <= 0) continue;
+        burn = blit_gles_scene_burn(kms->gles, output->gles_scene, view->effect_x,
+                                    view->effect_y, view->effect_width,
+                                    view->effect_height, 0, NULL);
+        if (burn != NULL) kms_gles_burn_fade(kms, output, burn, fade_us, now);
     }
     if (!hold_scene) {
         int everything = full || output->gles_scene_fresh;
@@ -816,11 +852,39 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
             blit_gles_scene_glow(kms->gles, output->gles_scene, pane->x, pane->y,
                                  pane->width, pane->height) == 0)
             ++output->info.effects_glow_rebuilds;
+        /* ADR 0208: a change puts what the pane showed until now, already
+           in the history, at the start of its fade. A new history is the
+           scene itself: nothing to fade. */
+        pane->burn = 0;
+        if (blit_effect_burn_in_us(&view->effects) > 0) {
+            int fresh = 0;
+            BlitGlesBurn *burn = blit_gles_scene_burn(kms->gles, output->gles_scene,
+                                                      pane->x, pane->y, pane->width,
+                                                      pane->height, 1, &fresh);
+            if (burn != NULL) {
+                if (fresh) {
+                    burn->faded_us = now;
+                    burn->carry = 0;
+                    burn->faded = BLIT_EFFECT_BURN_IN_LEVELS;
+                } else if (changed) {
+                    burn->faded = 0;
+                }
+                pane->burn = 1;
+                burn_fading |= burn->faded < BLIT_EFFECT_BURN_IN_LEVELS;
+                if (burn->faded < burn_faded) burn_faded = burn->faded;
+            }
+        }
         ++present_count;
     }
     blit_gles_scene_present(kms->gles, output->gles_scene, present, present_count,
                             output->zoom);
     output->info.effects_present_quads = (unsigned long long)present_count;
+    /* Histories no pane claimed this frame -- burn-in off, the pane moved,
+       resized or gone -- are freed now. */
+    output->info.effects_burn_in_panes =
+        blit_gles_scene_burn_release(kms->gles, output->gles_scene);
+    output->info.effects_burn_in_fading = burn_fading;
+    output->info.effects_burn_in_faded = burn_faded;
     for (v = 0; overlays != NULL && v < overlay_count; ++v) {
         const BlitKmsOverlay *overlay = &overlays[v];
         if (overlay->display_id != output->info.id || overlay->width < 1 ||

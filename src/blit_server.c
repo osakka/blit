@@ -3729,7 +3729,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 "\"effects\":{\"cpu_last_ms\":%.3f,\"cpu_max_ms\":%.3f,"
                 "\"gpu_quads\":%llu,\"present_panes\":%llu,\"glow_rebuilds\":%llu,"
                 "\"presentation_unavailable\":\"%s\",\"animation_hz\":%d,"
-                "\"animation_frames\":%llu,\"animation_phase\":%.4f},"
+                "\"animation_frames\":%llu,\"animation_phase\":%.4f,"
+                "\"burn_in_panes\":%llu,\"burn_in_faded\":%d},"
                 "\"flip\":{\"last_ms\":%.3f,\"max_ms\":%.3f,"
                 "\"total_us\":%llu,\"count\":%llu,"
                 "\"timing\":\"%s\",\"lead_us\":%llu,"
@@ -3764,6 +3765,8 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 output_animated(runtime, i) ? runtime->effects_animation_hz : 0,
                 have_kms_info ? kms_info.effects_animation_frames : 0ULL,
                 have_kms_info ? kms_info.effects_animation_phase : 0.0,
+                have_kms_info ? kms_info.effects_burn_in_panes : 0ULL,
+                have_kms_info ? kms_info.effects_burn_in_faded : 255,
                 have_kms_info ? kms_info.last_flip_ms : 0.0,
                 have_kms_info ? kms_info.max_flip_ms : 0.0,
                 have_kms_info ? kms_info.flip_wait_total_us : 0ULL,
@@ -21372,10 +21375,21 @@ static const char *pane_presentation_unavailable(const BlitRuntime *runtime,
     return blit_kms_presentation_unavailable(runtime->kms, index);
 }
 
+/* ADR 0208: why a pane's burn-in is not drawn, or "" when it is. */
+static const char *pane_burn_in_unavailable(const BlitRuntime *runtime,
+                                            const BlitPane *pane)
+{
+    int index = display_index_for_id(runtime, pane->display_id);
+    if (runtime->kms == NULL || index < 0) return "cpu compositor";
+    return blit_kms_burn_in_unavailable(runtime->kms, index);
+}
+
 /* ADR 0188: whether an output's frame clock should run -- a pane of it has
    an animated effect it can draw, and the output is presenting: the display
    powered (DPMS on, or never read), its KMS output presenting, and Blit
-   holding the VT. Anything else, and no tick, no frame, no cost. */
+   holding the VT. Anything else, and no tick, no frame, no cost.
+   ADR 0208: burn-in is not animated, but while its last frame left light
+   to fade, the output is, and only until that light is gone. */
 static int output_animated(const BlitRuntime *runtime, int output_index)
 {
     char display_id[64];
@@ -21387,6 +21401,7 @@ static int output_animated(const BlitRuntime *runtime, int output_index)
          runtime->displays[display_index].power_state != 0) ||
         !blit_kms_output_presenting(runtime->kms, display_index))
         return 0;
+    if (blit_kms_burn_in_fading(runtime->kms, display_index)) return 1;
     snprintf(display_id, sizeof(display_id), "display-%llu",
              runtime->outputs[output_index].display_id);
     for (i = 0; i < runtime->pane_count; ++i) {
@@ -21542,11 +21557,13 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
         json_appendf(body, capacity, &used, "}");
         /* Saved presentation effects this pane cannot draw: kept, and said. */
         {
-            const char *reason = pane_presentation_unavailable(runtime, pane);
+            const char *presentation = pane_presentation_unavailable(runtime, pane);
             first = 1;
             json_appendf(body, capacity, &used, ",\"unavailable\":{");
-            for (id = 0; reason[0] && id < BLIT_EFFECT_COUNT; ++id) {
-                if (set.value[id] == 0 ||
+            for (id = 0; id < BLIT_EFFECT_COUNT; ++id) {
+                const char *reason = id == BLIT_EFFECT_BURN_IN ?
+                    pane_burn_in_unavailable(runtime, pane) : presentation;
+                if (!reason[0] || set.value[id] == 0 ||
                     blit_effect_specs[id].effect_class != BLIT_EFFECT_PRESENTATION)
                     continue;
                 json_appendf(body, capacity, &used, "%s\"%s\":\"%s\"", first ? "" : ",",

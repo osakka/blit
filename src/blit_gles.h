@@ -148,11 +148,40 @@ typedef struct {
     double noise, noise_seed;
     double chroma, phosphor[3];
     double brightness, contrast;
+    /* ADR 0208: draw the pane's burn-in history (blit_gles_scene_burn) */
+    int burn;
 } BlitGlesPresentPane;
 /* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
    pane's blurred copy from its rectangle of the scene (halved twice). */
 int blit_gles_scene_glow(BlitGles *gles, BlitGlesScene *scene,
                          int x, int y, int width, int height);
+/* ADR 0208: a pane's burn-in history -- its rectangle of the scene with
+   the light it showed fading out -- one texture per burning pane, faded
+   and refreshed by blending. Needs GL_EXT_blend_minmax: without it,
+   blit_gles_burns is 0 and burn-in is unavailable. */
+int blit_gles_burns(const BlitGles *gles);
+/* The caller's book-keeping for one history, kept with its texture so
+   both are made and freed together: the time faded up to, the remainder
+   carried (blit_effect_burn_in_levels), and the levels faded since the
+   pane last changed, 255 when nothing is left to fade. */
+typedef struct {
+    long long faded_us, carry;
+    int faded;
+} BlitGlesBurn;
+/* Inside blit_gles_frame_begin/end: the history of the rectangle, claimed
+   for this frame, or NULL. With `create`, a rectangle without one gets
+   one, a copy of the scene there, and `*fresh` is set: nothing fades in a
+   new history, so no pixel of a previous layout or another pane can. */
+BlitGlesBurn *blit_gles_scene_burn(BlitGles *gles, BlitGlesScene *scene,
+                                   int x, int y, int width, int height,
+                                   int create, int *fresh);
+/* history = max(history - levels / 255, the scene's rectangle now). */
+void blit_gles_scene_burn_fade(BlitGles *gles, BlitGlesScene *scene,
+                               BlitGlesBurn *burn, int levels);
+/* Once per frame, after the present list: frees every history not claimed
+   since the last call, so a pane that stops burning, moves, resizes or
+   goes keeps nothing. Returns how many are kept. */
+int blit_gles_scene_burn_release(BlitGles *gles, BlitGlesScene *scene);
 /* Inside blit_gles_frame_begin/end: the plain copy, then each pane drawn
    again by the presentation program over its own rectangle. ADR 0204: at
    a zoom over 100 the copy is enlarged nearest-neighbour -- frame (x, y)

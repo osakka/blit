@@ -187,7 +187,7 @@ assert_equal({ 'corners' => 'local', 'curvature' => 'presentation', 'glow' => 'p
                'jitter' => 'presentation', 'scanlines' => 'local',
                'static_noise' => 'presentation', 'chroma' => 'presentation',
                'phosphor' => 'presentation', 'brightness' => 'presentation',
-               'contrast' => 'presentation' },
+               'contrast' => 'presentation', 'burn_in' => 'presentation' },
              effects.fetch('available').to_h { |e| [e.fetch('name'), e.fetch('class')] },
              'available pane effects and their classes')
 assert_equal(true, effects.fetch('enabled'), 'effects are switched on by default')

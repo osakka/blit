@@ -768,6 +768,7 @@ apply live, with no restart, and are saved:
 | `phosphor` | presentation | `color` | 0–16777215 | The colour chroma tints toward, as 0xRRGGBB; 0 is none (white) |
 | `brightness` | presentation | `level` | −100–100 | The picture times 1 + level/100; 0 neutral, −100 black |
 | `contrast` | presentation | `level` | −100–100 | About mid-grey, times 1 + level/100; 0 neutral, −100 flat grey |
+| `burn_in` | presentation | `amount` | 0–100 | Phosphor persistence: what the pane stops showing fades to black over 0.16–1.6 s (ADR 0208) |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.
@@ -811,6 +812,19 @@ apply live, with no restart, and are saved:
   before the corners and glass scanlines. Brightness and contrast are the
   only signed parameters; `GET /v1/effects` gives each effect's `minimum`
   beside its `maximum`. A phosphor with chroma at 0 changes nothing.
+- **Burn-in (ADR 0208):** each burning pane keeps a history texture of its
+  logical rectangle. Every presented frame, before the scene changes, the
+  history loses `elapsed × 255 / fade` whole levels (the remainder carried)
+  and takes the brighter of itself and the picture still shown; the pass
+  reads the brighter of scene and history wherever it samples, so the
+  trail is warped, shifted and coloured like the content. The fade is
+  0.16 s + 1.44 s × amount/100, linear, to exactly black. It is not
+  `animated`: the frame clock runs only while a trail is fading, then
+  stops. A change of the pane's rectangle (layout, resize, zoom, mode)
+  starts a fresh history with nothing fading; switched off, the texture is
+  freed. It needs `GL_EXT_blend_minmax`; without it, it is reported
+  unavailable as `no blend minmax`. Glow is built from the scene, so the
+  trail does not bloom.
 - **Pointer:** under curvature a click reaches the cell the screen shows at
   that point; a click in the black margin reaches the nearest edge cell.
 - **Cost:** each output's render diagnostics report it:
@@ -818,6 +832,8 @@ apply live, with no restart, and are saved:
   - `present_panes`, the panes the presentation pass drew last frame (0 when
     no pane has presentation effects: the plain path);
   - `glow_rebuilds`, blurred copies rebuilt, only when a frame changed;
+  - `burn_in_panes`, burn-in histories held, and `burn_in_faded`, the levels
+    the freshest trail has faded (255 when nothing fades);
   - `presentation_unavailable`, empty when the output can draw them.
 
 `GET /v1/topology.outputs[].layout` reports each actual grid. Its top-level

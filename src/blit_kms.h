@@ -188,6 +188,13 @@ typedef struct {
        and the glowing line's phase in the last frame that drew it. */
     unsigned long long effects_animation_frames;
     double effects_animation_phase;
+    /* ADR 0208: burn-in histories held (one texture per burning pane),
+       whether one still has light to fade -- the frame clock runs only
+       then -- and the levels (0..255) the freshest trail has faded since
+       its pane changed; 255 with nothing fading. */
+    unsigned long long effects_burn_in_panes;
+    int effects_burn_in_fading;
+    int effects_burn_in_faded;
     /* ADR 0203: frames presented only because the panel changed; frames
        presented for new picture pixels (Kitty, Sixel or a descriptor frame);
        frames for the pointer alone. With effects_animation_frames, each
@@ -216,6 +223,12 @@ int blit_kms_display_count(const BlitKms *kms);
 /* ADR 0187: why presentation effects are not drawn on an output, "" when
    they are -- without copying its whole display info, for the pointer path. */
 const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index);
+/* ADR 0208: why burn-in is not drawn on an output, "" when it is: the
+   presentation reason, or "no blend minmax" where the GPU cannot fade a
+   history. */
+const char *blit_kms_burn_in_unavailable(const BlitKms *kms, int index);
+/* ADR 0208: whether an output's last frame left burn-in light to fade. */
+int blit_kms_burn_in_fading(const BlitKms *kms, int index);
 /* ADR 0188: outputs the next blit_kms_present must present even with
    nothing changed -- an animated effect is due -- with the scene as it is.
    Consumed by that present. */

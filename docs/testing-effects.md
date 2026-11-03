@@ -1,6 +1,6 @@
 # Effect testing
 
-Pane effects (ADR 0186, 0187, 0188, 0190, 0207) are renderer state, not terminal state. They are
+Pane effects (ADR 0186, 0187, 0188, 0190, 0207, 0208) are renderer state, not terminal state. They are
 kept per pane in the settings document, keyed by output name and pane ordinal,
 and applied live:
 
@@ -140,6 +140,48 @@ On `native` it checks that presentation effects stay unavailable
 
 ```sh
 BLIT_GATE_BACKEND=gles ruby tools/tests/zoomed_effects_gate.rb
+```
+
+## Burn-in
+
+`tools/tests/burn_in_gate.rb` (ADR 0208, renderer suite) splits one display
+1x2. Pane 1 shows a white block of ten by three cells on black, and each
+line sent to its session moves the block between two places in one write;
+pane 2 never has effects. A small C probe compiles `blit_effect_burn_in_us`
+and `blit_effect_burn_in_levels` from `src/blit_effects.h`.
+
+On `gles` it checks:
+- **switched on:** a new history is the picture, so the pane is
+  byte-identical to the plain capture, and an idle screen presents nothing;
+- **the fade:** after a move held for seconds, every capture shows the old
+  place as one grey, falling monotonically. Its fade is the shared rule for
+  the time since the input, within the latency to the screen, and the
+  `burn_in_faded` level the diagnostics report for the frames on either side
+  of the capture, within 1. The new place is white;
+- **the end:** black by the fade time, the pane byte-identical to the plain
+  capture, `burn_in_faded` 255, `animation_hz` 0 and no frames when idle;
+- **the clock:** with nothing capturing, a fade alone makes animation
+  frames (at least a third of 30 Hz, at most the full rate over the fade),
+  and then none;
+- **a trail laid during a fade:** at 10 Hz, three times, a block moved while
+  the previous trail still fades starts its own fade at full, matching the
+  reported level within 1. Fading after the new picture would lose up to a
+  tick's levels;
+- **the amount:** at 30 the trail is visible a third of the way through,
+  and gone by its 0.59 s;
+- **layout:** a change to 2x1 mid-fade leaves no grey in the new pane, and
+  nothing fading;
+- **zoom:** at 200% every 2x2 block is one colour, and the trail covers
+  exactly the 100% trail's pixels enlarged;
+- **off:** no pass, no history texture, no trail;
+- **isolation:** pane 2 is byte-identical.
+
+On `native` it checks that burn-in is kept, reported unavailable (`cpu
+compositor`), draws no trail and costs no frames.
+
+```sh
+ruby tools/tests/burn_in_gate.rb
+BLIT_GATE_BACKEND=gles ruby tools/tests/burn_in_gate.rb
 ```
 
 ## Bounded graphic overlays

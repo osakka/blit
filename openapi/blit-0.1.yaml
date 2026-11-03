@@ -3114,11 +3114,16 @@ components:
                       plain path); `presentation_unavailable` is empty when
                       this output can draw presentation effects, else the
                       reason; `animation_hz` is 0 while no animated effect
-                      runs.
+                      runs and no burn-in fades. ADR 0208: `burn_in_panes`
+                      is the burn-in histories held (one texture per
+                      burning pane); `burn_in_faded` the levels (0-255) the
+                      freshest trail has faded since its pane changed, 255
+                      when nothing is fading.
                     required: [cpu_last_ms, cpu_max_ms, gpu_quads,
                                present_panes, glow_rebuilds,
                                presentation_unavailable, animation_hz,
-                               animation_frames, animation_phase]
+                               animation_frames, animation_phase,
+                               burn_in_panes, burn_in_faded]
                     properties:
                       cpu_last_ms: {type: number, minimum: 0}
                       cpu_max_ms: {type: number, minimum: 0}
@@ -3129,6 +3134,8 @@ components:
                       animation_hz: {type: integer, minimum: 0, maximum: 30}
                       animation_frames: {type: integer, minimum: 0}
                       animation_phase: {type: number, minimum: 0}
+                      burn_in_panes: {type: integer, minimum: 0}
+                      burn_in_faded: {type: integer, minimum: 0, maximum: 255}
                     additionalProperties: false
                   flip:
                     type: object
@@ -3769,7 +3776,7 @@ components:
         Local effects (scanlines, corners; ADR 0186) are applied in a fixed
         order over each pane's pixel region by both compositors.
         Presentation effects (curvature, glow and the rest; ADR 0187, 0188,
-        0190, 0207) are drawn by the GLES compositor as it presents the
+        0190, 0207, 0208) are drawn by the GLES compositor as it presents the
         frame; when a pane's curvature is
         drawn its scanlines are drawn on the glass instead. All are beneath
         the pointer and API overlays. In settings, `enabled: false` switches
@@ -3905,6 +3912,21 @@ components:
               minimum: -100
               maximum: 100
               description: "ADR 0207: 0.5 + (c - 0.5) x (1 + level/100), clamped; 0 is neutral, -100 flat grey."
+        burn_in:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: >-
+                ADR 0208: what the pane stops showing fades linearly to
+                black over 0.16 s + 1.44 s x amount/100 (1.6 s at 100),
+                in whole levels of 1/255; the picture is the brighter of
+                the scene and that history. Uses the frame clock only
+                while something fades.
     EffectState:
       type: object
       required: [revision, enabled, available, panes, configure]
@@ -3920,8 +3942,12 @@ components:
             additionalProperties: false
             required: [name, title, parameter, minimum, maximum, class, animated]
             properties:
-              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter, static_noise, chroma, phosphor, brightness, contrast]}
-              animated: {type: boolean, description: Driven by the frame clock (ADR 0188).}
+              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter, static_noise, chroma, phosphor, brightness, contrast, burn_in]}
+              animated:
+                type: boolean
+                description: >-
+                  Driven by the frame clock (ADR 0188). burn_in is false:
+                  it asks for frames only while a trail fades (ADR 0208).
               title: {type: string, description: "The effect's name for people, e.g. RGB shift."}
               parameter: {type: string}
               minimum:
@@ -3952,7 +3978,8 @@ components:
                 description: >-
                   Saved presentation effects this pane cannot draw, by name,
                   with the reason ("cpu compositor", "no highp fragment
-                  precision"). They are kept, not dropped.
+                  precision"; burn_in also "no blend minmax"). They are
+                  kept, not dropped.
                 additionalProperties: {type: string}
         configure: {type: string}
       additionalProperties: false

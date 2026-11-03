@@ -1993,6 +1993,10 @@ static void kms_gles_detach(BlitKms *kms, KmsOutput *output, const char *reason)
         output->gles_target = NULL;
         output->cpu_scene_stale = 1;
     }
+    /* ADR 0208: no history, so nothing fading and no frame clock for it. */
+    output->info.effects_burn_in_panes = 0;
+    output->info.effects_burn_in_fading = 0;
+    output->info.effects_burn_in_faded = 255;
     snprintf(output->info.compositor, sizeof(output->info.compositor), "cpu");
     snprintf(output->info.presentation_unavailable,
              sizeof(output->info.presentation_unavailable), "cpu compositor");
@@ -2295,6 +2299,19 @@ int blit_kms_output_presenting(const BlitKms *kms, int index)
 {
     if (kms == NULL || index < 0 || index >= kms->output_count) return 0;
     return kms_output(kms, index)->info.presentation_state == BLIT_KMS_PRESENTATION_PRESENTING;
+}
+
+const char *blit_kms_burn_in_unavailable(const BlitKms *kms, int index)
+{
+    const char *reason = blit_kms_presentation_unavailable(kms, index);
+    if (reason[0] != '\0') return reason;
+    return blit_gles_burns(kms->gles) ? "" : "no blend minmax";
+}
+
+int blit_kms_burn_in_fading(const BlitKms *kms, int index)
+{
+    if (kms == NULL || index < 0 || index >= kms->output_count) return 0;
+    return kms_output(kms, index)->info.effects_burn_in_fading;
 }
 
 const char *blit_kms_presentation_unavailable(const BlitKms *kms, int index)

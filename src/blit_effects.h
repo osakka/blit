@@ -17,6 +17,8 @@
      controls (chroma, phosphor, brightness, contrast; ADR 0207) are per
      pixel, but are presentation effects too: they must colour the light
      the pass adds, and the scene's blended quads cannot mix channels.
+     Burn-in (ADR 0208) keeps a history of each pane, so it needs the GPU's
+     own textures as well.
 
    The registry order is the order of application: corners last of the local
    ones, because they define the pane's edge. No backend or user reorders
@@ -41,6 +43,7 @@ typedef enum {
     BLIT_EFFECT_PHOSPHOR,
     BLIT_EFFECT_BRIGHTNESS,
     BLIT_EFFECT_CONTRAST,
+    BLIT_EFFECT_BURN_IN,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
 
@@ -88,6 +91,11 @@ static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
     { "phosphor", "color", 0, 0xffffff, BLIT_EFFECT_PRESENTATION, "Phosphor", 0 },
     { "brightness", "level", -100, 100, BLIT_EFFECT_PRESENTATION, "Brightness", 0 },
     { "contrast", "level", -100, 100, BLIT_EFFECT_PRESENTATION, "Contrast", 0 },
+    /* ADR 0208, cool-retro-term's burn-in: what a pane showed fades out
+       over blit_effect_burn_in_us instead of vanishing. Not `animated`: it
+       needs the frame clock only while something is fading, which the
+       GLES compositor reports per output, never on an idle screen. */
+    { "burn_in", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Burn-in", 0 },
 };
 
 /* The glowing line (ADR 0188), as cool-retro-term's randomPass: its length,
@@ -294,6 +302,47 @@ static inline void blit_effect_tube_colour(const BlitEffectSet *set, double c[3]
         if (brightness != 1.0) c[i] = blit_effect_clamp01(c[i] * brightness);
         if (contrast != 1.0) c[i] = blit_effect_clamp01(0.5 + (c[i] - 0.5) * contrast);
     }
+}
+
+/* ADR 0208. Burn-in's fade time: light a pane stops showing falls
+   linearly from its level to black in this long -- 0.16 s near 0 up to
+   1.6 s at 100, cool-retro-term's range. 0 is off. */
+#define BLIT_EFFECT_BURN_IN_MIN_US 160000LL
+#define BLIT_EFFECT_BURN_IN_MAX_US 1600000LL
+/* Levels in a channel: the history is 8 bits, and fades in whole levels. */
+#define BLIT_EFFECT_BURN_IN_LEVELS 255
+
+static inline long long blit_effect_burn_in_us(const BlitEffectSet *set)
+{
+    int amount = set->value[BLIT_EFFECT_BURN_IN];
+    if (amount <= 0) return 0;
+    return BLIT_EFFECT_BURN_IN_MIN_US +
+        (BLIT_EFFECT_BURN_IN_MAX_US - BLIT_EFFECT_BURN_IN_MIN_US) *
+        (amount > 100 ? 100 : amount) / 100;
+}
+
+/* The fade over `elapsed_us`, in whole levels of 1/255, as the history is
+   faded each presented frame: history = max(history - levels / 255, what
+   the pane showed). The remainder is carried in `*carry` (microsecond
+   levels, below fade_us), so frame by frame no time is lost or counted
+   twice, and a frame rate never changes the speed: over any run of frames
+   the levels add up to elapsed x 255 / fade_us, rounded down, or one more
+   for the carry brought in. Whole levels subtract exactly in 8 bits, so a
+   trail never sticks short of black, as a multiplied one would; a gap of
+   a whole fade time or more is everything, 255. */
+static inline int blit_effect_burn_in_levels(long long fade_us, long long elapsed_us,
+                                             long long *carry)
+{
+    long long total;
+    if (fade_us <= 0 || elapsed_us <= 0) return 0;
+    if (elapsed_us >= fade_us) {
+        *carry = 0;
+        return BLIT_EFFECT_BURN_IN_LEVELS;
+    }
+    total = elapsed_us * BLIT_EFFECT_BURN_IN_LEVELS + *carry;
+    *carry = total % fade_us;
+    total /= fade_us;
+    return (int)(total > BLIT_EFFECT_BURN_IN_LEVELS ? BLIT_EFFECT_BURN_IN_LEVELS : total);
 }
 
 /* The one predicate for corners under content-moving effects: a pane with
