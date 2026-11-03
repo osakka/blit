@@ -1,5 +1,39 @@
 # Verification status
 
+## 2026-11-03: 0.3.36 window chrome glyphs (Chalk and Slate) and framed text
+
+- **105 window-chrome glyphs** (ADR 0210), U+100231-U+100299, in three
+  sets of 35 in one order: Chalk (one colour, the cell's foreground),
+  Slate light and Slate dark (their own colours). Pieces: title bar
+  stripes and ends, close, shade and zoom boxes, frame and drop shadow,
+  note frame and close box, the dialog's double border, button caps.
+  They are drawn as cell geometry in the shared raster, so lines reach the
+  cell edge, from one table, `src/blit_window_glyphs.h`. The design script
+  and the gates read it, and every length is a constant there. Each
+  pixel is set or transparent; transparent pixels show the cell's
+  background, the wallpaper under a held desktop. Hibr picks the sets
+  per part (Frame, Title Bar, Buttons), so they mix; there is no bundled
+  window style. Lines stay 1 px at any cell size, and boxes and stripes
+  scale with the cell.
+- **SGR 51 framed** (and 54 to end it): a line along each cell's top and
+  bottom, in the underline colour or the foreground. Blit extensions:
+  `51:3` is the thick default-button ring (`BLIT_WINDOW_THICK_RING`, the
+  same constant the caps use); `51:2` and `51:4` are the Slate light and
+  dark title-bar rows, so the bar's bevel runs under the title text. One
+  band function in the header feeds both compositors. ECMA-48's framed is
+  four-sided; Blit's deviates and says so. DECRQSS and the cells API
+  (`style.framed`) report it.
+- **Gates:** `window_glyph_gate` checks every glyph against the design at
+  12 cell sizes, Chalk coverage and Slate colour order, the approved 11x22
+  pixels, seams at every size, and contrast on the dark set.
+  `window_style_gate` uses a real server on both compositors and checks
+  the 25,410 pixels of the 105 cells, SGR 51 and its variants, and cap +
+  label + cap as one outline. `terminal_conformance` gains the framed
+  cases. They fail on 0.3.35 ("the surface does not hold SGR 51",
+  framed-sgr) and without the raster branch.
+- **Suites:** font 40/40, all 172 pass (6 skip), renderer on GLES 77
+  pass (1 skip); no failures.
+
 ## 2026-11-03: 0.3.35 CRT mask; documentation brought up to date
 
 - **CRT mask** (ADR 0209): `mask {amount}` and `mask_type {kind}`

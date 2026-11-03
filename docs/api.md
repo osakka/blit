@@ -1627,7 +1627,10 @@ and different remaps, which is what makes per-device routing usable.
 `GET /v1/fonts/icons` returns the packaged, versioned catalogue of Blit's own
 colour icons (status icons, the hui badge, telephones, file-manager icons):
 each icon's id, codepoint, how many columns it spans, and the codepoints
-retired and never reused. Authentication is the same as other read
+retired and never reused. Its `cell_geometry` section lists the glyphs
+Blit draws as cell geometry: the bar corners and the 105 window-chrome
+glyphs (ADR 0210), each with `colour` and, for those, `set` (`chalk`,
+`slate-light` or `slate-dark`). Authentication is the same as other read
 endpoints. A missing, unreadable or oversized catalogue returns 503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)

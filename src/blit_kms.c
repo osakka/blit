@@ -6,6 +6,7 @@
 #include "blit_raster.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
+#include "blit_window_glyphs.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -41,6 +42,14 @@
 #define KMS_ATTR_CONTINUATION 32
 #define KMS_ATTR_CONCEAL 64
 #define KMS_ATTR_ITALIC 128
+#define KMS_ATTR_FRAMED 2048
+#define KMS_ATTR_FRAMED_THICK 4096
+#define KMS_ATTR_FRAMED_BAR 8192
+#define KMS_ATTR_FRAMED_DARK 16384
+/* SGR 51's kind for blit_window_framed_bands: 1, 3 (51:3), 2 or 4 (51:2,
+   51:4). */
+#define KMS_FRAMED_KIND(attr) (((attr) & KMS_ATTR_FRAMED_BAR) ? \
+    (((attr) & KMS_ATTR_FRAMED_DARK) ? 4 : 2) : ((attr) & KMS_ATTR_FRAMED_THICK) ? 3 : 1)
 
 typedef struct {
     uint32_t fb;
@@ -1395,7 +1404,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             int y = view->origin_y + row * ch;
             if (attr & 8) { uint32_t t = fg; fg = bg; bg = t; }
             if (attr & 2) fg = (fg & 0xfefefeU) >> 1;
-            if (cp == ' ' && bg == floor_colour && !(attr & 4) &&
+            if (cp == ' ' && bg == floor_colour && !(attr & (4 | KMS_ATTR_FRAMED)) &&
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
@@ -1420,6 +1429,22 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                     int right = x + glyph_width < clip_x1 ? x + glyph_width : clip_x1;
                     fill_rect(output, left, y + ch / 2, right - left, 1, fg);
                 }
+            /* ADR 0210: framed (SGR 51) is lines along the cell's top and
+               bottom: the underline colour's, 3 px for 51:3 (the default
+               button's ring), or a Slate title bar's rows for 51:2/51:4. */
+            if (!(attr & KMS_ATTR_CONTINUATION) && (attr & KMS_ATTR_FRAMED)) {
+                BlitWindowBand band[4];
+                int left = x > clip_x0 ? x : clip_x0;
+                int right = x + glyph_width < clip_x1 ? x + glyph_width : clip_x1;
+                int bands = blit_window_framed_bands(KMS_FRAMED_KIND(attr), ch, underline, band), b;
+                for (b = 0; b < bands; ++b) {
+                    int top = y + band[b].top, bottom = y + band[b].bottom;
+                    if (top < clip_y0) top = clip_y0;
+                    if (bottom > clip_y1) bottom = clip_y1;
+                    if (right > left && bottom > top)
+                        fill_rect(output, left, top, right - left, bottom - top, band[b].colour);
+                }
+            }
         }
     }
     output->glyph_clip_active = 0;

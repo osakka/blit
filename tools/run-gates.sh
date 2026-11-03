@@ -236,6 +236,7 @@ suite_font() {
     run_gate font_reference_gate.rb ruby tools/tests/font_reference_gate.rb
     run_gate powerline_geometry_gate.rb ruby tools/tests/powerline_geometry_gate.rb
     run_gate bar_corner_gate.rb ruby tools/tests/bar_corner_gate.rb
+    run_gate window_glyph_gate.rb ruby tools/tests/window_glyph_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate custom_icon_gate.rb ruby tools/tests/custom_icon_gate.rb
     run_gate pixel_font_stack_gate.rb ruby tools/tests/pixel_font_stack_gate.rb
@@ -335,6 +336,7 @@ suite_renderer() {
     run_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb
+    run_gate window_style_gate.rb ruby tools/tests/window_style_gate.rb
     run_gate sixel_slot_gate.rb ruby tools/tests/sixel_slot_gate.rb
     run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate gles_compositor_gate.rb ruby "$ROOT/tools/tests/gles_compositor_gate.rb"

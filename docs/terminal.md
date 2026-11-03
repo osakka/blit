@@ -15,7 +15,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Area | Supported |
 | --- | --- |
 | Colour | 16, 256 and 24-bit truecolour; underline colour (SGR 58/59) |
-| Attributes | bold, dim, italic, underline, blink (drawn steady), reverse, hidden, strikethrough |
+| Attributes | bold, dim, italic, underline, blink (drawn steady), reverse, hidden, strikethrough, framed (top and bottom only) |
 | Screens | main screen with 1,000 lines of scrollback; alternate screen (47, 1047, 1049) |
 | Editing | insert/delete characters and lines, erase, repeat, scroll regions, left/right margins, VT400 rectangle operations including copy (DECCRA) |
 | Mouse | X10/normal/button/any-motion tracking; legacy, SGR and SGR-pixel encodings; wheel and horizontal wheel |
@@ -97,6 +97,15 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 30–37, 40–47, 90–97, 100–107 | 16 colours, xterm's: `000000 cd0000 00cd00 cdcd00 0000ee cd00cd 00cdcd e5e5e5`, bright `7f7f7f ff0000 00ff00 ffff00 5c5cff ff00ff 00ffff ffffff` |
 | 38, 48, 58 with `;5;n`, `;2;r;g;b`, `:5:n`, `:2:r:g:b` or `:2:CS:r:g:b` | 256 colours and truecolour for text, background and underline |
 | 39, 49, 59 | Default text, background and underline colour |
+| 51, 51:3, 54 | Framed: a line along the cell's top and bottom edges, 1 px (51) or 3 px (51:3, a Blit extension for a default button's ring), in the underline colour if set, else the foreground; 54 ends it |
+| 51:2, 51:4 | Blit extensions: a Slate light (51:2) or Slate dark (51:4) title bar's top and bottom rows (frame line and highlight, shade and rule) in that set's colours, so a title's text cells match the bar glyphs beside them (ADR 0210) |
+
+**SGR 51 deviates from ECMA-48.** The standard's *framed* draws a frame on
+all four sides; Blit draws the top and bottom only. It is for a button's
+label and a window's title, whose ends are Blit's cap and stripe glyphs
+(ADR 0210); vertical lines round every cell would cut between the
+letters. The lines are as
+wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 
 ### DEC private modes
 

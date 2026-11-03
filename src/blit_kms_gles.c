@@ -572,7 +572,7 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
             int x = x0 + column * cw, y = y0 + row * ch;
             if (attr & 8) { uint32_t t = fg; fg = bg; bg = t; }
             if (attr & 2) fg = (fg & 0xfefefeU) >> 1;
-            if (cp == ' ' && bg == floor_colour && !(attr & 4) &&
+            if (cp == ' ' && bg == floor_colour && !(attr & (4 | KMS_ATTR_FRAMED)) &&
                 (view->combining_count == NULL || view->combining_count[index] == 0))
                 continue;
             if (attr & KMS_ATTR_CONTINUATION) continue;
@@ -586,6 +586,21 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
                     blit_gles_rect(kms->gles, left, y + ch - 1, right - left, 1, underline, 255);
                 if ((attr & 512) && y + ch / 2 >= cy0 && y + ch / 2 < cy1)
                     blit_gles_rect(kms->gles, left, y + ch / 2, right - left, 1, fg, 255);
+            }
+            /* ADR 0210: framed (SGR 51), as draw_view draws it. */
+            if (attr & KMS_ATTR_FRAMED) {
+                BlitWindowBand band[4];
+                int left = x > cx0 ? x : cx0;
+                int right = x + width < cx1 ? x + width : cx1;
+                int bands = blit_window_framed_bands(KMS_FRAMED_KIND(attr), ch, underline, band), b;
+                for (b = 0; b < bands; ++b) {
+                    int top = y + band[b].top, bottom = y + band[b].bottom;
+                    if (top < cy0) top = cy0;
+                    if (bottom > cy1) bottom = cy1;
+                    if (right > left && bottom > top)
+                        blit_gles_rect(kms->gles, left, top, right - left, bottom - top,
+                                       band[b].colour, 255);
+                }
             }
         }
     if (partial && !overhang)

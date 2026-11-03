@@ -53,6 +53,15 @@ is a wide character, so no width table changes.
 U+100007 and U+100008 are the bar corners, drawn as cell geometry (see
 `cell_geometry` in the catalogue).
 
+U+100231–U+100299 are the window-chrome glyph sets, also cell geometry (ADR
+0210). There are three sets of 35 in one order: Chalk (one colour, the
+cell's foreground), Slate light and Slate dark (their own colours). They
+draw title bars, boxes, window and notification frames, dialog borders
+and button ends. Blit draws them from the geometry table in
+`src/blit_window_glyphs.h`; `tools/fonts/draw-window-glyphs.py` is the
+design, writes their catalogue entries, and is what `window_glyph_gate`
+holds the raster to. U+10029A is the next free codepoint.
+
 These explicitly selected colour glyphs occupy one terminal cell. Plane16
 private-use mappings are a Blit contract, not Unicode or Nerd assignments;
 other fonts may assign them differently. A JSON string can use the character

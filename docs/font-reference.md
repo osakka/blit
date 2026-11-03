@@ -43,8 +43,8 @@ The shipped text fonts are unmodified upstream releases:
 **Every outline font draws through one glyph stack.** Arabic letters go
 to Blit Arabic Modern. Every other character takes the first of these that
 has it:
-1. Blit's cell geometry: box drawing, blocks, Braille, Powerline and bar
-   corners.
+1. Blit's cell geometry: box drawing, blocks, Braille, Powerline, bar
+   corners and the window-chrome glyph sets.
 2. Blit's own colour icons.
 3. Colour emoji, for emoji presentation.
 4. Nerd Fonts Symbols, for a private-use codepoint, whatever the text font
@@ -83,6 +83,7 @@ of a cell. Their ink bounds and terminal advance are different concepts.
 | App actions, files, development, devices, weather, brands | [17 Nerd categories](fonts/README.md) | 10,764 names/aliases, 10,386 distinct scalars, under every font; uses terminal foreground colour |
 | Branded Blit/Hibr menu icons, Wi-Fi 1–4, Bluetooth | [Original colour additions](fonts/special.md) | Explicit semantic ID/private scalar, one cell, intrinsic palette |
 | Themed Hibr pen, runic text, wired indicator | [Themed text additions](fonts/special.md#themed-text-additions) | U+270E, U+16D2, U+21CC retain documented text meanings |
+| Window chrome: title bars, frames, dialogs, buttons (Chalk, Slate light, Slate dark) | [Cell geometry](fonts/special.md#cell-geometry), [below](#window-chrome-glyph-sets-chalk-and-slate) | Pixel-exact cell geometry; Chalk in the foreground, Slate in its own colours; label buttons with SGR 51 |
 | Powerline separators and box/block UI geometry | [Powerline](fonts/pl.md), [Extras](fonts/ple.md) | Core U+E0B0..E0B3 use cell-fitted geometry; do not extend that guarantee to every Extra; box/half-block geometry is protected |
 | Arabic and Arabic-Indic digits | [Arabic section below](#arabic-and-arabic-indic-numerals) | Native companions, shared baseline, existing Hibr visual ordering |
 | Faces, people, nature, food, objects, symbols, flags | [Emoji categories](fonts/emoji.md) | Colour/text presentation and multi-scalar layout are distinct from Nerd icons |
@@ -132,6 +133,40 @@ supplementary character as two terminal cells, or append VS16 to a private
 icon in an attempt to enable colour. JSON uses a surrogate pair for a
 supplementary scalar; the generated table includes valid strings. For example,
 U+100000 is `"\udbc0\udc00"`, not the invalid six-digit escape `"\u100000"`.
+
+## Window chrome glyph sets: Chalk and Slate
+
+ADR 0210. 105 glyphs at U+100231–100299 draw retro Mac-style window
+chrome out of cells: three sets of 35 in one order (Chalk, Slate light,
+Slate dark), listed in the catalogue's `cell_geometry` section as
+`chalk-<name>`, `slate-light-<name>` and `slate-dark-<name>`.
+- **A set per part.** Each part (title bar, frame, dialog border, button
+  ends) takes its glyphs from whichever set the application picks for it,
+  so the sets mix: a Slate title bar on a box-drawing frame, a Chalk title
+  bar on a Slate frame. Every set has the same geometry, so parts from
+  different sets meet at the same rows and columns.
+- **Chalk** is one colour: the cell's foreground over its background, so a
+  theme recolours it. **Slate** is the same geometry in its own colours.
+  Wherever a glyph draws nothing, the cell's background shows; on a held
+  desktop that is the wallpaper, under the frame and around the shadow.
+- They are pixel-designed for an 11x22 cell. At every size, lines,
+  stripes and SGR 51 are 1 px, the shadow is 2 px at a 2 px offset and the
+  default ring is 3 px. The boxes stay as wide as the cell, the stripes
+  keep their proportion of the bar and a button's ends their roundness.
+  Neighbouring cells always join.
+- **A title** is text on the bar's background, framed to match the bar:
+  Chalk with SGR 51, which draws the frame line and the rule; Slate light
+  with SGR 51:2 and Slate dark with SGR 51:4, which also draw the bar's
+  highlight and shade rows. `stripe-before-title` and `stripe-after-title`
+  stand either side.
+- **A button** is `button-left`, the label with SGR 51 on the button's
+  face, and `button-right`. A default button is `default-button-left`, the
+  label with SGR 51:3, and `default-button-right`. Set SGR 58 to the
+  ring's colour: black, or 168,168,176 for Slate dark. See [the terminal reference](terminal.md#sgr).
+- **A dialog** is the `dialog-*` border round its content cells. Chalk's
+  border is one colour, so a Chalk dialog's frame cells take the dialog's
+  face as their background, and the face shows round the border. Slate
+  paints its own face, so its frame cells keep the desktop behind them.
 
 ## Discover first; retain a fallback
 

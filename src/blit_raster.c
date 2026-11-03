@@ -1,5 +1,6 @@
 #include "blit_raster.h"
 #include "blit_emoji_presentation.h"
+#include "blit_window_glyphs.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_COLOR_H
@@ -1188,6 +1189,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
        and the pen at U+270E, whatever the text font has there. */
     int blit_icon = !arabic && key->length == 1 && raster->icons &&
         (scalar >= 0x100000 || scalar == 0x270e) && !bar_corner(scalar) &&
+        !blit_window_glyph(scalar) &&
         FT_Get_Char_Index(raster->icons, scalar);
     int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
@@ -1236,6 +1238,10 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
+    /* ADR 0210: Chalk takes the foreground, Slate carries its colours. */
+    if (key->length == 1 && blit_window_glyph(scalar))
+        next.glyph.format = blit_window_colour(scalar) ?
+            BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
     else if (key->length > 1 && !arabic) {
         colour_index = colour_cluster_glyph(raster, key);
@@ -1255,6 +1261,10 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && bar_corner(scalar)) {
         draw_bar_corner(scalar, &next); result = 1;
+    } else if (key->length == 1 && blit_window_glyph(scalar)) {
+        result = blit_window_draw(scalar, next.pixels, next.glyph.stride,
+                                  next.glyph.width, next.glyph.height,
+                                  next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED) ? 1 : -1;
     } else if (key->length == 1 && scalar >= 0x2500 && scalar <= 0x257f &&
                next.glyph.format == BLIT_RASTER_COVERAGE) {
         draw_box_drawing(scalar, &next); result = 1;

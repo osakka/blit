@@ -187,10 +187,38 @@ extern char **environ;
    draws differently because of it, so it is deliberately not part of the
    cell style the API reports or accepts. */
 #define BLIT_ATTR_PROTECTED 1024
+/* ADR 0210: SGR 51, framed, drawn as a line along the cell's top and
+   bottom; with THICK (Blit's SGR 51:3) the lines are the default button's
+   ring, BLIT_WINDOW_THICK_RING wide. SGR 54 ends both. */
+#define BLIT_ATTR_FRAMED 2048
+#define BLIT_ATTR_FRAMED_THICK 4096
+/* SGR 51:2 and 51:4: a Slate title bar's top and bottom rows, light and
+   dark, so a title's text cells carry the bar's bevel. */
+#define BLIT_ATTR_FRAMED_BAR 8192
+#define BLIT_ATTR_FRAMED_DARK 16384
+#define BLIT_ATTR_FRAMED_ALL (BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_THICK | \
+                              BLIT_ATTR_FRAMED_BAR | BLIT_ATTR_FRAMED_DARK)
 
 typedef struct {
     int x, y, w, h;
 } BlitRect;
+
+/* ADR 0210: a cell's SGR 51 framing, as the cells API names it and as
+   DECRQSS reports it. */
+static const char *framed_name(uint16_t attributes)
+{
+    if (!(attributes & BLIT_ATTR_FRAMED)) return "none";
+    if (attributes & BLIT_ATTR_FRAMED_BAR)
+        return (attributes & BLIT_ATTR_FRAMED_DARK) ? "slate-dark-bar" : "slate-light-bar";
+    return (attributes & BLIT_ATTR_FRAMED_THICK) ? "thick" : "thin";
+}
+
+static const char *framed_sgr(uint16_t attributes)
+{
+    if (attributes & BLIT_ATTR_FRAMED_BAR)
+        return (attributes & BLIT_ATTR_FRAMED_DARK) ? ";51:4" : ";51:2";
+    return (attributes & BLIT_ATTR_FRAMED_THICK) ? ";51:3" : ";51";
+}
 
 typedef struct {
     unsigned long long id;
@@ -7337,7 +7365,8 @@ static int surface_snapshot_json(const BlitSurface *surface,
                     "\"background\":\"#%06x\",\"bold\":%s,"
                     "\"dim\":%s,\"italic\":%s,\"underline\":%s,"
                     "\"blink\":%s,\"inverse\":%s,\"strike\":%s,"
-                    "\"concealed\":%s,\"underline_color\":\"#%06x\"}",
+                    "\"concealed\":%s,\"framed\":\"%s\","
+                    "\"underline_color\":\"#%06x\"}",
                     (unsigned int)foreground, (unsigned int)background,
                     attributes & BLIT_ATTR_BOLD ? "true" : "false",
                     attributes & BLIT_ATTR_DIM ? "true" : "false",
@@ -7347,6 +7376,7 @@ static int surface_snapshot_json(const BlitSurface *surface,
                     attributes & BLIT_ATTR_INVERSE ? "true" : "false",
                     attributes & BLIT_ATTR_STRIKE ? "true" : "false",
                     attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
+                    framed_name(attributes),
                     (unsigned int)(surface->underline_color[y][x] ?
                         surface->underline_color[y][x] - 1 : 0)))
                     return 0;
@@ -7615,7 +7645,8 @@ static const char *cell_misplaced_style_key(const char *cell_json)
 {
     static const char *const style_keys[] = {
         "foreground", "background", "underline_color", "bold", "dim",
-        "italic", "underline", "blink", "inverse", "strike", "concealed"
+        "italic", "underline", "blink", "inverse", "strike", "concealed",
+        "framed"
     };
     size_t i;
 
@@ -8533,6 +8564,19 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
                 attributes |= BLIT_ATTR_STRIKE;
             if (json_bool(cell_json, "concealed", &flag) && flag)
                 attributes |= BLIT_ATTR_CONCEAL;
+            if (json_string(cell_json, "framed", color_text, sizeof(color_text))) {
+                if (strcmp(color_text, "thin") == 0)
+                    attributes |= BLIT_ATTR_FRAMED;
+                else if (strcmp(color_text, "thick") == 0)
+                    attributes |= BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_THICK;
+                else if (strcmp(color_text, "slate-light-bar") == 0)
+                    attributes |= BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_BAR;
+                else if (strcmp(color_text, "slate-dark-bar") == 0)
+                    attributes |= BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_BAR |
+                        BLIT_ATTR_FRAMED_DARK;
+                else if (strcmp(color_text, "none") != 0)
+                    style_valid = 0;
+            }
             if (json_string(cell_json, "underline_color", color_text,
                             sizeof(color_text))) {
                 underline_color_set = parse_color(color_text, &underline_color);
@@ -12334,6 +12378,9 @@ static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";9");
             if (session->terminal_attributes & BLIT_ATTR_CONCEAL)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";8");
+            if (session->terminal_attributes & BLIT_ATTR_FRAMED)
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, "%s",
+                                 framed_sgr(session->terminal_attributes));
             if (session->terminal_foreground_set)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used,
                                  ";38:2::%u:%u:%u",
@@ -12562,6 +12609,19 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             session->terminal_attributes |= BLIT_ATTR_STRIKE;
         } else if (value == 29) {
             session->terminal_attributes &= (uint16_t)~BLIT_ATTR_STRIKE;
+        } else if (value == 51) {
+            /* ADR 0210: framed. Blit's sub-parameters: 51:3 the default
+               button's thick frame, 51:2 and 51:4 a Slate light and dark
+               title bar's rows. ECMA-48 frames all four sides; Blit draws
+               the top and bottom only. */
+            int kind = param->subs > 0 ? param->sub[0] : 1;
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_FRAMED_ALL;
+            session->terminal_attributes |= BLIT_ATTR_FRAMED |
+                (kind == 3 ? BLIT_ATTR_FRAMED_THICK : 0) |
+                (kind == 2 || kind == 4 ? BLIT_ATTR_FRAMED_BAR : 0) |
+                (kind == 4 ? BLIT_ATTR_FRAMED_DARK : 0);
+        } else if (value == 54) {
+            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_FRAMED_ALL;
         } else if (value == 39) {
             session->terminal_foreground_set = 0;
         } else if (value == 49) {

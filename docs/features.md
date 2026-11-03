@@ -86,6 +86,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Arabic with shaping, positioned marks and Arabic-Indic digits | 0.1.588 | 0174 | Tested |
 | Blit's own colour icons: Wi-Fi, battery, volume, power, pen, telephones, the hui badge | 0.1.588–0.2.45 | 0172, 0196, 0197 | Used |
 | File-manager icons: 63 kinds, folders in four colourways | 0.3.4–0.3.9 | 0201 | Used |
+| Retro Mac-style window chrome glyph sets, Chalk (one colour) and Slate (light and dark), one per part (title bar, frame, dialog, buttons) so they mix; SGR 51 framed labels and titles | 0.3.36 | 0210 | Tested |
 | Icon catalogue for applications (`GET /v1/fonts/icons`) | 0.1.588 | 0172 | Used |
 
 The [font reference](font-reference.md) lists every glyph and icon codepoint.

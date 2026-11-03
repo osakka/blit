@@ -1056,6 +1056,44 @@ assert_equal(true, cells.fetch([1, 0]).fetch('style').fetch('concealed'),
              'SGR conceal set')
 raise 'SGR conceal reset left c styled' if cells.fetch([2, 0]).key?('style')
 
+# ADR 0210: SGR 51 framed, Blit's 51:3 thick, both ended by 54 and by 0.
+snapshot = run_case(base, 'framed-sgr',
+                    "printf 'a\\033[51mb\\033[51:3mc\\033[51md\\033[54me\\033[51:3mf\\033[0mg'")
+cells = cell_map(snapshot)
+assert_equal(%w[thin thick thin], [1, 2, 3].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
+             'SGR 51 thin, 51:3 thick, 51 thin again')
+assert_equal('thick', cells.fetch([5, 0]).fetch('style').fetch('framed'), 'SGR 51:3 after 54')
+raise 'SGR 54 left e framed' if cells.fetch([4, 0]).key?('style')
+raise 'SGR 0 left g framed' if cells.fetch([6, 0]).key?('style')
+raise 'an unframed cell reports framed' if cells.fetch([0, 0]).key?('style')
+snapshot = run_case(base, 'framed-bar-sgr', "printf '\\033[51:2ma\\033[51:4mb\\033[51mc\\033[54md'")
+cells = cell_map(snapshot)
+assert_equal(%w[slate-light-bar slate-dark-bar thin], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
+             'SGR 51:2 and 51:4 are the Slate bars, and 51 replaces them')
+raise 'SGR 54 left d framed' if cells.fetch([3, 0]).key?('style')
+
+# Framed survives what other attributes survive: scrolling into scrollback
+# and back, and the scrollback view.
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf '\\033[51:3mA\\033[0m\\nb\\nc'; sleep 1"],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+framed_id = created.fetch('id')
+Timeout.timeout(5) do
+  loop do
+    break if request(base, 'GET', "/v1/terminal-sessions/#{framed_id}").fetch('state') != 'starting' &&
+             request(base, 'GET', "/v1/surfaces/surface-#{framed_id}/scrollback").fetch('count') == 1
+
+    sleep 0.02
+  end
+end
+request(base, 'PATCH', "/v1/surfaces/surface-#{framed_id}/scrollback", { 'view' => 1 })
+historical = cell_map(request(base, 'GET', "/v1/surfaces/surface-#{framed_id}/cells"))
+assert_equal('thick', historical.fetch([0, 0]).fetch('style').fetch('framed'), 'framed kept in scrollback')
+request(base, 'DELETE', "/v1/terminal-sessions/#{framed_id}")
+puts 'PASS framed-scrollback'
+
 snapshot = run_case(base, 'synchronized-output',
                     "printf '\\033[?2026hA\\033[?2026lB'")
 cells = cell_map(snapshot)
@@ -2462,6 +2500,15 @@ puts 'PASS xtwinops-14-16-19'
 assert_equal(hex("\eP1$r0;1;38:2::1:2:3;48:2::205:0:0m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-colours', '\\033[1;38;2;1;2;3;41m\\033P$qm\\033\\\\\\033[0m', 40)),
              'DECRQSS SGR carries colours')
+assert_equal(hex("\eP1$r0;51:3m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-framed', '\\033[51:3m\\033P$qm\\033\\\\\\033[0m', 14)),
+             'DECRQSS SGR reports 51:3')
+assert_equal(hex("\eP1$r0;51m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-framed-thin', '\\033[51m\\033P$qm\\033\\\\\\033[0m', 12)),
+             'DECRQSS SGR reports 51')
+assert_equal(hex("\eP1$r0;51:4m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-framed-bar', '\\033[51:4m\\033P$qm\\033\\\\\\033[0m', 14)),
+             'DECRQSS SGR reports 51:4')
 assert_equal(hex("\eP1$r5 q\e\\"), row_text(reply_case(base, 'decrqss-decscusr', '\\033[5 q\\033P$q q\\033\\\\', 10)),
              'DECRQSS DECSCUSR keeps the style')
 
