@@ -1,5 +1,19 @@
 # Verification status
 
+## 2026-11-03: 0.3.34 a pane says whether anything is shown in it
+
+- **`has_view`** on each pane of `GET /v1/effects`: whether a session draws
+  in it. Effects saved for a pane with no session are kept but draw
+  nothing, and nothing said so. On the owner's mini PC the held desktop is
+  one session in DP-1 pane 2, so burn-in set on pane 1 never engaged
+  (`burn_in_panes` 0) while the API reported it set and available.
+  `pane_effects_gate` checks false for both panes before any session, true
+  for pane 1 alone after its session, true for both after; it fails on
+  0.3.33. The Control Panel's Blit pane 0.1.26 shows "Nothing shown here"
+  for such a pane, and burn-in's fade time.
+- **Suites:** font 39/39, all 169 pass (6 skip), renderer on GLES 75 pass
+  (1 skip); no failures.
+
 ## 2026-11-03: 0.3.33 burn-in
 
 - **Burn-in** (ADR 0208): `burn_in {amount}`, phosphor persistence. Each

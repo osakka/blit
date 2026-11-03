@@ -156,8 +156,17 @@ Dir.mktmpdir('blit-pane-effects') do |root|
   start(env)
   output = get('/v1/displays')['displays'].first.dig('state', 'connector')
   check(output.is_a?(String) && !output.empty?, 'display has no connector name')
+  # A pane says whether a session draws in it: effects saved for an empty
+  # pane draw nothing, and the owner's held desktop is one session in one
+  # pane of a split display.
+  views = -> { get('/v1/effects')['panes'].to_h { |p| [p['pane_id'], p['has_view']] } }
+  check(views.call == { 'pane-display-1-1' => false, 'pane-display-1-2' => false },
+        "has_view before any session: #{views.call}")
   paint('pane-display-1-1', A, loop_corner: true)
+  check(views.call == { 'pane-display-1-1' => true, 'pane-display-1-2' => false },
+        "has_view with one session: #{views.call}")
   paint('pane-display-1-2', B)
+  check(views.call.values == [true, true], "has_view with both: #{views.call}")
   shot = screenshot
   check(shot.pixel(0, 0) == A && shot.pixel(1, 1) == A, "no effects yet, corner #{shot.pixel(0, 0)}")
 
@@ -246,6 +255,6 @@ Dir.mktmpdir('blit-pane-effects') do |root|
   paint('pane-display-1-1', A)
   check(screenshot.pixel(0, 0) == [0, 0, 0], 'restarted pane 1 corner not black')
 
-  puts "PANE_EFFECTS_PASS backend=#{GATE_BACKEND} pixels=#{checked} exact_within=#{TOLERANCE} " \
+  puts "PANE_EFFECTS_PASS backend=#{GATE_BACKEND} has_view=empty_false,session_true pixels=#{checked} exact_within=#{TOLERANCE} " \
        'placement=pane damage=idempotent gpu=composes settings=strict clamp=half_side persisted=yes'
 end

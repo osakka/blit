@@ -21541,9 +21541,12 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
         pane_effects_key(runtime, pane, &output, &ordinal);
         json_appendf(body, capacity, &used,
                      "%s{\"pane_id\":\"%s\",\"display_id\":\"%s\",\"output\":\"%s\","
-                     "\"pane_ordinal\":%d,\"enabled\":%s,\"effects\":{",
+                     "\"pane_ordinal\":%d,\"enabled\":%s,\"has_view\":%s,\"effects\":{",
                      i ? "," : "", pane->id, pane->display_id, output, ordinal,
-                     pane_effects_switched_on(runtime, pane) ? "true" : "false");
+                     pane_effects_switched_on(runtime, pane) ? "true" : "false",
+                     /* No session draws here: its effects have nothing to
+                        draw on, though they are kept for when one does. */
+                     pane_surface_id(runtime, pane) != NULL ? "true" : "false");
         for (id = 0; id < BLIT_EFFECT_COUNT; ++id) {
             int value = set.value[id];
             if (value == 0) continue;

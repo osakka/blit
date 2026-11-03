@@ -3962,13 +3962,19 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [pane_id, display_id, output, pane_ordinal, enabled, effects, unavailable]
+            required: [pane_id, display_id, output, pane_ordinal, enabled, has_view, effects, unavailable]
             properties:
               pane_id: {$ref: '#/components/schemas/ResourceId'}
               display_id: {$ref: '#/components/schemas/ResourceId'}
               output: {type: string}
               pane_ordinal: {type: integer, minimum: 0, maximum: 64}
               enabled: {type: boolean, description: "The pane's own switch."}
+              has_view:
+                type: boolean
+                description: >-
+                  Whether a session draws in this pane. False: its effects
+                  are kept but have nothing to draw on (a desktop held as one
+                  session in another pane of the same display, for example).
               effects:
                 allOf:
                   - {$ref: '#/components/schemas/EffectSet'}
