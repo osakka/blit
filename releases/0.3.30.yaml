@@ -1,0 +1,11 @@
+release: 0.3.30
+package: blit_0.3.30-1_amd64.deb
+package_sha256: f4ca9d3dbbcf08daf510077fc5a3fe70b13ab9ea591dcee9256588db1dc9b635
+source_commit: 4348813d55564da7e6f4661c8f8423390ecdb1e2
+package_documentation_commit: 4348813d55564da7e6f4661c8f8423390ecdb1e2
+server_binary_sha256: ee518179d655351e674bf64525e54959d8915b5a42f1da040b1239e093c57e9b
+update_helper_sha256: b0736e2aceb7c77916470e279e7e9219c2219d565a6b6d77a2348f27d6034cf1
+hibr_adapter_sha256: 75a98efa001e86856c3ac2d261e2584fe241d050b8d368426e6c795daa2076ea
+hibr_version: 0.99.225
+hibr_abi: 16
+status: development-canary
