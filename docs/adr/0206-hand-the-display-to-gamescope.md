@@ -76,6 +76,14 @@ Option 1.
 - **gamescope** comes from a package the project builds (hibr-apt) or from
   Debian once it is there; Blit does not vendor it.
 
+**Steam in a window is a follow-up, not part of this decision.** It is
+option 3: gamescope's headless backend, its frames imported by Blit as
+dma-bufs and composed in a pane, input forwarded from Blit to gamescope. It
+gets its own ADR together with Blit's zero-copy dma-buf import, after this
+hand-over works, and the two then coexist: a game in a window that can go
+full screen through the hand-over. What must be verified first is how
+gamescope's headless backend takes input.
+
 ## Consequences
 
 - Games run as on SteamOS: their frames go from the GPU to the display with
