@@ -231,5 +231,18 @@ The gates that list the registry (`presentation_effects_gate`,
   scanlines and corners (`BLIT_ZOOMED_EFFECTS_SHOT`) is byte-identical
   between 0.3.31 and this change.
 
-Still to come: GPU milliseconds on the owner's Radeon, with and without
-these effects.
+Measured on the owner's mini PC (Radeon, 0.3.32, 2026-11-03): DP-1's top
+pane already drawing curvature, glow, RGB shift, the glowing line,
+flicker, horizontal sync and jitter; `gpu_total_us / gpu_frames` over 15 s
+(about 494 frames) each, the owner's settings restored after:
+
+| Added to the pane | GPU per frame |
+| --- | --- |
+| nothing | 1.754 ms |
+| static noise 30 | 1.702 ms |
+| chroma 70, amber phosphor | 1.755 ms |
+| brightness 20, contrast 20 | 1.727 ms |
+| all five | 1.727 ms |
+
+The differences are within run-to-run noise: the new steps cost nothing
+measurable on top of the pass they join.
