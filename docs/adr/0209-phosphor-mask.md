@@ -257,4 +257,15 @@ The gates that list the registry (`presentation_effects_gate`,
 The renderer suite on gles passes: 76 passed, and 1 skipped for want of
 QEMU.
 
-The GPU cost on the owner's Radeon is not measured yet.
+Measured on the owner's mini PC (Radeon, 0.3.35, 2026-11-03), on the DP-1
+pane holding the Hibr desktop with its nine other effects on;
+`gpu_total_us / gpu_frames` over 15 s each, settings restored after:
+
+| Mask | GPU per frame |
+| --- | --- |
+| off | 1.773 ms |
+| 50, aperture grille | 1.973 ms |
+| 100, shadow mask | 1.919 ms |
+| off again | 1.789 ms |
+
+About 0.15-0.2 ms per frame, with no extra frames.
