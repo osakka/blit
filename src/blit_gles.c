@@ -72,6 +72,7 @@ struct BlitGles {
     GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
     GLint present_shift, present_line, present_phase;
     GLint present_flick, present_sync, present_jit, present_corner, present_zoom;
+    GLint present_noise, present_tube, present_phosphor;
     /* ADR 0204: the enlargement of a zoomed output's scene. 0 without highp
        fragment floats, which the integer mapping needs at these sizes. */
     GLuint zoom_program, zoom_buffer;
@@ -442,7 +443,12 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
    One fragment per screen pixel of a pane with presentation effects:
    normalise within the pane, warp exactly as blit_effect_warp does, black
    outside the tube, otherwise the scene inside the pane's own rectangle
-   (its rows are bottom-up), then the glass scanlines and the glow.
+   (its rows are bottom-up), then the glass scanlines and the glow. ADR
+   0207: static noise is light, added after the glowing line; the tube's
+   colour controls (blit_effect_tube_colour) follow flicker, so every light
+   the pass adds is coloured too; corners and glass scanlines come last.
+   Each is behind its own uniform test, so a pane without it draws exactly
+   the pixels it drew before.
 
    ADR 0204: on a zoomed output the screen pixel first becomes the logical
    pixel the zoom program shows there (the same expression), and every
@@ -479,13 +485,16 @@ static void gles_build_present(BlitGles *gles)
         "uniform vec4 jit;\n"
         "uniform float corner;\n"
         "uniform float zoom;\n"
-        "float hash(vec2 q) { return fract(sin(dot(q, vec2(12.9898, 78.233)) + jit.w) * 43758.5453); }\n"
+        "uniform vec2 noise;\n"
+        "uniform vec3 tube;\n"
+        "uniform vec3 phosphor;\n"
+        "float hash(vec2 q, float s) { return fract(sin(dot(q, vec2(12.9898, 78.233)) + s) * 43758.5453); }\n"
         "vec2 vnoise(vec2 q) {\n"
         "  vec2 i = floor(q), f = q - i;\n"
-        "  vec2 a = vec2(hash(i), hash(i + vec2(17.0, 31.0)));\n"
-        "  vec2 b = vec2(hash(i + vec2(1.0, 0.0)), hash(i + vec2(18.0, 31.0)));\n"
-        "  vec2 c = vec2(hash(i + vec2(0.0, 1.0)), hash(i + vec2(17.0, 32.0)));\n"
-        "  vec2 d = vec2(hash(i + vec2(1.0, 1.0)), hash(i + vec2(18.0, 32.0)));\n"
+        "  vec2 a = vec2(hash(i, jit.w), hash(i + vec2(17.0, 31.0), jit.w));\n"
+        "  vec2 b = vec2(hash(i + vec2(1.0, 0.0), jit.w), hash(i + vec2(18.0, 31.0), jit.w));\n"
+        "  vec2 c = vec2(hash(i + vec2(0.0, 1.0), jit.w), hash(i + vec2(17.0, 32.0), jit.w));\n"
+        "  vec2 d = vec2(hash(i + vec2(1.0, 1.0), jit.w), hash(i + vec2(18.0, 32.0), jit.w));\n"
         "  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);\n"
         "}\n"
         "float cover(vec2 local) {\n"
@@ -538,7 +547,12 @@ static void gles_build_present(BlitGles *gles)
         "      c = min(c + vec3(line * u * u * (3.0 - 2.0 * u)), 1.0);\n"
         "    }\n"
         "  }\n"
+        "  if (noise.x > 0.0)\n"
+        "    c = min(c + vec3(noise.x * hash(floor(at - rect.xy) + vec2(41.0, 7.0), noise.y)), 1.0);\n"
         "  c = min(c * flick, 1.0);\n"
+        "  if (tube.x > 0.0) c = mix(c, phosphor * dot(c, vec3(0.2126, 0.7152, 0.0722)), tube.x);\n"
+        "  if (tube.y != 1.0) c = clamp(c * tube.y, 0.0, 1.0);\n"
+        "  if (tube.z != 1.0) c = clamp(0.5 + (c - 0.5) * tube.z, 0.0, 1.0);\n"
         "  if (corner > 0.0) {\n"
         "    vec2 local = floor(t0 * rect.zw);\n"
         "    vec2 m = vec2(local.x < corner ? local.x : rect.z - 1.0 - local.x,\n"
@@ -597,6 +611,9 @@ static void gles_build_present(BlitGles *gles)
     gles->present_jit = gles->glGetUniformLocation(gles->present_program, "jit");
     gles->present_corner = gles->glGetUniformLocation(gles->present_program, "corner");
     gles->present_zoom = gles->glGetUniformLocation(gles->present_program, "zoom");
+    gles->present_noise = gles->glGetUniformLocation(gles->present_program, "noise");
+    gles->present_tube = gles->glGetUniformLocation(gles->present_program, "tube");
+    gles->present_phosphor = gles->glGetUniformLocation(gles->present_program, "phosphor");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -1630,6 +1647,11 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
                         (GLfloat)(pane->jitter_cell > 0 ? pane->jitter_cell : 1.0),
                         (GLfloat)pane->jitter_seed);
         gles->Uniform1f(gles->present_corner, (GLfloat)pane->corner_radius);
+        gles->glUniform2f(gles->present_noise, (GLfloat)pane->noise, (GLfloat)pane->noise_seed);
+        gles->Uniform3f(gles->present_tube, (GLfloat)pane->chroma, (GLfloat)pane->brightness,
+                        (GLfloat)pane->contrast);
+        gles->Uniform3f(gles->present_phosphor, (GLfloat)pane->phosphor[0],
+                        (GLfloat)pane->phosphor[1], (GLfloat)pane->phosphor[2]);
         gles->glUniform2f(gles->present_glow_size,
                           glow ? (GLfloat)glow->quarter_width : 1.0f,
                           glow ? (GLfloat)glow->quarter_height : 1.0f);

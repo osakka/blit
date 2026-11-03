@@ -184,7 +184,10 @@ effects = request(base, 'GET', '/v1/effects')
 assert_equal({ 'corners' => 'local', 'curvature' => 'presentation', 'glow' => 'presentation',
                'rgb_shift' => 'presentation', 'glowing_line' => 'presentation',
                'flicker' => 'presentation', 'horizontal_sync' => 'presentation',
-               'jitter' => 'presentation', 'scanlines' => 'local' },
+               'jitter' => 'presentation', 'scanlines' => 'local',
+               'static_noise' => 'presentation', 'chroma' => 'presentation',
+               'phosphor' => 'presentation', 'brightness' => 'presentation',
+               'contrast' => 'presentation' },
              effects.fetch('available').to_h { |e| [e.fetch('name'), e.fetch('class')] },
              'available pane effects and their classes')
 assert_equal(true, effects.fetch('enabled'), 'effects are switched on by default')

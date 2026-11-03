@@ -763,6 +763,11 @@ apply live, with no restart, and are saved:
 | `flicker` | presentation, animated | `intensity` | 0–100 | The whole pane brightens or dims a little, at random, each frame (up to ±50% at 100) |
 | `horizontal_sync` | presentation, animated | `amount` | 0–100 | On a random share of frames the picture sways sideways in a sine wave (up to 12% of the width at 100) |
 | `jitter` | presentation, animated | `amount` | 0–100 | A fine shimmer of the sample points; grows with the square of the amount |
+| `static_noise` | presentation, animated | `amount` | 0–100 | Grey grain over every pixel, fresh each frame, up to half of white at 100 (ADR 0207) |
+| `chroma` | presentation | `amount` | 0–100 | Colour toward the phosphor's: 0 full colour, 100 monochrome in the phosphor colour |
+| `phosphor` | presentation | `color` | 0–16777215 | The colour chroma tints toward, as 0xRRGGBB; 0 is none (white) |
+| `brightness` | presentation | `level` | −100–100 | The picture times 1 + level/100; 0 neutral, −100 black |
+| `contrast` | presentation | `level` | −100–100 | About mid-grey, times 1 + level/100; 0 neutral, −100 flat grey |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.
@@ -800,6 +805,12 @@ apply live, with no restart, and are saved:
   pane with horizontal sync or jitter has its corners drawn by the
   presentation pass, so they stay still while the picture sways. Pointer
   input follows curvature only, never the sway.
+- **The tube's colour (ADR 0207):** chroma, brightness and contrast are
+  applied in that order, after every light the pass adds (glow, the hum
+  bar, static noise, flicker), so a monochrome tube colours them too, and
+  before the corners and glass scanlines. Brightness and contrast are the
+  only signed parameters; `GET /v1/effects` gives each effect's `minimum`
+  beside its `maximum`. A phosphor with chroma at 0 changes nothing.
 - **Pointer:** under curvature a click reaches the cell the screen shows at
   that point; a click in the black margin reaches the nearest edge cell.
 - **Cost:** each output's render diagnostics report it:

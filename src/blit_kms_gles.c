@@ -794,7 +794,14 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
             pane->corner_radius = blit_effect_corners_presented(&view->effects, 1) ?
                 blit_effect_corner_radius(&view->effects, view->effect_width,
                                           view->effect_height) : 0;
+            /* ADR 0207: the grain re-seeds with the frame, as jitter does. */
+            pane->noise = blit_effect_static_noise(&view->effects);
+            pane->noise_seed = seed;
         }
+        pane->chroma = blit_effect_chroma(&view->effects);
+        blit_effect_phosphor_rgb(&view->effects, pane->phosphor);
+        pane->brightness = blit_effect_level_gain(&view->effects, BLIT_EFFECT_BRIGHTNESS);
+        pane->contrast = blit_effect_level_gain(&view->effects, BLIT_EFFECT_CONTRAST);
         pane->line = blit_effect_line_strength(&view->effects);
         pane->phase = blit_effect_line_phase((double)kms_now_us() / 1000000.0);
         if (pane->line > 0) output->info.effects_animation_phase = pane->phase;

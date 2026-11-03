@@ -1,6 +1,7 @@
 # ADR 0190: Flicker, horizontal sync and jitter: per-frame randomness from C, on the frame clock
 
 - Status: accepted
+- Note: static noise was built in [ADR 0207](0207-tube-colour-and-static-noise.md).
 - Date: 2026-10-26
 - Scope: effects registry, presentation shader, frame clock
 - Builds on: ADR 0187 (presentation effects), ADR 0188 (animated effects)

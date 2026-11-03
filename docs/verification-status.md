@@ -1,5 +1,32 @@
 # Verification status
 
+## 2026-11-03: 0.3.32 tube colour and static noise; Hibr identity follows the disk
+
+- **Five presentation effects** (ADR 0207): `static_noise` (animated grain,
+  frame clock), `chroma` (towards monochrome in the phosphor colour),
+  `phosphor` (0xRRGGBB, 0 is white; acts only through chroma), `brightness`
+  and `contrast` (-100..100, 0 is off; the registry gains a `minimum`,
+  reported in `available[]`). The formulas live once in `blit_effects.h`
+  and the shader mirrors them; they run in the present pass after glow,
+  the hum bar and flicker, so the light the pass adds is tinted too. On the
+  CPU compositor they are kept and reported `cpu compositor`. Zoomed
+  displays draw them (ADR 0204). With none set the frame is unchanged:
+  the zoomed gate's 100% capture is byte-identical to 0.3.31.
+  `tube_effects_gate` checks 860,160 pixels over 7 sets against the C rule
+  (within 1). It fails on 0.3.31 (no registry row), and with the chroma or
+  noise step removed from the shader (122,880 pixels off; one grain level).
+  GPU cost on the Radeon is still to measure.
+- **Hibr's identity follows the Hibr on disk** (ADR 0094 revised). The
+  probe ran once at start, so after an `apt upgrade` of Hibr from ABI 16
+  to 17 the mini PC kept reporting the replaced 0.99.427 as incompatible.
+  Blit now stats the configured Hibr every 5 s and probes again only when
+  it changed. `hibr_identity_refresh_gate` fails on 0.3.31 (still the old
+  identity 12 s after the replacement) and passes.
+- **Suites:** font 39/39, renderer on GLES 74 pass (1 skip), all 168 pass
+  (6 skip). A first run of "all" failed `frame_rate_gate` (full-scene render
+  over budget) while another gate ran on this host; alone it passed twice
+  (62.5 Hz, worst frame 5-11 ms of 20) and the rerun of "all" passed.
+
 ## 2026-11-03: 0.3.31 built against Hibr 0.99.430 (module ABI 17)
 
 - **Hibr 0.99.430 moved its module ABI from 16 to 17** (`struct ent` and

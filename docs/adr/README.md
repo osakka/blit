@@ -224,6 +224,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0204 — Pixel zoom per display](0204-display-pixel-zoom.md)
 - [0205 — Restart after an update at a safe moment](0205-restart-after-update.md)
 - [0206 — Hand the display to gamescope for full-speed games](0206-hand-the-display-to-gamescope.md) (proposed)
+- [0207 — The tube's colour controls and static noise are presentation effects](0207-tube-colour-and-static-noise.md)
 
 ## Status
 

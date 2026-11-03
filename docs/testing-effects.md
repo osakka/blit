@@ -1,6 +1,6 @@
 # Effect testing
 
-Pane effects (ADR 0186, 0187) are renderer state, not terminal state. They are
+Pane effects (ADR 0186, 0187, 0188, 0190, 0207) are renderer state, not terminal state. They are
 kept per pane in the settings document, keyed by output name and pane ordinal,
 and applied live:
 
@@ -79,6 +79,34 @@ ruby tools/tests/presentation_effects_gate.rb
 BLIT_GATE_BACKEND=gles ruby tools/tests/presentation_effects_gate.rb
 ```
 
+The tube's colour controls and static noise (ADR 0207) are checked by
+`tools/tests/tube_effects_gate.rb`, in the renderer suite, on one display
+split 1x2. On both compositors it checks the registry rows (class,
+`animated`, the signed range of brightness and contrast) and strict
+settings: a value outside a row's minimum..maximum, or a second parameter,
+is refused; a negative level is kept and reported as written. On `gles`:
+- **colour:** over three-cell stripes, every pixel of pane 1 is the plain
+  capture's pixel through `blit_effect_tube_colour`, compiled from
+  `src/blit_effects.h` into a probe, within 1 -- for chroma 100 in a green
+  phosphor (the stripes become the phosphor at their luma), chroma 50 in
+  amber, brightness and contrast each down and up, and all four together;
+- **the unchanged path:** the effects at 0 draw no presentation pass and
+  the pane is byte-identical; a phosphor with chroma 0 changes nothing;
+- **static noise:** over dark grey, each frame's grain is grey, within
+  0..`BLIT_EFFECT_NOISE_GAIN` of white, with a mean of half that; over 90%
+  of pixels change between frames; the frame clock runs; under chroma the
+  grain is the phosphor's colour; off, the pane is plain again and an idle
+  screen presents nothing;
+- **isolation:** pane 2 is unchanged.
+
+On `native` it checks that the effects are kept, reported unavailable
+(`cpu compositor`), draw nothing and cost no frames.
+
+```sh
+ruby tools/tests/tube_effects_gate.rb
+BLIT_GATE_BACKEND=gles ruby tools/tests/tube_effects_gate.rb
+```
+
 Effects on a zoomed display (ADR 0204) are checked by
 `tools/tests/zoomed_effects_gate.rb`, in the renderer suite. Two mock
 outputs: display-1, 1024x768, zoomed to 200%, and display-2, 512x384 at
@@ -95,6 +123,10 @@ On `gles` it checks:
 - **animated:** with the glowing line, the frame clock ticks on the zoomed
   display, the band moves between captures, and every capture is still
   2x2 blocks;
+- **colour controls and static noise (ADR 0207):** with chroma, a phosphor,
+  brightness and contrast added to the static effects, display-1 is still
+  display-2 enlarged, within 2; static noise changes between frames, in
+  whole 2x2 blocks;
 - **pointer:** a real SGR mouse report from the curved, zoomed pane names
   the cell the warp shows at the pointer's logical position;
 - **diagnostics:** `presentation_unavailable` is empty on the zoomed

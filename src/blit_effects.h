@@ -13,7 +13,10 @@
      compositors draw them, into the scene.
    - PRESENTATION effects move geometry or read neighbours (curvature, glow).
      Only the GLES compositor draws them, as it presents the scene; elsewhere
-     they are kept and reported unavailable, never imitated.
+     they are kept and reported unavailable, never imitated. The colour
+     controls (chroma, phosphor, brightness, contrast; ADR 0207) are per
+     pixel, but are presentation effects too: they must colour the light
+     the pass adds, and the scene's blended quads cannot mix channels.
 
    The registry order is the order of application: corners last of the local
    ones, because they define the pane's edge. No backend or user reorders
@@ -33,6 +36,11 @@ typedef enum {
     BLIT_EFFECT_FLICKER,
     BLIT_EFFECT_HORIZONTAL_SYNC,
     BLIT_EFFECT_JITTER,
+    BLIT_EFFECT_STATIC_NOISE,
+    BLIT_EFFECT_CHROMA,
+    BLIT_EFFECT_PHOSPHOR,
+    BLIT_EFFECT_BRIGHTNESS,
+    BLIT_EFFECT_CONTRAST,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
 
@@ -44,6 +52,7 @@ typedef enum {
 typedef struct {
     const char *name;   /* the settings and API key */
     const char *param;  /* its one parameter; 0 is off */
+    int minimum;        /* below 0 only for a control with a neutral middle (ADR 0207) */
     int maximum;
     BlitEffectClass effect_class;
     const char *title;  /* what a person reads, e.g. a control panel label */
@@ -52,25 +61,33 @@ typedef struct {
 
 static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
     /* Every second pixel row from the pane's top, darkened by intensity%. */
-    { "scanlines", "intensity", 100, BLIT_EFFECT_LOCAL, "Scanlines", 0 },
+    { "scanlines", "intensity", 0, 100, BLIT_EFFECT_LOCAL, "Scanlines", 0 },
     /* Each corner of the pane's region cut to a quarter circle, in black. */
-    { "corners", "radius_px", 1024, BLIT_EFFECT_LOCAL, "Corners", 0 },
+    { "corners", "radius_px", 0, 1024, BLIT_EFFECT_LOCAL, "Corners", 0 },
     /* The pane bulges like a tube: blit_effect_warp. */
-    { "curvature", "amount", 100, BLIT_EFFECT_PRESENTATION, "Curvature", 0 },
+    { "curvature", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Curvature", 0 },
     /* A soft bloom from a blurred copy of the pane, added on top. */
-    { "glow", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Glow", 0 },
+    { "glow", "intensity", 0, 100, BLIT_EFFECT_PRESENTATION, "Glow", 0 },
     /* An old set's colour fringe: each channel leans to one side,
        blit_effect_rgb_shift_px apart (cool-retro-term's rgb shift). */
-    { "rgb_shift", "amount", 100, BLIT_EFFECT_PRESENTATION, "RGB shift", 0 },
+    { "rgb_shift", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "RGB shift", 0 },
     /* A soft band of light sweeping down the pane: blit_effect_line_value.
        The key is cool-retro-term's name ("glowing line"); the title is the
        owner's, after the real CRT artefact it evokes. */
-    { "glowing_line", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Hum bar", 1 },
+    { "glowing_line", "intensity", 0, 100, BLIT_EFFECT_PRESENTATION, "Hum bar", 1 },
     /* ADR 0190, cool-retro-term's moving set: the brightness wavers, the
        picture sways sideways now and then, and its sample points shimmer. */
-    { "flicker", "intensity", 100, BLIT_EFFECT_PRESENTATION, "Flicker", 1 },
-    { "horizontal_sync", "amount", 100, BLIT_EFFECT_PRESENTATION, "Horizontal sync", 1 },
-    { "jitter", "amount", 100, BLIT_EFFECT_PRESENTATION, "Jitter", 1 },
+    { "flicker", "intensity", 0, 100, BLIT_EFFECT_PRESENTATION, "Flicker", 1 },
+    { "horizontal_sync", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Horizontal sync", 1 },
+    { "jitter", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Jitter", 1 },
+    /* ADR 0207, the rest of cool-retro-term's tube: animated grain added as
+       light (blit_effect_static_noise), then the colour controls,
+       blit_effect_tube_colour. A phosphor is 0xRRGGBB, 0 none (white). */
+    { "static_noise", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Static noise", 1 },
+    { "chroma", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Chroma", 0 },
+    { "phosphor", "color", 0, 0xffffff, BLIT_EFFECT_PRESENTATION, "Phosphor", 0 },
+    { "brightness", "level", -100, 100, BLIT_EFFECT_PRESENTATION, "Brightness", 0 },
+    { "contrast", "level", -100, 100, BLIT_EFFECT_PRESENTATION, "Contrast", 0 },
 };
 
 /* The glowing line (ADR 0188), as cool-retro-term's randomPass: its length,
@@ -84,6 +101,9 @@ static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
 /* Glow at intensity 100 adds this much of the blurred colour. */
 #define BLIT_EFFECT_GLOW_GAIN 0.6f
 
+/* Static noise at 100 adds grain of up to this much white light. */
+#define BLIT_EFFECT_NOISE_GAIN 0.5
+
 /* A pane's effects, by BlitEffectId. All zero is no effect. */
 typedef struct {
     int value[BLIT_EFFECT_COUNT];
@@ -95,7 +115,7 @@ static inline int blit_effect_set_has(const BlitEffectSet *set,
 {
     int i;
     for (i = 0; i < BLIT_EFFECT_COUNT; ++i)
-        if (set->value[i] > 0 && blit_effect_specs[i].effect_class == effect_class)
+        if (set->value[i] != 0 && blit_effect_specs[i].effect_class == effect_class)
             return 1;
     return 0;
 }
@@ -122,7 +142,7 @@ static inline int blit_effect_set_animated(const BlitEffectSet *set)
 {
     int i;
     for (i = 0; i < BLIT_EFFECT_COUNT; ++i)
-        if (set->value[i] > 0 && blit_effect_specs[i].animated) return 1;
+        if (set->value[i] != 0 && blit_effect_specs[i].animated) return 1;
     return 0;
 }
 
@@ -211,6 +231,69 @@ static inline double blit_effect_jitter(const BlitEffectSet *set)
     int amount = set->value[BLIT_EFFECT_JITTER];
     double j = amount <= 0 ? 0.0 : (amount > 100 ? 100 : amount) / 100.0;
     return j * j;
+}
+
+/* ADR 0207. Static noise's strength, 0..BLIT_EFFECT_NOISE_GAIN: each
+   logical pixel gains white light of strength x a hash of the pixel and
+   the frame's seed, a fresh grain every frame. */
+static inline double blit_effect_static_noise(const BlitEffectSet *set)
+{
+    int amount = set->value[BLIT_EFFECT_STATIC_NOISE];
+    if (amount <= 0) return 0.0;
+    return (amount > 100 ? 100 : amount) / 100.0 * BLIT_EFFECT_NOISE_GAIN;
+}
+
+/* The tube's colour controls, ADR 0207, as the shader applies them, in
+   this order, to a colour in 0..1:
+   - chroma a = amount / 100: c = mix(c, P x Y(c), a), Y the Rec. 709 luma
+     and P the phosphor (white when 0). 0 is full colour, 1 monochrome in
+     the phosphor's colour;
+   - brightness: c x (1 + level / 100), so -100 is black and 100 double;
+   - contrast: 0.5 + (c - 0.5) x (1 + level / 100), about mid-grey;
+   each clamped to 0..1. Level 0 leaves the colour exactly as it was. */
+static inline void blit_effect_phosphor_rgb(const BlitEffectSet *set, double rgb[3])
+{
+    int color = set->value[BLIT_EFFECT_PHOSPHOR];
+    if (color <= 0) color = 0xffffff;
+    rgb[0] = ((color >> 16) & 0xff) / 255.0;
+    rgb[1] = ((color >> 8) & 0xff) / 255.0;
+    rgb[2] = (color & 0xff) / 255.0;
+}
+
+static inline double blit_effect_chroma(const BlitEffectSet *set)
+{
+    int amount = set->value[BLIT_EFFECT_CHROMA];
+    if (amount <= 0) return 0.0;
+    return (amount > 100 ? 100 : amount) / 100.0;
+}
+
+/* A level's gain, 1 + level / 100: 0..2, exactly 1 at 0. */
+static inline double blit_effect_level_gain(const BlitEffectSet *set, BlitEffectId id)
+{
+    int level = set->value[id];
+    if (level < -100) level = -100;
+    if (level > 100) level = 100;
+    return 1.0 + level / 100.0;
+}
+
+static inline double blit_effect_clamp01(double v)
+{
+    return v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v;
+}
+
+static inline void blit_effect_tube_colour(const BlitEffectSet *set, double c[3])
+{
+    double chroma = blit_effect_chroma(set), p[3], y;
+    double brightness = blit_effect_level_gain(set, BLIT_EFFECT_BRIGHTNESS);
+    double contrast = blit_effect_level_gain(set, BLIT_EFFECT_CONTRAST);
+    int i;
+    blit_effect_phosphor_rgb(set, p);
+    y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    for (i = 0; i < 3; ++i) {
+        if (chroma > 0) c[i] = c[i] + (p[i] * y - c[i]) * chroma;
+        if (brightness != 1.0) c[i] = blit_effect_clamp01(c[i] * brightness);
+        if (contrast != 1.0) c[i] = blit_effect_clamp01(0.5 + (c[i] - 0.5) * contrast);
+    }
 }
 
 /* The one predicate for corners under content-moving effects: a pane with

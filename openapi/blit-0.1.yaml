@@ -3768,8 +3768,9 @@ components:
         Named pane effects, each with its one parameter; 0 or absent is off.
         Local effects (scanlines, corners; ADR 0186) are applied in a fixed
         order over each pane's pixel region by both compositors.
-        Presentation effects (curvature, glow; ADR 0187) are drawn by the
-        GLES compositor as it presents the frame; when a pane's curvature is
+        Presentation effects (curvature, glow and the rest; ADR 0187, 0188,
+        0190, 0207) are drawn by the GLES compositor as it presents the
+        frame; when a pane's curvature is
         drawn its scanlines are drawn on the glass instead. All are beneath
         the pointer and API overlays. In settings, `enabled: false` switches
         the pane's effects off and keeps its values.
@@ -3846,6 +3847,64 @@ components:
           required: [amount]
           properties:
             amount: {type: integer, minimum: 0, maximum: 100}
+        static_noise:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: >-
+                Animated (ADR 0207): every logical pixel gains grey grain, up
+                to amount/100 x 0.5 of white, re-seeded each frame.
+        chroma:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: >-
+                ADR 0207: c = mix(c, P x Y(c), amount/100), Y the Rec. 709
+                luma and P the phosphor; 0 is full colour, 100 monochrome in
+                the phosphor's colour.
+        phosphor:
+          type: object
+          additionalProperties: false
+          required: [color]
+          properties:
+            color:
+              type: integer
+              minimum: 0
+              maximum: 16777215
+              description: >-
+                The phosphor chroma tints toward, as 0xRRGGBB (green
+                3407718 = 0x33ff66, amber 16756736 = 0xffb000). 0 is none:
+                white, not black. Drawn only through chroma.
+        brightness:
+          type: object
+          additionalProperties: false
+          required: [level]
+          properties:
+            level:
+              type: integer
+              minimum: -100
+              maximum: 100
+              description: "ADR 0207: c x (1 + level/100), clamped; 0 is neutral, -100 black."
+        contrast:
+          type: object
+          additionalProperties: false
+          required: [level]
+          properties:
+            level:
+              type: integer
+              minimum: -100
+              maximum: 100
+              description: "ADR 0207: 0.5 + (c - 0.5) x (1 + level/100), clamped; 0 is neutral, -100 flat grey."
     EffectState:
       type: object
       required: [revision, enabled, available, panes, configure]
@@ -3859,12 +3918,17 @@ components:
           items:
             type: object
             additionalProperties: false
-            required: [name, title, parameter, maximum, class, animated]
+            required: [name, title, parameter, minimum, maximum, class, animated]
             properties:
-              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter]}
+              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter, static_noise, chroma, phosphor, brightness, contrast]}
               animated: {type: boolean, description: Driven by the frame clock (ADR 0188).}
               title: {type: string, description: "The effect's name for people, e.g. RGB shift."}
               parameter: {type: string}
+              minimum:
+                type: integer
+                description: >-
+                  0, or below 0 for a control with a neutral middle
+                  (brightness, contrast: -100); 0 is off for every effect.
               maximum: {type: integer}
               class: {type: string, enum: [local, presentation]}
         panes:

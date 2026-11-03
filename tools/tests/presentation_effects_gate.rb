@@ -179,12 +179,14 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
                      'curvature' => 'presentation', 'glow' => 'presentation',
                      'rgb_shift' => 'presentation', 'glowing_line' => 'presentation',
                      'flicker' => 'presentation', 'horizontal_sync' => 'presentation',
-                     'jitter' => 'presentation' },
+                     'jitter' => 'presentation', 'static_noise' => 'presentation',
+                     'chroma' => 'presentation', 'phosphor' => 'presentation',
+                     'brightness' => 'presentation', 'contrast' => 'presentation' },
         "effect classes: #{classes}")
   titles = get('/v1/effects')['available'].to_h { |e| [e['name'], e['title']] }
   check(titles['rgb_shift'] == 'RGB shift' && titles['corners'] == 'Corners', "effect titles: #{titles}")
   animated = get('/v1/effects')['available'].select { |e| e['animated'] }.map { |e| e['name'] }
-  check(animated == %w[glowing_line flicker horizontal_sync jitter], "animated effects: #{animated}")
+  check(animated == %w[glowing_line flicker horizontal_sync jitter static_noise], "animated effects: #{animated}")
   # ADR 0190's per-frame randomness is a pure function of the frame number.
   probe = File.join(root, 'noise_probe')
   File.write("#{probe}.c", <<~C)

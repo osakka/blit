@@ -324,6 +324,7 @@ suite_renderer() {
     run_gate graphics_band_gate.rb ruby tools/tests/graphics_band_gate.rb
     run_gate pane_effects_gate.rb ruby tools/tests/pane_effects_gate.rb
     run_gate presentation_effects_gate.rb ruby tools/tests/presentation_effects_gate.rb
+    run_gate tube_effects_gate.rb ruby tools/tests/tube_effects_gate.rb
     run_gate performance_panel_gate.rb ruby tools/tests/performance_panel_gate.rb
     run_gate overlay_translucency_gate.rb ruby tools/tests/overlay_translucency_gate.rb
     run_gate under_text_picture_gate.rb ruby tools/tests/under_text_picture_gate.rb
@@ -394,6 +395,7 @@ suite_lifecycle() {
     run_gate update_reset_gate.sh "$ROOT"/tools/tests/update_reset_gate.sh
     run_gate update_restart_gate.sh "$ROOT"/tools/tests/update_restart_gate.sh
     run_gate restart_after_update_gate.rb ruby tools/tests/restart_after_update_gate.rb
+    run_gate hibr_identity_refresh_gate.rb ruby tools/tests/hibr_identity_refresh_gate.rb
     run_gate update_cancel_gate.sh "$ROOT"/tools/tests/update_cancel_gate.sh
 }
 

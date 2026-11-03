@@ -45,3 +45,14 @@ fail-closed condition.
 - The API schema and network gate require both ABI fields.
 - The live host is accepted only after its reported ABI matches the packaged
   ABI and the login handoff is retested through the diagnostics API.
+
+## Revision 2026-11-03: the identity follows the Hibr on disk
+
+The probe ran once, at Blit's start. When the owner upgraded Hibr from ABI
+16 to 17 while Blit ran, `hibr_compatibility` went on reporting the
+replaced 0.99.427 as incompatible until Blit restarted. Blit now stats the
+configured Hibr every 5 s (the update check's period, ADR 0205) and probes
+again only when the file changed (device, inode or mtime, which a dpkg
+rename changes), logging the new state once. `hibr_identity_refresh_gate`
+replaces a stand-in Hibr while Blit runs: the report follows within two
+periods, and an unchanged Hibr is not probed again. It fails on 0.3.31.

@@ -18,6 +18,9 @@
 #   * pixel zoom: every 2x2 block of display-1 is one colour, exactly
 #   * animated: the glowing line runs on the zoomed display -- its frame
 #     clock ticks, its band moves -- and every frame is still 2x2 blocks
+#   * ADR 0207: with chroma, a phosphor, brightness and contrast added to
+#     the static effects, display-1 is still display-2 enlarged; static
+#     noise changes between frames in whole 2x2 blocks
 #   * pointer: a click on the curved, zoomed pane reaches the cell the warp
 #     shows at that logical point
 #   * diagnostics: nothing is reported unavailable on the zoomed display
@@ -51,6 +54,8 @@ CURVATURE = 100
 GLES = GATE_BACKEND == 'gles'
 STATIC = { 'curvature' => { 'amount' => CURVATURE }, 'rgb_shift' => { 'amount' => 50 },
            'scanlines' => { 'intensity' => 50 }, 'corners' => { 'radius_px' => 24 } }.freeze
+TUBE = { 'chroma' => { 'amount' => 60 }, 'phosphor' => { 'color' => 0xffb000 },
+         'brightness' => { 'level' => 20 }, 'contrast' => { 'level' => -15 } }.freeze
 
 abort("zoomed effects gate: missing #{BINARY}") unless File.executable?(BINARY)
 
@@ -322,6 +327,41 @@ Dir.mktmpdir('blit-zoomed-effects') do |root|
   check(lit.all? { |l| l.empty? || (l.first.even? && l.last.odd?) },
         "#{ZOOM}%: the band does not cover whole logical rows: #{lit.map { |l| [l.first, l.last] }}")
 
+  # ADR 0207, the tube's colour controls with the static effects: still
+  # the 100% display's picture, enlarged; and static noise, re-seeded each
+  # frame, one grain per logical pixel.
+  effects_on.call(STATIC.merge(TUBE))
+  park('display-1')
+  reference = rows_of(settled('display-2'))
+  park('display-2')
+  wrong = nil
+  10.times do
+    tinted = rows_of(settled('display-1'))
+    wrong = []
+    tinted.each_with_index do |row, y|
+      row.each_with_index do |colour, x|
+        wrong << [x, y, colour, reference[y / 2][x / 2]] unless near?(colour, reference[y / 2][x / 2])
+      end
+    end
+    break if wrong.empty?
+    sleep 0.3
+  end
+  check(wrong.empty?, "#{ZOOM}%, colour controls: #{wrong.length} pixels are not the 100% display's enlarged, first " \
+                      "#{wrong.first(6).map { |x, y, got, want| "(#{x},#{y}) #{got} not #{want}" }.join(', ')}")
+  check(reference[HL / 2][WL / 2] != A && reference[HL / 2][WL / 2] != B,
+        "the colour controls did not change the picture: #{reference[HL / 2][WL / 2]}")
+  save_effects(connectors[0] => { '1' => { 'static_noise' => { 'amount' => 100 } } })
+  sleep 0.5
+  grains = Array.new(3) do
+    rows = rows_of(screenshot_bytes('display-1'))
+    bad = blocks(rows)
+    check(bad.empty?, "#{ZOOM}%, static noise: #{bad.length} 2x2 blocks are not one colour, first #{bad.first(4)}")
+    sleep 0.15
+    rows
+  end
+  grained = (0...H).step(2).sum { |y| (0...W).step(2).count { |x| grains[0][y][x] != grains[1][y][x] } }
+  check(grained > WL * HL / 2, "#{ZOOM}%, static noise: only #{grained} logical pixels changed between frames")
+
   # 100% again, the static effects: byte-identical to before zooming.
   effects_on.call(STATIC)
   set_zoom(100)
@@ -339,5 +379,6 @@ Dir.mktmpdir('blit-zoomed-effects') do |root|
   puts "ZOOMED_EFFECTS_PASS backend=gles zoom=#{ZOOM} logical=#{WL}x#{HL} " \
        "same_as_100_enlarged=#{compared}px(curvature+rgb_shift+scanlines+corners) tube=black " \
        "fringed=#{fringed}px pixel=2x2_blocks glowing_line=ticks_#{ticks},moves,2x2 " \
+       "colour_controls=same_as_100_enlarged static_noise=2x2,fresh_#{grained} " \
        'pointer=warped_logical unavailable=none back_to_100=byte_identical'
 end

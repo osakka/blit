@@ -142,6 +142,12 @@ typedef struct {
     double sync_scale, sync_freq, sync_phase;
     double jitter, jitter_cell, jitter_seed;
     double corner_radius;
+    /* ADR 0207: static noise's strength (0 none) and this frame's seed;
+       chroma (0 none) toward the phosphor's colour (0..1 each); brightness
+       and contrast gains (1 none: blit_effect_level_gain). */
+    double noise, noise_seed;
+    double chroma, phosphor[3];
+    double brightness, contrast;
 } BlitGlesPresentPane;
 /* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
    pane's blurred copy from its rectangle of the scene (halved twice). */

@@ -1358,6 +1358,11 @@ typedef struct {
     char hibr_runtime_version[64];
     int hibr_runtime_probe_ok;
     int hibr_runtime_abi;
+    int hibr_exe_known;  /* an identity (or "missing") is recorded */
+    dev_t hibr_exe_dev;
+    ino_t hibr_exe_ino;
+    struct timespec hibr_exe_mtime;
+    uint64_t hibr_checked_us;
     int opener_notify[2];
     unsigned long long diagnostic_open_requests;
     unsigned long long diagnostic_open_requests_dropped;
@@ -21151,18 +21156,26 @@ static int settings_auxiliary_policy_valid(const char *document)
                              "scanlines": {"intensity": 40}}}}
    Strict: an unknown output character, ordinal, effect or parameter, a
    repeated one, or a value out of range makes the section invalid. An absent
-   section is no effects. Effect names and bounds come from blit_effects.h. */
-static int effects_integer(const char *text, int maximum, int *out)
+   section is no effects. Effect names and bounds come from blit_effects.h;
+   a minimum is below 0 only for a control with a neutral middle (ADR 0207:
+   brightness, contrast). */
+static int effects_range(const char *text, int minimum, int maximum, int *out)
 {
     char *end;
     long number;
     while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') ++text;
-    if (*text < '0' || *text > '9') return 0;
+    if ((*text < '0' || *text > '9') &&
+        (minimum >= 0 || *text != '-' || text[1] < '0' || text[1] > '9')) return 0;
     number = strtol(text, &end, 10);
     while (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r') ++end;
-    if (*end != '\0' || number < 0 || number > maximum) return 0;
+    if (*end != '\0' || number < minimum || number > maximum) return 0;
     *out = (int)number;
     return 1;
+}
+
+static int effects_integer(const char *text, int maximum, int *out)
+{
+    return effects_range(text, 0, maximum, out);
 }
 
 /* A JSON boolean: 1 true, 0 false, -1 anything else. */
@@ -21254,8 +21267,9 @@ static int settings_effects_parse(const char *document, BlitPaneEffects *table,
                                                         sizeof(parameter), number,
                                                         sizeof(number))) != NULL) {
                     if (params++ || strcmp(parameter, blit_effect_specs[id].param) != 0 ||
-                        !effects_integer(number, blit_effect_specs[id].maximum,
-                                         &entry.set.value[id])) return 0;
+                        !effects_range(number, blit_effect_specs[id].minimum,
+                                       blit_effect_specs[id].maximum,
+                                       &entry.set.value[id])) return 0;
                 }
                 if (params != 1) return 0;
             }
@@ -21496,9 +21510,10 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
     for (id = 0; id < BLIT_EFFECT_COUNT; ++id)
         json_appendf(body, capacity, &used,
                      "%s{\"name\":\"%s\",\"title\":\"%s\",\"parameter\":\"%s\","
-                     "\"maximum\":%d,\"class\":\"%s\",\"animated\":%s}",
+                     "\"minimum\":%d,\"maximum\":%d,\"class\":\"%s\",\"animated\":%s}",
                      id ? "," : "", blit_effect_specs[id].name, blit_effect_specs[id].title,
-                     blit_effect_specs[id].param, blit_effect_specs[id].maximum,
+                     blit_effect_specs[id].param, blit_effect_specs[id].minimum,
+                     blit_effect_specs[id].maximum,
                      blit_effect_specs[id].effect_class == BLIT_EFFECT_PRESENTATION ?
                      "presentation" : "local",
                      blit_effect_specs[id].animated ? "true" : "false");
@@ -21516,7 +21531,7 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
                      pane_effects_switched_on(runtime, pane) ? "true" : "false");
         for (id = 0; id < BLIT_EFFECT_COUNT; ++id) {
             int value = set.value[id];
-            if (value <= 0) continue;
+            if (value == 0) continue;
             if (id == BLIT_EFFECT_CORNERS)
                 value = blit_effect_corner_radius(&set, pane->pixel_region_width,
                                                   pane->pixel_region_height);
@@ -21531,7 +21546,7 @@ static void effect_json(BlitRuntime *runtime, char *body, size_t capacity)
             first = 1;
             json_appendf(body, capacity, &used, ",\"unavailable\":{");
             for (id = 0; reason[0] && id < BLIT_EFFECT_COUNT; ++id) {
-                if (set.value[id] <= 0 ||
+                if (set.value[id] == 0 ||
                     blit_effect_specs[id].effect_class != BLIT_EFFECT_PRESENTATION)
                     continue;
                 json_appendf(body, capacity, &used, "%s\"%s\":\"%s\"", first ? "" : ",",
@@ -29765,6 +29780,60 @@ static void service_http_client(BlitRuntime *runtime, int index)
 #include "blit_update_restart.h"
 #include "blit_frames.h"
 
+/* ADR 0094: the running Hibr's identity, probed at start and again whenever
+   the program on disk changes -- an apt upgrade of Hibr while Blit runs, so
+   hibr_compatibility never reports the Hibr that was replaced. The file is
+   only stat'ed every BLIT_UPDATE_CHECK_US; the probe runs on a change. */
+static void hibr_identity_refresh(BlitRuntime *runtime, uint64_t now)
+{
+    char path[PATH_MAX];
+    struct stat st;
+    const char *command = runtime->login_command;
+    int found = 0;
+
+    if (runtime->hibr_checked_us != 0 && now - runtime->hibr_checked_us < BLIT_UPDATE_CHECK_US)
+        return;
+    runtime->hibr_checked_us = now;
+    if (strchr(command, '/') != NULL) {
+        snprintf(path, sizeof(path), "%s", command);
+        found = stat(path, &st) == 0;
+    } else {
+        const char *dirs = getenv("PATH");
+        const char *p = dirs != NULL ? dirs : "/usr/local/bin:/usr/bin:/bin";
+        while (!found && *p) {
+            size_t length = strcspn(p, ":");
+            snprintf(path, sizeof(path), "%.*s/%s", (int)length, p, command);
+            found = length > 0 && stat(path, &st) == 0 && S_ISREG(st.st_mode);
+            p += length + (p[length] == ':');
+        }
+    }
+    if (!found) memset(&st, 0, sizeof(st));
+    if (runtime->hibr_exe_known &&
+        st.st_dev == runtime->hibr_exe_dev && st.st_ino == runtime->hibr_exe_ino &&
+        st.st_mtim.tv_sec == runtime->hibr_exe_mtime.tv_sec &&
+        st.st_mtim.tv_nsec == runtime->hibr_exe_mtime.tv_nsec)
+        return;
+    runtime->hibr_exe_known = 1;
+    runtime->hibr_exe_dev = st.st_dev;
+    runtime->hibr_exe_ino = st.st_ino;
+    runtime->hibr_exe_mtime = st.st_mtim;
+    runtime->hibr_runtime_probe_ok = probe_hibr_identity(
+        command, runtime->hibr_runtime_version,
+        sizeof(runtime->hibr_runtime_version), &runtime->hibr_runtime_abi);
+    if (!runtime->hibr_runtime_probe_ok)
+        diagnostic_log(runtime, "warning", "hibr_version_unavailable",
+                       "configured Hibr command did not report a version");
+    else if (runtime->hibr_runtime_abi != BLIT_HIBR_ABI)
+        diagnostic_log(runtime, "error", "hibr_abi_mismatch",
+                       "running Hibr module ABI differs from the packaged adapter ABI");
+    else if (strcmp(BLIT_HIBR_VERSION, runtime->hibr_runtime_version) != 0)
+        diagnostic_log(runtime, "info", "hibr_version_drift",
+                       "running Hibr release differs while the documented module ABI matches");
+    else
+        diagnostic_log(runtime, "info", "hibr_version_matches",
+                       "running Hibr matches the packaged release and module ABI");
+}
+
 int main(int argc, char **argv)
 {
     int port = 8080;
@@ -30016,18 +30085,7 @@ int main(int argc, char **argv)
             }
         }
     }
-    runtime.hibr_runtime_probe_ok = probe_hibr_identity(
-        runtime.login_command, runtime.hibr_runtime_version,
-        sizeof(runtime.hibr_runtime_version), &runtime.hibr_runtime_abi);
-    if (!runtime.hibr_runtime_probe_ok)
-        diagnostic_log(&runtime, "warning", "hibr_version_unavailable",
-                       "configured Hibr command did not report a version");
-    else if (runtime.hibr_runtime_abi != BLIT_HIBR_ABI)
-        diagnostic_log(&runtime, "error", "hibr_abi_mismatch",
-                       "running Hibr module ABI differs from the packaged adapter ABI");
-    else if (strcmp(BLIT_HIBR_VERSION, runtime.hibr_runtime_version) != 0)
-        diagnostic_log(&runtime, "info", "hibr_version_drift",
-                       "running Hibr release differs while the documented module ABI matches");
+    hibr_identity_refresh(&runtime, monotonic_us());
     /* ADR 0067. The settings document, read before the first scan so that a
        device found at boot acquires its stored configuration in the same place
        a device hotplugged an hour later does.
@@ -30629,6 +30687,7 @@ int main(int argc, char **argv)
             effects_animation_tick(&runtime, now);
             recent_tick(&runtime, now);
             update_tick(&runtime, now);
+            hibr_identity_refresh(&runtime, now);
             hud_reconcile(&runtime);
             hud_tick(&runtime, now);
             if (blit_vt_active() && runtime.render_pending &&
