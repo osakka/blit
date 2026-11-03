@@ -100,6 +100,18 @@ already be fixed.
 Security review, a reproducible package, and a rehearsed install, rollback
 and recovery.
 
+### 7. Steam through gamescope ([ADR 0206](adr/0206-hand-the-display-to-gamescope.md), proposed; Gitea ticket to open)
+
+- **Hand-over first:** `POST /v1/control/handover` starts gamescope
+  (`--backend drm`) as the signed-in user in a logind session on a free VT;
+  Blit's existing VT release gives up the display and input, and the
+  acquire path takes them back when it exits. Hibr adds the Steam launcher.
+- **Before building:** package gamescope for hibr-apt (not in the mini PC's
+  apt sources); confirm its DRM backend on the Radeon from such a session;
+  confirm PipeWire audio across the VT switch.
+- **Then Steam in a window:** its own ADR, with zero-copy dma-buf import;
+  verify how gamescope's headless backend takes input first.
+
 ## Waiting for hardware
 
 These are built and tested; they need a device to confirm.
