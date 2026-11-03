@@ -100,7 +100,7 @@ already be fixed.
 Security review, a reproducible package, and a rehearsed install, rollback
 and recovery.
 
-### 7. Steam through gamescope ([ADR 0206](adr/0206-hand-the-display-to-gamescope.md), proposed; Gitea ticket to open)
+### 7. Steam through gamescope (#148, [ADR 0206](adr/0206-hand-the-display-to-gamescope.md), proposed)
 
 - **Hand-over first:** `POST /v1/control/handover` starts gamescope
   (`--backend drm`) as the signed-in user in a logind session on a free VT;
