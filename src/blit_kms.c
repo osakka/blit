@@ -2031,7 +2031,6 @@ static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
     snprintf(output->info.compositor, sizeof(output->info.compositor), "gles");
     snprintf(output->info.presentation_unavailable,
              sizeof(output->info.presentation_unavailable), "%s",
-             output->zoom > 100 ? "zoomed display" :
              blit_gles_presents(kms->gles) ? "" : "no highp fragment precision");
     snprintf(output->info.compositor_renderer,
              sizeof(output->info.compositor_renderer), "%s",
@@ -2346,11 +2345,6 @@ int blit_kms_set_zoom(BlitKms *kms, int index, int zoom)
         blit_gles_scene_close(kms->gles, output->gles_scene);
         output->gles_scene = NULL;
     }
-    if (output->gles_target != NULL)
-        snprintf(output->info.presentation_unavailable,
-                 sizeof(output->info.presentation_unavailable), "%s",
-                 zoom > 100 ? "zoomed display" :
-                 blit_gles_presents(kms->gles) ? "" : "no highp fragment precision");
     return 0;
 }
 

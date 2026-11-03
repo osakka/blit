@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-11-03: 0.3.30 presentation effects on zoomed displays
+
+- **Zoomed displays draw every effect** (ADR 0204 revised). On the GLES
+  compositor a display with pixel zoom took the enlargement in place of
+  the presentation pass, so curvature, glow, RGB shift, the glowing line,
+  flicker, horizontal sync and jitter were not drawn and were reported
+  unavailable as `zoomed display`. The presentation program now takes the
+  zoom: each physical pixel maps to the logical pixel the zoom program
+  would show (the same expression), and every effect is worked out in the
+  pane's logical rectangle. The result is the 100% picture enlarged in
+  crisp blocks. One entry point, `blit_gles_scene_present(..., zoom)`, draws
+  the plain copy 1:1 or zoomed; scanlines and corners under the pass are on
+  the glass again when zoomed, and the `zoomed display` reason is gone.
+  At 100% the output is byte-identical to 0.3.29.
+  `zoomed_effects_gate.rb` (renderer suite): a 200% display must equal the
+  100% display enlarged, pixel for pixel, with curvature, RGB shift,
+  scanlines and corners, black outside the tube, 2x2 blocks, the glowing
+  line ticking and moving, and a click landing where the warp shows it.
+  On 0.3.29 it fails (392,068 pixels not the 100% display enlarged).
+  The entries for 0.3.26 below describe the earlier decision.
+- **Screenshots no longer stall under slow animated frames.** Each pending
+  capture forced a frame on every render until answered; when frames took
+  longer than their period, a flip was always pending at the check after
+  composing, and the client got EOF after 10 s. A capture's request now
+  clears once its frame is submitted, and captures whose frame has flipped
+  are answered before the next frame is composed. It is still the next
+  presented frame. Reproduced on 0.3.29 with a zoom cycle and effects on
+  llvmpipe; the new gate depends on it.
+- **Suites:** font 39/39, all 166 pass (6 skip), renderer on GLES 73 pass
+  (1 skip); no failures.
+
 ## 2026-11-01: 0.3.29 erased cells repaint; translucent overlays; tidy-up
 
 - **Erased cells never repainted** (the owner's wallpaper showing beside

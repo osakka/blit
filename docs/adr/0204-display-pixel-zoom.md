@@ -74,14 +74,32 @@ zoom**: the whole display, pictures included, magnified as an image.
   testing, mouse reports and pointer lock.
 - **Damage.** A logical damaged rectangle becomes its enlarged physical
   rectangle; nothing else is repainted.
-- **Effects.** The presentation effects (curvature, glow and the others
-  the GLES presentation pass draws, ADR 0187) are not drawn on a zoomed
-  display: the enlargement takes the place of that pass. The display's
-  `presentation_unavailable` says `zoomed display`, as it says `cpu
-  compositor` on the CPU. The local effects (scanlines, corners) are drawn
-  into the logical scene and enlarged with it, including the ones the
-  presentation pass would otherwise draw on the glass (scanlines under
-  curvature, corners under horizontal sync or jitter), as on the CPU.
+- **Effects** (revised 2026-11-03; 0.3.29 did not draw them zoomed). A
+  zoomed display draws every effect it draws at 100%, the picture at 100%
+  enlarged. The local effects (scanlines, corners) are drawn into the
+  logical scene and enlarged with it. On GLES the presentation pass
+  (curvature, glow, RGB shift, the glowing line, flicker, horizontal sync,
+  jitter; ADR 0187, 0188, 0190) is the enlargement too: the plain copy is
+  the zoom program over the whole frame, and each pane with presentation
+  effects is drawn again over its physical rectangle by the presentation
+  program, which knows the zoom. For each physical pixel it takes the
+  logical pixel the zoom program shows there (the same expression, clamp
+  included) and evaluates everything at that pixel's centre in the pane's
+  logical rectangle -- the warp, the samples, RGB shift's distance,
+  jitter's grid, the corners, the glass scanlines' rows, the line's band
+  and the glow's blurred copy, which is built from the logical scene as
+  before. So every effect is the 100% one, pixel-enlarged: each logical
+  pixel an even block at 200%, nothing re-evaluated between them, no new
+  smoothness and no thinner scanlines. The pass draws the glass scanlines
+  and the still corners under sync or jitter on a zoomed display as it
+  does at 100%. A pane without presentation effects is the zoom program's
+  pixels exactly, and at 100% the program takes the screen pixel as it is:
+  the same pixels as before, for one uniform branch per fragment. Nothing is reported
+  unavailable for being zoomed; the CPU compositor still says `cpu
+  compositor`. Clicks follow the warp in logical pixels, as the pointer's
+  position is logical. The first decision -- no presentation effects on a
+  zoomed display, reported `zoomed display` -- was a gap the owner did not
+  want: a CRT look and a magnified display are independent choices.
 
 ## Consequences
 
@@ -98,7 +116,10 @@ zoom**: the whole display, pictures included, magnified as an image.
   detail, make its window bigger, not the display. A crisp zoom (larger cells per display) remains possible
   later as a separate setting.
 - Cost: the enlargement is one textured quad on GLES; on the CPU a
-  row-replicating copy of the damaged area.
+  row-replicating copy of the damaged area. A pane with presentation
+  effects on a zoomed display costs its presentation quad over its physical
+  rectangle, as on an unzoomed display of that mode, with the zoom
+  program's fragments under it also run.
 
 ## Verification
 
@@ -109,6 +130,19 @@ zoom**: the whole display, pictures included, magnified as an image.
   columns × the unchanged cell width (rows likewise); the pointer's
   reported position is logical; the panel and pointer are not enlarged;
   100% is byte-identical to today.
+- The zoomed effects gate (`zoomed_effects_gate.rb`, GLES, renderer
+  suite): display-1 1024x768 at 200% beside display-2 512x384 at 100%, the
+  same stripes and the same curvature, RGB shift, scanlines and corners on
+  both. Every physical pixel of display-1 (x, y) is display-2's (x / 2,
+  y / 2) within 2 -- the effects are drawn, in logical coordinates; every
+  2x2 block is one colour exactly; the tube's outside is black and stripe
+  edges fringe; the glowing line ticks and moves on the zoomed display and
+  stays in 2x2 blocks; a click on the curved zoomed pane reaches the cell
+  the warp shows; `presentation_unavailable` is empty; back at 100% the
+  frame with effects is byte-identical to the one before zooming. Against
+  0.3.29 it fails (about 392,000 pixels, half the frame, are not the
+  enlarged 100% picture), and its 100% capture with effects is
+  byte-identical between 0.3.29 and the fix.
 - The display API gate: `zoom` in `capabilities` and `configuration`,
   invalid values refused (400 `invalid_display_zoom`), any step of 25
   accepted, persisted per connector across a restart, and an entry under

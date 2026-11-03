@@ -176,6 +176,12 @@ values are kept, and `GET /v1/effects` reports them under each pane's
 still draw there. This keeps ADR 0186's rule that entries are kept, not
 dropped.
 
+**A zoomed display draws them too** (ADR 0204, revised 2026-11-03). The
+pass takes the output's zoom: each physical pixel is mapped to the logical
+pixel the enlargement shows there, and the effects are evaluated there, in
+the pane's logical rectangle, so they are the 100% effects, pixel-enlarged.
+At 100% the screen pixel is used as it is.
+
 **Switches bypass, they do not dim.** The owner asked for effects to be
 switchable, with no cost while off:
 - `document.effects.enabled` is a master switch, and each pane's entry may

@@ -2795,6 +2795,39 @@ static int send_kms_screenshot(BlitHttpClient *client, BlitRuntime *runtime,
     return 1;
 }
 
+/* Answer the captures whose frame is on the panel. `submitted_only`: only
+   those whose frame has been submitted -- checked before composing, so a
+   flip that just completed is answered before the next frame is put in
+   flight (with frames slower than their period, an animated output always
+   had a flip pending by the check after composing). */
+static void serve_screenshots(BlitRuntime *runtime, int submitted_only)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        BlitHttpClient *client = &runtime->http_clients[i];
+        int screenshot_index;
+        int screenshot_result;
+        if (!client->used || client->screenshot_output_index <= 0)
+            continue;
+        screenshot_index = client->screenshot_output_index - 1;
+        if (screenshot_index < 0 || screenshot_index >= runtime->output_count)
+            continue;
+        if (submitted_only &&
+            (runtime->screenshot_requested_mask & (1U << screenshot_index)))
+            continue;
+        screenshot_result = send_kms_screenshot(client, runtime,
+                                                screenshot_index);
+        if (screenshot_result == 0)
+            continue;
+        if (screenshot_result < 0) {
+            remove_http_client(runtime, i);
+            continue;
+        }
+        runtime->screenshot_requested_mask &= ~(1U << screenshot_index);
+        client->screenshot_output_index = 0;
+    }
+}
+
 static void json_escape(const char *input, char *output, size_t capacity)
 {
     /* Bytes that are escaped (" and \\ ) or dropped (other controls); runs
@@ -26619,6 +26652,11 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         1000.0;
     runtime->kms_retry_outputs |= kms_deferred_output_mask;
     runtime->kms_retry_outputs &= ~kms_submitted_output_mask;
+    /* A capture asks for one frame: once it is submitted the request
+       waits for its flip. Forcing every later frame too kept a flip
+       pending at each check whenever frames came slower than their
+       deadline, and the capture was never answered. */
+    runtime->screenshot_requested_mask &= ~kms_submitted_output_mask;
     runtime->diagnostic_last_kms_present_ms = kms_present_ms;
     if (kms_present_ms > runtime->diagnostic_max_kms_present_ms)
         runtime->diagnostic_max_kms_present_ms = kms_present_ms;
@@ -30572,6 +30610,7 @@ int main(int argc, char **argv)
         for (i = 0; i < BLIT_MAX_STREAMS; ++i)
             if (runtime.streams[i].used && runtime.streams[i].receive_length > 0)
                 service_stream(&runtime, runtime.streams[i].fd);
+        serve_screenshots(&runtime, 1);
         now = monotonic_us();
         /* Rephase only after a genuinely idle interval.  Resetting the phase
            for every new event made a moving Hibr window present at producer
@@ -30632,26 +30671,7 @@ int main(int argc, char **argv)
                 runtime.render_last_us = now;
             }
         }
-        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
-            BlitHttpClient *client = &runtime.http_clients[i];
-            int screenshot_index;
-            int screenshot_result;
-            if (!client->used || client->screenshot_output_index <= 0)
-                continue;
-            screenshot_index = client->screenshot_output_index - 1;
-            if (screenshot_index < 0 || screenshot_index >= runtime.output_count)
-                continue;
-            screenshot_result = send_kms_screenshot(client, &runtime,
-                                                    screenshot_index);
-            if (screenshot_result == 0)
-                continue;
-            if (screenshot_result < 0) {
-                remove_http_client(&runtime, i);
-                continue;
-            }
-            runtime.screenshot_requested_mask &= ~(1U << screenshot_index);
-            client->screenshot_output_index = 0;
-        }
+        serve_screenshots(&runtime, 0);
     }
     close(server_fd);
     if (runtime.evdev_watch_fd >= 0)

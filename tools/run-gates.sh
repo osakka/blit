@@ -328,6 +328,7 @@ suite_renderer() {
     run_gate overlay_translucency_gate.rb ruby tools/tests/overlay_translucency_gate.rb
     run_gate under_text_picture_gate.rb ruby tools/tests/under_text_picture_gate.rb
     run_gate display_zoom_gate.rb ruby tools/tests/display_zoom_gate.rb
+    run_gate zoomed_effects_gate.rb ruby tools/tests/zoomed_effects_gate.rb
     run_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb

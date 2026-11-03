@@ -71,7 +71,7 @@ struct BlitGles {
     GLint present_target, present_scene, present_glow, present_scene_size;
     GLint present_rect, present_k, present_scan, present_gain, present_glow_size;
     GLint present_shift, present_line, present_phase;
-    GLint present_flick, present_sync, present_jit, present_corner;
+    GLint present_flick, present_sync, present_jit, present_corner, present_zoom;
     /* ADR 0204: the enlargement of a zoomed output's scene. 0 without highp
        fragment floats, which the integer mapping needs at these sizes. */
     GLuint zoom_program, zoom_buffer;
@@ -442,7 +442,12 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
    One fragment per screen pixel of a pane with presentation effects:
    normalise within the pane, warp exactly as blit_effect_warp does, black
    outside the tube, otherwise the scene inside the pane's own rectangle
-   (its rows are bottom-up), then the glass scanlines and the glow. */
+   (its rows are bottom-up), then the glass scanlines and the glow.
+
+   ADR 0204: on a zoomed output the screen pixel first becomes the logical
+   pixel the zoom program shows there (the same expression), and every
+   effect is evaluated at that pixel's centre: the 100% picture, enlarged
+   nearest-neighbour. At 100 `pixel` is used as it is. */
 static void gles_build_present(BlitGles *gles)
 {
     static const char *vertex_source =
@@ -473,6 +478,7 @@ static void gles_build_present(BlitGles *gles)
         "uniform vec3 sync;\n"
         "uniform vec4 jit;\n"
         "uniform float corner;\n"
+        "uniform float zoom;\n"
         "float hash(vec2 q) { return fract(sin(dot(q, vec2(12.9898, 78.233)) + jit.w) * 43758.5453); }\n"
         "vec2 vnoise(vec2 q) {\n"
         "  vec2 i = floor(q), f = q - i;\n"
@@ -493,7 +499,9 @@ static void gles_build_present(BlitGles *gles)
         "  return floor((outside * 255.0 + 32.0) / 64.0) / 255.0;\n"
         "}\n"
         "void main() {\n"
-        "  vec2 q = (pixel - rect.xy) / rect.zw * 2.0 - 1.0;\n"
+        "  vec2 at = zoom > 100.0 ?\n"
+        "    min(floor(floor(pixel) * 100.0 / zoom), scene_size - 1.0) + 0.5 : pixel;\n"
+        "  vec2 q = (at - rect.xy) / rect.zw * 2.0 - 1.0;\n"
         "  vec2 s = q * ((1.0 + k * dot(q, q)) / (1.0 + k));\n"
         "  if (abs(s.x) > 1.0 || abs(s.y) > 1.0) {\n"
         "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n"
@@ -537,7 +545,7 @@ static void gles_build_present(BlitGles *gles)
         "                  local.y < corner ? local.y : rect.w - 1.0 - local.y);\n"
         "    if (m.x < corner && m.y < corner) c *= 1.0 - cover(m);\n"
         "  }\n"
-        "  if (scan > 0.0 && mod(floor(pixel.y - rect.y), 2.0) > 0.5)\n"
+        "  if (scan > 0.0 && mod(floor(at.y - rect.y), 2.0) > 0.5)\n"
         "    c = floor(c * (255.0 - scan) + 0.5) / 255.0;\n"
         "  gl_FragColor = vec4(c, 1.0);\n"
         "}\n";
@@ -588,6 +596,7 @@ static void gles_build_present(BlitGles *gles)
     gles->present_sync = gles->glGetUniformLocation(gles->present_program, "sync");
     gles->present_jit = gles->glGetUniformLocation(gles->present_program, "jit");
     gles->present_corner = gles->glGetUniformLocation(gles->present_program, "corner");
+    gles->present_zoom = gles->glGetUniformLocation(gles->present_program, "zoom");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -1536,21 +1545,60 @@ int blit_gles_scene_glow(BlitGles *gles, BlitGlesScene *scene,
     return 0;
 }
 
+/* ADR 0204: the plain copy of a zoomed scene, to the whole frame. */
+static void gles_scene_zoom(BlitGles *gles, BlitGlesScene *scene, int zoom)
+{
+    GLfloat quad[12];
+    float w, h;
+    if (gles == NULL || scene == NULL || gles->frame_target == NULL || !gles->zoom_program)
+        return;
+    w = (float)gles->frame_target->width;
+    h = (float)gles->frame_target->height;
+    quad[0] = 0; quad[1] = 0; quad[2] = w; quad[3] = 0; quad[4] = 0; quad[5] = h;
+    quad[6] = w; quad[7] = 0; quad[8] = w; quad[9] = h; quad[10] = 0; quad[11] = h;
+    gles_flush(gles);
+    gles->glUseProgram(gles->zoom_program);
+    gles->glUniform2f(gles->zoom_target, w, h);
+    gles->glUniform2f(gles->zoom_scene_size, (GLfloat)scene->width, (GLfloat)scene->height);
+    gles->Uniform1f(gles->zoom_percent, (GLfloat)zoom);
+    gles->glUniform1i(gles->zoom_scene, 0);
+    gles->glActiveTexture(GL_TEXTURE0);
+    gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
+    gles->glBindBuffer(GL_ARRAY_BUFFER, gles->zoom_buffer);
+    gles->glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+    gles->glDisableVertexAttribArray(1);
+    gles->glDisableVertexAttribArray(2);
+    gles->glDisableVertexAttribArray(3);
+    gles->glEnableVertexAttribArray(0);
+    gles->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
+    gles->glDrawArrays(GL_TRIANGLES, 0, 6);
+    ++gles->draw_calls;
+    gles->vertices_drawn += 6;
+    gles->glUseProgram(gles->compose_program);
+    gles->batch_texture = (GLuint)-1;
+}
+
 void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
-                             const BlitGlesPresentPane *panes, int count)
+                             const BlitGlesPresentPane *panes, int count, int zoom)
 {
     int i;
-    blit_gles_scene_draw(gles, scene);
+    if (zoom > 100)
+        gles_scene_zoom(gles, scene, zoom);
+    else
+        blit_gles_scene_draw(gles, scene);
     if (gles == NULL || scene == NULL || !gles->presents || gles->frame_target == NULL)
         return;
     for (i = 0; i < count; ++i) {
         const BlitGlesPresentPane *pane = &panes[i];
         struct BlitGlesGlow *glow = NULL;
-        float x0 = (float)pane->x, y0 = (float)pane->y;
-        float x1 = x0 + (float)pane->width, y1 = y0 + (float)pane->height;
+        /* The quad covers the pane's frame pixels; the program works in
+           its scene rectangle (ADR 0204: logical on a zoomed output). */
+        float x0 = (float)pane->frame_x, y0 = (float)pane->frame_y;
+        float x1 = x0 + (float)pane->frame_width, y1 = y0 + (float)pane->frame_height;
         GLfloat quad[12];
         int j;
-        if (pane->width < 1 || pane->height < 1) continue;
+        if (pane->width < 1 || pane->height < 1 ||
+            pane->frame_width < 1 || pane->frame_height < 1) continue;
         if (pane->glow > 0)
             for (j = 0; j < BLIT_GLES_GLOW_SLOTS; ++j)
                 if (scene->glow[j].half && scene->glow[j].x == pane->x &&
@@ -1565,8 +1613,9 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
                           (GLfloat)gles->frame_target->height);
         gles->glUniform2f(gles->present_scene_size, (GLfloat)scene->width,
                           (GLfloat)scene->height);
-        gles->Uniform4f(gles->present_rect, x0, y0, (GLfloat)pane->width,
-                        (GLfloat)pane->height);
+        gles->Uniform4f(gles->present_rect, (GLfloat)pane->x, (GLfloat)pane->y,
+                        (GLfloat)pane->width, (GLfloat)pane->height);
+        gles->Uniform1f(gles->present_zoom, (GLfloat)(zoom > 100 ? zoom : 100));
         gles->Uniform1f(gles->present_k, (GLfloat)pane->k);
         gles->Uniform1f(gles->present_scan, (GLfloat)pane->scanline_alpha);
         gles->Uniform1f(gles->present_gain, glow ? (GLfloat)pane->glow : 0.0f);
@@ -1613,38 +1662,6 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
         gles->glUseProgram(gles->compose_program);
         gles->batch_texture = (GLuint)-1;
     }
-}
-
-void blit_gles_scene_zoom(BlitGles *gles, BlitGlesScene *scene, int zoom)
-{
-    GLfloat quad[12];
-    float w, h;
-    if (gles == NULL || scene == NULL || gles->frame_target == NULL || !gles->zoom_program)
-        return;
-    w = (float)gles->frame_target->width;
-    h = (float)gles->frame_target->height;
-    quad[0] = 0; quad[1] = 0; quad[2] = w; quad[3] = 0; quad[4] = 0; quad[5] = h;
-    quad[6] = w; quad[7] = 0; quad[8] = w; quad[9] = h; quad[10] = 0; quad[11] = h;
-    gles_flush(gles);
-    gles->glUseProgram(gles->zoom_program);
-    gles->glUniform2f(gles->zoom_target, w, h);
-    gles->glUniform2f(gles->zoom_scene_size, (GLfloat)scene->width, (GLfloat)scene->height);
-    gles->Uniform1f(gles->zoom_percent, (GLfloat)zoom);
-    gles->glUniform1i(gles->zoom_scene, 0);
-    gles->glActiveTexture(GL_TEXTURE0);
-    gles->glBindTexture(GL_TEXTURE_2D, scene->texture);
-    gles->glBindBuffer(GL_ARRAY_BUFFER, gles->zoom_buffer);
-    gles->glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
-    gles->glDisableVertexAttribArray(1);
-    gles->glDisableVertexAttribArray(2);
-    gles->glDisableVertexAttribArray(3);
-    gles->glEnableVertexAttribArray(0);
-    gles->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, (void *)0);
-    gles->glDrawArrays(GL_TRIANGLES, 0, 6);
-    ++gles->draw_calls;
-    gles->vertices_drawn += 6;
-    gles->glUseProgram(gles->compose_program);
-    gles->batch_texture = (GLuint)-1;
 }
 
 unsigned long long blit_gles_draw_calls(const BlitGles *gles)

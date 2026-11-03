@@ -79,6 +79,37 @@ ruby tools/tests/presentation_effects_gate.rb
 BLIT_GATE_BACKEND=gles ruby tools/tests/presentation_effects_gate.rb
 ```
 
+Effects on a zoomed display (ADR 0204) are checked by
+`tools/tests/zoomed_effects_gate.rb`, in the renderer suite. Two mock
+outputs: display-1, 1024x768, zoomed to 200%, and display-2, 512x384 at
+100% -- display-1's logical size. Both run the same session (vertical
+stripes three cells wide, drawn again on SIGWINCH) with the same effects.
+On `gles` it checks:
+- **same, enlarged:** with curvature, RGB shift, scanlines and corners on
+  both, every physical pixel (x, y) of display-1 is display-2's
+  (x / 2, y / 2), within 2. The effects are drawn, in logical coordinates,
+  exactly as at 100%;
+- **drawn:** the tube's outside is black in display-1's corners, and stripe
+  edges in the middle row fringe;
+- **pixel zoom:** every 2x2 block of display-1 is one colour, exactly;
+- **animated:** with the glowing line, the frame clock ticks on the zoomed
+  display, the band moves between captures, and every capture is still
+  2x2 blocks;
+- **pointer:** a real SGR mouse report from the curved, zoomed pane names
+  the cell the warp shows at the pointer's logical position;
+- **diagnostics:** `presentation_unavailable` is empty on the zoomed
+  display, and the pass drew the pane;
+- **100% unchanged:** back at 100%, the frame with the static effects is
+  byte-identical to the one captured before zooming.
+
+On `native` it checks that presentation effects stay unavailable
+(`cpu compositor`) at 200%. `BLIT_ZOOMED_EFFECTS_SHOT=<path>` keeps the
+100% capture with effects, for comparing two builds byte for byte.
+
+```sh
+BLIT_GATE_BACKEND=gles ruby tools/tests/zoomed_effects_gate.rb
+```
+
 ## Bounded graphic overlays
 
 `/v1/overlays` is the schema-first rectangle overlay resource. An overlay is

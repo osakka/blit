@@ -897,9 +897,10 @@ y·100/zoom), the last logical row and column repeated where the mode is not
 a whole multiple. The pointer and the performance panel are drawn after the
 enlargement at their normal size, relative pointer motion is physical
 (the pointer crosses a zoomed display as fast as any other), and
-screenshots are physical. Presentation effects (curvature, glow) are not
-drawn on a zoomed display composed by GLES; its `presentation_unavailable`
-says `zoomed display`. A zoom other than 100 is persisted in the settings
+screenshots are physical. Pane effects are drawn on a zoomed display as at
+100%, in logical pixels, and enlarged with everything else: on GLES the
+presentation effects (curvature, glow and the rest) included. A zoom other
+than 100 is persisted in the settings
 document as `displays.<connector>.zoom`, keyed by `state.connector` (`DP-1`,
 not the display's `name`; `name` only where there is no connector), so it
 follows the monitor and is applied before the first frame. An entry under

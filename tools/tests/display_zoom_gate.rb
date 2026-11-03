@@ -33,11 +33,12 @@
 #   * two displays: display-2's grid, winsize and pixels are untouched by
 #     display-1's zoom
 #   * 100% again: byte-identical to the screenshot before zooming
-#   * scanlines under curvature: drawn in the logical scene and enlarged,
-#     each odd logical row two dark physical rows at 200%, on both
-#     compositors (GLES draws them on the glass only when unzoomed)
+#   * scanlines under curvature: each odd logical row two dark physical
+#     rows at 200%, on both compositors (GLES draws them on the glass, in
+#     logical rows; the CPU in the logical scene)
 #   * gles: the zoomed frames are composed by GLES, and presentation
-#     effects are reported unavailable on the zoomed display
+#     effects are available on the zoomed display (zoomed_effects_gate.rb
+#     checks what they draw there)
 # BLIT_ZOOM_GATE_SHOT=<path> keeps the 150% screenshot.
 
 require 'base64'
@@ -421,7 +422,7 @@ Dir.mktmpdir('blit-display-zoom') do |root|
         output('display-1').dig('compositor', 'active') == 'gles'
       end
       reason = output('display-1').dig('effects', 'presentation_unavailable')
-      check(reason == 'zoomed display', "#{zoom}%: effects unavailable because #{reason.inspect}")
+      check(reason == '', "#{zoom}%: effects unavailable because #{reason.inspect}")
     end
     check(settled('display-2') == before2, "#{zoom}% on display-1 changed display-2's pixels")
     bytes, count = frame_becomes(frame, "#{zoom}%")
@@ -458,10 +459,9 @@ Dir.mktmpdir('blit-display-zoom') do |root|
       wait_until('the panel stayed at 200%') { get('/v1/diagnostics')['hud']['panels'].empty? }
       # Where they were is the enlarged frame again.
       checked += frame_becomes(frame, '200% after the pointer and the panel')[1]
-      # Scanlines under curvature: the presentation pass that draws them on
-      # the glass is not run on a zoomed display, so they are drawn in the
-      # logical scene and enlarged -- each odd logical row two dark physical
-      # rows -- on both compositors, not lost.
+      # Scanlines under curvature: each odd logical row two dark physical
+      # rows, on both compositors -- GLES's presentation pass draws them on
+      # the glass in logical rows (ADR 0204), the CPU in the logical scene.
       connector = display('display-1').dig('state', 'connector')
       save('effects', { connector => { '1' => { 'curvature' => { 'amount' => 100 },
                                                'scanlines' => { 'intensity' => 50 } } } })
@@ -487,10 +487,6 @@ Dir.mktmpdir('blit-display-zoom') do |root|
   set_zoom(100)
   sizes_follow(100, files, surfaces, inset)
   park
-  if GLES
-    reason = output('display-1').dig('effects', 'presentation_unavailable')
-    check(reason != 'zoomed display', "100%: effects still unavailable because #{reason.inspect}")
-  end
   after, count = frame_becomes(logical100, '100% again')
   checked += count
   check(after == before, '100% again is not byte-identical to the screenshot before zooming')
@@ -502,5 +498,5 @@ Dir.mktmpdir('blit-display-zoom') do |root|
        "panel=#{panel200[2]}x#{panel200[3]}@#{panel200[0]},#{panel200[1]}_unenlarged " \
        'scanlines_under_curvature=enlarged display-2=untouched back_to_100=byte_identical ' \
        "diagnostics=render+viewport+scale@100,200" \
-       "#{GLES ? ' effects=unavailable_zoomed' : ''}"
+       "#{GLES ? ' effects=available_zoomed' : ''}"
 end

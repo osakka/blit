@@ -439,16 +439,13 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
 /* At most this many panes per output get the presentation pass. */
 #define BLIT_KMS_PRESENT_PANES 16
 
-static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r, const KmsOutput *output,
+static void kms_gles_effects(BlitKms *kms, KmsGlesResources *r,
                              const BlitKmsSurfaceView *view,
                              int x0, int y0, int x1, int y1)
 {
     const BlitEffectSet *set = &view->effects;
     int y, radius, corner;
-    /* ADR 0204: a zoomed output has no presentation pass, so what that pass
-       would draw for a pane (scanlines under curvature, corners under sync
-       or jitter) is drawn here, in the logical scene, as without highp. */
-    int presents = blit_gles_presents(kms->gles) && output->zoom <= 100;
+    int presents = blit_gles_presents(kms->gles);
     if (!blit_effect_set_has(set, BLIT_EFFECT_LOCAL) || x1 <= x0 || y1 <= y0) return;
     blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
     /* ADR 0187: a curved pane's scanlines are drawn on the glass instead. */
@@ -656,7 +653,7 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
         }
     }
 effects:
-    kms_gles_effects(kms, r, output, view, cx0, cy0, cx1, cy1);
+    kms_gles_effects(kms, r, view, cx0, cy0, cx1, cy1);
     blit_gles_clip(kms->gles, 0, 0, 0, 0);
 }
 
@@ -756,8 +753,9 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         if (everything) everything_drawn = 1;
     }
     /* ADR 0187: panes with presentation effects are drawn again over the
-       plain copy by the presentation program; with none, the copy is all. */
-    for (v = 0; output->zoom <= 100 && blit_gles_presents(kms->gles) && v < view_count &&
+       plain copy by the presentation program; with none, the copy is all.
+       ADR 0204: on a zoomed output too, in the pane's logical rectangle. */
+    for (v = 0; blit_gles_presents(kms->gles) && v < view_count &&
          present_count < BLIT_KMS_PRESENT_PANES; ++v) {
         const BlitKmsSurfaceView *view = &views[v];
         BlitGlesPresentPane *pane = &present[present_count];
@@ -772,6 +770,13 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         pane->y = view->effect_y;
         pane->width = view->effect_width;
         pane->height = view->effect_height;
+        pane->frame_x = pane->x;
+        pane->frame_y = pane->y;
+        pane->frame_width = pane->width;
+        pane->frame_height = pane->height;
+        if (output->zoom > 100)
+            zoom_physical_rect(output, &pane->frame_x, &pane->frame_y,
+                               &pane->frame_width, &pane->frame_height);
         pane->k = blit_effect_curvature_k(&view->effects);
         pane->scanline_alpha = blit_effect_scanlines_presented(&view->effects, 1) ?
             blit_effect_scanline_alpha(&view->effects, 1) : 0;
@@ -806,12 +811,8 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
             ++output->info.effects_glow_rebuilds;
         ++present_count;
     }
-    /* A zoomed scene is enlarged instead, and draws no presentation
-       effects: they are reported unavailable on a zoomed display. */
-    if (output->zoom > 100)
-        blit_gles_scene_zoom(kms->gles, output->gles_scene, output->zoom);
-    else
-        blit_gles_scene_present(kms->gles, output->gles_scene, present, present_count);
+    blit_gles_scene_present(kms->gles, output->gles_scene, present, present_count,
+                            output->zoom);
     output->info.effects_present_quads = (unsigned long long)present_count;
     for (v = 0; overlays != NULL && v < overlay_count; ++v) {
         const BlitKmsOverlay *overlay = &overlays[v];
