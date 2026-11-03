@@ -32,7 +32,9 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
   plugged in, each configurable: repeat rate, remapping, pointer speed,
   natural scrolling, a choice of pointer looks.
 - **Effects:** rounded corners, scanlines, screen curvature, glow, RGB
-  shift and an old CRT's hum bar, per pane.
+  shift, an old CRT's hum bar, flicker, jitter, static noise, a phosphor
+  tint, brightness and contrast, burn-in and a CRT mask, per pane, also
+  on zoomed displays.
 - **Sound and power:** sound cards' volume and mixer, backlight brightness.
 - **Safe to run:** a bearer token on every request, an allow-list of
   commands, an unprivileged mode, updates through a separate checked

@@ -1,6 +1,6 @@
 # Effect testing
 
-Pane effects (ADR 0186, 0187, 0188, 0190, 0207, 0208) are renderer state, not terminal state. They are
+Pane effects (ADR 0186, 0187, 0188, 0190, 0207, 0208, 0209) are renderer state, not terminal state. They are
 kept per pane in the settings document, keyed by output name and pane ordinal,
 and applied live:
 
@@ -182,6 +182,40 @@ compositor`), draws no trail and costs no frames.
 ```sh
 ruby tools/tests/burn_in_gate.rb
 BLIT_GATE_BACKEND=gles ruby tools/tests/burn_in_gate.rb
+```
+
+## Phosphor mask
+
+`tools/tests/mask_gate.rb` (ADR 0209, renderer suite) splits one display
+1x2. Pane 1 shows stripes in two colours, a white block and flat grey 60;
+pane 2 never has effects. A small C probe compiles `blit_effect_mask_rgb`
+and `blit_effect_tube_colour` from `src/blit_effects.h`.
+
+On `gles` it checks:
+- **the rule:** for each type at 100 and at 40, every pixel of pane 1 is
+  the plain capture's pixel through the shared rule at its physical
+  position, within 1; and, with brightness and contrast, through the
+  colour controls first;
+- **the pattern,** from the capture alone, over the grey: the period (3x1
+  for the aperture grille, 6x4 for the slot and shadow masks), one channel
+  lit per pixel (none in the slot mask's gaps) in the column the type
+  says, and the other two at 1 − s of it;
+- **compensation:** over the grey, each channel's mean is the grey's own,
+  within 1, at every type and strength;
+- **strength:** 40 and 100 draw different pixels;
+- **the unchanged path:** amount 0 draws no pass and the pane is
+  byte-identical; a type alone takes the pass and is byte-identical;
+- **zoom:** at 200%, every pixel is the plain 200% capture's through the
+  rule at its physical position, so the mask is not enlarged, and the
+  frame is not 2x2 blocks;
+- **isolation:** pane 2 is byte-identical.
+
+On `native` it checks that the mask is kept, reported unavailable (`cpu
+compositor`), drawn nowhere and costs no frames.
+
+```sh
+ruby tools/tests/mask_gate.rb
+BLIT_GATE_BACKEND=gles ruby tools/tests/mask_gate.rb
 ```
 
 ## Bounded graphic overlays

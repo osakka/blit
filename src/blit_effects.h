@@ -18,7 +18,9 @@
      pixel, but are presentation effects too: they must colour the light
      the pass adds, and the scene's blended quads cannot mix channels.
      Burn-in (ADR 0208) keeps a history of each pane, so it needs the GPU's
-     own textures as well.
+     own textures as well. The phosphor mask (ADR 0209) is the one effect
+     laid out in the panel's physical pixels, not the picture's logical
+     ones: it belongs to the glass.
 
    The registry order is the order of application: corners last of the local
    ones, because they define the pane's edge. No backend or user reorders
@@ -44,6 +46,8 @@ typedef enum {
     BLIT_EFFECT_BRIGHTNESS,
     BLIT_EFFECT_CONTRAST,
     BLIT_EFFECT_BURN_IN,
+    BLIT_EFFECT_MASK,
+    BLIT_EFFECT_MASK_TYPE,
     BLIT_EFFECT_COUNT
 } BlitEffectId;
 
@@ -96,6 +100,13 @@ static const BlitEffectSpec blit_effect_specs[BLIT_EFFECT_COUNT] = {
        needs the frame clock only while something is fading, which the
        GLES compositor reports per output, never on an idle screen. */
     { "burn_in", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "Burn-in", 0 },
+    /* ADR 0209, the tube's phosphor structure: each physical pixel passes
+       its own channel and dims the other two by amount%, in the pattern of
+       a mask type (BLIT_EFFECT_MASK_*; 0, the default, is the aperture
+       grille), then is lifted back by the mask's mean: blit_effect_mask_rgb.
+       A type alone draws nothing, as a phosphor without chroma. */
+    { "mask", "amount", 0, 100, BLIT_EFFECT_PRESENTATION, "CRT mask", 0 },
+    { "mask_type", "kind", 0, 2, BLIT_EFFECT_PRESENTATION, "Mask type", 0 },
 };
 
 /* The glowing line (ADR 0188), as cool-retro-term's randomPass: its length,
@@ -343,6 +354,69 @@ static inline int blit_effect_burn_in_levels(long long fade_us, long long elapse
     *carry = total % fade_us;
     total /= fade_us;
     return (int)(total > BLIT_EFFECT_BURN_IN_LEVELS ? BLIT_EFFECT_BURN_IN_LEVELS : total);
+}
+
+/* ADR 0209. The mask types, mask_type's `kind`. Each is a pattern of
+   physical pixels counted from the frame's top-left corner, so a periodic
+   table: which channel a pixel passes, or none (a gap between slots).
+   - APERTURE_GRILLE (Trinitron): vertical stripes, column x mod 3 is R, G,
+     B. Period 3 x 1.
+   - SLOT: the grille, cut into slots three rows tall by a dark row; every
+     other triad (x / 3 odd) is set two rows down, as bricks. Period 6 x 4.
+   - SHADOW (the delta-gun dot triad): dots two pixels wide, R G B along a
+     row, each pair of rows set half a triad (3 px) along. Period 6 x 4. */
+#define BLIT_EFFECT_MASK_APERTURE_GRILLE 0
+#define BLIT_EFFECT_MASK_SLOT 1
+#define BLIT_EFFECT_MASK_SHADOW 2
+
+static inline double blit_effect_mask_strength(const BlitEffectSet *set)
+{
+    int amount = set->value[BLIT_EFFECT_MASK];
+    if (amount <= 0) return 0.0;
+    return (amount > 100 ? 100 : amount) / 100.0;
+}
+
+static inline int blit_effect_mask_kind(const BlitEffectSet *set)
+{
+    int kind = set->value[BLIT_EFFECT_MASK_TYPE];
+    return kind < 0 || kind > BLIT_EFFECT_MASK_SHADOW ? 0 : kind;
+}
+
+/* The channel physical pixel (x, y), x and y >= 0, passes: 0 R, 1 G, 2 B,
+   or -1 for none. */
+static inline int blit_effect_mask_channel(int kind, int x, int y)
+{
+    if (kind == BLIT_EFFECT_MASK_SLOT)
+        return (y + 2 * ((x / 3) & 1)) % 4 == 3 ? -1 : x % 3;
+    if (kind == BLIT_EFFECT_MASK_SHADOW)
+        return (x + 3 * (y / 2)) % 6 / 2;
+    return x % 3;
+}
+
+/* The mask's compensation: 1 / its mean transmission, so a colour the gain
+   does not clip keeps its average light over one period. A third of the
+   pixels pass a given channel (a quarter for the slot mask, whose gaps
+   pass none), the rest pass 1 - s: gain 1 / (1 - 2s/3), 3 at full
+   strength; the slot mask 1 / (1 - 3s/4), 4. */
+static inline double blit_effect_mask_gain(int kind, double strength)
+{
+    double lit = kind == BLIT_EFFECT_MASK_SLOT ? 0.25 : 1.0 / 3.0;
+    return 1.0 / (lit + (1.0 - lit) * (1.0 - strength));
+}
+
+/* The factor each channel of physical pixel (x, y) is multiplied by: the
+   gain where the pixel passes the channel, (1 - s) x gain where it does
+   not. The shader applies min(c x factor, 1), after the colour controls.
+   All 1 when the mask is off. */
+static inline void blit_effect_mask_rgb(const BlitEffectSet *set, int x, int y,
+                                        double factor[3])
+{
+    double s = blit_effect_mask_strength(set);
+    int kind = blit_effect_mask_kind(set), channel, i;
+    double gain = blit_effect_mask_gain(kind, s);
+    channel = blit_effect_mask_channel(kind, x, y);
+    for (i = 0; i < 3; ++i)
+        factor[i] = s <= 0.0 ? 1.0 : i == channel ? gain : (1.0 - s) * gain;
 }
 
 /* The one predicate for corners under content-moving effects: a pane with

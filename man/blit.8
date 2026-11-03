@@ -1,7 +1,7 @@
 .\" Blit server manual. Source of truth for what the binary reads is src/;
 .\" tools/tests/documentation_gate.rb fails if a BLIT_ name the code reads
 .\" or exports is missing here.
-.TH BLIT 8 "2026-10-29" "Blit @VERSION@" "System Administration"
+.TH BLIT 8 "2026-11-03" "Blit @VERSION@" "System Administration"
 .SH NAME
 blit, blit-server \- API-driven native KMS display and terminal server
 .SH SYNOPSIS
@@ -76,13 +76,34 @@ at
 .I /var/lib/blit/settings.json
 holds what clients saved through
 .BR "PUT /v1/settings" :
-fonts, pane layout, the compositor, frame timing, pointer and keyboard
-settings, effects, the login manager, and the shutdown chord.
+fonts, pane layout, pixel zoom per display (100\(en400% in 25% steps,
+kept under the connector name), the compositor, frame timing, pointer and
+keyboard settings, effects, the performance panel
+.RB ( hud ),
+restarting after an update
+.RB ( server.restart_after_update :
+.B at-login-screen
+or
+.BR manual ),
+the login manager, and the shutdown chord.
 A saved value replaces the environment's startup value.
 .B "GET /v1/settings"
 reports the effective value of each and where it came from;
 .B "DELETE /v1/settings"
 goes back to the startup values.
+.PP
+Effects are set per pane in the document's
+.B effects
+object and listed, with each pane's state, by
+.BR "GET /v1/effects" :
+rounded corners, scanlines, curvature, glow, RGB shift, the glowing line,
+flicker, horizontal sync, jitter, static noise, chroma with a phosphor
+colour, brightness, contrast, burn-in, and a CRT mask with its type.
+All but corners and scanlines need the GPU compositor; on the CPU they
+are kept and reported unavailable.
+A pane that no session draws in reports
+.B has_view
+false: its effects are kept but show nothing.
 .PP
 Do not edit the settings document by hand while the server is running:
 it is rewritten on every change.

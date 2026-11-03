@@ -74,6 +74,7 @@ struct BlitGles {
     GLint present_flick, present_sync, present_jit, present_corner, present_zoom;
     GLint present_noise, present_tube, present_phosphor;
     GLint present_burn, present_history;
+    GLint present_mask;
     /* ADR 0208: burn-in histories are faded and refreshed by blending,
        which needs GL_EXT_blend_minmax's GL_MAX_EXT. 0 without it. */
     int burns;
@@ -472,6 +473,14 @@ static int gles_build_program(BlitGles *gles, char *error, size_t capacity)
    shifted, swayed and coloured like the rest. The history has the pane's
    own size, its rows bottom-up as glow's copy.
 
+   ADR 0209: the phosphor mask (blit_effect_mask_rgb) follows the colour
+   controls -- the signal -- and comes before the bezel's corners and the
+   glass scanlines, so its gain never lifts their black. It alone reads
+   `pixel`, the physical frame pixel, never `at` or the warped point: the
+   mask is the glass's, fixed while the picture warps, sways or zooms.
+   wrap() is mod() for whole numbers, rounded so that a division a GPU
+   does by reciprocal can never floor one period short.
+
    ADR 0204: on a zoomed output the screen pixel first becomes the logical
    pixel the zoom program shows there (the same expression), and every
    effect is evaluated at that pixel's centre: the 100% picture, enlarged
@@ -512,6 +521,8 @@ static void gles_build_present(BlitGles *gles)
         "uniform vec3 phosphor;\n"
         "uniform sampler2D history;\n"
         "uniform float burn;\n"
+        "uniform vec3 mask;\n"
+        "float wrap(float v, float n) { return v - n * floor((v + 0.5) / n); }\n"
         "float hash(vec2 q, float s) { return fract(sin(dot(q, vec2(12.9898, 78.233)) + s) * 43758.5453); }\n"
         "vec2 vnoise(vec2 q) {\n"
         "  vec2 i = floor(q), f = q - i;\n"
@@ -582,6 +593,15 @@ static void gles_build_present(BlitGles *gles)
         "  if (tube.x > 0.0) c = mix(c, phosphor * dot(c, vec3(0.2126, 0.7152, 0.0722)), tube.x);\n"
         "  if (tube.y != 1.0) c = clamp(c * tube.y, 0.0, 1.0);\n"
         "  if (tube.z != 1.0) c = clamp(0.5 + (c - 0.5) * tube.z, 0.0, 1.0);\n"
+        "  if (mask.x > 0.0) {\n"
+        "    vec2 f = floor(pixel);\n"
+        "    float ch = wrap(f.x, 3.0);\n"
+        "    if (mask.z > 1.5) ch = floor(wrap(f.x + 3.0 * floor((f.y + 0.5) / 2.0), 6.0) / 2.0);\n"
+        "    else if (mask.z > 0.5 &&\n"
+        "             wrap(f.y + 2.0 * wrap(floor((f.x + 0.5) / 3.0), 2.0), 4.0) > 2.5) ch = 3.0;\n"
+        "    vec3 lit = vec3(ch < 0.5, ch > 0.5 && ch < 1.5, ch > 1.5 && ch < 2.5);\n"
+        "    c = min(c * mix(vec3(1.0 - mask.x), vec3(1.0), lit) * mask.y, 1.0);\n"
+        "  }\n"
         "  if (corner > 0.0) {\n"
         "    vec2 local = floor(t0 * rect.zw);\n"
         "    vec2 m = vec2(local.x < corner ? local.x : rect.z - 1.0 - local.x,\n"
@@ -645,6 +665,7 @@ static void gles_build_present(BlitGles *gles)
     gles->present_phosphor = gles->glGetUniformLocation(gles->present_program, "phosphor");
     gles->present_burn = gles->glGetUniformLocation(gles->present_program, "burn");
     gles->present_history = gles->glGetUniformLocation(gles->present_program, "history");
+    gles->present_mask = gles->glGetUniformLocation(gles->present_program, "mask");
     gles->glGenBuffers(1, &gles->present_buffer);
     while (gles->glGetError() != GL_NO_ERROR) {}
     gles->presents = 1;
@@ -1832,6 +1853,8 @@ void blit_gles_scene_present(BlitGles *gles, BlitGlesScene *scene,
                           glow ? (GLfloat)glow->quarter_width : 1.0f,
                           glow ? (GLfloat)glow->quarter_height : 1.0f);
         gles->Uniform1f(gles->present_burn, burn ? 1.0f : 0.0f);
+        gles->Uniform3f(gles->present_mask, (GLfloat)pane->mask, (GLfloat)pane->mask_gain,
+                        (GLfloat)pane->mask_kind);
         gles->glUniform1i(gles->present_scene, 0);
         gles->glUniform1i(gles->present_glow, 1);
         gles->glUniform1i(gles->present_history, 2);

@@ -3776,7 +3776,7 @@ components:
         Local effects (scanlines, corners; ADR 0186) are applied in a fixed
         order over each pane's pixel region by both compositors.
         Presentation effects (curvature, glow and the rest; ADR 0187, 0188,
-        0190, 0207, 0208) are drawn by the GLES compositor as it presents the
+        0190, 0207, 0208, 0209) are drawn by the GLES compositor as it presents the
         frame; when a pane's curvature is
         drawn its scanlines are drawn on the glass instead. All are beneath
         the pointer and API overlays. In settings, `enabled: false` switches
@@ -3927,6 +3927,35 @@ components:
                 in whole levels of 1/255; the picture is the brighter of
                 the scene and that history. Uses the frame clock only
                 while something fades.
+        mask:
+          type: object
+          additionalProperties: false
+          required: [amount]
+          properties:
+            amount:
+              type: integer
+              minimum: 0
+              maximum: 100
+              description: >-
+                ADR 0209: a CRT's phosphor mask, in the pattern mask_type
+                names, laid on the display's physical pixels (not enlarged
+                by zoom). Each pixel passes its own channel and dims the
+                other two to 1 - amount/100; the result is multiplied by
+                the mask's mean-light compensation (3 at 100, 4 for the
+                slot mask) and clamped.
+        mask_type:
+          type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: integer
+              minimum: 0
+              maximum: 2
+              description: >-
+                ADR 0209: 0 aperture grille (vertical R G B stripes, the
+                default), 1 slot mask (the grille cut into bricked slots),
+                2 shadow mask (delta dot triads). Drawn only through mask.
     EffectState:
       type: object
       required: [revision, enabled, available, panes, configure]
@@ -3942,7 +3971,7 @@ components:
             additionalProperties: false
             required: [name, title, parameter, minimum, maximum, class, animated]
             properties:
-              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter, static_noise, chroma, phosphor, brightness, contrast, burn_in]}
+              name: {type: string, enum: [scanlines, corners, curvature, glow, rgb_shift, glowing_line, flicker, horizontal_sync, jitter, static_noise, chroma, phosphor, brightness, contrast, burn_in, mask, mask_type]}
               animated:
                 type: boolean
                 description: >-

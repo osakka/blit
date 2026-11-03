@@ -838,6 +838,10 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
         blit_effect_phosphor_rgb(&view->effects, pane->phosphor);
         pane->brightness = blit_effect_level_gain(&view->effects, BLIT_EFFECT_BRIGHTNESS);
         pane->contrast = blit_effect_level_gain(&view->effects, BLIT_EFFECT_CONTRAST);
+        /* ADR 0209: the shader evaluates the pattern itself, per frame pixel. */
+        pane->mask = blit_effect_mask_strength(&view->effects);
+        pane->mask_kind = blit_effect_mask_kind(&view->effects);
+        pane->mask_gain = blit_effect_mask_gain(pane->mask_kind, pane->mask);
         pane->line = blit_effect_line_strength(&view->effects);
         pane->phase = blit_effect_line_phase((double)kms_now_us() / 1000000.0);
         if (pane->line > 0) output->info.effects_animation_phase = pane->phase;

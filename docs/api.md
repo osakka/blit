@@ -769,6 +769,8 @@ apply live, with no restart, and are saved:
 | `brightness` | presentation | `level` | −100–100 | The picture times 1 + level/100; 0 neutral, −100 black |
 | `contrast` | presentation | `level` | −100–100 | About mid-grey, times 1 + level/100; 0 neutral, −100 flat grey |
 | `burn_in` | presentation | `amount` | 0–100 | Phosphor persistence: what the pane stops showing fades to black over 0.16–1.6 s (ADR 0208) |
+| `mask` | presentation | `amount` | 0–100 | A CRT's phosphor mask on the display's physical pixels: each passes one of R, G, B and dims the others to 1 − amount/100, lifted back by the mask's mean (ADR 0209) |
+| `mask_type` | presentation | `kind` | 0–2 | The mask's pattern: 0 aperture grille (default), 1 slot mask, 2 shadow mask; drawn only through `mask` |
 
 - **Order:** effects are applied in a fixed order (scanlines, then corners),
   over the pane's pixel region, beneath the pointer and API overlays.

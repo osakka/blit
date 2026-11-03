@@ -226,6 +226,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0206 — Hand the display to gamescope for full-speed games](0206-hand-the-display-to-gamescope.md) (proposed)
 - [0207 — The tube's colour controls and static noise are presentation effects](0207-tube-colour-and-static-noise.md)
 - [0208 — Burn-in keeps a per-pane history that fades in whole levels, on the frame clock only while it fades](0208-burn-in.md)
+- [0209 — The phosphor mask is a presentation effect on physical pixels](0209-phosphor-mask.md)
 
 ## Status
 

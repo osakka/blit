@@ -326,6 +326,7 @@ suite_renderer() {
     run_gate presentation_effects_gate.rb ruby tools/tests/presentation_effects_gate.rb
     run_gate tube_effects_gate.rb ruby tools/tests/tube_effects_gate.rb
     run_gate burn_in_gate.rb ruby tools/tests/burn_in_gate.rb
+    run_gate mask_gate.rb ruby tools/tests/mask_gate.rb
     run_gate performance_panel_gate.rb ruby tools/tests/performance_panel_gate.rb
     run_gate overlay_translucency_gate.rb ruby tools/tests/overlay_translucency_gate.rb
     run_gate under_text_picture_gate.rb ruby tools/tests/under_text_picture_gate.rb

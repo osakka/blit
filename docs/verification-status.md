@@ -1,5 +1,31 @@
 # Verification status
 
+## 2026-11-03: 0.3.35 CRT mask; documentation brought up to date
+
+- **CRT mask** (ADR 0209): `mask {amount}` and `mask_type {kind}`
+  (0 aperture grille, 1 slot mask, 2 shadow mask). It sits at the
+  panel's physical pixels, counted from the frame's corner: it belongs to
+  the glass, so it does not grow with zoom and stays still under
+  curvature, sync and jitter. Each pixel passes its own channel and
+  attenuates the others by the strength, scaled by the inverse of the
+  mask's mean transmission, so an unclipped colour keeps its average
+  light. It sits after the colour controls and before corners and the
+  glass scanlines. Unset, it is byte-identical. `mask_gate` checks
+  1,105,920 pixels against the C rule. It fails on 0.3.34 and on four
+  mutants: logical pixels, no compensation, no step, and the mask before
+  the colour controls.
+- **Documentation:**
+  - `docs/features.md` lists the effects from 0.3.30 to 0.3.35, restart
+    after update, the Hibr identity refresh, ABI 17, `has_view`, and
+    Control Panel panes up to 0.1.27, and corrects the zoom range;
+  - the README names every effect;
+  - `blit(8)` lists zoom, the panel and restart after update among saved
+    settings, and gains a paragraph on effects and `has_view`.
+  `documentation_gate` passes.
+- **Suites:** font 39/39, renderer on GLES 76 pass (1 skip), all 170
+  pass (6 skip). A first run of "all" failed `settings_persistence_gate`
+  once; alone it passed five times, and the rerun of "all" passed.
+
 ## 2026-11-03: 0.3.34 a pane says whether anything is shown in it
 
 - **`has_view`** on each pane of `GET /v1/effects`: whether a session draws

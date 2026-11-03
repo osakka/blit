@@ -32,7 +32,7 @@ release. What is not here yet is in the [roadmap](roadmap.md).
 | Text grid centred in each pane, whole rows only | 0.1.536 | 0075, 0123 | Used |
 | Display list with modes, size, refresh and connector | 0.1 | 0064 | Used |
 | Backlight brightness (laptops with one panel) | 0.1.456 | 0064 | Hardware pending (a laptop panel) |
-| Pixel zoom per monitor (125–400%): the whole display magnified, pointer and panel kept normal size | 0.3.26 | 0204 | Tested |
+| Pixel zoom per monitor (100–400% in 25% steps, kept per connector): the whole display magnified, pointer and panel kept normal size | 0.3.26 | 0204 | Tested |
 | Screenshots of what is on screen, read back from the GPU | 0.1; GPU 0.2.13 | 0105 | Used |
 | Overlays placed by API clients | 0.1 | 0002 | Tested |
 
@@ -126,6 +126,11 @@ Per pane, saved with the settings, changed live from the Blit Effects pane.
 | RGB shift | 0.2.30 | 0187 | Tested |
 | Hum bar (animated only while on) | 0.2.31 | 0188 | Used |
 | Flicker, horizontal sync and jitter | 0.2.32 | 0190 | Tested |
+| Every effect drawn on a zoomed display, the 100% picture enlarged | 0.3.30 | 0204 | Tested |
+| Static noise, chroma with a phosphor colour, brightness and contrast | 0.3.32 | 0207 | Used (cost measured on the mini PC) |
+| Burn-in: what was lit fades out over 0.16–1.6 s, frames only while a trail fades | 0.3.33 | 0208 | Used (cost measured on the mini PC) |
+| CRT mask at the panel's own pixels: aperture grille, slot mask or shadow mask, brightness kept | 0.3.35 | 0209 | Tested |
+| A pane says whether anything is shown in it (`has_view`), so effects set on an empty pane are explained | 0.3.34 | — | Used |
 | Master switch and per-pane switch | 0.2.28 | 0187 | Tested |
 | The pointer still lands on the right cell through curvature | 0.2.28 | 0187 | Tested |
 
@@ -138,7 +143,7 @@ Per pane, saved with the settings, changed live from the Blit Effects pane.
 | Signing in hands the session to the user, with their identity | 0.1.538 | 0125 | Used |
 | One Hibr desktop, joined by other displays as independent viewports | 0.1.540 | 0127 | Used |
 | Other displays started and placed from saved settings | 0.1.542 | 0128 | Used |
-| Control Panel panes **Blit**, **Blit Mouse** and **Blit Effects** (shipped with Hibr's apps) | pane 0.1.0–0.1.19 | — | Used |
+| Control Panel panes **Blit**, **Blit Mouse** and **Blit Effects** (shipped with Hibr's apps): zoom and effect sliders, the panel's switches, restart after update | pane 0.1.0–0.1.27 | — | Used |
 | Restart Blit and the Ctrl+Alt+Backspace switch from the Control Panel | pane 0.1.19 | — | Used |
 
 [Hibr integration](integration-hibr.md) explains the contract.
@@ -184,6 +189,9 @@ Errors are `application/problem+json` with stable codes.
 | Install a new package through the API; a separate root helper checks and installs it | 0.1.232 | 0008 | Used |
 | Settings, devices and the shutdown chord survive updates | 0.1.451 | 0067 | Used |
 | Restart in place through the API, without a reboot | 0.1.451 | — | Used |
+| After an `apt upgrade`, Blit restarts itself at the login screen when nobody is signed in (or only reports it: `server.restart_after_update`) | 0.3.27 | 0205 | Used |
+| The running Hibr's release and module ABI are checked again whenever Hibr is upgraded underneath Blit | 0.3.32 | 0094 | Used |
+| Built against Hibr's module ABI 17 | 0.3.31 | 0094 | Used |
 | Debian package on Hibr's apt repository, with a release receipt per version | 0.2.2 | 0091 | Used |
 | Manual pages: `blit(8)`, `blit.env(5)`, `blit-update-helper(8)` | 0.3.10 | — | Tested |
 | `blit --version` and `blit --help` | 0.3.20 | — | Tested |

@@ -150,6 +150,10 @@ typedef struct {
     double brightness, contrast;
     /* ADR 0208: draw the pane's burn-in history (blit_gles_scene_burn) */
     int burn;
+    /* ADR 0209: the phosphor mask's strength (0 none), its gain and type
+       (blit_effect_mask_gain, BLIT_EFFECT_MASK_*), laid on frame pixels. */
+    double mask, mask_gain;
+    int mask_kind;
 } BlitGlesPresentPane;
 /* Inside blit_gles_frame_begin/end, after the scene was composed: rebuild a
    pane's blurred copy from its rectangle of the scene (halved twice). */
