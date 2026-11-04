@@ -302,8 +302,9 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
    bands {top, bottom, colour}. kind is 1 (51, thin), 3 (51:3, the default
    button's ring), 2 or 4 (51:2 and 51:4, the Slate light and dark title
    bar: frame line and highlight at the top, shade and rule at the bottom,
-   the rows every bar glyph has, in the same palette). line is the thin
-   and thick lines' colour, 0xRRGGBB. Both compositors draw from this, so
+   the rows every bar glyph has, in the same palette), or 5 (51:5, a rule
+   along the bottom only, under a note's strip). line is the thin, thick
+   and rule lines' colour, 0xRRGGBB. Both compositors draw from this, so
    a framed title meets the bar glyphs beside it row for row. */
 typedef struct { int top, bottom; uint32_t colour; } BlitWindowBand;
 
@@ -325,6 +326,10 @@ static int blit_window_framed_bands(int kind, int h, uint32_t line, BlitWindowBa
         band[2].top = h - 2 * L; band[2].bottom = h - L; band[2].colour = wg_rgb(dark, WR_D);
         band[3].top = h - L; band[3].bottom = h; band[3].colour = wg_rgb(dark, WR_K);
         return 4;
+    }
+    if (kind == 5) {
+        band[0].top = h - L; band[0].bottom = h; band[0].colour = line;
+        return 1;
     }
     t = kind == 3 ? BLIT_WINDOW_THICK_RING : L;
     if (t > h / 2) t = h / 2;

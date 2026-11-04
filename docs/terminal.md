@@ -99,6 +99,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 39, 49, 59 | Default text, background and underline colour |
 | 51, 51:3, 54 | Framed: a line along the cell's top and bottom edges, 1 px (51) or 3 px (51:3, a Blit extension for a default button's ring), in the underline colour if set, else the foreground; 54 ends it |
 | 51:2, 51:4 | Blit extensions: a Slate light (51:2) or Slate dark (51:4) title bar's top and bottom rows (frame line and highlight, shade and rule) in that set's colours, so a title's text cells match the bar glyphs beside them (ADR 0210) |
+| 51:5 | Blit extension: a rule along the cell's bottom edge only, 1 px, in the underline colour if set, else the foreground: the line under a note's strip (ADR 0210) |
 
 **SGR 51 deviates from ECMA-48.** The standard's *framed* draws a frame on
 all four sides; Blit draws the top and bottom only. It is for a button's

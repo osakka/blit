@@ -368,3 +368,20 @@ title).
   - the Slate title before and after 51:2.
   They are at 11x22 and at 14x28, shown at 2x, with 6x close-ups of the
   title bar ends, the title and the buttons.
+
+## Revision 2026-11-04: 51:5, the rule under a note's strip
+
+The approved note has a black rule under its coloured strip, and 0.3.36
+drew nothing there: plain 51 on the strip's cells would also draw a top
+line directly under the frame-top row's line, a doubled 2 px line. Blit
+adds `51:5`, a rule along the cell's bottom edge only, 1 px, in the
+underline colour or the foreground, drawn by the same band function as
+every other kind. Hibr puts it on the strip's cells.
+
+The framing kinds are now one 3-bit field beside the FRAMED bit (0 thin,
+1 thick, 2 and 3 the Slate bars, 4 the rule), mapped to the SGR
+sub-parameters in one table, so the parser, DECRQSS, the cells API
+(`framed: "rule"`) and both compositors read the same values. An unknown
+sub-parameter is plain 51. `terminal_conformance` (framed-rule-sgr,
+decrqss-sgr-framed-rule) and `window_style_gate` (the bottom line only,
+both compositors) cover it.

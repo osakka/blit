@@ -5362,14 +5362,16 @@ components:
         concealed: {type: boolean}
         framed:
           type: string
-          enum: [none, thin, thick, slate-light-bar, slate-dark-bar]
+          enum: [none, thin, thick, slate-light-bar, slate-dark-bar, rule]
           description: >-
             SGR 51 (thin) or Blit's 51:3 (thick): a line along the cell's top
             and bottom edges, 1 px or the default button's 3 px ring, in the
             underline colour if set, else the foreground. Blit's 51:2 and
             51:4 (slate-light-bar, slate-dark-bar) draw a Slate title bar's
             top and bottom rows instead: frame line and highlight, shade and
-            rule, in that set's colours. ECMA-48 frames all four sides; Blit
+            rule, in that set's colours. Blit's 51:5 (rule) draws only the
+            bottom line, 1 px, in the underline colour or the foreground:
+            the rule under a note's strip. ECMA-48 frames all four sides; Blit
             draws top and bottom only, and the button glyphs close the ends
             (ADR 0210). SGR 54 ends it.
         underline_color:

@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-11-04: 0.3.37 SGR 51:5, the rule under a note's strip
+
+- **`51:5`** draws a rule along the cell's bottom edge only (1 px, in
+  the underline colour or the foreground): the line under a note's strip,
+  which 0.3.36 left undrawn. Plain 51 there would double the frame-top
+  line above it. The framing kinds are now one 3-bit field beside the
+  FRAMED bit, mapped to the sub-parameters in one table, so the parser,
+  DECRQSS, the cells API (`framed: "rule"`) and both compositors read the
+  same values. An unknown sub-parameter is plain 51 (ADR 0210 revised).
+  `terminal_conformance` (framed-rule-sgr, decrqss-sgr-framed-rule) and
+  `window_style_gate` (the bottom line only, native and GLES) cover it.
+  On 0.3.36, 51:5 reads as plain 51: the cell reports thin and draws top
+  and bottom.
+- **Suites:** font 40/40, all 172 pass (6 skip), renderer on GLES 77 pass
+  (1 skip); no failures.
+
 ## 2026-11-03: 0.3.36 window chrome glyphs (Chalk and Slate) and framed text
 
 - **105 window-chrome glyphs** (ADR 0210), U+100231-U+100299, in three

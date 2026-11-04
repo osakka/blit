@@ -43,13 +43,10 @@
 #define KMS_ATTR_CONCEAL 64
 #define KMS_ATTR_ITALIC 128
 #define KMS_ATTR_FRAMED 2048
-#define KMS_ATTR_FRAMED_THICK 4096
-#define KMS_ATTR_FRAMED_BAR 8192
-#define KMS_ATTR_FRAMED_DARK 16384
-/* SGR 51's kind for blit_window_framed_bands: 1, 3 (51:3), 2 or 4 (51:2,
-   51:4). */
-#define KMS_FRAMED_KIND(attr) (((attr) & KMS_ATTR_FRAMED_BAR) ? \
-    (((attr) & KMS_ATTR_FRAMED_DARK) ? 4 : 2) : ((attr) & KMS_ATTR_FRAMED_THICK) ? 3 : 1)
+/* The server's framing field (BLIT_FRAMED_KIND: 0 thin, 1 thick, 2 and 3
+   the Slate bars, 4 the bottom rule) as blit_window_framed_bands' kind,
+   which is the SGR 51 sub-parameter: 1, 3, 2, 4, 5. */
+#define KMS_FRAMED_KIND(attr) ("\1\3\2\4\5\1\1\1"[((attr) >> 12) & 7U])
 
 typedef struct {
     uint32_t fb;

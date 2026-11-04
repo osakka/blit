@@ -187,17 +187,22 @@ extern char **environ;
    draws differently because of it, so it is deliberately not part of the
    cell style the API reports or accepts. */
 #define BLIT_ATTR_PROTECTED 1024
-/* ADR 0210: SGR 51, framed, drawn as a line along the cell's top and
-   bottom; with THICK (Blit's SGR 51:3) the lines are the default button's
-   ring, BLIT_WINDOW_THICK_RING wide. SGR 54 ends both. */
+/* ADR 0210: SGR 51, framed. FRAMED marks a framed cell; the three bits
+   above it are its kind, one field (BLIT_FRAMED_KIND), in SGR terms:
+   0 thin (51: a line along the top and bottom), 1 thick (51:3, the default
+   button's ring, BLIT_WINDOW_THICK_RING wide), 2 and 3 a Slate light and
+   dark title bar's rows (51:2, 51:4), 4 a rule along the bottom only
+   (51:5, under a note's strip). SGR 54 ends any of them. */
 #define BLIT_ATTR_FRAMED 2048
-#define BLIT_ATTR_FRAMED_THICK 4096
-/* SGR 51:2 and 51:4: a Slate title bar's top and bottom rows, light and
-   dark, so a title's text cells carry the bar's bevel. */
-#define BLIT_ATTR_FRAMED_BAR 8192
-#define BLIT_ATTR_FRAMED_DARK 16384
-#define BLIT_ATTR_FRAMED_ALL (BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_THICK | \
-                              BLIT_ATTR_FRAMED_BAR | BLIT_ATTR_FRAMED_DARK)
+#define BLIT_ATTR_FRAMED_SHIFT 12
+#define BLIT_ATTR_FRAMED_ALL (BLIT_ATTR_FRAMED | (7U << BLIT_ATTR_FRAMED_SHIFT))
+#define BLIT_FRAMED_KIND(attributes) (((attributes) >> BLIT_ATTR_FRAMED_SHIFT) & 7U)
+/* The field value for each SGR 51 sub-parameter, and back. */
+static const unsigned char blit_framed_kind_for_sgr[6] = { 0, 0, 2, 1, 3, 4 };
+static const char blit_framed_sgr_for_kind[5] = { 0, 3, 2, 4, 5 };
+static const char *const blit_framed_names[5] = {
+    "thin", "thick", "slate-light-bar", "slate-dark-bar", "rule"
+};
 
 typedef struct {
     int x, y, w, h;
@@ -207,17 +212,16 @@ typedef struct {
    DECRQSS reports it. */
 static const char *framed_name(uint16_t attributes)
 {
-    if (!(attributes & BLIT_ATTR_FRAMED)) return "none";
-    if (attributes & BLIT_ATTR_FRAMED_BAR)
-        return (attributes & BLIT_ATTR_FRAMED_DARK) ? "slate-dark-bar" : "slate-light-bar";
-    return (attributes & BLIT_ATTR_FRAMED_THICK) ? "thick" : "thin";
+    unsigned kind = BLIT_FRAMED_KIND(attributes);
+    if (!(attributes & BLIT_ATTR_FRAMED) || kind > 4) return "none";
+    return blit_framed_names[kind];
 }
 
 static const char *framed_sgr(uint16_t attributes)
 {
-    if (attributes & BLIT_ATTR_FRAMED_BAR)
-        return (attributes & BLIT_ATTR_FRAMED_DARK) ? ";51:4" : ";51:2";
-    return (attributes & BLIT_ATTR_FRAMED_THICK) ? ";51:3" : ";51";
+    static const char *const sgr[5] = { ";51", ";51:3", ";51:2", ";51:4", ";51:5" };
+    unsigned kind = BLIT_FRAMED_KIND(attributes);
+    return kind <= 4 ? sgr[kind] : ";51";
 }
 
 typedef struct {
@@ -8565,15 +8569,11 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
             if (json_bool(cell_json, "concealed", &flag) && flag)
                 attributes |= BLIT_ATTR_CONCEAL;
             if (json_string(cell_json, "framed", color_text, sizeof(color_text))) {
-                if (strcmp(color_text, "thin") == 0)
-                    attributes |= BLIT_ATTR_FRAMED;
-                else if (strcmp(color_text, "thick") == 0)
-                    attributes |= BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_THICK;
-                else if (strcmp(color_text, "slate-light-bar") == 0)
-                    attributes |= BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_BAR;
-                else if (strcmp(color_text, "slate-dark-bar") == 0)
-                    attributes |= BLIT_ATTR_FRAMED | BLIT_ATTR_FRAMED_BAR |
-                        BLIT_ATTR_FRAMED_DARK;
+                unsigned kind;
+                for (kind = 0; kind < 5 && strcmp(color_text, blit_framed_names[kind]) != 0; ++kind)
+                    ;
+                if (kind < 5)
+                    attributes |= (uint16_t)(BLIT_ATTR_FRAMED | (kind << BLIT_ATTR_FRAMED_SHIFT));
                 else if (strcmp(color_text, "none") != 0)
                     style_valid = 0;
             }
@@ -12612,14 +12612,14 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
         } else if (value == 51) {
             /* ADR 0210: framed. Blit's sub-parameters: 51:3 the default
                button's thick frame, 51:2 and 51:4 a Slate light and dark
-               title bar's rows. ECMA-48 frames all four sides; Blit draws
-               the top and bottom only. */
-            int kind = param->subs > 0 ? param->sub[0] : 1;
+               title bar's rows, 51:5 a rule along the bottom only.
+               ECMA-48 frames all four sides; Blit draws the top and
+               bottom only. An unknown sub-parameter is plain 51. */
+            int sub = param->subs > 0 ? param->sub[0] : 1;
+            unsigned kind = sub >= 0 && sub <= 5 ? blit_framed_kind_for_sgr[sub] : 0;
             session->terminal_attributes &= (uint16_t)~BLIT_ATTR_FRAMED_ALL;
-            session->terminal_attributes |= BLIT_ATTR_FRAMED |
-                (kind == 3 ? BLIT_ATTR_FRAMED_THICK : 0) |
-                (kind == 2 || kind == 4 ? BLIT_ATTR_FRAMED_BAR : 0) |
-                (kind == 4 ? BLIT_ATTR_FRAMED_DARK : 0);
+            session->terminal_attributes |= (uint16_t)(BLIT_ATTR_FRAMED |
+                (kind << BLIT_ATTR_FRAMED_SHIFT));
         } else if (value == 54) {
             session->terminal_attributes &= (uint16_t)~BLIT_ATTR_FRAMED_ALL;
         } else if (value == 39) {

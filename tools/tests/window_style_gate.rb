@@ -72,7 +72,8 @@ Dir.mktmpdir('blit-window-style') do |root|
     bl, br = u(FIRST + 31), u(FIRST + 32)
     dl, dr = u(FIRST + 33), u(FIRST + 34)
     # Row 5: a button, a default button, a red-framed label, framing ended
-    # by 54 and by 0. Row 6: a framed blank and framing after a reset.
+    # by 54 and by 0. Row 6: a framed blank, framing after a reset, and a
+    # 51:5 blank (the rule under a note's strip: the bottom line only).
     buttons = "#{bl}#{sgr('51')} OK #{sgr('54')}#{br} #{dl}#{sgr('51:3')} Go #{sgr('54')}#{dr} " \
               "#{sgr('58;2;255;0;0;51')}red#{sgr('59;54')} #{sgr('51')}A#{sgr('54')}B#{sgr('51')}C#{sgr('0')}D"
     # Row 7: a Slate light and a Slate dark title, framed 51:2 and 51:4 on
@@ -82,7 +83,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     end.join
     script = "printf '\\033[?25l#{colours}\\033[2J" \
              "\\033[2;3H#{rows[0]}\\033[3;3H#{rows[1]}\\033[4;3H#{rows[2]}" \
-             "\\033[6;3H#{buttons}#{colours}\\033[7;3H#{sgr('51')} #{sgr('0')}#{colours}E" \
+             "\\033[6;3H#{buttons}#{colours}\\033[7;3H#{sgr('51')} #{sgr('0')}#{colours}E#{sgr('51:5')} #{sgr('0')}#{colours}" \
              "\\033[8;3H#{titles}'; sleep 600"
     # A file, not -c: the 105 glyphs make a script longer than an argument
     # may be.
@@ -134,6 +135,7 @@ Dir.mktmpdir('blit-window-style') do |root|
           lines.call(22, 5, FG) == [0, ch - 1] && lines.call(23, 5, FG).empty?, 'SGR 54 or 0 does not end framing')
     check(lines.call(2, 6, FG) == [0, ch - 1], 'a framed blank draws nothing')
     check(lines.call(3, 6, FG).empty?, 'framing survives SGR 0')
+    check(lines.call(4, 6, FG) == [ch - 1], "SGR 51:5 does not draw the bottom rule only: #{lines.call(4, 6, FG)}")
 
     # A Slate title: its text cells carry the bar's top and bottom rows
     # (frame line, highlight; shade, rule) exactly as the title glyph beside
@@ -166,7 +168,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     end
     request('DELETE', "/v1/terminal-sessions/#{session['id']}")
     puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=105 pixels=#{checked} " \
-         'chalk=foreground slate=own_colours transparent=background sgr51=1px sgr51:3=3px ' \
+         'chalk=foreground slate=own_colours transparent=background sgr51=1px sgr51:3=3px sgr51:5=bottom_rule ' \
          'underline_colour=used sgr54,sgr0=end buttons=continuous titles=51:2,51:4_match_bar'
   ensure
     Process.kill('TERM', pid) rescue nil

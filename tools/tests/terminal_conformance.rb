@@ -1071,6 +1071,11 @@ cells = cell_map(snapshot)
 assert_equal(%w[slate-light-bar slate-dark-bar thin], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
              'SGR 51:2 and 51:4 are the Slate bars, and 51 replaces them')
 raise 'SGR 54 left d framed' if cells.fetch([3, 0]).key?('style')
+snapshot = run_case(base, 'framed-rule-sgr', "printf '\\033[51:5ma\\033[51:7mb\\033[51:5mc\\033[54md'")
+cells = cell_map(snapshot)
+assert_equal(%w[rule thin rule], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
+             'SGR 51:5 is the bottom rule, and an unknown sub-parameter is plain 51')
+raise 'SGR 54 left d ruled' if cells.fetch([3, 0]).key?('style')
 
 # Framed survives what other attributes survive: scrolling into scrollback
 # and back, and the scrollback view.
@@ -2509,6 +2514,9 @@ assert_equal(hex("\eP1$r0;51m\e\\"),
 assert_equal(hex("\eP1$r0;51:4m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-framed-bar', '\\033[51:4m\\033P$qm\\033\\\\\\033[0m', 14)),
              'DECRQSS SGR reports 51:4')
+assert_equal(hex("\eP1$r0;51:5m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-framed-rule', '\\033[51:5m\\033P$qm\\033\\\\\\033[0m', 14)),
+             'DECRQSS SGR reports 51:5')
 assert_equal(hex("\eP1$r5 q\e\\"), row_text(reply_case(base, 'decrqss-decscusr', '\\033[5 q\\033P$q q\\033\\\\', 10)),
              'DECRQSS DECSCUSR keeps the style')
 
