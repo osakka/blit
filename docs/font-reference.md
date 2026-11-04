@@ -148,10 +148,15 @@ Slate dark), listed in the catalogue's `cell_geometry` section as
 - **Chalk** is one colour: the cell's foreground over its background, so a
   theme recolours it. **Slate** is the same geometry in its own colours.
   Wherever a glyph draws nothing, the cell's background shows; on a held
-  desktop that is the wallpaper, under the frame and around the shadow.
+  desktop that is the wallpaper, right up to the frame's line.
+- **No shadow.** The frame and dialog pieces draw only their lines and
+  borders. A drop shadow is the application's own setting (Hibr's
+  Shadow), not part of the glyphs. That is why `frame-right-top` draws as
+  `frame-right`, and `frame-bottom-first` as `frame-bottom`; both keep
+  their codepoints.
 - They are pixel-designed for an 11x22 cell. At every size, lines,
-  stripes and SGR 51 are 1 px, the shadow is 2 px at a 2 px offset and the
-  default ring is 3 px. The boxes stay as wide as the cell, the stripes
+  stripes and SGR 51 are 1 px, the dialog border's layers are 2/3/1/1 px
+  and the default ring is 3 px. The boxes stay as wide as the cell, the stripes
   keep their proportion of the bar and a button's ends their roundness.
   Neighbouring cells always join.
 - **A title** is text on the bar's background, framed to match the bar:

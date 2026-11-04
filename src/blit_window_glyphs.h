@@ -13,7 +13,7 @@
    script tools/fonts/draw-window-glyphs.py reads it from this file, and
    window_glyph_gate holds this drawing to that script pixel for pixel.
    The glyphs are pixel-designed for the owner's 11x22 cell. At other sizes
-   lines, stripes, the shadow and the rings keep their pixel widths. What
+   lines, stripes and the rings keep their pixel widths. What
    scales with the cell is the box (the cell's width), the number of
    stripes (six at 22 px, in proportion to the height) and a button end's
    radius. */
@@ -32,8 +32,6 @@
 #define BLIT_WINDOW_STRIPES 6           /* stripes at that height; 1 px, 1 px apart */
 #define BLIT_WINDOW_STRIPE_INSET 2      /* clear beside a frame or a box */
 #define BLIT_WINDOW_TITLE_GAP 5         /* clear before and after the title */
-#define BLIT_WINDOW_SHADOW 2            /* the drop shadow's width */
-#define BLIT_WINDOW_SHADOW_OFFSET 2     /* and how far it is moved down and right */
 #define BLIT_WINDOW_DIALOG_MARGIN 2     /* dialog border, from the content out: */
 #define BLIT_WINDOW_DIALOG_BAND 3       /*   face margin, the wide line, */
 #define BLIT_WINDOW_DIALOG_GAP 1        /*   a gap of the face, */
@@ -70,21 +68,21 @@ enum {
 };
 
 /* Slate's colour roles: K frame and outlines, D dark grey, L highlight,
-   B the title bar, W a box's face, S shadow, G a dialog's face, F a
+   B the title bar, W a box's face, G a dialog's face, F a
    button's face, N a button's shade; and the controls' lines: O a
    button's ring and a dialog's outer line, R the dialog's wide line, H
    the highlight down its middle. In light, O, R and H are K, D and L;
    dark lifts them so they read on its dark faces. Chalk inks every role
    it uses. */
-enum { WR_NONE, WR_K, WR_D, WR_L, WR_B, WR_W, WR_S, WR_G, WR_F, WR_N, WR_O, WR_R, WR_H,
+enum { WR_NONE, WR_K, WR_D, WR_L, WR_B, WR_W, WR_G, WR_F, WR_N, WR_O, WR_R, WR_H,
        WR_ROLES };
 
 static const unsigned char blit_window_palette[2][WR_ROLES][3] = {
     { {0, 0, 0}, {0, 0, 0}, {119, 119, 119}, {255, 255, 255}, {214, 214, 214},
-      {255, 255, 255}, {0, 0, 0}, {238, 238, 238}, {221, 221, 221}, {153, 153, 153},
+      {255, 255, 255}, {238, 238, 238}, {221, 221, 221}, {153, 153, 153},
       {0, 0, 0}, {119, 119, 119}, {255, 255, 255} },
     { {0, 0, 0}, {8, 8, 10}, {30, 30, 34}, {112, 112, 122}, {60, 60, 67},
-      {200, 200, 206}, {0, 0, 0}, {52, 52, 58}, {78, 78, 86}, {40, 40, 45},
+      {200, 200, 206}, {52, 52, 58}, {78, 78, 86}, {40, 40, 45},
       {168, 168, 176}, {122, 122, 130}, {190, 190, 198} },
 };
 
@@ -143,7 +141,6 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
 {
     enum {
         L = BLIT_WINDOW_LINE, INSET = BLIT_WINDOW_STRIPE_INSET,
-        SW = BLIT_WINDOW_SHADOW, SO = BLIT_WINDOW_SHADOW_OFFSET,
         /* The dialog border's layers, as distances from the content. */
         D1 = BLIT_WINDOW_DIALOG_MARGIN, D2 = D1 + BLIT_WINDOW_DIALOG_BAND,
         D3 = D2 + BLIT_WINDOW_DIALOG_GAP, D4 = D3 + BLIT_WINDOW_DIALOG_OUTER
@@ -202,24 +199,16 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
         }
         return;
     }
-    /* The window frame: a line against the content, and a shadow beside
-       the right and under the bottom, SO from the outer corners. */
+    /* The window frame: a line against the content and nothing else. The
+       drop shadow is Hibr's Shadow setting, not part of the frame (ADR
+       0210, revised 2026-11-04), so the -top and -first pieces now draw the
+       same as their plain neighbours; they keep their codepoints. */
     switch (index) {
     case WG_FRAME_LEFT: wg_fill(&cell, w - L, w, 0, h, WR_K); return;
-    case WG_FRAME_RIGHT_TOP: case WG_FRAME_RIGHT:
-        wg_fill(&cell, 0, L, 0, h, WR_K);
-        wg_fill(&cell, L, L + SW, index == WG_FRAME_RIGHT_TOP ? SO : 0, h, WR_S);
-        return;
+    case WG_FRAME_RIGHT_TOP: case WG_FRAME_RIGHT: wg_fill(&cell, 0, L, 0, h, WR_K); return;
     case WG_FRAME_BOTTOM_LEFT: wg_fill(&cell, w - L, w, 0, L, WR_K); return;
-    case WG_FRAME_BOTTOM_FIRST: case WG_FRAME_BOTTOM:
-        wg_fill(&cell, 0, w, 0, L, WR_K);
-        /* The left frame's outer edge is L into the previous cell. */
-        wg_fill(&cell, index == WG_FRAME_BOTTOM_FIRST ? SO - L : 0, w, L, L + SW, WR_S);
-        return;
-    case WG_FRAME_BOTTOM_RIGHT:
-        wg_fill(&cell, 0, L + SW, 0, L + SW, WR_S);
-        wg_fill(&cell, 0, L, 0, L, WR_K);
-        return;
+    case WG_FRAME_BOTTOM_FIRST: case WG_FRAME_BOTTOM: wg_fill(&cell, 0, w, 0, L, WR_K); return;
+    case WG_FRAME_BOTTOM_RIGHT: wg_fill(&cell, 0, L, 0, L, WR_K); return;
     case WG_FRAME_TOP_LEFT: wg_fill(&cell, w - L, w, h - L, h, WR_K); return;
     case WG_FRAME_TOP: wg_fill(&cell, 0, w, h - L, h, WR_K); return;
     case WG_FRAME_TOP_RIGHT: wg_fill(&cell, 0, L, h - L, h, WR_K); return;
@@ -228,9 +217,9 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
     if (index >= WG_DIALOG_TOP_LEFT && index <= WG_DIALOG_BOTTOM_RIGHT) {
         /* The double border, outward from the content: a margin of the
            face, the wide line (Slate's grey with a highlight down its
-           middle), a gap of the face, the outer line; then the shadow, SO
-           from the outer line's far corners. A pixel's layer is its
-           distance from the content, so the corners are square. */
+           middle), a gap of the face, the outer line; nothing beyond it.
+           A pixel's layer is its distance from the content, so the
+           corners are square. */
         int left = index == WG_DIALOG_TOP_LEFT || index == WG_DIALOG_LEFT ||
             index == WG_DIALOG_BOTTOM_LEFT;
         int right = index == WG_DIALOG_TOP_RIGHT || index == WG_DIALOG_RIGHT ||
@@ -241,18 +230,11 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
         for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
             int dx = left ? w - 1 - x : right ? x : 0;
             int dy = upper ? h - 1 - y : lower ? y : 0;
-            int d = dx > dy ? dx : dy, shadow = 0;
+            int d = dx > dy ? dx : dy;
             unsigned char role = WR_NONE;
             if (d < D1 || (d >= D2 && d < D3)) role = slate ? WR_G : WR_NONE;
             else if (d < D2) role = slate ? (d == mid ? WR_H : WR_R) : WR_K;
             else if (d < D4) role = slate ? WR_O : WR_K;
-            else {
-                if (right && x < D4 + SW)
-                    shadow = upper ? y >= h - D4 + SO : !lower || y < D4 + SW;
-                else if (lower && y < D4 + SW)
-                    shadow = left ? x >= w - D4 + SO : !right || x < D4 + SW;
-                if (shadow) role = WR_S;
-            }
             if (role != WR_NONE) roles[y * w + x] = role;
         }
         return;

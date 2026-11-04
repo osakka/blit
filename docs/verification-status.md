@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-11-04: 0.3.38 no shadow in the frame glyphs
+
+- **The frame, note-frame and dialog glyphs draw no shadow** (ADR 0210
+  revised, owner's direction). Each appearance setting draws only its own
+  part, and Hibr's Shadow setting owns the shadow. In all three sets the
+  frame pieces draw only their 1 px line, and the dialog pieces their four
+  border layers. frame-right-top draws as frame-right, frame-bottom-first
+  as frame-bottom, and frame-bottom-right as its corner pixel; the code
+  points are kept. The shadow constants and Slate's shadow role are
+  removed, not left dead. `window_glyph_gate` checks that every frame and
+  dialog piece inks exactly its line(s) and nothing else, at 12 sizes in
+  all three sets. Against 0.3.37's drawing it fails ("frame-right-top:
+  no line against the content, or a shadow beside it").
+- **Suites:** font 40/40, renderer on GLES 77 pass (1 skip), all 172 pass
+  (6 skip; run with the Hibr headers); no failures.
+
 ## 2026-11-04: 0.3.37 SGR 51:5, the rule under a note's strip
 
 - **`51:5`** draws a rule along the cell's bottom edge only (1 px, in

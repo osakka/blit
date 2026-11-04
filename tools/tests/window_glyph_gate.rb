@@ -14,7 +14,9 @@
 #   frame cells are transparent off their lines.
 # - At 11x22 the approved mock-up's pixels hold, written here, not read
 #   from the design: stripe and bevel rows, the full-width 11x11 box, the
-#   insets, the shadow's offset, the dialog's layers, the buttons' ends.
+#   insets, the dialog's layers, the buttons' ends.
+# - No frame or dialog piece draws a shadow, or any pixel outside its
+#   line or its border, in any set at any size (ADR 0210, revised).
 # - At every size, bar cells join: a stripe's rows run edge to edge and
 #   match its neighbours', and the frame line and rule cross every edge.
 
@@ -133,7 +135,7 @@ ink = ->(g, x, y) { g[y][x][0] == 255 }
 rgb = ->(g, x, y) { g[y][x][1] }
 STRIPE_ROWS = [5, 7, 9, 11, 13, 15].freeze
 LIGHT = { K: [0, 0, 0], D: [119, 119, 119], L: [255, 255, 255], B: [214, 214, 214], W: [255, 255, 255],
-          S: [0, 0, 0], G: [238, 238, 238] }.freeze
+          G: [238, 238, 238] }.freeze
 # Colours in the raster's byte order: Slate dark's frame is (8, 8, 10).
 g = glyph(raster, 'slate-dark', 'stripe')
 check(rgb.call(g, 0, 0) == [8, 8, 10] && rgb.call(g, 0, 2) == [60, 60, 67], "Slate dark's colours are #{rgb.call(g, 0, 0)}")
@@ -179,13 +181,13 @@ check((1..9).all? { |x| rgb.call(g, x, 9) == LIGHT[:K] } && rgb.call(g, 5, 8) ==
 g = glyph(raster, 'chalk', 'note-close')
 check(!ink.call(g, 5, 2) && !ink.call(g, 5, 10) && ink.call(g, 0, 5), 'the note close box is not alone and open')
 g = glyph(raster, 'chalk', 'frame-right-top')
-check((0...22).all? { |y| ink.call(g, 0, y) } && !ink.call(g, 1, 1) && ink.call(g, 1, 2) && ink.call(g, 2, 21) && !ink.call(g, 3, 5),
-      'frame-right-top: no line, or its shadow is not 2 px wide from 2 px down')
+check((0...22).all? { |y| ink.call(g, 0, y) && !ink.call(g, 1, y) && !ink.call(g, 2, y) },
+      'frame-right-top: no line against the content, or a shadow beside it')
 g = glyph(raster, 'chalk', 'frame-left')
 check((0...22).all? { |y| ink.call(g, 10, y) && !ink.call(g, 0, y) }, 'frame-left does not hug the content, transparent elsewhere')
 g = glyph(raster, 'slate-light', 'frame-bottom-first')
-check(rgb.call(g, 0, 0) == LIGHT[:K] && g[1][0][0].zero? && rgb.call(g, 1, 1) == LIGHT[:S] && rgb.call(g, 1, 2) == LIGHT[:S] && g[3][5][0].zero?,
-      'frame-bottom-first: the shadow does not start 2 px from the left frame')
+check((0...11).all? { |x| rgb.call(g, x, 0) == LIGHT[:K] && g[1][x][0].zero? && g[2][x][0].zero? },
+      'frame-bottom-first: no line against the content, or a shadow under it')
 g = glyph(raster, 'slate-light', 'dialog-left')
 layers = (0...11).map { |x| g[10][x][0].zero? ? :none : LIGHT.key(rgb.call(g, x, 10)) }
 want = %i[none none none none K G D L D G G]
@@ -194,10 +196,10 @@ g = glyph(raster, 'chalk', 'dialog-left')
 check((0...11).map { |x| ink.call(g, x, 10) } == [false] * 4 + [true, false, true, true, true, false, false],
       'the Chalk dialog border is not outer line, gap, 3 px line, margin')
 g = glyph(raster, 'chalk', 'dialog-right')
-check((0...11).map { |x| ink.call(g, x, 0) } == [false, false, true, true, true, false, true, true, true, false, false],
-      'the dialog right edge does not carry its 2 px shadow')
-g = glyph(raster, 'chalk', 'dialog-top-right')
-check(!ink.call(g, 8, 16) && ink.call(g, 8, 17) && ink.call(g, 7, 21), 'the dialog shadow does not start 2 px below its top')
+check((0...11).map { |x| ink.call(g, x, 0) } == [false, false, true, true, true, false, true, false, false, false, false],
+      'the dialog right edge is not margin, 3 px line, gap, outer line, with nothing beyond')
+g = glyph(raster, 'chalk', 'dialog-bottom-right')
+check(ink.call(g, 6, 6) && !ink.call(g, 7, 7) && !ink.call(g, 8, 2) && !ink.call(g, 2, 8), 'the dialog corner draws a shadow')
 %w[button default-button].each do |kind|
   thick = kind == 'default-button' ? 3 : 1
   %w[left right].each do |side|
@@ -209,6 +211,43 @@ check(!ink.call(g, 8, 16) && ink.call(g, 8, 17) && ink.call(g, 7, 21), 'the dial
           "#{kind}-#{side}: the edge the label joins is inked at #{rows.inspect}, not #{thick} px at top and bottom")
     check((0...22).none? { |y| ink.call(g, far, y) } && !ink.call(g, far, 0), "#{kind}-#{side}: the end is not rounded and inset")
     check(ink.call(g, side == 'left' ? 2 : 8, 11), "#{kind}-#{side}: the end's side is not 2 px in")
+  end
+end
+
+# Footprints, at every size and in every set: a frame piece inks only its
+# 1 px line against the content, a dialog piece only its 7 px border
+# (2 margin, 3 line, 1 gap, 1 outer). Nothing else, so no shadow.
+FRAME_LINE = {
+  'frame-left' => ->(x, y, w, h) { x == w - 1 }, 'frame-right-top' => ->(x, y, w, h) { x.zero? },
+  'frame-right' => ->(x, y, w, h) { x.zero? }, 'frame-bottom-left' => ->(x, y, w, h) { x == w - 1 && y.zero? },
+  'frame-bottom-first' => ->(x, y, w, h) { y.zero? }, 'frame-bottom' => ->(x, y, w, h) { y.zero? },
+  'frame-bottom-right' => ->(x, y, w, h) { x.zero? && y.zero? }, 'frame-top-left' => ->(x, y, w, h) { x == w - 1 && y == h - 1 },
+  'frame-top' => ->(x, y, w, h) { y == h - 1 }, 'frame-top-right' => ->(x, y, w, h) { x.zero? && y == h - 1 }
+}.freeze
+SIZES.each do |w, h|
+  SETS.each_key do |style|
+    FRAME_LINE.each do |name, line|
+      g = glyph(raster, style, name, w, h)
+      (0...h).each do |y|
+        (0...w).each do |x|
+          check((g[y][x][0] == 255) == line.call(x, y, w, h), "#{style}-#{name} at #{w}x#{h}: pixel #{x},#{y} is off its line")
+        end
+      end
+    end
+    %w[top-left top top-right left right bottom-left bottom bottom-right].each do |part|
+      g = glyph(raster, style, "dialog-#{part}", w, h)
+      sides = part.split('-')
+      (0...h).each do |y|
+        (0...w).each do |x|
+          dx = sides.include?('left') ? w - 1 - x : sides.include?('right') ? x : 0
+          dy = sides.include?('top') ? h - 1 - y : sides.include?('bottom') ? y : 0
+          d = [dx, dy].max
+          inked = g[y][x][0] == 255
+          want = style == 'chalk' ? (d.between?(2, 4) || d == 6) : d < 7
+          check(inked == want, "#{style}-dialog-#{part} at #{w}x#{h}: pixel #{x},#{y} (#{d} px out) is #{inked ? 'set' : 'clear'}")
+        end
+      end
+    end
   end
 end
 
@@ -245,5 +284,5 @@ SIZES.each do |w, h|
   end
 end
 
-puts "WINDOW_GLYPH_PASS glyphs=105 catalogue=named sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
+puts "WINDOW_GLYPH_PASS footprints=lines_only shadow=none glyphs=105 catalogue=named sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
      'design=pixel-exact chalk=coverage slate=rgba pixels=crisp mockup_11x22=held seams=joined'

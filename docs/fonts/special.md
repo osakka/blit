@@ -289,24 +289,24 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `chalk-shade` | `U+10023B` | `"\udbc0\ude3b"` | foreground | Chalk set: title bar with the window-shade box: the square with a bar across |
 | `chalk-zoom` | `U+10023C` | `"\udbc0\ude3c"` | foreground | Chalk set: title bar with the zoom box: the square with a smaller square in its corner |
 | `chalk-frame-left` | `U+10023D` | `"\udbc0\ude3d"` | foreground | Chalk set: window frame, left: a line against the content |
-| `chalk-frame-right-top` | `U+10023E` | `"\udbc0\ude3e"` | foreground | Chalk set: window frame, right, beside the title bar: line, shadow from 2 px down |
-| `chalk-frame-right` | `U+10023F` | `"\udbc0\ude3f"` | foreground | Chalk set: window frame, right: line and its 2 px shadow |
+| `chalk-frame-right-top` | `U+10023E` | `"\udbc0\ude3e"` | foreground | Chalk set: window frame, right, beside the title bar: a line against the content (as frame-right) |
+| `chalk-frame-right` | `U+10023F` | `"\udbc0\ude3f"` | foreground | Chalk set: window frame, right: a line against the content |
 | `chalk-frame-bottom-left` | `U+100240` | `"\udbc0\ude40"` | foreground | Chalk set: window frame, bottom-left corner |
-| `chalk-frame-bottom-first` | `U+100241` | `"\udbc0\ude41"` | foreground | Chalk set: window frame, first bottom cell: line, shadow from 2 px in |
-| `chalk-frame-bottom` | `U+100242` | `"\udbc0\ude42"` | foreground | Chalk set: window frame, bottom: line and its 2 px shadow |
-| `chalk-frame-bottom-right` | `U+100243` | `"\udbc0\ude43"` | foreground | Chalk set: window frame, bottom-right corner and shadow |
+| `chalk-frame-bottom-first` | `U+100241` | `"\udbc0\ude41"` | foreground | Chalk set: window frame, first bottom cell: a line against the content (as frame-bottom) |
+| `chalk-frame-bottom` | `U+100242` | `"\udbc0\ude42"` | foreground | Chalk set: window frame, bottom: a line against the content |
+| `chalk-frame-bottom-right` | `U+100243` | `"\udbc0\ude43"` | foreground | Chalk set: window frame, bottom-right corner |
 | `chalk-frame-top-left` | `U+100244` | `"\udbc0\ude44"` | foreground | Chalk set: frame without a title bar, top-left corner |
 | `chalk-frame-top` | `U+100245` | `"\udbc0\ude45"` | foreground | Chalk set: frame without a title bar, top: a line against the content |
 | `chalk-frame-top-right` | `U+100246` | `"\udbc0\ude46"` | foreground | Chalk set: frame without a title bar, top-right corner |
 | `chalk-note-close` | `U+100247` | `"\udbc0\ude47"` | foreground | Chalk set: a notification's close box alone, transparent around it |
 | `chalk-dialog-top-left` | `U+100248` | `"\udbc0\ude48"` | foreground | Chalk set: dialog double border, top-left corner |
 | `chalk-dialog-top` | `U+100249` | `"\udbc0\ude49"` | foreground | Chalk set: dialog double border, top |
-| `chalk-dialog-top-right` | `U+10024A` | `"\udbc0\ude4a"` | foreground | Chalk set: dialog double border, top-right corner, shadow from 2 px down |
+| `chalk-dialog-top-right` | `U+10024A` | `"\udbc0\ude4a"` | foreground | Chalk set: dialog double border, top-right corner |
 | `chalk-dialog-left` | `U+10024B` | `"\udbc0\ude4b"` | foreground | Chalk set: dialog double border, left |
-| `chalk-dialog-right` | `U+10024C` | `"\udbc0\ude4c"` | foreground | Chalk set: dialog double border, right, with its shadow |
-| `chalk-dialog-bottom-left` | `U+10024D` | `"\udbc0\ude4d"` | foreground | Chalk set: dialog double border, bottom-left corner, shadow from 2 px in |
-| `chalk-dialog-bottom` | `U+10024E` | `"\udbc0\ude4e"` | foreground | Chalk set: dialog double border, bottom, with its shadow |
-| `chalk-dialog-bottom-right` | `U+10024F` | `"\udbc0\ude4f"` | foreground | Chalk set: dialog double border, bottom-right corner and shadow |
+| `chalk-dialog-right` | `U+10024C` | `"\udbc0\ude4c"` | foreground | Chalk set: dialog double border, right |
+| `chalk-dialog-bottom-left` | `U+10024D` | `"\udbc0\ude4d"` | foreground | Chalk set: dialog double border, bottom-left corner |
+| `chalk-dialog-bottom` | `U+10024E` | `"\udbc0\ude4e"` | foreground | Chalk set: dialog double border, bottom |
+| `chalk-dialog-bottom-right` | `U+10024F` | `"\udbc0\ude4f"` | foreground | Chalk set: dialog double border, bottom-right corner |
 | `chalk-button-left` | `U+100250` | `"\udbc0\ude50"` | foreground | Chalk set: button, left end: rounded 1 px outline; SGR 51 draws the label's lines |
 | `chalk-button-right` | `U+100251` | `"\udbc0\ude51"` | foreground | Chalk set: button, right end |
 | `chalk-default-button-left` | `U+100252` | `"\udbc0\ude52"` | foreground | Chalk set: default button, left end: rounded 3 px ring; SGR 51:3 draws the label's |
@@ -324,24 +324,24 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `slate-light-shade` | `U+10025E` | `"\udbc0\ude5e"` | colour | Slate light set: title bar with the window-shade box: the square with a bar across |
 | `slate-light-zoom` | `U+10025F` | `"\udbc0\ude5f"` | colour | Slate light set: title bar with the zoom box: the square with a smaller square in its corner |
 | `slate-light-frame-left` | `U+100260` | `"\udbc0\ude60"` | colour | Slate light set: window frame, left: a line against the content |
-| `slate-light-frame-right-top` | `U+100261` | `"\udbc0\ude61"` | colour | Slate light set: window frame, right, beside the title bar: line, shadow from 2 px down |
-| `slate-light-frame-right` | `U+100262` | `"\udbc0\ude62"` | colour | Slate light set: window frame, right: line and its 2 px shadow |
+| `slate-light-frame-right-top` | `U+100261` | `"\udbc0\ude61"` | colour | Slate light set: window frame, right, beside the title bar: a line against the content (as frame-right) |
+| `slate-light-frame-right` | `U+100262` | `"\udbc0\ude62"` | colour | Slate light set: window frame, right: a line against the content |
 | `slate-light-frame-bottom-left` | `U+100263` | `"\udbc0\ude63"` | colour | Slate light set: window frame, bottom-left corner |
-| `slate-light-frame-bottom-first` | `U+100264` | `"\udbc0\ude64"` | colour | Slate light set: window frame, first bottom cell: line, shadow from 2 px in |
-| `slate-light-frame-bottom` | `U+100265` | `"\udbc0\ude65"` | colour | Slate light set: window frame, bottom: line and its 2 px shadow |
-| `slate-light-frame-bottom-right` | `U+100266` | `"\udbc0\ude66"` | colour | Slate light set: window frame, bottom-right corner and shadow |
+| `slate-light-frame-bottom-first` | `U+100264` | `"\udbc0\ude64"` | colour | Slate light set: window frame, first bottom cell: a line against the content (as frame-bottom) |
+| `slate-light-frame-bottom` | `U+100265` | `"\udbc0\ude65"` | colour | Slate light set: window frame, bottom: a line against the content |
+| `slate-light-frame-bottom-right` | `U+100266` | `"\udbc0\ude66"` | colour | Slate light set: window frame, bottom-right corner |
 | `slate-light-frame-top-left` | `U+100267` | `"\udbc0\ude67"` | colour | Slate light set: frame without a title bar, top-left corner |
 | `slate-light-frame-top` | `U+100268` | `"\udbc0\ude68"` | colour | Slate light set: frame without a title bar, top: a line against the content |
 | `slate-light-frame-top-right` | `U+100269` | `"\udbc0\ude69"` | colour | Slate light set: frame without a title bar, top-right corner |
 | `slate-light-note-close` | `U+10026A` | `"\udbc0\ude6a"` | colour | Slate light set: a notification's close box alone, transparent around it |
 | `slate-light-dialog-top-left` | `U+10026B` | `"\udbc0\ude6b"` | colour | Slate light set: dialog double border, top-left corner |
 | `slate-light-dialog-top` | `U+10026C` | `"\udbc0\ude6c"` | colour | Slate light set: dialog double border, top |
-| `slate-light-dialog-top-right` | `U+10026D` | `"\udbc0\ude6d"` | colour | Slate light set: dialog double border, top-right corner, shadow from 2 px down |
+| `slate-light-dialog-top-right` | `U+10026D` | `"\udbc0\ude6d"` | colour | Slate light set: dialog double border, top-right corner |
 | `slate-light-dialog-left` | `U+10026E` | `"\udbc0\ude6e"` | colour | Slate light set: dialog double border, left |
-| `slate-light-dialog-right` | `U+10026F` | `"\udbc0\ude6f"` | colour | Slate light set: dialog double border, right, with its shadow |
-| `slate-light-dialog-bottom-left` | `U+100270` | `"\udbc0\ude70"` | colour | Slate light set: dialog double border, bottom-left corner, shadow from 2 px in |
-| `slate-light-dialog-bottom` | `U+100271` | `"\udbc0\ude71"` | colour | Slate light set: dialog double border, bottom, with its shadow |
-| `slate-light-dialog-bottom-right` | `U+100272` | `"\udbc0\ude72"` | colour | Slate light set: dialog double border, bottom-right corner and shadow |
+| `slate-light-dialog-right` | `U+10026F` | `"\udbc0\ude6f"` | colour | Slate light set: dialog double border, right |
+| `slate-light-dialog-bottom-left` | `U+100270` | `"\udbc0\ude70"` | colour | Slate light set: dialog double border, bottom-left corner |
+| `slate-light-dialog-bottom` | `U+100271` | `"\udbc0\ude71"` | colour | Slate light set: dialog double border, bottom |
+| `slate-light-dialog-bottom-right` | `U+100272` | `"\udbc0\ude72"` | colour | Slate light set: dialog double border, bottom-right corner |
 | `slate-light-button-left` | `U+100273` | `"\udbc0\ude73"` | colour | Slate light set: button, left end: rounded 1 px outline; SGR 51 draws the label's lines |
 | `slate-light-button-right` | `U+100274` | `"\udbc0\ude74"` | colour | Slate light set: button, right end |
 | `slate-light-default-button-left` | `U+100275` | `"\udbc0\ude75"` | colour | Slate light set: default button, left end: rounded 3 px ring; SGR 51:3 draws the label's |
@@ -359,24 +359,24 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `slate-dark-shade` | `U+100281` | `"\udbc0\ude81"` | colour | Slate dark set: title bar with the window-shade box: the square with a bar across |
 | `slate-dark-zoom` | `U+100282` | `"\udbc0\ude82"` | colour | Slate dark set: title bar with the zoom box: the square with a smaller square in its corner |
 | `slate-dark-frame-left` | `U+100283` | `"\udbc0\ude83"` | colour | Slate dark set: window frame, left: a line against the content |
-| `slate-dark-frame-right-top` | `U+100284` | `"\udbc0\ude84"` | colour | Slate dark set: window frame, right, beside the title bar: line, shadow from 2 px down |
-| `slate-dark-frame-right` | `U+100285` | `"\udbc0\ude85"` | colour | Slate dark set: window frame, right: line and its 2 px shadow |
+| `slate-dark-frame-right-top` | `U+100284` | `"\udbc0\ude84"` | colour | Slate dark set: window frame, right, beside the title bar: a line against the content (as frame-right) |
+| `slate-dark-frame-right` | `U+100285` | `"\udbc0\ude85"` | colour | Slate dark set: window frame, right: a line against the content |
 | `slate-dark-frame-bottom-left` | `U+100286` | `"\udbc0\ude86"` | colour | Slate dark set: window frame, bottom-left corner |
-| `slate-dark-frame-bottom-first` | `U+100287` | `"\udbc0\ude87"` | colour | Slate dark set: window frame, first bottom cell: line, shadow from 2 px in |
-| `slate-dark-frame-bottom` | `U+100288` | `"\udbc0\ude88"` | colour | Slate dark set: window frame, bottom: line and its 2 px shadow |
-| `slate-dark-frame-bottom-right` | `U+100289` | `"\udbc0\ude89"` | colour | Slate dark set: window frame, bottom-right corner and shadow |
+| `slate-dark-frame-bottom-first` | `U+100287` | `"\udbc0\ude87"` | colour | Slate dark set: window frame, first bottom cell: a line against the content (as frame-bottom) |
+| `slate-dark-frame-bottom` | `U+100288` | `"\udbc0\ude88"` | colour | Slate dark set: window frame, bottom: a line against the content |
+| `slate-dark-frame-bottom-right` | `U+100289` | `"\udbc0\ude89"` | colour | Slate dark set: window frame, bottom-right corner |
 | `slate-dark-frame-top-left` | `U+10028A` | `"\udbc0\ude8a"` | colour | Slate dark set: frame without a title bar, top-left corner |
 | `slate-dark-frame-top` | `U+10028B` | `"\udbc0\ude8b"` | colour | Slate dark set: frame without a title bar, top: a line against the content |
 | `slate-dark-frame-top-right` | `U+10028C` | `"\udbc0\ude8c"` | colour | Slate dark set: frame without a title bar, top-right corner |
 | `slate-dark-note-close` | `U+10028D` | `"\udbc0\ude8d"` | colour | Slate dark set: a notification's close box alone, transparent around it |
 | `slate-dark-dialog-top-left` | `U+10028E` | `"\udbc0\ude8e"` | colour | Slate dark set: dialog double border, top-left corner |
 | `slate-dark-dialog-top` | `U+10028F` | `"\udbc0\ude8f"` | colour | Slate dark set: dialog double border, top |
-| `slate-dark-dialog-top-right` | `U+100290` | `"\udbc0\ude90"` | colour | Slate dark set: dialog double border, top-right corner, shadow from 2 px down |
+| `slate-dark-dialog-top-right` | `U+100290` | `"\udbc0\ude90"` | colour | Slate dark set: dialog double border, top-right corner |
 | `slate-dark-dialog-left` | `U+100291` | `"\udbc0\ude91"` | colour | Slate dark set: dialog double border, left |
-| `slate-dark-dialog-right` | `U+100292` | `"\udbc0\ude92"` | colour | Slate dark set: dialog double border, right, with its shadow |
-| `slate-dark-dialog-bottom-left` | `U+100293` | `"\udbc0\ude93"` | colour | Slate dark set: dialog double border, bottom-left corner, shadow from 2 px in |
-| `slate-dark-dialog-bottom` | `U+100294` | `"\udbc0\ude94"` | colour | Slate dark set: dialog double border, bottom, with its shadow |
-| `slate-dark-dialog-bottom-right` | `U+100295` | `"\udbc0\ude95"` | colour | Slate dark set: dialog double border, bottom-right corner and shadow |
+| `slate-dark-dialog-right` | `U+100292` | `"\udbc0\ude92"` | colour | Slate dark set: dialog double border, right |
+| `slate-dark-dialog-bottom-left` | `U+100293` | `"\udbc0\ude93"` | colour | Slate dark set: dialog double border, bottom-left corner |
+| `slate-dark-dialog-bottom` | `U+100294` | `"\udbc0\ude94"` | colour | Slate dark set: dialog double border, bottom |
+| `slate-dark-dialog-bottom-right` | `U+100295` | `"\udbc0\ude95"` | colour | Slate dark set: dialog double border, bottom-right corner |
 | `slate-dark-button-left` | `U+100296` | `"\udbc0\ude96"` | colour | Slate dark set: button, left end: rounded 1 px outline; SGR 51 draws the label's lines |
 | `slate-dark-button-right` | `U+100297` | `"\udbc0\ude97"` | colour | Slate dark set: button, right end |
 | `slate-dark-default-button-left` | `U+100298` | `"\udbc0\ude98"` | colour | Slate dark set: default button, left end: rounded 3 px ring; SGR 51:3 draws the label's |

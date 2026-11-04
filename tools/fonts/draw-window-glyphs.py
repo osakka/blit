@@ -15,8 +15,7 @@ colours. A pixel no rule sets is transparent in both: the cell's
 background shows, which for a frame cell on a held desktop is the
 wallpaper.
 
-Pixel-designed for 11x22. At other sizes lines, stripes, the shadow and
-the rings keep their widths in pixels; the box (the cell's width), the
+Pixel-designed for 11x22. At other sizes lines, stripes and the rings keep their widths in pixels; the box (the cell's width), the
 number of stripes (six at 22 px, in proportion) and a button end's radius
 scale with the cell.
 
@@ -47,24 +46,24 @@ NAMES = [
     ('shade', 'title bar with the window-shade box: the square with a bar across'),
     ('zoom', 'title bar with the zoom box: the square with a smaller square in its corner'),
     ('frame-left', 'window frame, left: a line against the content'),
-    ('frame-right-top', 'window frame, right, beside the title bar: line, shadow from 2 px down'),
-    ('frame-right', 'window frame, right: line and its 2 px shadow'),
+    ('frame-right-top', 'window frame, right, beside the title bar: a line against the content (as frame-right)'),
+    ('frame-right', 'window frame, right: a line against the content'),
     ('frame-bottom-left', 'window frame, bottom-left corner'),
-    ('frame-bottom-first', 'window frame, first bottom cell: line, shadow from 2 px in'),
-    ('frame-bottom', 'window frame, bottom: line and its 2 px shadow'),
-    ('frame-bottom-right', 'window frame, bottom-right corner and shadow'),
+    ('frame-bottom-first', 'window frame, first bottom cell: a line against the content (as frame-bottom)'),
+    ('frame-bottom', 'window frame, bottom: a line against the content'),
+    ('frame-bottom-right', 'window frame, bottom-right corner'),
     ('frame-top-left', 'frame without a title bar, top-left corner'),
     ('frame-top', 'frame without a title bar, top: a line against the content'),
     ('frame-top-right', 'frame without a title bar, top-right corner'),
     ('note-close', 'a notification\'s close box alone, transparent around it'),
     ('dialog-top-left', 'dialog double border, top-left corner'),
     ('dialog-top', 'dialog double border, top'),
-    ('dialog-top-right', 'dialog double border, top-right corner, shadow from 2 px down'),
+    ('dialog-top-right', 'dialog double border, top-right corner'),
     ('dialog-left', 'dialog double border, left'),
-    ('dialog-right', 'dialog double border, right, with its shadow'),
-    ('dialog-bottom-left', 'dialog double border, bottom-left corner, shadow from 2 px in'),
-    ('dialog-bottom', 'dialog double border, bottom, with its shadow'),
-    ('dialog-bottom-right', 'dialog double border, bottom-right corner and shadow'),
+    ('dialog-right', 'dialog double border, right'),
+    ('dialog-bottom-left', 'dialog double border, bottom-left corner'),
+    ('dialog-bottom', 'dialog double border, bottom'),
+    ('dialog-bottom-right', 'dialog double border, bottom-right corner'),
     ('button-left', 'button, left end: rounded 1 px outline; SGR 51 draws the label\'s lines'),
     ('button-right', 'button, right end'),
     ('default-button-left', 'default button, left end: rounded 3 px ring; SGR 51:3 draws the label\'s'),
@@ -74,7 +73,7 @@ STYLES = [('chalk', 0x100231), ('slate-light', 0x100254), ('slate-dark', 0x10027
 NEXT_FREE = 0x10029A
 
 HEADER = ROOT / 'src/blit_window_glyphs.h'
-ROLES = 'KDLBWSGFNORH'
+ROLES = 'KDLBWGFNORH'
 
 
 def table():
@@ -134,7 +133,6 @@ def draw(style, index, w, h):
     name = NAMES[index][0]
     slate = style != 'chalk'
     L, inset = T['LINE'], T['STRIPE_INSET']
-    sw, so = T['SHADOW'], T['SHADOW_OFFSET']
     d1 = T['DIALOG_MARGIN']
     d2 = d1 + T['DIALOG_BAND']
     d3 = d2 + T['DIALOG_GAP']
@@ -183,10 +181,10 @@ def draw(style, index, w, h):
             y = by + (side - 3 * L) // 2
             c.fill(bx, bx + side, y, y + L, ink)
 
-    def dialog(distance, shadow):
+    def dialog(distance):
         # The double border, outward from the content: a margin of the
         # face, the wide line (Slate's grey with a highlight down its
-        # middle), a gap of the face, the outer line; then the shadow.
+        # middle), a gap of the face, the outer line; nothing beyond it.
         mid = d1 + (d2 - d1) // 2
         for y in range(h):
             for x in range(w):
@@ -198,8 +196,6 @@ def draw(style, index, w, h):
                     role = ('H' if d == mid else 'R') if slate else ink
                 elif d < d4:
                     role = 'O' if slate else ink
-                elif shadow(x, y):
-                    role = 'S'
                 if role:
                     c.px[y][x] = role
 
@@ -252,16 +248,13 @@ def draw(style, index, w, h):
     elif name == 'frame-left':
         c.fill(w - L, w, 0, h, ink)
     elif name in ('frame-right-top', 'frame-right'):
+        # No shadow: that is Hibr's Shadow setting (ADR 0210, revised).
         c.fill(0, L, 0, h, ink)
-        c.fill(L, L + sw, so if name == 'frame-right-top' else 0, h, 'S')
     elif name == 'frame-bottom-left':
         c.fill(w - L, w, 0, L, ink)
     elif name in ('frame-bottom-first', 'frame-bottom'):
         c.fill(0, w, 0, L, ink)
-        # The left frame's outer edge is L into the previous cell.
-        c.fill(so - L if name == 'frame-bottom-first' else 0, w, L, L + sw, 'S')
     elif name == 'frame-bottom-right':
-        c.fill(0, L + sw, 0, L + sw, 'S')
         c.fill(0, L, 0, L, ink)
     elif name == 'frame-top-left':
         c.fill(w - L, w, h - L, h, ink)
@@ -278,16 +271,7 @@ def draw(style, index, w, h):
             dx = w - 1 - x if left else x if right else 0
             dy = h - 1 - y if upper else y if lower else 0
             return max(dx, dy)
-
-        # The shadow: beside the right and under the bottom, so from the
-        # outer line's far corners.
-        def shadow(x, y):
-            if right and x < d4 + sw:
-                return y >= h - d4 + so if upper else (not lower or y < d4 + sw)
-            if lower and y < d4 + sw:
-                return x >= w - d4 + so if left else (not right or x < d4 + sw)
-            return False
-        dialog(distance, shadow)
+        dialog(distance)
     elif name.startswith('button-') or name.startswith('default-button-'):
         button(name.endswith('-right'), name.startswith('default-'))
     return c.rows()

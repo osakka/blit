@@ -16,7 +16,9 @@
 The owner wants Hibr's windows, notifications and dialogs drawn with
 retro Mac-style chrome, from glyph sets of our own drawing:
 - **Chalk**, black and white: a pinstriped title bar, a close box, a
-  window-shade box and a zoom box, a 1 px frame with a 2 px drop shadow.
+  window-shade box and a zoom box, a 1 px frame with a 2 px drop shadow
+  (the shadow has since become Hibr's own setting: see the revision of
+  2026-11-04).
 - **Slate**, in colour: the same geometry with a grey bar, embossed
   stripes, a bevel and white boxes, in a light and a dark set.
 
@@ -118,7 +120,6 @@ title).
   | highlight (L) | 255 | 112,112,122 |
   | title bar (B) | 214 | 60,60,67 |
   | box face (W) | 255 | 200,200,206 |
-  | shadow (S) | 0 | 0 |
   | dialog face (G) | 238 | 52,52,58 |
   | button face (F) | 221 | 78,78,86 |
   | button shade (N) | 153 | 40,40,45 |
@@ -156,11 +157,11 @@ title).
     1 px outline. The zoom box's inner square is (0,5)–(6,11). The shade
     box has a bar across at row 9.
   - **The window frame:** a 1 px line on the content side of the cell,
-    and a 2 px shadow offset 2 px from the frame's outer corners.
+    and nothing else (revised 2026-11-04: no shadow).
   - **The dialog border,** from the content out: a 2 px margin of the
     face, a 3 px line (Slate: grey, a highlight down its middle, as the
     approved mock-up draws it), a 1 px gap of the face and a 1 px outer
-    line, then the 2 px shadow.
+    line, and nothing beyond it.
   - **Button caps:** a rounded end 2 px in from the outside edge, with a
     radius of 4/11 of the cell height. The ring is 1 px, or 3 px for the
     default button. Its straight top and bottom run to the cell's inner
@@ -172,8 +173,8 @@ title).
 - **Other cell sizes.** The glyphs are pixel-designed for 11x22, and when
   the font size changes they keep their pixel widths:
   - **Fixed widths:** lines, stripes, outlines, the bevel rows and SGR 51
-    stay 1 px. The shadow stays 2 px at a 2 px offset, the dialog border's
-    layers stay 2/3/1/1 px, and the default ring stays 3 px.
+    stay 1 px. The dialog border's layers stay 2/3/1/1 px, and the
+    default ring stays 3 px.
   - **Scaled with the cell:**
     - the box stays square and as wide as the cell;
     - there are six stripes at 22 px, and as many in proportion at other
@@ -181,9 +182,8 @@ title).
       apart and centred;
     - a button end's radius stays 4/11 of the height.
   - **Narrow cells:** where a cell is narrower than a piece needs, the
-    piece is clipped to the cell. The dialog's right edge needs 9 px (7 px
-    of border plus 2 px of shadow), so an 8 px cell (Terminus 16) loses
-    the shadow's last column.
+    piece is clipped to the cell. The dialog border needs 7 px, so only a
+    cell narrower than that (Hack below 14 px) clips it.
   - **The smallest cell, 4x8 (Hack at 8 px):**
     - two stripes, which run into the bevel;
     - a 3x3 box;
@@ -265,18 +265,15 @@ title).
 - **A Chalk dialog's frame cells take the dialog's face as their
   background.** Chalk is one colour, so the border's margin and gap can
   only be the cell's background. The cells' area outside the border shows
-  the face too: a white halo round the dialog, with the shadow on it. The
+  the face too: a white halo round the dialog. The
   owner chose this. Slate paints its own face there, so its frame cells
   keep the wallpaper.
-- **Shadow colours:** Chalk's shadow is the foreground, like the rest of
-  Chalk. Slate's shadow is black in both sets.
+- **Shadow is Hibr's.** No frame or dialog glyph draws a shadow (revised
+  2026-11-04); Hibr's Shadow setting draws one, or none.
 - **The Slate dialog and button face colours** must match the content
   cells: 238 and 221 in light, 52,52,58 and 78,78,86 in dark. The dark
   set's dialog and button faces are not in any mock-up; they were chosen
   from the dark palette.
-- **A notification** has no title bar, so its first right-hand cell is
-  `frame-right-top`. Its shadow then starts 3 px below the top line, not
-  2, because `frame-top-right` cannot also start the shadow.
 
 ## Rejected
 
@@ -296,9 +293,8 @@ title).
 - **Chalk takes Slate's geometry** (owner direction): full-width 11x11
   boxes, the to-box, from-box and between cells, and the 5 px title gap.
   The first Chalk mock-up's 9x10 boxes and 4 px title gap are gone.
-- **The shadow under the bottom frame starts 2 px from the left frame's
-  outer edge.** That matches the stated 2 px offset; the mock-ups started
-  it at 3 px.
+- **No drop shadow in the glyphs** (owner direction, 2026-11-04): the
+  mock-ups drew one into the frame; it is now Hibr's setting.
 - **The button outlines sit on the cell's top and bottom rows (0 and 21),**
   where SGR 51's lines are. The mock-up drew them at rows 1 and 20. The
   default button is a 3 px ring in the same box, not a ring around a
@@ -322,8 +318,11 @@ title).
     in the raster's byte order; no pixel is partial.
   - **The approved mock-up at 11x22, written into the gate:** stripe and
     bevel rows, the 11x11 box at rows 5–15, the zoom square, the shade
-    bar, the insets, the shadow offsets, the dialog's layers, and the caps'
-    1 px and 3 px seam rows.
+    bar, the insets, the dialog's layers, and the caps' 1 px and 3 px seam
+    rows.
+  - **Footprints at every size, in every set:** each frame piece inks
+    exactly its 1 px line and each dialog piece exactly its 7 px border,
+    nothing else. The gate writes these out itself, not from the design.
   - **Slate dark's contrast:** the button ring, the default ring and the
     dialog's lines each stand at least 60 grey levels above their face. With
     the old dark values this fails: "Slate dark's button ring [8, 8, 10]
@@ -385,3 +384,30 @@ sub-parameters in one table, so the parser, DECRQSS, the cells API
 sub-parameter is plain 51. `terminal_conformance` (framed-rule-sgr,
 decrqss-sgr-framed-rule) and `window_style_gate` (the bottom line only,
 both compositors) cover it.
+
+## Revision 2026-11-04: no shadow in the frame glyphs
+
+The owner made the drop shadow a setting of its own, Hibr's Shadow, so it
+can be on or off, and mixed with any frame. The frame and dialog glyphs
+therefore stop drawing it, in all three sets:
+- **The frame pieces** each draw only their 1 px line against the content.
+  `frame-right-top` now draws as `frame-right`, and `frame-bottom-first`
+  as `frame-bottom`. Both keep their codepoints, so Hibr's layout need not
+  change; `frame-bottom-right` is its corner pixel alone.
+- **The dialog pieces** each draw only the border's four layers (margin,
+  wide line, gap, outer line). Nothing lies beyond the outer line.
+- **One change in the table:** the shadow constants
+  (`BLIT_WINDOW_SHADOW`, `BLIT_WINDOW_SHADOW_OFFSET`) and Slate's shadow
+  role are gone from `src/blit_window_glyphs.h`, because nothing uses them.
+  The design script reads the table, so it changed with it. The catalogue
+  shapes no longer mention a shadow.
+- **A Blit-drawn shadow may follow, in its own ADR.** It would be an
+  attribute drawn by the compositor rather than glyph pixels, so that any
+  frame, in any set, can cast one.
+
+`window_glyph_gate` now holds every frame and dialog piece, in every set
+and at all 12 sizes, to exactly its line or border: no other pixel may be
+set. Against the 0.3.37 drawing it fails at the first: "frame-right-top:
+no line against the content, or a shadow beside it". `window_style_gate`
+compares every glyph cell with the design on both compositors, so it
+covers the change on screen.
