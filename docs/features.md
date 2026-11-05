@@ -202,6 +202,7 @@ Errors are `application/problem+json` with stable codes.
 | Built against Hibr's module ABI 17 | 0.3.31 | 0094 | Used |
 | Debian package on Hibr's apt repository, with a release receipt per version | 0.2.2 | 0091 | Used |
 | Manual pages: `blit(8)`, `blit.env(5)`, `blit-update-helper(8)` | 0.3.10 | — | Tested |
+| One copy of the documentation, and FreeMono's source in its own small package `blit-font-sources` (suggested, not installed by default): the package is 17.2 MB, down from 24.6 MB | 0.3.45 | 0217 | Tested |
 | `blit --version` and `blit --help` | 0.3.20 | — | Tested |
 
 ## Diagnostics
