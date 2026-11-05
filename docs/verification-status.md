@@ -1,5 +1,38 @@
 # Verification status
 
+## 2026-11-05: 0.3.41 one frame, its line on the outer edge; title-bar end cells
+
+- **One window frame, line on the outermost edge** (ADR 0214, owner's
+  decision). Chalk's and Slate's frames were identical, so there is one
+  set: `frame-left`, `-right`, `-bottom-left`, `-bottom`, `-bottom-right`
+  (U+1002AE-U+1002B2, `set: frame`, coverage in the foreground). The line
+  is on the outer edge of its cell (left edge of the left cell, right edge
+  of the right, bottom edge of the bottom row); the rest of the cell is
+  transparent, so the cell's background, the window face, is the padding.
+  The shadow goes in the cells beyond, with `ESC[66:kind:width:0m`.
+- **Title-bar end cells** belong to the title bar styles:
+  `chalk-title-end-left/right` (U+1002B3-B4) and
+  `slate-light-title-end-left/right` (U+1002B5-B6) carry the outer line,
+  the bar's top line and rule, Slate's bevel rows and the stripes, which
+  run into the cell and stop 2 px clear of the outer line. The old
+  stripe-first/-last (inset from a frame line) are redundant.
+- **Deprecation, not removal:** the current `chalk-` and `slate-light-`
+  frame glyphs (7 each) and stripe-first/-last (18 entries) carry
+  `deprecated` and `replaced_by` in the catalogue (typed in OpenAPI,
+  checked by `catalogue_fields_gate`) and draw exactly as before, so an
+  installed Hibr keeps working until it moves. A later release retires
+  them.
+- **Gates**, all failing on 0.3.40: `window_glyph_gate` (the nine glyphs
+  against the design at 12 sizes, the line on the outermost edge and no
+  other ink, seamless stripe joins, the stripe clearance),
+  `window_style_gate` (a real server, both compositors: a Slate window with
+  a 1 px and a Chalk window with a 2 px shadow, every pixel),
+  `catalogue_fields_gate`, `font_reference_gate`, `custom_icon_gate`,
+  `documentation_gate`, `api_schema_gate`.
+- **Suites:** font 42/42, all 174 pass + 1 timing failure
+  (`frame_rate_gate`, which fails under concurrent suites and passed twice
+  alone at 62.5 Hz), renderer on GLES 78 pass (1 skip).
+
 ## 2026-11-05: 0.3.40 controls glyphs; a catalogue programs can map from
 
 - **Controls glyphs** (ADR 0212), U+10029A-U+1002AD (next free U+1002AE):
