@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-11-05: 0.3.44 plain title-bar end cells for the inactive bar
+
+- **Four glyphs** (ADR 0214, revised): `chalk-title-end-plain-left/right`
+  (U+1002B7-B8) and `slate-light-title-end-plain-left/right` (U+1002B9-BA;
+  next free U+1002BB). Each is the existing title-end cell without stripes: the
+  outer line, the bar's top line and rule, Slate's bevel rows, the bar
+  background. Away from the outer line it is pixel-identical to the plain
+  `title` cell, so an inactive title row (end, title cells, end) has no notch
+  in the top line or rule. Pens as the title ends (bg the bar, fg the ink,
+  Slate: SGR 58 the highlight). Set, part, cells and pen roles in the
+  catalogue as for the other frame cells; the catalogue has 105 entries.
+- **Gates**, all failing on 0.3.42: `window_glyph_gate` (83 glyphs at 12
+  sizes: each plain cell matches the design, equals the `title` cell away
+  from the outer line, the seam with it, the 11x22 pixels by hand),
+  `window_style_gate` (a real server on both compositors draws all 13 frame
+  glyphs and an inactive Chalk and an inactive Slate window; every cell
+  against the design, no pixel in the bar but the bar colour),
+  `font_reference_gate`, `custom_icon_gate`, `documentation_gate`.
+- **Suites:** all 178 pass (6 skip), renderer on GLES 80 pass (1 skip); no
+  failures. (Another agent's timed `all` ran at the same time on this host.
+  The standalone font suite was not run: `all` contains it.)
+
 ## 2026-11-05: 0.3.43 a fitted glyph is never trimmed (the Wi-Fi and volume icons)
 
 - **Root cause** (ADR 0215), found by a sweep of every catalogue icon and the
