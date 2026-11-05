@@ -45,6 +45,16 @@ if File.executable?(binary)
   raise "blit --help does not point at blit(8): #{help.inspect}" unless $?.success? && help.include?('blit(8)')
 end
 
+# The record of the outer-edge frame (ADR 0214) is in the index and says what
+# it built and what it deprecated.
+index = File.read('docs/adr/README.md')
+frame_adr = Dir['docs/adr/*outer-edge-frame*.md'].first or raise 'no ADR records the outer-edge frame'
+raise "#{frame_adr} is not in docs/adr/README.md" unless index.include?("(#{File.basename(frame_adr)})")
+adr_text = File.read(frame_adr)
+raise "#{frame_adr} does not record the frame, the title ends, the deprecation and the shadow note" unless
+  ['U+1002AE', 'U+1002B6', 'U+1002B7', 'title-end', 'deprecated: true', 'replaced_by', 'inset 0', 'Deprecation, not retirement'].all? { |t| adr_text.include?(t) }
+raise 'docs/features.md does not list the outer-edge frame' unless File.read('docs/features.md').include?('| 0214 |')
+
 broken = []
 IO.popen(%w[git ls-files -z *.md], &:read).split("\0").each do |file|
   next if file.start_with?('vendor/')

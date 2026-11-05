@@ -75,8 +75,30 @@ application chooses), its knob the underline colour, its smoothed edge the
 mean of the foreground and the background. Blit draws them from
 `src/blit_control_glyphs.h` and the window table;
 `tools/fonts/draw-control-glyphs.py` is the design and writes their
-entries, and `control_glyph_gate` holds the raster to it. U+1002AE is the
-next free codepoint.
+entries, and `control_glyph_gate` holds the raster to it.
+
+U+1002AE–U+1002B6 are the outer-edge frame (ADR 0214), also cell geometry,
+nine glyphs: the one frame set, `frame-left`, `frame-right`,
+`frame-bottom-left`, `frame-bottom`, `frame-bottom-right` (U+1002AE–1002B2),
+and the title bar's end cells, `chalk-title-end-left`, `-right` and
+`slate-light-title-end-left`, `-right` (U+1002B3–1002B6). A window has one
+frame, and its line sits on the outermost edge of each frame cell: the left
+cell's left edge, the right cell's right edge, the bottom row's bottom edge
+(the bottom corners have two lines). Nothing else in the cell is drawn, so
+the cell's own background is the padding: set the frame cells' background to
+the window's face. The frame cells are coverage in the foreground, the same
+for Chalk and Slate windows. The right-hand cell of the title row is
+`*-title-end-right`, not `frame-right`. A title-end cell is the title bar's
+end: the outer line, the bar's top line and rule (Slate: its bevel rows
+too) and the stripes, which run into the cell and stop (or start) 2 px from
+its outer edge, so they join the next cell's. Chalk's are coverage; Slate's
+use the cell's pens as `slate-light-stripe` does (background the bar,
+foreground the ink, SGR 58 the highlight). A drop shadow (SGR 66) goes in
+the cells beyond the frame cells, with inset 0. `tools/fonts/draw-window-glyphs.py`
+is the design and writes their entries; `window_glyph_gate` holds the raster
+to it. The old frame glyphs and `stripe-first`/`stripe-last` of the window
+sets are deprecated by these (see `deprecated` below) and still drawn. U+1002B7
+is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph
 
@@ -90,12 +112,14 @@ schema (`CellGeometryGlyph`):
 | Field | Values and meaning |
 | --- | --- |
 | `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners have neither this nor `set`. |
-| `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`. |
+| `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`, `frame` (the one frame set, drawn in the foreground alone like Chalk, ADR 0214). |
 | `part` | What the glyph is a piece of: `bar-corner`, `title-bar` (stripes, title, close, shade, zoom), `note-close`, `frame`, `dialog-border`, `button-cap`, `checkbox`, `switch`, `capsule`. |
 | `cells` | `{span, position}`: how many cells the whole piece spans (1 to 3), written side by side, and this glyph's place in it from 0. |
-| `background` | What the cell's background should be: `bar` (the title bar's colour), `panel` (what a control or a note sits on), `wallpaper` (the default background), `dialog-face`, `button-face`. |
+| `background` | What the cell's background should be: `bar` (the title bar's colour), `panel` (what a control or a note sits on, and the window's face, which a frame cell's background is), `wallpaper` (the default background), `dialog-face`, `button-face`. |
 | `foreground` | `ink` (lines and outlines), `track` (the capsule's track, in the colour the application chooses), `bar` (the corners' fill: the bar's colour). |
 | `line` | What SGR 58 is: `none` (Chalk, frames, corners), `highlight` (the bar's highlight, and a window box's face), `box-face` (a note's close box or a checkbox), `dialog-face`, `button-face`, `knob` (a switch's or the capsule's knob, and a switch track's highlight). Unset, it is white. |
+| `deprecated` | `true`, present only on a glyph that a later one replaces (ADR 0214): Blit still draws it, unchanged, until a release retires it. An application moves to `replaced_by`. |
+| `replaced_by` | With `deprecated`: the ids that replace it, each an entry in this section that is not itself deprecated. The old frame glyphs (`chalk-` and `slate-light-` `frame-left`, `frame-right-top`, `frame-right`, `frame-bottom-left`, `frame-bottom-first`, `frame-bottom`, `frame-bottom-right`) and `stripe-first`/`stripe-last` are deprecated: the one frame set takes the body and bottom rows, the style's `title-end` glyphs the title row. |
 
 `GET /v1/fonts/icons` also returns `revision`, the SHA-256 of the catalogue
 file as packaged (the hash `fonts.source.json` pins), and sends it as the

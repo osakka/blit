@@ -1994,7 +1994,7 @@ components:
           description: 'Always false: no glyph carries colours of its own.'
         shape: {type: string}
         pens: {type: string, enum: [foreground, cell]}
-        set: {type: string, enum: [chalk, slate-light, slate, capsule]}
+        set: {type: string, enum: [chalk, slate-light, slate, capsule, frame]}
         part:
           type: string
           enum: [bar-corner, title-bar, note-close, frame, dialog-border, button-cap, checkbox, switch, capsule]
@@ -2012,8 +2012,9 @@ components:
           enum: [bar, panel, wallpaper, dialog-face, button-face]
           description: >-
             What the cell's background should be: the title bar's, the panel
-            the control or note sits on, the wallpaper (the default
-            background), the dialog's face or the button's face.
+            the control or note sits on (and the window's face, which an
+            outer-edge frame cell's background is, ADR 0214), the wallpaper
+            (the default background), the dialog's face or the button's face.
         foreground:
           type: string
           enum: [ink, track, bar]
@@ -2029,6 +2030,21 @@ components:
             the bar's highlight (and a window box's face), a box's face, the
             dialog's face, the button's face, or a knob's face (and a switch
             track's highlight).
+        deprecated:
+          type: boolean
+          const: true
+          description: >-
+            Present, and true, on a glyph that a later one replaces (ADR 0214).
+            Blit still draws it, unchanged, until a release retires it; an
+            application moves to `replaced_by`.
+        replaced_by:
+          type: array
+          minItems: 1
+          items: {type: string}
+          description: >-
+            The ids that replace a deprecated glyph, each the id of an entry
+            in this section that is not itself deprecated. Present exactly
+            when `deprecated` is.
       additionalProperties: false
     FontIconCatalogue:
       type: object

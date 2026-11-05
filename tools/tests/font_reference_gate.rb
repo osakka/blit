@@ -29,6 +29,23 @@ special = File.read(File.join(pages, 'special.md'))
   encoded = row.split(' | ')[2].delete_prefix('`').delete_suffix('`')
   raise 'private scalar JSON encoding incorrect' unless JSON.parse(encoded).codepoints == [hex.to_i(16)]
 end
+# ADR 0214: the outer-edge frame is listed, and a deprecated glyph's row says
+# so and names what replaces it.
+geometry = icons.fetch('cell_geometry')
+frame_ids = %w[frame-left frame-right frame-bottom-left frame-bottom frame-bottom-right chalk-title-end-left
+               chalk-title-end-right slate-light-title-end-left slate-light-title-end-right]
+raise 'the outer-edge frame is not in the catalogue' unless
+  frame_ids.each_with_index.all? { |id, i| geometry.any? { |g| g['id'] == id && g['codepoint'].to_i(16) == 0x1002AE + i } }
+deprecated = geometry.select { |g| g['deprecated'] }
+raise "expected 18 deprecated glyphs, found #{deprecated.size}" unless deprecated.size == 18
+deprecated.each do |g|
+  row = special.lines.find { |l| l.start_with?("| `#{g['id']}` |") }
+  raise "special.md does not mark #{g['id']} deprecated" unless row.include?('Deprecated') && g['replaced_by'].all? { |r| row.include?("`#{r}`") }
+end
+reference_text = File.read(File.join(root, 'docs/font-reference.md'))
+raise 'docs/font-reference.md does not document the outer-edge frame' unless
+  (frame_ids - %w[chalk-title-end-right slate-light-title-end-right]).all? { |id| reference_text.include?("`#{id}`") } &&
+  reference_text.include?('U+1002AE–1002B6') && reference_text.include?('U+1002B7') && reference_text.include?('Deprecated, not retired')
 coverage = JSON.parse(File.read(File.join(pages, 'coverage.json')))
 # ADR 0195: every shipped text font, the stack, the Arabic and emoji faces.
 manifest = JSON.parse(File.read(File.join(fonts, 'fonts.source.json')))

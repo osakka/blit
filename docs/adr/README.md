@@ -230,6 +230,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0210 — Window chrome glyph sets (Chalk and Slate) are cell geometry, and SGR 51 frames button labels and titles](0210-window-chrome-glyphs-and-framed.md)
 - [0211 — Slate takes its colours from the cell, and the drop shadow is a Blit-drawn cell attribute](0211-slate-from-cell-colours-and-shadow.md)
 - [0212 — The controls glyph set, and a catalogue a client can map dynamically](0212-controls-glyphs-and-a-mappable-catalogue.md)
+- [0214 — One frame, its line on the outer edge; the title bar's end cells](0214-outer-edge-frame-and-title-end-cells.md)
 
 ## Status
 

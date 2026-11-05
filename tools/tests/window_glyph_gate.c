@@ -16,6 +16,11 @@
 #define FIRST 0x100231U
 #define SLATE 0x100254U
 #define LAST 0x100276U
+/* ADR 0214: the outer-edge frame, nine glyphs; the last two (Slate's title
+   ends) are drawn in pens, the first seven are coverage. */
+#define FRAME_FIRST 0x1002AEU
+#define FRAME_LAST 0x1002B6U
+#define FRAME_SLATE 0x1002B5U
 
 int main(int argc, char **argv)
 {
@@ -26,13 +31,16 @@ int main(int argc, char **argv)
     if (blit_font_load_path(&font, argv[1])) return 2;
     for (arg = 4; arg + 1 < argc; arg += 2) {
         int w = atoi(argv[arg]), h = atoi(argv[arg + 1]), x, y;
-        unsigned cp;
+        unsigned cp, n;
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], w, h);
         if (!raster) { fprintf(stderr, "WINDOW_GLYPH_FAIL no raster at %dx%d\n", w, h); return 1; }
         printf("SIZE %d %d\n", w, h);
-        for (cp = FIRST; cp <= LAST; ++cp) {
+        for (n = 0; n < (LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1); ++n) {
             BlitRasterGlyph glyph, plane[3];
+            int pen_drawn;
             int p;
+            cp = n <= LAST - FIRST ? FIRST + n : FRAME_FIRST + (n - (LAST - FIRST + 1));
+            pen_drawn = (cp >= SLATE && cp <= LAST) || cp >= FRAME_SLATE;
             if (!blit_raster_get(raster, cp, 1, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;
@@ -43,7 +51,12 @@ int main(int argc, char **argv)
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X is not a whole coverage cell at %dx%d\n", cp, w, h);
                 return 1;
             }
-            if (cp < SLATE) {
+            if (!pen_drawn) {
+                /* Coverage in the foreground alone: no pen planes. */
+                if (blit_raster_get_window_plane(raster, cp, 1, &plane[0])) {
+                    fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X is one colour but has a plane\n", cp);
+                    return 1;
+                }
                 printf("%X coverage ", cp);
                 for (y = 0; y < h; ++y) for (x = 0; x < w; ++x)
                     printf("%02x", glyph.pixels[y * glyph.stride + x]);

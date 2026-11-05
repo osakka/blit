@@ -31,6 +31,23 @@ Dir.chdir(root) do
     slots.call(%w[folder-git folder-config folder-local folder-system folder-desktop folder-downloads folder-documents folder-music folder-pictures folder-videos folder-apps folder-games rc history service key network cron readme license log kernel boot c asm makefile patch json vector rom ebook exe disc package library lock database usb share], true) +
     %w[jpg png gif].flat_map { |f| ["file-image-#{f}-left", "file-image-#{f}-right"] }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
+  # ADR 0214: the outer-edge frame is cell geometry at U+1002AE-1002B6, clear
+  # of the icons and every retired range; a deprecated glyph names live,
+  # non-deprecated replacements and keeps its place (it is not retired).
+  geometry = icons.fetch('cell_geometry')
+  frame = geometry.select { |g| g['codepoint'].to_i(16).between?(0x1002AE, 0x1002B6) }
+  raise 'the outer-edge frame (U+1002AE-1002B6) is not cell geometry in the catalogue' unless
+    frame.size == 9 && frame.map { |g| g['codepoint'].to_i(16) } == (0x1002AE..0x1002B6).to_a
+  raise 'a cell-geometry glyph reuses an icon or retired codepoint' unless
+    (geometry.map { |g| g['codepoint'].to_i(16) } &
+     (icons.fetch('icons').map { |i| i['codepoint'].to_i(16) } +
+      icons.fetch('retired').flat_map { |r| (r['from'].to_i(16)..r['to'].to_i(16)).to_a })).empty?
+  ids = geometry.map { |g| g['id'] }
+  deprecated = geometry.select { |g| g['deprecated'] }
+  raise 'ADR 0214 deprecates 18 glyphs' unless deprecated.size == 18
+  raise 'a deprecated glyph is not replaced by a live one' unless
+    deprecated.all? { |g| g['replaced_by'].all? { |r| ids.include?(r) && !deprecated.map { |d| d['id'] }.include?(r) } }
+  raise 'a deprecated glyph was retired early' unless deprecated.none? { |g| icons.fetch('retired').any? { |r| g['codepoint'].to_i(16).between?(r['from'].to_i(16), r['to'].to_i(16)) } }
   codepoints = icons.fetch('icons').map { |i| i.fetch('codepoint').to_i(16) }
   retired = icons.fetch('retired').flat_map { |r| (r.fetch('from').to_i(16)..r.fetch('to').to_i(16)).to_a }
   raise 'unexpected private mappings' unless codepoints == codepoints.sort.uniq && codepoints.all? { |c| c.between?(0x100000, 0x10fffd) }

@@ -12,6 +12,16 @@
 #   Slate's roles in the cell's pens -- K the foreground, L the underline
 #   colour (white when unset), M each channel (fg + bg) / 2 -- and the
 #   background wherever nothing is drawn.
+# - The outer-edge frame (ADR 0214, U+1002AE-1002B6): its nine glyphs on a
+#   row, every pixel the design's (the frame cells' background the window's
+#   face, the line the foreground; Chalk's title ends in the foreground,
+#   Slate's in the cell's pens); then two whole windows built from them, a
+#   Slate one with a 1 px shadow and a Chalk one with a 2 px shadow, each
+#   cell a design glyph or the plain face: the line on the window's
+#   outermost edge on every side, the stripes running from the title-end
+#   cells into their neighbours with no gap (and one clear pixel beside the
+#   outer line), and the shadow, SGR 66 with inset 0, starting in the cell
+#   beyond the frame at the pixel next to its line.
 # - SGR 66 (ADR 0211): each shadow kind at each width is exactly its strips,
 #   in the foreground or the underline colour, under the cell's glyph (a
 #   frame glyph's line stays on top); SGR 67 and SGR 0 end it.
@@ -52,6 +62,14 @@ LINE = [10, 220, 120].freeze
 FACE = [120, 30, 150].freeze
 BTN = [230, 130, 20].freeze
 FIRST = 0x100231
+# ADR 0214: the outer-edge frame, and the windows built from it.
+FRAME_FIRST = 0x1002AE
+INK = [0, 0, 0].freeze
+BAR = [214, 214, 214].freeze
+HI = [255, 255, 255].freeze
+SHADOW = [255, 200, 0].freeze
+WIN_COLS = 10
+WIN_BODY = 3
 MIX = FG.zip(BG).map { |a, b| (a + b) / 2 }.freeze
 # SGR 66's strips, written out here from ADR 0211, not read from Blit: for
 # kind k, width t (1 or 2) and inset i (1, just outside a frame glyph's
@@ -117,6 +135,39 @@ Dir.mktmpdir('blit-window-style') do |root|
     # Row 8: each shadow kind and width on a blank, an unshadowed blank
     # after each (SGR 67); a red shadow (SGR 58); one ended by SGR 0; and a
     # Chalk frame-right glyph over a red right:2 shadow.
+    # The outer-edge frame (ADR 0214). Row 11: the nine glyphs, the frame
+    # cells on the window's face (FACE), Chalk's title ends on the bar and
+    # Slate's on the bar with SGR 58 the highlight. Rows 13-18 a Slate
+    # window with a 1 px shadow beyond it (inset 0), rows 21-26 a Chalk one
+    # with a 2 px shadow.
+    face_pens = sgr("0;38;2;#{rgb(INK)};48;2;#{rgb(FACE)}")
+    bar_pens = sgr("0;38;2;#{rgb(INK)};48;2;#{rgb(BAR)};58;2;#{rgb(HI)}")
+    nine = (0...9).map { |i| (i < 5 ? face_pens : bar_pens) + u(FRAME_FIRST + i) }.join + sgr('0') + colours
+    at = ->(x, y, text) { "\\033[#{y + 1};#{x + 1}H#{text}" }
+    win_text = lambda do |x0, y0, slate, thick|
+      w = WIN_COLS
+      bar = bar_pens
+      stripe = u((slate ? 0x100254 : 0x100231))
+      out = +''
+      title = [FRAME_FIRST + (slate ? 7 : 5)] + [stripe.ord] * 3 + [(slate ? 0x100254 : 0x100231) + 3] +
+              [(slate ? 0x100254 : 0x100231) + 5] * 2 + [(slate ? 0x100254 : 0x100231) + 4] + [stripe.ord] + [FRAME_FIRST + (slate ? 8 : 6)]
+      out << at.call(x0, y0, bar + title.map { |c| u(c) }.join)
+      (1..WIN_BODY).each do |r|
+        out << at.call(x0, y0 + r, face_pens + u(FRAME_FIRST) + ' ' * (w - 2) + u(FRAME_FIRST + 1))
+      end
+      by = y0 + WIN_BODY + 1
+      out << at.call(x0, by, face_pens + u(FRAME_FIRST + 2) + u(FRAME_FIRST + 3) * (w - 2) + u(FRAME_FIRST + 4))
+      # The shadow: in the cells beyond the frame, inset 0 (flush), on the wallpaper.
+      t = thick ? 2 : 1
+      shadow_pens = sgr("0;38;2;#{rgb(SHADOW)};48;2;#{rgb(BG)}")
+      out << at.call(x0 + w, y0, shadow_pens + sgr("66:2:#{t}:0") + ' ')
+      (1..WIN_BODY + 1).each { |r| out << at.call(x0 + w, y0 + r, shadow_pens + sgr("66:1:#{t}:0") + ' ') }
+      out << at.call(x0, by + 1, shadow_pens + sgr("66:4:#{t}:0") + ' ')
+      (1...w).each { |c| out << at.call(x0 + c, by + 1, shadow_pens + sgr("66:3:#{t}:0") + ' ') }
+      out << at.call(x0 + w, by + 1, shadow_pens + sgr("66:5:#{t}:0") + ' ')
+      out << sgr('0') + colours
+    end
+    frames_scene = at.call(2, 10, nine) + win_text.call(2, 12, true, false) + win_text.call(2, 20, false, true)
     shadows = SHADOWS.map { |k, t, i| "#{sgr("66:#{k}:#{t}:#{i}")} #{sgr('67')} " }.join +
               "#{sgr('58;2;255;0;0;66:1:2')} #{sgr('0')}#{colours}#{sgr('66:1:2;0')}#{colours} " \
               "#{sgr('58;2;255;0;0;66:1:2')}#{u(FIRST + 14)}#{sgr('0')}#{colours}"
@@ -131,7 +182,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     script = "printf '\\033[?25l#{colours}\\033[2J" \
              "\\033[2;3H#{rows[0]}\\033[3;3H#{rows[1]}\\033[4;3H#{sgr("58;2;#{rgb(LINE)}")}#{rows[1]}#{sgr('59')}" \
              "\\033[6;3H#{buttons}#{colours}\\033[7;3H#{sgr('51')} #{sgr('0')}#{colours}E#{sgr('51:5')} #{sgr('0')}#{colours}" \
-             "\\033[8;3H#{titles}#{colours}\\033[9;3H#{shadows}\\033[10;3H#{pen_row}'; sleep 600"
+             "\\033[8;3H#{titles}#{colours}\\033[9;3H#{shadows}\\033[10;3H#{pen_row}#{frames_scene}'; sleep 600"
     # A file, not -c: the 105 glyphs make a script longer than an argument
     # may be.
     path = File.join(root, 'scene.sh')
@@ -162,7 +213,7 @@ Dir.mktmpdir('blit-window-style') do |root|
                                          '--reference', cw.to_s, ch.to_s)
     check(status.success?, "the design does not run: #{err}")
     lines = design.lines
-    check(lines.size == 70, "the design has #{lines.size} glyphs, not 70")
+    check(lines.size == 79, "the design has #{lines.size} glyphs, not 79")
     # Chalk on row 1; Slate on row 2 (no underline colour: LINE is white)
     # and row 3 (underline colour LINE).
     [[0, 1, nil], [35, 2, [255, 255, 255]], [35, 3, LINE]].each do |offset, row, line_pen|
@@ -181,6 +232,106 @@ Dir.mktmpdir('blit-window-style') do |root|
                                       FIRST + offset + i, row, dx, dy, got.inspect, want.inspect))
             checked += 1
           end
+        end
+      end
+    end
+
+    # The outer-edge frame, ADR 0214: a cell's pixels from the design.
+    ref = lines.to_h { |l| cp, fmt, data = l.split; [cp.to_i(16), [fmt, data]] }
+    cell_ok = lambda do |col, row, cp, fg, bg, line, what|
+      fmt, data = ref.fetch(cp)
+      pens = { 'K' => fg, 'L' => line, 'M' => fg.zip(bg).map { |a, b| (a + b) / 2 } }
+      ch.times do |dy|
+        cw.times do |dx|
+          want = fmt == 'coverage' ? (data[2 * (dy * cw + dx), 2].hex == 255 ? fg : bg) : pens.fetch(data[dy * cw + dx], bg)
+          got = px.call(col, row, dx, dy)
+          check(got == want, "#{what} (U+#{cp.to_s(16).upcase}) at pixel #{dx},#{dy} is #{got.inspect}, the design says #{want.inspect}")
+          checked += 1
+        end
+      end
+    end
+    9.times do |i|
+      cell_ok.call(2 + i, 10, FRAME_FIRST + i, INK, i < 5 ? FACE : BAR, HI, "frame glyph #{i}")
+    end
+    [[12, true, 1, 0x100254], [20, false, 2, 0x100231]].each do |y0, slate, t, first|
+      w = WIN_COLS
+      # The title row: every cell the design's, the ends from the frame set.
+      ends = [FRAME_FIRST + (slate ? 7 : 5), FRAME_FIRST + (slate ? 8 : 6)]
+      cps = [ends[0]] + [first] * 3 + [first + 3] + [first + 5] * 2 + [first + 4] + [first] + [ends[1]]
+      cps.each_with_index { |cp, i| cell_ok.call(2 + i, y0, cp, INK, BAR, HI, "window title cell #{i}") }
+      # The stripes run from the end cells into their neighbours: on every
+      # stripe row the pixels from 2 px in (one clear beside the line) to the
+      # neighbour's edge are one stripe colour, and the outer line is ink.
+      stripe_rows = (1...ch - 1).select { |dy| px.call(3, y0, cw / 2, dy) != px.call(2 + 5, y0, cw / 2, dy) }
+      stripe_rows.each do |dy|
+        run = (2...cw).map { |dx| px.call(2, y0, dx, dy) } + (0...cw).map { |dx| px.call(3, y0, dx, dy) }
+        check(run.uniq.size == 1, "the stripes do not run from the left end cell into the next at row #{dy}: #{run.uniq}")
+        check(px.call(2, y0, 0, dy) == INK && px.call(2, y0, 1, dy) != run[0], "the left end cell's outer line or the clear pixel beside it at row #{dy}")
+        run = (0...cw - 2).map { |dx| px.call(2 + w - 1, y0, dx, dy) } + (0...cw).map { |dx| px.call(2 + w - 2, y0, dx, dy) }
+        check(run.uniq.size == 1, "the stripes do not run from the right end cell into the previous at row #{dy}: #{run.uniq}")
+        check(px.call(2 + w - 1, y0, cw - 1, dy) == INK && px.call(2 + w - 1, y0, cw - 2, dy) != run[0], "the right end cell's outer line at row #{dy}")
+      end
+      check(stripe_rows.size >= 6, "the window's title bar has #{stripe_rows.size} stripe rows")
+      # The body: the face, with the line on the outermost edge of the
+      # frame cells and nothing else.
+      (1..WIN_BODY).each do |r|
+        w.times do |c|
+          ch.times do |dy|
+            cw.times do |dx|
+              line = (c.zero? && dx.zero?) || (c == w - 1 && dx == cw - 1)
+              got = px.call(2 + c, y0 + r, dx, dy)
+              check(got == (line ? INK : FACE), "window body cell #{c},#{r} pixel #{dx},#{dy} is #{got.inspect}: the line is not just the outermost edge")
+              checked += 1
+            end
+          end
+        end
+      end
+      by = y0 + WIN_BODY + 1
+      w.times do |c|
+        ch.times do |dy|
+          cw.times do |dx|
+            line = dy == ch - 1 || (c.zero? && dx.zero?) || (c == w - 1 && dx == cw - 1)
+            got = px.call(2 + c, by, dx, dy)
+            check(got == (line ? INK : FACE), "window bottom cell #{c} pixel #{dx},#{dy} is #{got.inspect}")
+            checked += 1
+          end
+        end
+      end
+      # The shadow beyond the frame (inset 0): the first pixel next to the
+      # line is the shadow's, not wallpaper (SGR 66 flush), t px wide.
+      sc = 2 + w
+      (1..WIN_BODY + 1).each do |r|
+        ch.times do |dy|
+          cw.times do |dx|
+            want = dx < t ? SHADOW : BG
+            got = px.call(sc, y0 + r, dx, dy)
+            check(got == want, "shadow right of the frame at pixel #{dx},#{dy} (row #{r}) is #{got.inspect}, want #{want.inspect}")
+            checked += 1
+          end
+        end
+      end
+      check(px.call(sc - 1, y0 + 1, cw - 1, 5) == INK && px.call(sc, y0 + 1, 0, 5) == SHADOW, 'the shadow does not start at the pixel next to the right frame line')
+      (1...w).each do |c|
+        ch.times do |dy|
+          cw.times do |dx|
+            want = dy < t ? SHADOW : BG
+            got = px.call(2 + c, by + 1, dx, dy)
+            check(got == want, "shadow under the frame at cell #{c} pixel #{dx},#{dy} is #{got.inspect}, want #{want.inspect}")
+            check(px.call(2 + c, by, dx, ch - 1) == INK && px.call(2 + c, by + 1, dx, 0) == SHADOW, 'the shadow does not start at the pixel under the bottom line')
+            checked += 2
+          end
+        end
+      end
+      # Under the left corner the shadow starts 2 px in; at the corner it
+      # joins the right strip.
+      ch.times do |dy|
+        cw.times do |dx|
+          want = dy < t && dx >= 2 ? SHADOW : BG
+          check(px.call(2, by + 1, dx, dy) == want, "shadow under the left corner at #{dx},#{dy}")
+          rects = shadow_rects(5, t, cw, ch, 0)
+          inside = rects.any? { |x0, x1, ya, yb| dx >= x0 && dx < x1 && dy >= ya && dy < yb }
+          check(px.call(sc, by + 1, dx, dy) == (inside ? SHADOW : BG), "shadow corner at #{dx},#{dy}")
+          checked += 2
         end
       end
     end
@@ -298,7 +449,7 @@ Dir.mktmpdir('blit-window-style') do |root|
             "the #{thick == 3 ? 'default ' : ''}button's left end is not 2 px in")
     end
     request('DELETE', "/v1/terminal-sessions/#{session['id']}")
-    puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70 pixels=#{checked} " \
+    puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70+9_frame windows=slate+chalk(outer_edge,stripes_run_in,shadow_inset_0) pixels=#{checked} " \
          'chalk=foreground slate=cell_pens(fg,line,mix) transparent=background sgr51=1px sgr51:3=3px ' \
          'sgr51:5=bottom_rule underline_colour=used sgr54,sgr0=end buttons=continuous ' \
          'dialog=no_halo,no_fixed_colour caps=corners_show_dialog_face titles=51:2=51:4=bar_rows shadow=5_kinds*2_widths*2_insets,colour,under_glyph sgr67,sgr0=end'

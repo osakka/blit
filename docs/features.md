@@ -89,6 +89,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Retro Mac-style window chrome glyph sets, Chalk (one colour) and Slate (the cell's own colours since 0.3.39), one per part (title bar, frame, dialog, buttons) so they mix; SGR 51 framed labels and titles | 0.3.36–0.3.39 | 0210, 0211 | Tested |
 | Drop shadow under any cell (SGR 66/67), in the cell's underline colour or foreground | 0.3.39 | 0211 | Tested |
 | Icon catalogue for applications (`GET /v1/fonts/icons`) | 0.1.588 | 0172 | Used |
+| Window frame with its line on the outer edge: one frame set (five cells) and the title bar's end cells, Chalk and Slate, whose stripes run into them; the old frame glyphs and `stripe-first`/`-last` are deprecated in the catalogue (`deprecated`, `replaced_by`) and still drawn | 0.3.41 | 0214 | Tested |
 | Controls glyph set: a checkbox, a compact two-cell switch and a three-cell capsule switch, in Chalk, Slate and the capsule's own pens | 0.3.40 | 0212 | Tested |
 | A catalogue a client can map: structured pen roles (part, cells, background, foreground, SGR 58) on every cell-geometry glyph; a revision, an ETag and `If-None-Match`; SGR capability flags (`sgr-framed`, `sgr-framed-bar`, `sgr-shadow`) in `GET /v1/server` | 0.3.40 | 0212 | Tested |
 

@@ -65,6 +65,14 @@ raise 'cell_geometry entries are not typed' unless
   glyph.dig('properties','foreground','enum') == %w[ink track bar] &&
   glyph.dig('properties','line','enum') == %w[none highlight box-face dialog-face button-face knob] &&
   glyph.dig('properties','cells','required').sort == %w[position span]
+# ADR 0214: the outer-edge frame's set, and a deprecation a client can read.
+raise 'the frame set or the deprecation of a replaced glyph is not typed' unless
+  glyph.dig('properties','set','enum').include?('frame') &&
+  glyph.dig('properties','deprecated','type') == 'boolean' && glyph.dig('properties','deprecated','const') == true &&
+  glyph.dig('properties','replaced_by','type') == 'array' && glyph.dig('properties','replaced_by','items','type') == 'string' &&
+  glyph.dig('properties','replaced_by','minItems') == 1 && !glyph.fetch('required').include?('deprecated')
+raise 'docs/api.md does not describe deprecated and replaced_by' unless
+  File.read(File.expand_path('../../docs/api.md', __dir__)).then { |t| t.include?('`deprecated: true`') && t.include?('`replaced_by`') }
 icons_get = paths.dig('/v1/fonts/icons','get')
 raise 'the catalogue has no revision, ETag or conditional request' unless
   schema.dig('components','schemas','FontIconCatalogue','properties','revision','pattern') == '^[0-9a-f]{64}$' &&

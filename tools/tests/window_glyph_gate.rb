@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR 0210, 0211: the window-chrome glyph sets, Chalk (U+100231-100253)
+# ADR 0210, 0211, 0214: the window-chrome glyph sets, Chalk (U+100231-100253)
 # and Slate (U+100254-100276); Slate dark (U+100277-100299) is retired.
 #
 # - The catalogue lists all 70 by name, as cell geometry, in two sets of
@@ -14,6 +14,19 @@
 #   and at eleven other cell sizes. Chalk as coverage; Slate as its role
 #   map, read from its three pen planes (FG, LINE, MIX), which the harness
 #   requires to be disjoint and together its one-colour lookup.
+# - The outer-edge frame (ADR 0214), U+1002AE-1002B6: nine more glyphs. The
+#   five frame cells (frame-left, -right, -bottom-left, -bottom,
+#   -bottom-right) are one set, Chalk and Slate alike: a 1 px line on the
+#   cell's OUTERMOST edge and no other ink in the cell, at every size, in
+#   the foreground alone (coverage, no pen planes). The four title-end cells
+#   (chalk-title-end-left/-right as coverage, slate-light-title-end-left/
+#   -right as pens) are the bar row's end cells: the outer line, the bar's
+#   top line and rule (Slate's bevel too), and stripes that run INTO the
+#   cell, starting (or stopping) 2 px from its outer edge -- the line and
+#   one clear pixel -- and join the next cell's stripes row for row at
+#   every size. Chalk's ink is Slate's foreground and, in the stripe rows,
+#   its mix. The old frame and stripe-first/-last glyphs are unchanged
+#   (they are deprecated, not retired).
 # - Every pixel is fully set or fully clear, and the frame cells are
 #   transparent off their lines.
 # - Pewter (ADR 0211): Slate drawn in the cell's pens with bg 214, fg black
@@ -46,6 +59,14 @@ NAMES = %w[stripe stripe-first stripe-last stripe-before-title stripe-after-titl
            dialog-bottom-left dialog-bottom dialog-bottom-right button-left button-right
            default-button-left default-button-right].freeze
 SETS = { 'chalk' => 0x100231, 'slate-light' => 0x100254 }.freeze
+
+# ADR 0214: the outer-edge frame, in order from U+1002AE.
+FRAME_FIRST = 0x1002AE
+FRAME_NAMES = %w[frame-left frame-right frame-bottom-left frame-bottom frame-bottom-right
+                 chalk-title-end-left chalk-title-end-right slate-light-title-end-left
+                 slate-light-title-end-right].freeze
+FRAME_SETS = %w[frame frame frame frame frame chalk chalk slate-light slate-light].freeze
+FRAME_PENS = %w[foreground foreground foreground foreground foreground foreground foreground cell cell].freeze
 
 def fail!(why)
   abort "WINDOW_GLYPH_FAIL #{why}"
@@ -80,6 +101,12 @@ check(codes == (0x100231..0x100276).to_a, 'the window glyphs are not U+100231-10
 check((0x100277..0x100299).all? { |c| retired.include?(c) }, 'Slate dark (U+100277-100299) is not retired')
 check(geometry.none? { |e| e['codepoint'].to_i(16).between?(0x100277, 0x100299) },
       'a glyph is mapped in the retired Slate dark range')
+frames = geometry.select { |e| e['codepoint'].to_i(16).between?(FRAME_FIRST, FRAME_FIRST + 8) }
+check(frames.map { |e| [e['id'], e['codepoint'], e['set'], e['pens'], e['colour']] } ==
+      FRAME_NAMES.each_with_index.map { |n, i| [n, format('%06X', FRAME_FIRST + i), FRAME_SETS[i], FRAME_PENS[i], false] },
+      'the catalogue does not list the nine outer-edge frame glyphs (U+1002AE-1002B6) in order with their sets and pens')
+check(frames.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'an outer-edge frame glyph has no shape')
+check((frames.map { |e| e['codepoint'].to_i(16) } & (icon_codes + retired)).empty?, 'a frame glyph reuses an icon or retired codepoint')
 
 # The raster, at every size.
 freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")
@@ -114,7 +141,7 @@ Dir.mktmpdir('blit-window-glyphs') do |work|
     end
   end
 end
-check(raster.size == 70 * SIZES.size, "the raster drew #{raster.size} of #{70 * SIZES.size}")
+check(raster.size == 79 * SIZES.size, "the raster drew #{raster.size} of #{79 * SIZES.size}")
 mismatches = []
 raster.each do |key, got|
   mismatches << format('U+%X at %dx%d', key[1], *key[0]) unless design[key] == got
@@ -259,6 +286,96 @@ SIZES.each do |w, h|
   end
 end
 
+# The outer-edge frame (ADR 0214), written out here, not read from the
+# design. Formats first: the frame cells and Chalk's title ends are coverage
+# in the foreground, Slate's title ends are pens.
+frame_pixels = ->(name, w, h) { pixels(raster, w, h, FRAME_FIRST + FRAME_NAMES.index(name)) }
+SIZES.each do |w, h|
+  FRAME_NAMES.each_with_index do |name, i|
+    fmt, = raster.fetch([[w, h], FRAME_FIRST + i])
+    check(fmt == (name.start_with?('slate') ? 'roles' : 'coverage'), "#{name} is #{fmt}")
+    check(pixels(raster, w, h, FRAME_FIRST + i).flatten(1).all? { |a, _| [0, 255].include?(a) }, "#{name} at #{w}x#{h} has a partial pixel")
+  end
+  # The frame cells: the line on the outermost edge, and no ink anywhere
+  # else, so the cell's own background is the padding.
+  on_line = {
+    'frame-left' => ->(x, y) { x.zero? }, 'frame-right' => ->(x, y) { x == w - 1 },
+    'frame-bottom-left' => ->(x, y) { x.zero? || y == h - 1 }, 'frame-bottom' => ->(x, y) { y == h - 1 },
+    'frame-bottom-right' => ->(x, y) { x == w - 1 || y == h - 1 }
+  }
+  on_line.each do |name, line|
+    g = frame_pixels.call(name, w, h)
+    (0...h).each do |y|
+      (0...w).each do |x|
+        check((g[y][x][0] == 255) == line.call(x, y), "#{name} at #{w}x#{h}: pixel #{x},#{y} is #{g[y][x][0] == 255 ? 'inked off' : 'clear on'} the outermost edge's line")
+      end
+    end
+  end
+  # The title ends. Stripe rows are where the plain stripe cell has ink in
+  # its middle column besides its frame line and rule.
+  chalk_stripe = glyph(raster, 'chalk', 'stripe', w, h)
+  rows = (1...h - 1).select { |y| chalk_stripe[y][w / 2][0] == 255 }
+  check(rows.size.positive?, "no stripe rows at #{w}x#{h}")
+  { 'left' => 0, 'right' => w - 1 }.each do |side, edge|
+    far = side == 'left' ? w - 1 : 0 # the column that meets the next cell
+    inner = side == 'left' ? (2...w).to_a : (0...w - 2).to_a
+    chalk = frame_pixels.call("chalk-title-end-#{side}", w, h)
+    slate = frame_pixels.call("slate-light-title-end-#{side}", w, h)
+    (0...h).each do |y|
+      (0...w).each do |x|
+        want = x == edge || y.zero? || y == h - 1 || (rows.include?(y) && inner.include?(x))
+        check((chalk[y][x][0] == 255) == want, "chalk-title-end-#{side} at #{w}x#{h}: pixel #{x},#{y} is #{want ? 'clear' : 'inked'}")
+      end
+    end
+    # 2 px clear: the first stripe pixel is INSET (2) px from the outer edge.
+    rows.each do |y|
+      xs = (0...w).select { |x| chalk[y][x][0] == 255 && x != edge }
+      check(xs == inner, "chalk-title-end-#{side} at #{w}x#{h}: stripe row #{y} inks #{xs.inspect}, not #{inner.first}..#{inner.last}")
+    end
+    # The same ink in Slate: its foreground, and its mix in the stripe rows.
+    (0...h).each do |y|
+      (0...w).each do |x|
+        role = slate[y][x][1]
+        ink_now = role == 'K' || (role == 'M' && rows.include?(y))
+        check((chalk[y][x][0] == 255) == ink_now, "slate-light-title-end-#{side} at #{w}x#{h}: pixel #{x},#{y} is #{role.inspect}, Chalk has #{chalk[y][x][0]}")
+      end
+    end
+    # Slate's bar: the outer line, the line and rule, the highlight under
+    # the line and the shade over the rule (both start beside the outer
+    # line), a dark stripe over a highlight row, the bar (no pixel) between.
+    check((0...h).all? { |y| slate[y][edge][1] == 'K' }, "slate-light-title-end-#{side} at #{w}x#{h}: the outer line is not the foreground")
+    check((0...w).all? { |x| slate[0][x][1] == 'K' && slate[h - 1][x][1] == 'K' }, "slate-light-title-end-#{side} at #{w}x#{h}: no line and rule")
+    (0...w).reject { |x| x == edge }.each do |x|
+      check(slate[1][x][1] == 'L' && slate[h - 2][x][1] == 'M', "slate-light-title-end-#{side} at #{w}x#{h}: no highlight and shade at #{x}")
+    end
+    rows.each do |y|
+      inner.each do |x|
+        check(slate[y][x][1] == 'M' && slate[y + 1][x][1] == 'L', "slate-light-title-end-#{side} at #{w}x#{h}: stripe at #{x},#{y} is not a dark stripe over a highlight")
+      end
+    end
+    # Seamless: the column that meets the next cell is that cell's stripe
+    # column, row for row, in both styles.
+    { 'chalk' => chalk, 'slate-light' => slate }.each do |style, e|
+      plain = glyph(raster, style, 'stripe', w, h)
+      (0...h).each do |y|
+        check(e[y][far] == plain[y][far], "#{style}-title-end-#{side} at #{w}x#{h}: row #{y} does not join the stripe cell")
+      end
+    end
+  end
+end
+# At the owner's 11x22, by eye: the left cell's stripe rows run from x 2 to
+# its right edge (x 1 clear), the right cell's from its left edge to x 8.
+g = frame_pixels.call('chalk-title-end-left', 11, 22)
+check((0...22).select { |y| g[y][1][0] == 255 } == [0, 21] && (0...22).select { |y| g[y][2][0] == 255 } == [0, *STRIPE_ROWS, 21],
+      'chalk-title-end-left at 11x22: stripes do not start at x 2 on rows 5-15')
+g = frame_pixels.call('chalk-title-end-right', 11, 22)
+check((0...22).select { |y| g[y][9][0] == 255 } == [0, 21] && (0...22).select { |y| g[y][8][0] == 255 } == [0, *STRIPE_ROWS, 21],
+      'chalk-title-end-right at 11x22: stripes do not stop at x 8 on rows 5-15')
+g = frame_pixels.call('slate-light-title-end-left', 11, 22)
+check((0...22).map { |y| g[y][0][1] } == ['K'] * 22 && (0...22).map { |y| g[y][1][1] } == ['K', 'L'] + [nil] * 18 + ['M', 'K'] &&
+      (0...22).map { |y| g[y][5][1] } == %w[K L] + [nil] * 3 + %w[M L M L M L M L M L M L] + [nil] * 3 + %w[M K],
+      'slate-light-title-end-left at 11x22 is not the outer line, bevel and stripes of the approved bar')
+
 # Pewter: Slate in the cell's pens, against 0.3.38's fixed Slate light
 # (tools/fixtures, made by 0.3.38's own design script). Each glyph sits on
 # the background Hibr gives it: the bar 214, a note's close box 238; frame
@@ -378,7 +495,8 @@ SIZES.each do |w, h|
   end
 end
 
-puts "WINDOW_GLYPH_PASS glyphs=70 slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
+puts "WINDOW_GLYPH_PASS glyphs=70+9_frame(U+1002AE-1002B6) outer_edge=line_only title_ends=stripes_join,2px_clear " \
+     "slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
      "sizes=#{SIZES.map { |s| s.join('x') }.join(',')} design=pixel-exact chalk=coverage slate=pen_planes " \
      "pewter=0.3.38_except_mix(#{mix_differs}_px,#{compared}_glyphs) dialog=no_halo,line+fg_only caps=corners_clear " \
      'pixels=crisp mockup_11x22=held seams=joined'

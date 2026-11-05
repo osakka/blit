@@ -277,8 +277,8 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `bar-corner-left` | `U+100007` | `"\udbc0\udc07"` | foreground | cell filled except a quarter-circle cut at its top-left, radius the cell's shorter side |
 | `bar-corner-right` | `U+100008` | `"\udbc0\udc08"` | foreground | cell filled except a quarter-circle cut at its top-right, radius the cell's shorter side |
 | `chalk-stripe` | `U+100231` | `"\udbc0\ude31"` | foreground | Chalk set: title bar: frame line, six stripes, rule |
-| `chalk-stripe-first` | `U+100232` | `"\udbc0\ude32"` | foreground | Chalk set: title bar next to the left frame: stripes start 2 px in |
-| `chalk-stripe-last` | `U+100233` | `"\udbc0\ude33"` | foreground | Chalk set: title bar next to the right frame: stripes stop 2 px short |
+| `chalk-stripe-first` | `U+100232` | `"\udbc0\ude32"` | foreground | Chalk set: title bar next to the left frame: stripes start 2 px in **Deprecated (ADR 0214):** use `chalk-title-end-left`. |
+| `chalk-stripe-last` | `U+100233` | `"\udbc0\ude33"` | foreground | Chalk set: title bar next to the right frame: stripes stop 2 px short **Deprecated (ADR 0214):** use `chalk-title-end-right`. |
 | `chalk-stripe-before-title` | `U+100234` | `"\udbc0\ude34"` | foreground | Chalk set: title bar before the title: stripes stop 5 px short |
 | `chalk-stripe-after-title` | `U+100235` | `"\udbc0\ude35"` | foreground | Chalk set: title bar after the title: stripes start 5 px in |
 | `chalk-title` | `U+100236` | `"\udbc0\ude36"` | foreground | Chalk set: title bar without stripes: under the title, and the inactive bar |
@@ -288,13 +288,13 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `chalk-close` | `U+10023A` | `"\udbc0\ude3a"` | foreground | Chalk set: title bar with the close box: an 11x11 square, the cell's width |
 | `chalk-shade` | `U+10023B` | `"\udbc0\ude3b"` | foreground | Chalk set: title bar with the window-shade box: the square with a bar across |
 | `chalk-zoom` | `U+10023C` | `"\udbc0\ude3c"` | foreground | Chalk set: title bar with the zoom box: the square with a smaller square in its corner |
-| `chalk-frame-left` | `U+10023D` | `"\udbc0\ude3d"` | foreground | Chalk set: window frame, left: a line against the content |
-| `chalk-frame-right-top` | `U+10023E` | `"\udbc0\ude3e"` | foreground | Chalk set: window frame, right, beside the title bar: a line against the content (as frame-right) |
-| `chalk-frame-right` | `U+10023F` | `"\udbc0\ude3f"` | foreground | Chalk set: window frame, right: a line against the content |
-| `chalk-frame-bottom-left` | `U+100240` | `"\udbc0\ude40"` | foreground | Chalk set: window frame, bottom-left corner |
-| `chalk-frame-bottom-first` | `U+100241` | `"\udbc0\ude41"` | foreground | Chalk set: window frame, first bottom cell: a line against the content (as frame-bottom) |
-| `chalk-frame-bottom` | `U+100242` | `"\udbc0\ude42"` | foreground | Chalk set: window frame, bottom: a line against the content |
-| `chalk-frame-bottom-right` | `U+100243` | `"\udbc0\ude43"` | foreground | Chalk set: window frame, bottom-right corner |
+| `chalk-frame-left` | `U+10023D` | `"\udbc0\ude3d"` | foreground | Chalk set: window frame, left: a line against the content **Deprecated (ADR 0214):** use `frame-left`, `chalk-title-end-left`. |
+| `chalk-frame-right-top` | `U+10023E` | `"\udbc0\ude3e"` | foreground | Chalk set: window frame, right, beside the title bar: a line against the content (as frame-right) **Deprecated (ADR 0214):** use `chalk-title-end-right`. |
+| `chalk-frame-right` | `U+10023F` | `"\udbc0\ude3f"` | foreground | Chalk set: window frame, right: a line against the content **Deprecated (ADR 0214):** use `frame-right`. |
+| `chalk-frame-bottom-left` | `U+100240` | `"\udbc0\ude40"` | foreground | Chalk set: window frame, bottom-left corner **Deprecated (ADR 0214):** use `frame-bottom-left`. |
+| `chalk-frame-bottom-first` | `U+100241` | `"\udbc0\ude41"` | foreground | Chalk set: window frame, first bottom cell: a line against the content (as frame-bottom) **Deprecated (ADR 0214):** use `frame-bottom`. |
+| `chalk-frame-bottom` | `U+100242` | `"\udbc0\ude42"` | foreground | Chalk set: window frame, bottom: a line against the content **Deprecated (ADR 0214):** use `frame-bottom`. |
+| `chalk-frame-bottom-right` | `U+100243` | `"\udbc0\ude43"` | foreground | Chalk set: window frame, bottom-right corner **Deprecated (ADR 0214):** use `frame-bottom-right`. |
 | `chalk-frame-top-left` | `U+100244` | `"\udbc0\ude44"` | foreground | Chalk set: frame without a title bar, top-left corner |
 | `chalk-frame-top` | `U+100245` | `"\udbc0\ude45"` | foreground | Chalk set: frame without a title bar, top: a line against the content |
 | `chalk-frame-top-right` | `U+100246` | `"\udbc0\ude46"` | foreground | Chalk set: frame without a title bar, top-right corner |
@@ -312,8 +312,8 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `chalk-default-button-left` | `U+100252` | `"\udbc0\ude52"` | foreground | Chalk set: default button, left end: rounded 3 px ring; SGR 51:3 draws the label's |
 | `chalk-default-button-right` | `U+100253` | `"\udbc0\ude53"` | foreground | Chalk set: default button, right end |
 | `slate-light-stripe` | `U+100254` | `"\udbc0\ude54"` | cell pens | Slate set: title bar: frame line, six stripes, rule |
-| `slate-light-stripe-first` | `U+100255` | `"\udbc0\ude55"` | cell pens | Slate set: title bar next to the left frame: stripes start 2 px in |
-| `slate-light-stripe-last` | `U+100256` | `"\udbc0\ude56"` | cell pens | Slate set: title bar next to the right frame: stripes stop 2 px short |
+| `slate-light-stripe-first` | `U+100255` | `"\udbc0\ude55"` | cell pens | Slate set: title bar next to the left frame: stripes start 2 px in **Deprecated (ADR 0214):** use `slate-light-title-end-left`. |
+| `slate-light-stripe-last` | `U+100256` | `"\udbc0\ude56"` | cell pens | Slate set: title bar next to the right frame: stripes stop 2 px short **Deprecated (ADR 0214):** use `slate-light-title-end-right`. |
 | `slate-light-stripe-before-title` | `U+100257` | `"\udbc0\ude57"` | cell pens | Slate set: title bar before the title: stripes stop 5 px short |
 | `slate-light-stripe-after-title` | `U+100258` | `"\udbc0\ude58"` | cell pens | Slate set: title bar after the title: stripes start 5 px in |
 | `slate-light-title` | `U+100259` | `"\udbc0\ude59"` | cell pens | Slate set: title bar without stripes: under the title, and the inactive bar |
@@ -323,13 +323,13 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `slate-light-close` | `U+10025D` | `"\udbc0\ude5d"` | cell pens | Slate set: title bar with the close box: an 11x11 square, the cell's width |
 | `slate-light-shade` | `U+10025E` | `"\udbc0\ude5e"` | cell pens | Slate set: title bar with the window-shade box: the square with a bar across |
 | `slate-light-zoom` | `U+10025F` | `"\udbc0\ude5f"` | cell pens | Slate set: title bar with the zoom box: the square with a smaller square in its corner |
-| `slate-light-frame-left` | `U+100260` | `"\udbc0\ude60"` | cell pens | Slate set: window frame, left: a line against the content |
-| `slate-light-frame-right-top` | `U+100261` | `"\udbc0\ude61"` | cell pens | Slate set: window frame, right, beside the title bar: a line against the content (as frame-right) |
-| `slate-light-frame-right` | `U+100262` | `"\udbc0\ude62"` | cell pens | Slate set: window frame, right: a line against the content |
-| `slate-light-frame-bottom-left` | `U+100263` | `"\udbc0\ude63"` | cell pens | Slate set: window frame, bottom-left corner |
-| `slate-light-frame-bottom-first` | `U+100264` | `"\udbc0\ude64"` | cell pens | Slate set: window frame, first bottom cell: a line against the content (as frame-bottom) |
-| `slate-light-frame-bottom` | `U+100265` | `"\udbc0\ude65"` | cell pens | Slate set: window frame, bottom: a line against the content |
-| `slate-light-frame-bottom-right` | `U+100266` | `"\udbc0\ude66"` | cell pens | Slate set: window frame, bottom-right corner |
+| `slate-light-frame-left` | `U+100260` | `"\udbc0\ude60"` | cell pens | Slate set: window frame, left: a line against the content **Deprecated (ADR 0214):** use `frame-left`, `slate-light-title-end-left`. |
+| `slate-light-frame-right-top` | `U+100261` | `"\udbc0\ude61"` | cell pens | Slate set: window frame, right, beside the title bar: a line against the content (as frame-right) **Deprecated (ADR 0214):** use `slate-light-title-end-right`. |
+| `slate-light-frame-right` | `U+100262` | `"\udbc0\ude62"` | cell pens | Slate set: window frame, right: a line against the content **Deprecated (ADR 0214):** use `frame-right`. |
+| `slate-light-frame-bottom-left` | `U+100263` | `"\udbc0\ude63"` | cell pens | Slate set: window frame, bottom-left corner **Deprecated (ADR 0214):** use `frame-bottom-left`. |
+| `slate-light-frame-bottom-first` | `U+100264` | `"\udbc0\ude64"` | cell pens | Slate set: window frame, first bottom cell: a line against the content (as frame-bottom) **Deprecated (ADR 0214):** use `frame-bottom`. |
+| `slate-light-frame-bottom` | `U+100265` | `"\udbc0\ude65"` | cell pens | Slate set: window frame, bottom: a line against the content **Deprecated (ADR 0214):** use `frame-bottom`. |
+| `slate-light-frame-bottom-right` | `U+100266` | `"\udbc0\ude66"` | cell pens | Slate set: window frame, bottom-right corner **Deprecated (ADR 0214):** use `frame-bottom-right`. |
 | `slate-light-frame-top-left` | `U+100267` | `"\udbc0\ude67"` | cell pens | Slate set: frame without a title bar, top-left corner |
 | `slate-light-frame-top` | `U+100268` | `"\udbc0\ude68"` | cell pens | Slate set: frame without a title bar, top: a line against the content |
 | `slate-light-frame-top-right` | `U+100269` | `"\udbc0\ude69"` | cell pens | Slate set: frame without a title bar, top-right corner |
@@ -366,5 +366,14 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `capsule-on-left` | `U+1002AB` | `"\udbc0\udeab"` | cell pens | Capsule set: capsule switch, on, left cell: the knob on the right |
 | `capsule-on-mid` | `U+1002AC` | `"\udbc0\udeac"` | cell pens | Capsule set: capsule switch, on, middle cell |
 | `capsule-on-right` | `U+1002AD` | `"\udbc0\udead"` | cell pens | Capsule set: capsule switch, on, right cell |
+| `frame-left` | `U+1002AE` | `"\udbc0\udeae"` | foreground | Frame set: window frame, left: the line on the cell's left edge, nothing else |
+| `frame-right` | `U+1002AF` | `"\udbc0\udeaf"` | foreground | Frame set: window frame, right: the line on the cell's right edge |
+| `frame-bottom-left` | `U+1002B0` | `"\udbc0\udeb0"` | foreground | Frame set: window frame, bottom-left corner: the left and bottom edges |
+| `frame-bottom` | `U+1002B1` | `"\udbc0\udeb1"` | foreground | Frame set: window frame, bottom: the line on the cell's bottom edge |
+| `frame-bottom-right` | `U+1002B2` | `"\udbc0\udeb2"` | foreground | Frame set: window frame, bottom-right corner: the right and bottom edges |
+| `chalk-title-end-left` | `U+1002B3` | `"\udbc0\udeb3"` | foreground | Chalk set: title bar, left end cell: the outer line, the bar's top line and rule, stripes from 2 px in |
+| `chalk-title-end-right` | `U+1002B4` | `"\udbc0\udeb4"` | foreground | Chalk set: title bar, right end cell: the outer line, the bar's top line and rule, stripes to 2 px short |
+| `slate-light-title-end-left` | `U+1002B5` | `"\udbc0\udeb5"` | cell pens | Slate set: title bar, left end cell: the outer line, the bar's bevel, stripes from 2 px in |
+| `slate-light-title-end-right` | `U+1002B6` | `"\udbc0\udeb6"` | cell pens | Slate set: title bar, right end cell: the outer line, the bar's bevel, stripes to 2 px short |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

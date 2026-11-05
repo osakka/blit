@@ -13,8 +13,15 @@ over its background, so a theme recolours it) at U+100231 and Slate at
 U+100254: the same geometry in the cell's own pens (ADR 0211). Slate dark,
 once at U+100277-100299, is retired. A pixel no rule sets is transparent in
 both: the cell's background shows, which for a frame cell on a held desktop
-is the wallpaper. The controls that follow (U+10029A on) are
+is the wallpaper. The controls that follow (U+10029A-1002AD) are
 draw-control-glyphs.py's.
+
+The outer-edge frame (ADR 0214), U+1002AE-1002B6, is here too: ONE frame
+set (the line on the outermost edge of each frame cell, nothing else
+drawn), and the title bar's four end cells, Chalk's and Slate's, which
+carry that outer line and run the stripes into the cell. The frame glyphs
+and stripe-first/-last of the two sets above are deprecated (the catalogue
+says so, and what replaces them); they draw unchanged until Hibr moves.
 
 Pixel-designed for 11x22. At other sizes lines, stripes and the rings keep
 their widths in pixels; the box (the cell's width), the number of stripes
@@ -75,6 +82,38 @@ NAMES = [
 STYLES = [('chalk', 0x100231), ('slate-light', 0x100254)]
 # Slate dark took U+100277-100299 until ADR 0211; retired, never reused.
 RETIRED = (0x100277, 0x100299)
+
+# ADR 0214: the outer-edge frame, nine glyphs in this order. The first five
+# are the one frame set (one colour, coverage in the foreground); the title
+# ends are the bar's end cells in each title-bar style.
+FRAME_FIRST = 0x1002AE
+FRAMES = [
+    ('frame-left', 'frame', 'window frame, left: the line on the cell\'s left edge, nothing else'),
+    ('frame-right', 'frame', 'window frame, right: the line on the cell\'s right edge'),
+    ('frame-bottom-left', 'frame', 'window frame, bottom-left corner: the left and bottom edges'),
+    ('frame-bottom', 'frame', 'window frame, bottom: the line on the cell\'s bottom edge'),
+    ('frame-bottom-right', 'frame', 'window frame, bottom-right corner: the right and bottom edges'),
+    ('chalk-title-end-left', 'chalk', 'title bar, left end cell: the outer line, the bar\'s top line and rule, stripes from 2 px in'),
+    ('chalk-title-end-right', 'chalk', 'title bar, right end cell: the outer line, the bar\'s top line and rule, stripes to 2 px short'),
+    ('slate-light-title-end-left', 'slate-light', 'title bar, left end cell: the outer line, the bar\'s bevel, stripes from 2 px in'),
+    ('slate-light-title-end-right', 'slate-light', 'title bar, right end cell: the outer line, the bar\'s bevel, stripes to 2 px short'),
+]
+# The glyphs that ADR 0214 deprecates: each old frame piece and the stripe
+# cells beside the frame, and what an application draws instead (the title
+# row's cells are the title ends).
+DEPRECATED = {}
+for _style in ('chalk', 'slate-light'):
+    DEPRECATED.update({
+        f'{_style}-frame-left': ['frame-left', f'{_style}-title-end-left'],
+        f'{_style}-frame-right-top': [f'{_style}-title-end-right'],
+        f'{_style}-frame-right': ['frame-right'],
+        f'{_style}-frame-bottom-left': ['frame-bottom-left'],
+        f'{_style}-frame-bottom-first': ['frame-bottom'],
+        f'{_style}-frame-bottom': ['frame-bottom'],
+        f'{_style}-frame-bottom-right': ['frame-bottom-right'],
+        f'{_style}-stripe-first': [f'{_style}-title-end-left'],
+        f'{_style}-stripe-last': [f'{_style}-title-end-right'],
+    })
 
 HEADER = ROOT / 'src/blit_window_glyphs.h'
 # Slate's roles (ADR 0211), resolved in the cell it is drawn in: K the
@@ -290,11 +329,57 @@ def draw(style, index, w, h):
     return c.rows()
 
 
+def draw_frame(index, w, h):
+    """One outer-edge frame glyph's role map (ADR 0214), index 0-8 of FRAMES."""
+    name = FRAMES[index][0]
+    L, inset = T['LINE'], T['STRIPE_INSET']
+    c = Cell(w, h)
+    if name in ('frame-left', 'frame-bottom-left'):
+        c.fill(0, L, 0, h, 'K')
+    if name in ('frame-right', 'frame-bottom-right'):
+        c.fill(w - L, w, 0, h, 'K')
+    if name.startswith('frame-bottom'):
+        c.fill(0, w, h - L, h, 'K')
+    if '-title-end-' in name:
+        # The bar row: its own line and rule (Slate: bevel and bar), the
+        # stripes running into the cell and stopping INSET px from its outer
+        # edge, and the outer line over everything.
+        slate = name.startswith('slate')
+        right = name.endswith('-right')
+        n, top, side, bx, by = band_box(w, h)
+        x0, x1 = (0, w - inset) if right else (inset, w)
+        if slate:
+            c.fill(0, w, 0, h, 'B')
+        for k in range(n):
+            y = top + 2 * L * k
+            c.fill(x0, x1, y, y + L, 'M' if slate else 'K')
+            if slate:
+                c.fill(x0, x1, y + L, y + 2 * L, 'L')
+        c.fill(0, w, 0, L, 'K')
+        c.fill(0, w, h - L, h, 'K')
+        if slate:
+            c.fill(0, w, L, 2 * L, 'L')
+            c.fill(0, w, h - 2 * L, h - L, 'M')
+        if right:
+            c.fill(w - L, w, 0, h, 'K')
+        else:
+            c.fill(0, L, 0, h, 'K')
+    return c.rows()
+
+
 def glyphs():
-    """Every (codepoint, style, index) in codepoint order."""
+    """Every (codepoint, style, index) in codepoint order. Window glyphs
+    have the two sets' styles and index 0-34; the outer-edge frame glyphs
+    (ADR 0214) the style 'frame' or their title-bar style, and 100 + n."""
     for style, first in STYLES:
         for index in range(len(NAMES)):
             yield first + index, style, index
+    for index, (_, style, _) in enumerate(FRAMES):
+        yield FRAME_FIRST + index, style, 100 + index
+
+
+def rows_of(style, index, w, h):
+    return draw_frame(index - 100, w, h) if index >= 100 else draw(style, index, w, h)
 
 
 def colour(style, role, fg=(0, 0, 0), bg=(214, 214, 214), line=None):
@@ -309,8 +394,8 @@ def reference(w, h):
     role included, which shows the cell's background)."""
     lines = []
     for cp, style, index in glyphs():
-        rows = draw(style, index, w, h)
-        if style == 'chalk':
+        rows = rows_of(style, index, w, h)
+        if style in ('chalk', 'frame'):
             out = bytes(0 if role == '.' else 255 for row in rows for role in row)
             lines.append(f'{cp:X} coverage {out.hex()}')
         else:
@@ -349,17 +434,51 @@ CORNER = {'part': 'bar-corner', 'cells': {'span': 1, 'position': 0}, 'background
           'foreground': 'bar', 'line': 'none'}
 
 
+def frame_entries():
+    """The outer-edge frame's entries (ADR 0214). The frame cells are the
+    one frame set, in the foreground alone, on the window's face (a panel);
+    the title ends are the bar's, in Chalk's or Slate's pens."""
+    entries = []
+    for index, (name, style, shape) in enumerate(FRAMES):
+        cp = FRAME_FIRST + index
+        if style == 'frame':
+            entries.append({'id': name, 'codepoint': f'{cp:06X}', 'colour': False, 'pens': 'foreground',
+                            'set': 'frame', 'shape': f'Frame set: {shape}', 'part': 'frame',
+                            'cells': {'span': 1, 'position': 0}, 'background': 'panel',
+                            'foreground': 'ink', 'line': 'none'})
+        else:
+            set_name = {'chalk': 'Chalk', 'slate-light': 'Slate'}[style]
+            entries.append({'id': name, 'codepoint': f'{cp:06X}', 'colour': False,
+                            'pens': 'foreground' if style == 'chalk' else 'cell',
+                            'set': style, 'shape': f'{set_name} set: {shape}',
+                            **structure(style, 'title')})
+    return entries
+
+
+def owned(entry):
+    """Is this catalogue entry one of this script's: a window glyph
+    (U+100231-100276) or an outer-edge frame glyph (U+1002AE-1002B6)?"""
+    cp = int(entry['codepoint'], 16)
+    return STYLES[0][1] <= cp < RETIRED[0] or FRAME_FIRST <= cp < FRAME_FIRST + len(FRAMES)
+
+
 def catalogue_entries():
     entries = []
     for cp, style, index in glyphs():
+        if index >= 100:
+            continue
         name, shape = NAMES[index]
         set_name = {'chalk': 'Chalk', 'slate-light': 'Slate'}[style]
         # Neither set carries its own colours since ADR 0211: Chalk draws in
         # the foreground, Slate in the cell's pens.
-        entries.append({'id': f'{style}-{name}', 'codepoint': f'{cp:06X}',
-                        'colour': False, 'pens': 'foreground' if style == 'chalk' else 'cell',
-                        'set': style, 'shape': f'{set_name} set: {shape}', **structure(style, name)})
-    return entries
+        entry = {'id': f'{style}-{name}', 'codepoint': f'{cp:06X}',
+                 'colour': False, 'pens': 'foreground' if style == 'chalk' else 'cell',
+                 'set': style, 'shape': f'{set_name} set: {shape}', **structure(style, name)}
+        if entry['id'] in DEPRECATED:
+            entry['deprecated'] = True
+            entry['replaced_by'] = DEPRECATED[entry['id']]
+        entries.append(entry)
+    return entries + frame_entries()
 
 
 def write_catalogue():
@@ -367,7 +486,7 @@ def write_catalogue():
     data = json.loads(text)
     # The entries of the other families (the corners, the controls) are kept;
     # the corners get their structured fields. Everything is in codepoint order.
-    keep = [e for e in data['cell_geometry'] if not STYLES[0][1] <= int(e['codepoint'], 16) <= RETIRED[0] - 1]
+    keep = [e for e in data['cell_geometry'] if not owned(e)]
     keep = [{**e, **CORNER} if e['id'].startswith('bar-corner-') else e for e in keep]
     rows = sorted(keep + catalogue_entries(), key=lambda e: int(e['codepoint'], 16))
     # Slate dark's codepoints, retired by ADR 0211 and never reused.
@@ -391,8 +510,8 @@ def check_catalogue():
     """Is every one of this script's entries in the catalogue exactly what
     the tables give, structured fields included, and the corners' too?"""
     data = json.loads(CATALOGUE.read_text(encoding='utf-8'))
-    have = [e for e in data['cell_geometry'] if STYLES[0][1] <= int(e['codepoint'], 16) < RETIRED[0]]
-    want = catalogue_entries()
+    have = [e for e in data['cell_geometry'] if owned(e)]
+    want = sorted(catalogue_entries(), key=lambda e: int(e['codepoint'], 16))
     corners = [e for e in data['cell_geometry'] if e['id'].startswith('bar-corner-')]
     ok = have == want and len(corners) == 2 and all(all(e.get(k) == v for k, v in CORNER.items()) for e in corners)
     print('catalogue matches the window tables' if ok else 'the catalogue differs from the window tables: run --catalogue')

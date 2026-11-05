@@ -6,7 +6,8 @@
 #
 # - The catalogue lists all 20 in order with their names, sets and pens, in
 #   `cell_geometry`, clear of the icons and every retired codepoint, and
-#   U+1002AE is the next free.
+#   U+1002AE-1002B6 are the outer-edge frame's (ADR 0214, its own gate), and
+#   U+1002B7 is the next free.
 # - Through the production raster, every glyph equals the design
 #   (tools/fonts/draw-control-glyphs.py, which reads the geometry tables in
 #   src/blit_control_glyphs.h and src/blit_window_glyphs.h) pixel for
@@ -57,8 +58,9 @@ check(mine.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'a contr
 icon_codes = catalogue.fetch('icons').map { |i| i['codepoint'].to_i(16) }
 retired = catalogue.fetch('retired').flat_map { |r| (r['from'].to_i(16)..r['to'].to_i(16)).to_a }
 check(((FIRST...NEXT_FREE).to_a & (icon_codes + retired)).empty?, 'a control reuses an icon or retired codepoint')
-check((icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).none? { |c| c >= NEXT_FREE },
-      "something is mapped at or past U+#{NEXT_FREE.to_s(16).upcase}, the next free codepoint")
+NEXT_FREE_ALL = 0x1002B7 # past the outer-edge frame (ADR 0214)
+check((icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).none? { |c| c >= NEXT_FREE_ALL },
+      "something is mapped at or past U+#{NEXT_FREE_ALL.to_s(16).upcase}, the next free codepoint")
 
 # The raster, at every size.
 freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")
@@ -238,5 +240,5 @@ SIZES.each do |w, h|
   end
 end
 
-puts "CONTROL_GLYPH_PASS glyphs=20 catalogue=named,next_free=U+1002AE sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
+puts "CONTROL_GLYPH_PASS glyphs=20 catalogue=named,next_free=U+1002B7 sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
      'design=pixel-exact chalk=coverage slate,capsule=pen_planes mockup_11x22=held states=distinct seams=joined capsule=3_pens_every_size'

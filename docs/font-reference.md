@@ -193,11 +193,53 @@ are retired.
     shows round the border. For a black-and-white dialog with no halo, use
     the Slate glyphs with a black foreground and SGR 58 white.
 
+## Window frame: one frame, its line on the outer edge
+
+ADR 0214. 9 glyphs at U+1002AE–1002B6 are the window frame as the owner
+wants it: **one frame, and its line sits on the outermost edge of each
+frame cell** (the left cell's left edge, the right cell's right edge, the
+bottom row's bottom edge). Nothing else in the cell is drawn, so the cell's
+own background is the padding: set the frame cells' background to the
+window's face and the face runs out to the line.
+
+| Glyph | Codepoint | Put it | Pens |
+| --- | --- | --- | --- |
+| `frame-left` | U+1002AE | left of each body row | fg = the line |
+| `frame-right` | U+1002AF | right of each body row | fg = the line |
+| `frame-bottom-left` | U+1002B0 | bottom-left corner (left and bottom lines) | fg = the line |
+| `frame-bottom` | U+1002B1 | the bottom row | fg = the line |
+| `frame-bottom-right` | U+1002B2 | bottom-right corner (right and bottom lines) | fg = the line |
+| `chalk-title-end-left`, `-right` | U+1002B3, U+1002B4 | the title row's end cells | fg = the ink, bg = the bar |
+| `slate-light-title-end-left`, `-right` | U+1002B5, U+1002B6 | the title row's end cells | bg = the bar, fg = the ink, SGR 58 = the highlight |
+
+- **One frame set.** Chalk's and Slate's frame glyphs were the same 1 px
+  foreground line, so the frame cells are one set (catalogue `set: frame`,
+  coverage in the foreground). The right-hand cell of the title row is not
+  `frame-right`: it is a title-end glyph.
+- **A title-end cell is the title bar's end.** It carries the outer line, the
+  bar's top line and rule (Slate: its bevel rows too), and **the stripes run
+  into it**, starting (left) or stopping (right) 2 px from the cell's outer
+  edge: the line and one clear pixel. They join the next cell's stripes at
+  every cell size. Chalk's are coverage; Slate's use the cell's pens as the
+  Slate bar glyphs do. `stripe-first` and `stripe-last` are redundant.
+- **The shadow is unchanged** (SGR 66, ADR 0211), but goes in the cells
+  beyond the frame cells with **inset 0** (`66:kind:width:0`), so its strip
+  begins at the pixel next to the frame's line.
+- **Deprecated, not retired.** The window sets' `frame-left`,
+  `frame-right-top`, `frame-right`, `frame-bottom-left`,
+  `frame-bottom-first`, `frame-bottom`, `frame-bottom-right`, and
+  `stripe-first`, `stripe-last` (Chalk and Slate: 18 glyphs) are marked
+  `deprecated: true` with `replaced_by` in the catalogue and in
+  [the special-glyph table](fonts/special.md). Blit still draws them,
+  unchanged, until a later release retires them. The dialog, note and
+  `frame-top-*` glyphs are not affected.
+
 ## Controls: checkbox, switch and capsule
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002AE.
+section. The next free codepoint is U+1002B7 (the outer-edge frame, below,
+is U+1002AE–1002B6).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

@@ -40,7 +40,7 @@ wd = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(wd)
 
 FIRST = 0x10029A
-NEXT_FREE = 0x1002AE
+NEXT_FREE = 0x1002AE  # the end of the controls (ADR 0214 follows at U+1002AE)
 
 # id, set, what it is, how many cells it spans and which one this is.
 # Every entry's pens are in part(): part, background, foreground and line.

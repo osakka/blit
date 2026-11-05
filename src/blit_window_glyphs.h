@@ -10,6 +10,13 @@
    drawn. A pixel no rule sets is transparent in both, so a frame cell shows
    its background (on a held desktop, the wallpaper).
 
+   ADR 0214 adds the outer-edge frame (nine glyphs from U+1002AE, after the
+   controls): ONE frame set whose line sits on the outermost edge of its
+   cell, and the title bar's two end cells (Chalk's and Slate's), which
+   carry that outer line and run the stripes in. They are below, after the
+   dialog and button code; the frame glyphs of the sets above are
+   deprecated, drawn unchanged until Hibr moves.
+
    The geometry table below is the one source of every length. The design
    script tools/fonts/draw-window-glyphs.py reads it from this file, and
    window_glyph_gate holds this drawing to that script pixel for pixel.
@@ -45,6 +52,8 @@
 #define BLIT_WINDOW_BUTTON_INSET 2      /* clear before a button's rounded end */
 #define BLIT_WINDOW_BUTTON_RADIUS_NUM 4 /* that end's radius: 4/11 of the cell */
 #define BLIT_WINDOW_BUTTON_RADIUS_DEN 11 /*   height, within half of it and the cell */
+#define BLIT_FRAME_FIRST 0x1002AEU      /* the outer-edge frame (ADR 0214): */
+#define BLIT_FRAME_COUNT 9U             /*   five frame cells, four title-end cells */
 #define BLIT_WINDOW_ZOOM_NUM 2          /* the zoom box's inner square: 2/3 of the */
 #define BLIT_WINDOW_ZOOM_DEN 3          /*   box, from its top-left corner */
 
@@ -181,6 +190,28 @@ static void blit_window_band(int w, int h, int *n_out, int *top_out,
     *by_out = top + (band - L - side) / 2;
 }
 
+/* The title bar's row: the cell's own background (Slate: the bar), the
+   stripes from sx0 to sx1 if there are any, the frame line and the rule
+   under the bar; Slate's bevel is a highlight under the line and a shade
+   over the rule. n and top are blit_window_band's. */
+static void wg_bar(WindowCell *c, int slate, int stripes, int sx0, int sx1, int n, int top)
+{
+    enum { L = BLIT_WINDOW_LINE };
+    int k, y;
+    if (slate) wg_fill(c, 0, c->w, 0, c->h, WR_BG);
+    for (k = 0; stripes && k < n; ++k) {
+        y = top + 2 * L * k;
+        wg_fill(c, sx0, sx1, y, y + L, slate ? WR_MIX : WR_FG);
+        if (slate) wg_fill(c, sx0, sx1, y + L, y + 2 * L, WR_LINE);
+    }
+    wg_fill(c, 0, c->w, 0, L, WR_FG);
+    wg_fill(c, 0, c->w, c->h - L, c->h, WR_FG);
+    if (slate) {
+        wg_fill(c, 0, c->w, L, 2 * L, WR_LINE);
+        wg_fill(c, 0, c->w, c->h - 2 * L, c->h - L, WR_MIX);
+    }
+}
+
 /* One glyph's roles, w x h, row-major; WR_NONE is transparent. */
 static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int h)
 {
@@ -192,7 +223,7 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
     };
     unsigned index = (scalar - BLIT_WINDOW_FIRST) % BLIT_WINDOW_SET;
     int slate = blit_window_colour(scalar);
-    int n, top, side, bx, by, x, y, k, sx0 = 0, sx1 = w, stripes = 0;
+    int n, top, side, bx, by, x, y, sx0 = 0, sx1 = w, stripes = 0;
     WindowCell cell;
     cell.roles = roles; cell.w = w; cell.h = h;
     memset(roles, WR_NONE, (size_t)w * (size_t)h);
@@ -206,22 +237,7 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
     case WG_STRIPE_BETWEEN: stripes = 1; sx0 = INSET; sx1 = w - INSET; break;
     default: break;
     }
-    if (index <= WG_ZOOM) {
-        if (slate) wg_fill(&cell, 0, w, 0, h, WR_BG);
-        for (k = 0; stripes && k < n; ++k) {
-            y = top + 2 * L * k;
-            wg_fill(&cell, sx0, sx1, y, y + L, slate ? WR_MIX : WR_FG);
-            if (slate) wg_fill(&cell, sx0, sx1, y + L, y + 2 * L, WR_LINE);
-        }
-        /* The frame line and the rule under the bar; Slate's bevel is a
-           highlight under the line and a shade over the rule. */
-        wg_fill(&cell, 0, w, 0, L, WR_FG);
-        wg_fill(&cell, 0, w, h - L, h, WR_FG);
-        if (slate) {
-            wg_fill(&cell, 0, w, L, 2 * L, WR_LINE);
-            wg_fill(&cell, 0, w, h - 2 * L, h - L, WR_MIX);
-        }
-    }
+    if (index <= WG_ZOOM) wg_bar(&cell, slate, stripes, sx0, sx1, n, top);
     if (index == WG_CLOSE || index == WG_SHADE || index == WG_ZOOM || index == WG_NOTE_CLOSE) {
         if (slate) wg_fill(&cell, bx, bx + side, by, by + side, WR_LINE);
         wg_outline(&cell, bx, bx + side, by, by + side, L);
@@ -311,6 +327,62 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
             roles[y * w + x] = role;
         }
     }
+}
+
+/* ADR 0214: the outer-edge frame, nine glyphs from BLIT_FRAME_FIRST. A
+   window has one frame. Its line sits on the outermost edge of each frame
+   cell -- the left cell's left edge, the right cell's right edge, the
+   bottom row's bottom edge -- and nothing else in the cell is drawn: the
+   cell's own background is the padding (the window's face, which the
+   application sets on the frame cells). Frame cells: left, right,
+   bottom-left (left and bottom lines), bottom, bottom-right; one colour,
+   coverage in the cell's foreground, the same for Chalk and Slate, whose
+   frames were always a 1 px foreground line. The title bar's two end cells
+   are the bar row's frame cells, and belong to the title-bar styles:
+   Chalk's (coverage) and Slate's (pens, the bar glyphs' roles). Each is
+   the bar -- its top line and rule, Slate's bevel rows -- with the outer
+   line down its outer edge, and the stripes run into the cell, stopping
+   BLIT_WINDOW_STRIPE_INSET px from the cell's outer edge (the line and one
+   clear pixel), so they join the stripes of the next cell. */
+enum {
+    FR_LEFT, FR_RIGHT, FR_BOTTOM_LEFT, FR_BOTTOM, FR_BOTTOM_RIGHT,
+    FR_CHALK_END_LEFT, FR_CHALK_END_RIGHT, FR_SLATE_END_LEFT, FR_SLATE_END_RIGHT
+};
+
+static int blit_frame_glyph(uint32_t scalar)
+{
+    return scalar >= BLIT_FRAME_FIRST && scalar < BLIT_FRAME_FIRST + BLIT_FRAME_COUNT;
+}
+
+/* Only Slate's two title-end cells draw in pens: 0 and 1; -1 for the rest. */
+static int blit_frame_pen_index(uint32_t scalar)
+{
+    if (!blit_frame_glyph(scalar) || scalar - BLIT_FRAME_FIRST < FR_SLATE_END_LEFT) return -1;
+    return (int)(scalar - BLIT_FRAME_FIRST) - FR_SLATE_END_LEFT;
+}
+
+static void blit_frame_roles(uint32_t scalar, unsigned char *roles, int w, int h)
+{
+    enum { L = BLIT_WINDOW_LINE };
+    unsigned index = scalar - BLIT_FRAME_FIRST;
+    int n, top, side, bx, by, right;
+    WindowCell cell;
+    cell.roles = roles; cell.w = w; cell.h = h;
+    memset(roles, WR_NONE, (size_t)w * (size_t)h);
+    switch (index) {
+    case FR_LEFT: wg_fill(&cell, 0, L, 0, h, WR_FG); return;
+    case FR_RIGHT: wg_fill(&cell, w - L, w, 0, h, WR_FG); return;
+    case FR_BOTTOM_LEFT: wg_fill(&cell, 0, L, 0, h, WR_FG); wg_fill(&cell, 0, w, h - L, h, WR_FG); return;
+    case FR_BOTTOM: wg_fill(&cell, 0, w, h - L, h, WR_FG); return;
+    case FR_BOTTOM_RIGHT: wg_fill(&cell, w - L, w, 0, h, WR_FG); wg_fill(&cell, 0, w, h - L, h, WR_FG); return;
+    default: break;
+    }
+    right = index == FR_CHALK_END_RIGHT || index == FR_SLATE_END_RIGHT;
+    blit_window_band(w, h, &n, &top, &side, &bx, &by);
+    wg_bar(&cell, index >= FR_SLATE_END_LEFT, 1, right ? 0 : BLIT_WINDOW_STRIPE_INSET,
+           right ? w - BLIT_WINDOW_STRIPE_INSET : w, n, top);
+    if (right) wg_fill(&cell, w - L, w, 0, h, WR_FG);
+    else wg_fill(&cell, 0, L, 0, h, WR_FG);
 }
 
 /* ADR 0210: what SGR 51 draws in a framed cell, as up to four horizontal
