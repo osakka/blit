@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-11-05: 0.3.45 a smaller package: one copy of the documentation, font sources in their own package
+
+- **The Blit package is 17.2 MB, down from 24.6 MB** (installed file bytes
+  40.8 MB, down from 51.2 MB) (ADR 0217), with no change in behaviour.
+  (1) The documentation was copied to `usr/lib/blit/docs` as well as
+  `usr/share/doc/blit/docs` (3.8 MB each); nothing reads the first (checked
+  in Blit's source and read-only in Hibr and the apps) and only the package
+  gate compared the two, so the second copy is gone, not linked: dpkg
+  removes the old directory on upgrade where it cannot replace a directory
+  with a symlink. (2) `usr/lib/blit/fonts/sources/freefont-src-20120503.tar.gz`
+  (6.2 MB), the preferred-form source of GNU FreeMono from which Blit Arabic
+  Modern is derived (GPLv3-or-later with the font exception), is now in its
+  own `blit-font-sources_20120503-1_all.deb` (6.5 MB, `Architecture: all`,
+  version the upstream's, published only when its content changes), which
+  `blit` Suggests; `usr/lib/blit/fonts/FreeMono-SOURCE.txt` in the main package
+  says where the source is (the package, the ftp.gnu.org URL, the sha256),
+  so the source offer stays with the binary. The build refuses a tarball whose
+  sha256 differs from `arabic-fonts.source.json`.
+- **Checks:** `package_artifact_gate` now fails on a shipped `fonts/sources`
+  or `usr/lib/blit/docs`, a missing `FreeMono-SOURCE.txt` or Suggests, and,
+  with the sources package beside it, checks `Architecture: all`, the version,
+  the file set and the tarball's sha256; it fails on the 0.3.42 package.
+  `documentation_gate`, `font_assets_gate` and `arabic_raster_gate` pass.
+  A real `dpkg --root` install of 0.3.42 and then the new packages in a scratch
+  root removed `usr/lib/blit/docs` and `fonts/sources` and changed nothing
+  else (the postinst needs root, `systemctl` and `adduser`, so it failed in
+  that unprivileged run, as expected).
+- **Suites:** this change touches packaging only, with no source change since
+  0.3.44 (all 178 and renderer 80 passed there); the full matrix was not
+  rerun. Run here: the gates above, individually.
+
 ## 2026-11-05: 0.3.44 plain title-bar end cells for the inactive bar
 
 - **Four glyphs** (ADR 0214, revised): `chalk-title-end-plain-left/right`
