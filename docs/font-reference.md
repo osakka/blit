@@ -116,6 +116,12 @@ mark beside a level.
 `hui-right` side by side: each is one column, and each draws its half of
 one badge (ADR 0197).
 
+Icons and symbols are fitted to the cell at every size from 8 to 64 px
+without trimming (ADR 0215): a colour icon is fitted by the layers it draws
+(so the Wi-Fi bars and the volume waves, not just their first layer), a
+spanning icon is drawn unhinted so its halves join, and a glyph that cannot
+be fitted is shown as the fallback, never cut.
+
 Every original uses **one terminal column** in every font.
 They are plane 16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:

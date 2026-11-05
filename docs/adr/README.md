@@ -232,6 +232,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0212 — The controls glyph set, and a catalogue a client can map dynamically](0212-controls-glyphs-and-a-mappable-catalogue.md)
 - [0213 — The graphics ledger, blink counters, and pictures held through a synchronized update](0213-graphics-ledger-blink-counters-and-held-pictures.md)
 - [0214 — One frame, its line on the outer edge; the title bar's end cells](0214-outer-edge-frame-and-title-end-cells.md)
+- [0215 — A fitted glyph is never trimmed: measured after the render, unhinted where it spans](0215-fitted-glyphs-are-never-trimmed.md)
 
 ## Status
 

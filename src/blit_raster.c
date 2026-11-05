@@ -976,6 +976,74 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
    caller restores it. */
 enum { FIT_ICON, FIT_SYMBOL };
 
+/* What draw_fitted fits: the glyph's outline in font units. A colour glyph
+   (COLR) is drawn from its layers, which the base glyph's own outline does
+   not cover (Blit's Wi-Fi bars: the base is the first bar only), so its box
+   is the layers' union. Leaves the base glyph loaded. */
+static int fitted_box(FT_Face face, FT_UInt index, int colour, FT_BBox *box)
+{
+    FT_LayerIterator iterator;
+    FT_UInt layer, palette;
+    int any = 0;
+    if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE)) return -1;
+    if (face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
+    FT_Outline_Get_CBox(&face->glyph->outline, box);
+    if (colour && FT_HAS_COLOR(face)) {
+        memset(&iterator, 0, sizeof(iterator));
+        while (FT_Get_Color_Glyph_Layer(face, index, &layer, &palette, &iterator)) {
+            FT_BBox part;
+            if (FT_Load_Glyph(face, layer, FT_LOAD_NO_SCALE) ||
+                face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) continue;
+            FT_Outline_Get_CBox(&face->glyph->outline, &part);
+            if (part.xMax <= part.xMin || part.yMax <= part.yMin) continue;
+            if (!any || part.xMin < box->xMin) box->xMin = part.xMin;
+            if (!any || part.yMin < box->yMin) box->yMin = part.yMin;
+            if (!any || part.xMax > box->xMax) box->xMax = part.xMax;
+            if (!any || part.yMax > box->yMax) box->yMax = part.yMax;
+            any = 1;
+        }
+        if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE)) return -1;
+    }
+    return 1;
+}
+
+/* Where a fitted glyph's origin goes for a given scale: the glyph centred
+   on the cell (or the span), icons on half the cap height, symbols on
+   their own baseline unless that leaves the cell. */
+static void fitted_origin(const BlitRaster *raster, int rule, int span, int column,
+                          const FT_BBox *box, double fit, int w, int h,
+                          double *ox, double *oy)
+{
+    if (span > 1) {
+        /* The whole icon's origin on the 26.6 grid, and the column's shift
+           from it, which the quantised scale (see draw_fitted) makes a whole
+           number of 26.6 steps: every part gets the same sub-pixel phase. */
+        double one = raster->icon_advance, step = w * 64.0 - fit * one * 64.0;
+        *ox = (floor(span / 2.0 * step + 0.5) - floor(column * step + 0.5)) / 64.0;
+        *oy = raster->cap / 2.0 - fit * raster->icon_cap / 2.0;
+        if (*oy + fit * box->yMax > raster->baseline) *oy = raster->baseline - fit * box->yMax;
+        if (*oy + fit * box->yMin < raster->baseline - h) *oy = raster->baseline - h - fit * box->yMin;
+        return;
+    }
+    *ox = w / 2.0 - fit * (box->xMin + box->xMax) / 2.0;
+    if (rule == FIT_ICON) *oy = raster->cap / 2.0 - fit * (box->yMin + box->yMax) / 2.0;
+    else {
+        double above = fit * box->yMax, below = -fit * box->yMin;
+        *oy = 0;
+        if (above > raster->baseline) *oy = raster->baseline - above;
+        else if (below > h - raster->baseline) *oy = below - (h - raster->baseline);
+    }
+}
+
+/* ADR 0215: the fitted glyph is never trimmed. A spanning icon is rendered
+   unhinted, so its parts, one outline shifted by whole advances, share one
+   sub-pixel phase and join; any other fitted glyph gets light (vertical)
+   hinting only, which leaves its horizontal extent where its outline says.
+   The bitmap is measured after the
+   render: one that does not fit its cell (or its span's outer edges) is
+   fitted again smaller, one that fits but sits askew is slid in, and one
+   that still does not fit is declined, for the caller's visible fallback,
+   as draw_outline_face does. */
 static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scalar,
                        RasterEntry *entry, int colour)
 {
@@ -985,10 +1053,11 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
     FT_Bitmap *bitmap;
     double natural, fit, bw, bh, ox, oy, limit;
     int w = entry->glyph.width, h = entry->glyph.height, left, top, x, y, failed, span = 1;
+    int column = 0, attempt, found;
     if (!face || !(index = FT_Get_Char_Index(face, scalar))) return 0;
-    if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE)) return -1;
-    if (face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
-    FT_Outline_Get_CBox(&face->glyph->outline, &box);
+    found = fitted_box(face, index, colour, &box);
+    if (found < 0) return -1;
+    if (!found) return 0;
     bw = (double)(box.xMax - box.xMin);
     bh = (double)(box.yMax - box.yMin);
     if (bw <= 0 || bh <= 0) return 1;
@@ -1005,14 +1074,10 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
                family is drawn at one scale and on one line, shrunk only if
                its ink would not fit the span. */
             double one = raster->icon_advance;
-            int column = (int)floor((span * one / 2.0 - (box.xMin + box.xMax) / 2.0) / one + 0.5);
+            column = (int)floor((span * one / 2.0 - (box.xMin + box.xMax) / 2.0) / one + 0.5);
             fit = 0.8 * h / raster->icon_cap;
             if (0.95 * span * w / bw < fit) fit = 0.95 * span * w / bw;
-            ox = (span / 2.0 - column) * (w - fit * one);
-            oy = raster->cap / 2.0 - fit * raster->icon_cap / 2.0;
-            if (oy + fit * box.yMax > raster->baseline) oy = raster->baseline - fit * box.yMax;
-            if (oy + fit * box.yMin < raster->baseline - h) oy = raster->baseline - h - fit * box.yMin;
-            goto place;
+            goto render;
         }
         natural = w / advance;
         limit = raster->cap / bh;
@@ -1023,36 +1088,63 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
     fit = natural;
     if (0.9 * w / bw < fit) fit = 0.9 * w / bw;
     if (limit < fit) fit = limit;
-    ox = w / 2.0 - fit * (box.xMin + box.xMax) / 2.0;
-    if (rule == FIT_ICON) oy = raster->cap / 2.0 - fit * (box.yMin + box.yMax) / 2.0;
-    else {
-        double above = fit * box.yMax, below = -fit * box.yMin;
-        oy = 0;
-        if (above > raster->baseline) oy = raster->baseline - above;
-        else if (below > h - raster->baseline) oy = below - (h - raster->baseline);
+render:
+    for (attempt = 0; attempt < 3; ++attempt) {
+        int over_x, over_y, avail_x = span * w;
+        double shrink = 1.0;
+        long size = (long)(fit * face->units_per_EM * 64.0 + 0.5);
+        if (span > 1) {
+            /* A spanning icon's parts are one outline shifted by whole
+               advances: a scale at which an advance is a whole number of
+               26.6 steps keeps the parts on one phase, so they join. */
+            long a = (long)(raster->icon_advance + 0.5), b = face->units_per_EM, t, g;
+            while (b) { t = a % b; a = b; b = t; }
+            g = face->units_per_EM / a;
+            if (g > 1 && g <= 64) size = (size + g / 2) / g * g;
+            if (size < 1) size = 1;
+            fit = (double)size / (face->units_per_EM * 64.0);
+        }
+        fitted_origin(raster, rule, span, column, &box, fit, w, h, &ox, &oy);
+        if (FT_Set_Char_Size(face, 0, (FT_F26Dot6)size, 72, 72))
+            return -1;
+        left = (int)floor(ox);
+        delta.x = (FT_Pos)((ox - left) * 64.0);
+        delta.y = (FT_Pos)(oy * 64.0);
+        FT_Set_Transform(face, NULL, &delta);
+        failed = FT_Load_Glyph(face, index, FT_LOAD_RENDER | (span > 1 ? FT_LOAD_TARGET_NORMAL | FT_LOAD_NO_HINTING : FT_LOAD_TARGET_LIGHT) |
+                               (colour ? FT_LOAD_COLOR : 0));
+        FT_Set_Transform(face, NULL, NULL);
+        if (failed) return -1;
+        bitmap = &face->glyph->bitmap;
+        if (bitmap->pitch < 0 ||
+            (!colour && (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->num_grays != 256)) ||
+            (colour && bitmap->pixel_mode != FT_PIXEL_MODE_BGRA)) return -1;
+        left += face->glyph->bitmap_left;
+        top = raster->baseline - face->glyph->bitmap_top;
+        if (!bitmap->width || !bitmap->rows) return 1;
+        /* Over the edges: a spanning part's inner sides are its neighbour's. */
+        over_x = (span > 1 ? ((column == 0 ? left < 0 : 0) ||
+                              (column == span - 1 ? left + (int)bitmap->width > w : 0)) :
+                  left < 0 || left + (int)bitmap->width > w);
+        over_y = top < 0 || top + (int)bitmap->rows > h;
+        if (!over_x && !over_y) break;
+        if ((int)bitmap->width > avail_x) shrink = (double)avail_x / bitmap->width;
+        if ((int)bitmap->rows > h && (double)h / bitmap->rows < shrink) shrink = (double)h / bitmap->rows;
+        if (shrink < 1.0) { fit *= shrink * 0.98; continue; }
+        if (span > 1) return 0;     /* the parts of a family are not slid apart */
+        /* It fits, but sits askew: slide it in, whole pixels, no ink lost. */
+        if (left < 0) left = 0;
+        else if (left + (int)bitmap->width > w) left = w - (int)bitmap->width;
+        if (top < 0) top = 0;
+        else if (top + (int)bitmap->rows > h) top = h - (int)bitmap->rows;
+        break;
     }
-place:
-    if (FT_Set_Char_Size(face, 0, (FT_F26Dot6)(fit * face->units_per_EM * 64.0 + 0.5), 72, 72))
-        return -1;
-    left = (int)floor(ox);
-    delta.x = (FT_Pos)((ox - left) * 64.0);
-    delta.y = (FT_Pos)(oy * 64.0);
-    FT_Set_Transform(face, NULL, &delta);
-    failed = FT_Load_Glyph(face, index, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL |
-                           (colour ? FT_LOAD_COLOR : 0));
-    FT_Set_Transform(face, NULL, NULL);
-    if (failed) return -1;
-    bitmap = &face->glyph->bitmap;
-    if (bitmap->pitch < 0 ||
-        (!colour && (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->num_grays != 256)) ||
-        (colour && bitmap->pixel_mode != FT_PIXEL_MODE_BGRA)) return -1;
-    left += face->glyph->bitmap_left;
-    top = raster->baseline - face->glyph->bitmap_top;
-    /* Fitted to the cell, so at most hinting's pixel can stray: trim it. */
+    if (attempt == 3) return 0;
     for (y = 0; y < (int)bitmap->rows; ++y) for (x = 0; x < (int)bitmap->width; ++x) {
         int cx = left + x, cy = top + y;
         unsigned char *out;
         const unsigned char *in;
+        /* Only a spanning part's inner side, the neighbour's, is left out. */
         if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
         out = entry->pixels + cy * entry->glyph.stride + cx * (int)entry->glyph.format;
         in = bitmap->buffer + y * bitmap->pitch + x * (colour ? 4 : 1);

@@ -4,6 +4,7 @@
 - Date: 2026-10-27
 - Scope: `assets/fonts/icons` (catalogue and artwork), the icon generator,
   `blit_raster.c` (`draw_fitted`), the icon gates
+- Revised by: ADR 0215 (0.3.41), the fitting step of `draw_fitted`: measured after the render, never trimmed, spanning parts unhinted
 
 ## Context
 
