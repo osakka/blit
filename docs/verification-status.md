@@ -1,5 +1,18 @@
 # Verification status
 
+## 2026-11-05: 0.3.46 XTGETTCAP answers the SGR extension names
+
+- **`DCS + q` now answers `sgr-framed`, `sgr-framed-bar` and `sgr-shadow`**
+  (hibr#476), the names `GET /v1/server` lists in `capabilities`, so a client
+  that holds the terminal and not the HTTP API can ask the terminal itself.
+  Each is a boolean: a name Blit has is answered `DCS 1 + r <hex name> ST` with
+  no value; any other name is still refused `DCS 0 + r <hex name> ST`. `CSI > q`
+  already answers `Blit(<version>)`. Documented in `docs/terminal.md`.
+- **Checks:** `terminal_conformance` has one case per name asserting the exact
+  reply bytes. Suites `all` (174 pass, 10 skip, 0 fail) and GLES `renderer`
+  (80 pass, 1 skip, 0 fail) passed; `package_artifact_gate` passes on the
+  package (reproducibility check skipped).
+
 ## 2026-11-05: 0.3.45 a smaller package: one copy of the documentation, font sources in their own package
 
 - **The Blit package is 17.2 MB, down from 24.6 MB** (installed file bytes
