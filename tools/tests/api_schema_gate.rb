@@ -50,8 +50,28 @@ raise "unexpected path count #{paths.length}" unless paths.length == 49
 raise 'font icon discovery contract missing' unless
   paths.dig('/v1/fonts/icons','get','operationId') == 'getFontIconCatalogue' &&
   schema.dig('components','schemas','FontIconCatalogue','required').sort ==
-    %w[version profiles columns namespace license icons text_glyphs].sort &&
+    %w[revision version profiles columns namespace license icons text_glyphs retired cell_geometry].sort &&
   schema.dig('components','schemas','FontIcon','properties','signal_level','maximum') == 4
+# ADR 0212: a catalogue a client can map dynamically -- every cell_geometry
+# entry typed with what it is and which pens to set, a revision, an ETag and
+# a conditional request.
+glyph = schema.dig('components','schemas','CellGeometryGlyph')
+raise 'cell_geometry entries are not typed' unless
+  glyph.fetch('required').sort == %w[id codepoint colour shape part cells background foreground line].sort &&
+  glyph.fetch('additionalProperties') == false &&
+  glyph.dig('properties','part','enum') ==
+    %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule] &&
+  glyph.dig('properties','background','enum') == %w[bar panel wallpaper dialog-face button-face] &&
+  glyph.dig('properties','foreground','enum') == %w[ink track bar] &&
+  glyph.dig('properties','line','enum') == %w[none highlight box-face dialog-face button-face knob] &&
+  glyph.dig('properties','cells','required').sort == %w[position span]
+icons_get = paths.dig('/v1/fonts/icons','get')
+raise 'the catalogue has no revision, ETag or conditional request' unless
+  schema.dig('components','schemas','FontIconCatalogue','properties','revision','pattern') == '^[0-9a-f]{64}$' &&
+  icons_get.fetch('parameters').any? { |p| p['name'] == 'If-None-Match' && p['in'] == 'header' } &&
+  icons_get.dig('responses','200','headers','ETag') && icons_get.dig('responses','304','headers','ETag')
+capabilities = schema.dig('components','schemas','ServerDetails','properties','capabilities','description').to_s
+raise 'the SGR capability flags are not documented' unless %w[sgr-framed sgr-framed-bar sgr-shadow].all? { |f| capabilities.include?(f) }
 console=schema.dig('components','schemas','ConsoleDiagnostics')
 raise 'native console observation contract missing' unless
   paths.dig('/v1/diagnostics/console','get','operationId') == 'getConsoleDiagnostics' &&

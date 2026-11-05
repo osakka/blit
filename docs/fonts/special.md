@@ -346,5 +346,25 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `slate-light-button-right` | `U+100274` | `"\udbc0\ude74"` | cell pens | Slate set: button, right end |
 | `slate-light-default-button-left` | `U+100275` | `"\udbc0\ude75"` | cell pens | Slate set: default button, left end: rounded 3 px ring; SGR 51:3 draws the label's |
 | `slate-light-default-button-right` | `U+100276` | `"\udbc0\ude76"` | cell pens | Slate set: default button, right end |
+| `chalk-check-off` | `U+10029A` | `"\udbc0\ude9a"` | foreground | Chalk set: checkbox, off: an 11x11 square on the text row |
+| `chalk-check-on` | `U+10029B` | `"\udbc0\ude9b"` | foreground | Chalk set: checkbox, checked: the square with an X |
+| `chalk-check-mixed` | `U+10029C` | `"\udbc0\ude9c"` | foreground | Chalk set: checkbox, mixed: the square with a dash |
+| `slate-check-off` | `U+10029D` | `"\udbc0\ude9d"` | cell pens | Slate set: checkbox, off: the square, a face and a shade down and right |
+| `slate-check-on` | `U+10029E` | `"\udbc0\ude9e"` | cell pens | Slate set: checkbox, checked: with a 2 px check mark |
+| `slate-check-mixed` | `U+10029F` | `"\udbc0\ude9f"` | cell pens | Slate set: checkbox, mixed: with a heavier dash |
+| `chalk-switch-off-left` | `U+1002A0` | `"\udbc0\udea0"` | foreground | Chalk set: compact switch, off, left cell: a rounded track, the knob on the left |
+| `chalk-switch-off-right` | `U+1002A1` | `"\udbc0\udea1"` | foreground | Chalk set: compact switch, off, right cell |
+| `chalk-switch-on-left` | `U+1002A2` | `"\udbc0\udea2"` | foreground | Chalk set: compact switch, on, left cell: a filled track, the knob on the right |
+| `chalk-switch-on-right` | `U+1002A3` | `"\udbc0\udea3"` | foreground | Chalk set: compact switch, on, right cell |
+| `slate-switch-off-left` | `U+1002A4` | `"\udbc0\udea4"` | cell pens | Slate set: compact switch, off, left cell: a bevelled track, the knob on the left |
+| `slate-switch-off-right` | `U+1002A5` | `"\udbc0\udea5"` | cell pens | Slate set: compact switch, off, right cell |
+| `slate-switch-on-left` | `U+1002A6` | `"\udbc0\udea6"` | cell pens | Slate set: compact switch, on, left cell: a mixed-grey track, the knob on the right |
+| `slate-switch-on-right` | `U+1002A7` | `"\udbc0\udea7"` | cell pens | Slate set: compact switch, on, right cell |
+| `capsule-off-left` | `U+1002A8` | `"\udbc0\udea8"` | cell pens | Capsule set: capsule switch, off, left cell: a pill track, the knob on the left |
+| `capsule-off-mid` | `U+1002A9` | `"\udbc0\udea9"` | cell pens | Capsule set: capsule switch, off, middle cell |
+| `capsule-off-right` | `U+1002AA` | `"\udbc0\udeaa"` | cell pens | Capsule set: capsule switch, off, right cell |
+| `capsule-on-left` | `U+1002AB` | `"\udbc0\udeab"` | cell pens | Capsule set: capsule switch, on, left cell: the knob on the right |
+| `capsule-on-mid` | `U+1002AC` | `"\udbc0\udeac"` | cell pens | Capsule set: capsule switch, on, middle cell |
+| `capsule-on-right` | `U+1002AD` | `"\udbc0\udead"` | cell pens | Capsule set: capsule switch, on, right cell |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

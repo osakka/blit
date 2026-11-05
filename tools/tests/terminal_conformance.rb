@@ -92,6 +92,16 @@ unless expected_version.nil? || expected_version.empty?
   puts "PASS version-identity-#{expected_version}"
 end
 
+# ADR 0212: a client switches on a flag, not a version. The server names the
+# SGR extensions this file exercises below: sgr-framed (51, 51:3, 51:5, 54),
+# sgr-framed-bar (51:2, with 51:4 its alias) and sgr-shadow (66, 67).
+sgr_flags = %w[sgr-framed sgr-framed-bar sgr-shadow]
+advertised = request(base, 'GET', '/v1/server').fetch('capabilities')
+missing = sgr_flags - advertised
+raise "server capabilities lack #{missing.join(', ')}" unless missing.empty?
+raise 'server capabilities repeat a flag' unless advertised.uniq == advertised
+puts 'PASS sgr-capability-flags'
+
 topology = request(base, 'GET', '/v1/topology')
 revision = topology.fetch('revision')
 placements = topology.fetch('outputs').map.with_index do |output, index|

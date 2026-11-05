@@ -159,6 +159,28 @@ static void wg_round_normal(int x, int y, int x0, int x1, int y0, int y1, int r,
     *vy = py < 2 * (y0 + r) ? py - 2 * (y0 + r) : py > 2 * (y1 - r) ? py - 2 * (y1 - r) : 0;
 }
 
+/* The title bar's stripes and the box among them, for a w x h cell: n
+   stripes (L thick and L apart, six at 22 px and as many in proportion at
+   other heights, at least one), centred in a band of 2n lines; and the box,
+   square, the cell's width or the band less a line, centred on the stripes.
+   The window boxes and the checkbox and switch (ADR 0212) all stand here,
+   so they line up at every cell size. */
+static void blit_window_band(int w, int h, int *n_out, int *top_out,
+                             int *side_out, int *bx_out, int *by_out)
+{
+    int L = BLIT_WINDOW_LINE;
+    int n = (BLIT_WINDOW_STRIPES * h + BLIT_WINDOW_DESIGN_HEIGHT / 2) / BLIT_WINDOW_DESIGN_HEIGHT;
+    int band, top, side;
+    if (n > (h - 4 * L) / (2 * L)) n = (h - 4 * L) / (2 * L);
+    if (n < 1) n = 1;
+    band = 2 * L * n;
+    top = (h - band) / 2;
+    side = band - L < w ? band - L : w;
+    *n_out = n; *top_out = top; *side_out = side;
+    *bx_out = (w - side) / 2;
+    *by_out = top + (band - L - side) / 2;
+}
+
 /* One glyph's roles, w x h, row-major; WR_NONE is transparent. */
 static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int h)
 {
@@ -170,21 +192,11 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
     };
     unsigned index = (scalar - BLIT_WINDOW_FIRST) % BLIT_WINDOW_SET;
     int slate = blit_window_colour(scalar);
-    /* The title bar's stripes: L thick and L apart, six at 22 px and as
-       many in proportion at other heights, centred. */
-    int n = (BLIT_WINDOW_STRIPES * h + BLIT_WINDOW_DESIGN_HEIGHT / 2) / BLIT_WINDOW_DESIGN_HEIGHT;
-    int band, top, side, bx, by, x, y, k, sx0 = 0, sx1 = w, stripes = 0;
+    int n, top, side, bx, by, x, y, k, sx0 = 0, sx1 = w, stripes = 0;
     WindowCell cell;
     cell.roles = roles; cell.w = w; cell.h = h;
     memset(roles, WR_NONE, (size_t)w * (size_t)h);
-    if (n > (h - 4 * L) / (2 * L)) n = (h - 4 * L) / (2 * L);
-    if (n < 1) n = 1;
-    band = 2 * L * n;
-    top = (h - band) / 2;
-    /* A box: square, the cell's width, centred on the stripes. */
-    side = band - L < w ? band - L : w;
-    bx = (w - side) / 2;
-    by = top + (band - L - side) / 2;
+    blit_window_band(w, h, &n, &top, &side, &bx, &by);
     switch (index) {
     case WG_STRIPE: stripes = 1; break;
     case WG_STRIPE_FIRST: case WG_STRIPE_FROM_BOX: stripes = 1; sx0 = INSET; break;

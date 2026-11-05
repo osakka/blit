@@ -1,6 +1,6 @@
 #include "blit_raster.h"
 #include "blit_emoji_presentation.h"
-#include "blit_window_glyphs.h"
+#include "blit_control_glyphs.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_COLOR_H
@@ -54,8 +54,9 @@ struct BlitRaster {
     unsigned long long hits, misses;
     unsigned reclaim_slot;
     RasterEntry cache[RASTER_SLOTS];
-    /* ADR 0211: each Slate glyph's FG, LINE and MIX planes. */
-    unsigned char *window_planes[BLIT_WINDOW_SET][3];
+    /* ADR 0211, 0212: each pen-drawn glyph's FG, LINE and MIX planes: Slate's
+       window glyphs, then the controls'. */
+    unsigned char *window_planes[BLIT_CHROME_PENS][3];
 };
 
 static int ceil_26_6(FT_Pos value) { return (int)((value + 63) / 64); }
@@ -74,7 +75,7 @@ void blit_raster_close(BlitRaster *raster)
     int i;
     if (!raster) return;
     for (i = 0; i < RASTER_SLOTS; ++i) free(raster->cache[i].pixels);
-    for (i = 0; i < (int)BLIT_WINDOW_SET * 3; ++i) free(raster->window_planes[i / 3][i % 3]);
+    for (i = 0; i < (int)BLIT_CHROME_PENS * 3; ++i) free(raster->window_planes[i / 3][i % 3]);
     if (raster->shape_buffer) hb_buffer_destroy(raster->shape_buffer);
     if (raster->colour_font) hb_font_destroy(raster->colour_font);
     if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
@@ -1192,7 +1193,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
        and the pen at U+270E, whatever the text font has there. */
     int blit_icon = !arabic && key->length == 1 && raster->icons &&
         (scalar >= 0x100000 || scalar == 0x270e) && !bar_corner(scalar) &&
-        !blit_window_glyph(scalar) &&
+        !blit_chrome_glyph(scalar) &&
         FT_Get_Char_Index(raster->icons, scalar);
     int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
@@ -1244,7 +1245,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     /* ADR 0210, 0211: the window glyphs are coverage. Chalk is drawn in the
        foreground; looked up whole, a Slate glyph is the same one-colour
        fallback, and its pens come from blit_raster_get_window_plane. */
-    if (key->length == 1 && blit_window_glyph(scalar))
+    if (key->length == 1 && blit_chrome_glyph(scalar))
         next.glyph.format = BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
     else if (key->length > 1 && !arabic) {
@@ -1265,8 +1266,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && bar_corner(scalar)) {
         draw_bar_corner(scalar, &next); result = 1;
-    } else if (key->length == 1 && blit_window_glyph(scalar)) {
-        result = blit_window_draw(scalar, 0, next.pixels, next.glyph.stride,
+    } else if (key->length == 1 && blit_chrome_glyph(scalar)) {
+        result = blit_chrome_draw(scalar, 0, next.pixels, next.glyph.stride,
                                   next.glyph.width, next.glyph.height) ? 1 : -1;
     } else if (key->length == 1 && scalar >= 0x2500 && scalar <= 0x257f &&
                next.glyph.format == BLIT_RASTER_COVERAGE) {
@@ -1369,14 +1370,14 @@ int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
 {
     unsigned index;
     unsigned char **pixels;
-    if (!raster || !glyph || !blit_window_colour(scalar) || plane < WR_FG || plane > WR_MIX)
+    if (!raster || !glyph || !blit_chrome_colour(scalar) || plane < WR_FG || plane > WR_MIX)
         return 0;
-    index = scalar - (BLIT_WINDOW_FIRST + BLIT_WINDOW_SET);
+    index = (unsigned)blit_chrome_pen_index(scalar);
     pixels = &raster->window_planes[index][plane - WR_FG];
     if (!*pixels) {
         *pixels = calloc((size_t)raster->width, (size_t)raster->height);
         if (!*pixels) return 0;
-        if (!blit_window_draw(scalar, plane, *pixels, raster->width, raster->width, raster->height)) {
+        if (!blit_chrome_draw(scalar, plane, *pixels, raster->width, raster->width, raster->height)) {
             free(*pixels);
             *pixels = NULL;
             return 0;

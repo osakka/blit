@@ -1,5 +1,35 @@
 # Verification status
 
+## 2026-11-05: 0.3.40 controls glyphs; a catalogue programs can map from
+
+- **Controls glyphs** (ADR 0212), U+10029A-U+1002AD (next free U+1002AE):
+  a checkbox (off, checked, mixed) and a two-cell switch in Chalk
+  (coverage, the cell's foreground) and Slate (role art from the cell's
+  pens), and the Capsule switch, three cells, in one set: its track is the
+  cell's foreground (the application picks green or grey), its knob the
+  underline colour, its smoothed edge the mean of foreground and
+  background. Boxes use the window boxes' helper, so a checkbox lands on
+  the same rows at every size. `control_glyph_gate` (every glyph at 12 cell
+  sizes against the design) and `control_style_gate` (a real server on both
+  compositors; the capsule drawn in green and grey on light and dark
+  panels) fail on 0.3.39 ("U+10029A is not a whole coverage cell").
+- **A catalogue programs can map from.** Every `cell_geometry` entry (92) has
+  structured pen roles, generated from the same tables as the glyphs:
+  `part`, `cells` (span and position), `background`, `foreground`, `line`,
+  typed in OpenAPI and checked by `catalogue_fields_gate` (the design
+  scripts' `--check`). `GET /v1/fonts/icons` carries a `revision` (the
+  SHA-256 of the catalogue file as packaged, computed by a new
+  `blit_sha256.h`, checked against Ruby's across the padding boundaries)
+  and the same value as its `ETag`; `If-None-Match` gets 304; the response
+  is `Cache-Control: no-cache`. `GET /v1/server` capabilities list
+  `sgr-framed`, `sgr-framed-bar` and `sgr-shadow`, so a client switches
+  features on a flag, not a version. The catalogue is 60.9 KB of the 256 KiB
+  cap, which the gate enforces.
+- **Suites:** font 42/42, all 175 pass (6 skip), renderer on GLES 78 pass
+  (1 skip); no failures. One run of "all" failed
+  `settings_persistence_gate` once under load; alone it passed 3 of 3 on
+  this build and on 0.3.39, and the rerun of "all" passed.
+
 ## 2026-11-05: 0.3.39 Slate from the cell's colours; the shadow attribute
 
 - **Slate takes its colours from the cell** (ADR 0211, owner's decision).

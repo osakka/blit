@@ -154,16 +154,44 @@ paths:
       description: >-
         Return the packaged canonical catalogue shared by both outline profiles.
         Private-use icons occupy one cell and carry intrinsic colour. Text
-        glyphs and the U+270E alias remain foreground-coloured. This is not
-        an assertion that the active font is an outline profile or that every
-        application selects these glyphs. No display or font setting changes.
+        glyphs and the U+270E alias remain foreground-coloured. Cell geometry
+        (the bar corners, the window chrome and the controls, ADR 0210-0212)
+        is drawn by Blit in the cell's own pens, and each entry says which
+        pens an application sets for it. This is not an assertion that the
+        active font is an outline profile or that every application selects
+        these glyphs. No display or font setting changes.
+
+        `revision` is the SHA-256 of the catalogue file as packaged, the hash
+        fonts.source.json pins, and the ETag carries the same value (quoted).
+        A client that keeps the catalogue compares it, or sends it back in
+        If-None-Match and is answered 304 while it is current. The response
+        may be stored and must be revalidated (Cache-Control: no-cache).
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: A catalogue ETag (or `*`); a current one is answered 304 with no body.
+          schema: {type: string}
       responses:
         '200':
           description: Packaged original icon catalogue
+          headers:
+            ETag:
+              description: The catalogue's revision, quoted.
+              schema: {type: string, pattern: '^"[0-9a-f]{64}"$'}
+            Cache-Control:
+              description: no-cache
+              schema: {type: string, const: no-cache}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/FontIconCatalogue'
+        '304':
+          description: The client's If-None-Match is the current revision; no body.
+          headers:
+            ETag:
+              description: The catalogue's revision, quoted.
+              schema: {type: string, pattern: '^"[0-9a-f]{64}"$'}
         '503':
           $ref: '#/components/responses/Problem'
         default:
@@ -1929,11 +1957,87 @@ components:
         text_alias: {type: string, pattern: '^[0-9A-F]{4,6}$'}
         signal_level: {type: integer, minimum: 1, maximum: 4}
         colour: {type: boolean}
+        columns:
+          type: integer
+          minimum: 2
+          description: How many cells the icon spans, written side by side (ADR 0197).
+        column:
+          type: integer
+          minimum: 0
+          description: This entry's place in the span, from 0.
+      additionalProperties: false
+    RetiredRange:
+      type: object
+      description: Codepoints that once meant something and never mean anything else (ADR 0201).
+      required: [from, to, was]
+      properties:
+        from: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+        to: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+        was: {type: string}
+        note: {type: string}
+      additionalProperties: false
+    CellGeometryGlyph:
+      type: object
+      description: >-
+        A glyph Blit draws itself, from the cell's size, in the cell's pens
+        (ADR 0191, 0210-0212). The structured fields say what it is and what
+        an application sets for it, so a client maps it from this data.
+        `pens` says how it is drawn: `foreground` in the one colour (Chalk),
+        `cell` in the foreground, SGR 58 and a mix of foreground and
+        background (Slate, the capsule); the corners have neither field.
+      required: [id, codepoint, colour, shape, part, cells, background, foreground, line]
+      properties:
+        id: {type: string}
+        codepoint: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+        colour:
+          type: boolean
+          description: 'Always false: no glyph carries colours of its own.'
+        shape: {type: string}
+        pens: {type: string, enum: [foreground, cell]}
+        set: {type: string, enum: [chalk, slate-light, slate, capsule]}
+        part:
+          type: string
+          enum: [bar-corner, title-bar, note-close, frame, dialog-border, button-cap, checkbox, switch, capsule]
+          description: What the glyph is a piece of.
+        cells:
+          type: object
+          description: How many cells the whole piece spans, written side by side, and this glyph's place in it.
+          required: [span, position]
+          properties:
+            span: {type: integer, minimum: 1, maximum: 3}
+            position: {type: integer, minimum: 0, maximum: 2}
+          additionalProperties: false
+        background:
+          type: string
+          enum: [bar, panel, wallpaper, dialog-face, button-face]
+          description: >-
+            What the cell's background should be: the title bar's, the panel
+            the control or note sits on, the wallpaper (the default
+            background), the dialog's face or the button's face.
+        foreground:
+          type: string
+          enum: [ink, track, bar]
+          description: >-
+            What the cell's foreground is: the ink (lines, outlines), the
+            capsule's track (the application chooses its colour), or the title
+            bar's colour (the corners' fill).
+        line:
+          type: string
+          enum: [none, highlight, box-face, dialog-face, button-face, knob]
+          description: >-
+            What SGR 58 (the underline colour, white when unset) is: nothing,
+            the bar's highlight (and a window box's face), a box's face, the
+            dialog's face, the button's face, or a knob's face (and a switch
+            track's highlight).
       additionalProperties: false
     FontIconCatalogue:
       type: object
-      required: [version, profiles, columns, namespace, license, icons, text_glyphs]
+      required: [revision, version, profiles, columns, namespace, license, icons, text_glyphs, retired, cell_geometry]
       properties:
+        revision:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The SHA-256 of the catalogue file as packaged; the ETag carries it too.
         version: {type: integer, minimum: 1}
         profiles:
           type: array
@@ -1948,6 +2052,12 @@ components:
         text_glyphs:
           type: array
           items: {$ref: '#/components/schemas/FontIcon'}
+        retired:
+          type: array
+          items: {$ref: '#/components/schemas/RetiredRange'}
+        cell_geometry:
+          type: array
+          items: {$ref: '#/components/schemas/CellGeometryGlyph'}
       additionalProperties: false
     FontProfile:
       type: object
@@ -2075,6 +2185,12 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         capabilities:
           type: array
+          description: >-
+            Runtime facts a client switches on instead of a version. Among
+            them: `sgr-framed` (SGR 51 framed, with Blit's 51:3 thick and 51:5
+            rule, and 54 to end it), `sgr-framed-bar` (51:2, a Slate title
+            bar's rows in the cell's pens; 51:4 is its alias) and `sgr-shadow`
+            (SGR 66, 67: a drop shadow drawn under the cell's glyph).
           items: {type: string}
         display_count: {type: integer, minimum: 0}
         display_backend:

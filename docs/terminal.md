@@ -102,6 +102,10 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 51:5 | Blit extension: a rule along the cell's bottom edge only, 1 px, in the underline colour if set, else the foreground: the line under a note's strip (ADR 0210) |
 | 66:kind:width:inset, 67 | Blit extension: a drop shadow drawn under the cell's glyph, in the underline colour if set, else the foreground; 67 (or 66:0) ends it. kind 1 right, 2 right from 2 px down (a window's first row), 3 under, 4 under from the 2 px offset (its first cell), 5 the corner; width 1 or 2 px, 2 if left out; inset 1 (default: 1 px in, just outside a Blit frame glyph's line) or 0 (at the cell's edge, beside a frame that fills its cells). Colon form only (ADR 0211) |
 
+**A client detects these extensions** from `GET /v1/server`'s `capabilities`:
+`sgr-framed` (51, 51:3, 51:5, 54), `sgr-framed-bar` (51:2, and 51:4 as its
+alias) and `sgr-shadow` (66, 67), not from the version.
+
 **SGR 66 and 67 are Blit's own,** in a gap the references we read leave
 unassigned (ADR 0211 lists them); that is not a survey of every terminal.
 `66;1;2` is three SGRs, not a shadow.

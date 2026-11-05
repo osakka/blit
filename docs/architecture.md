@@ -48,7 +48,7 @@ Beside the main loop:
 | Frame socket | `src/blit_frames.h` | pictures by descriptor from programs on this machine: a sealed memfd per frame into a session's Kitty image, checked by session token and sender uid (ADR 0202) |
 | Topology | `src/blit_display_layout.h` | monitors, panes per monitor (up to 8×8), which session is in which pane |
 | Input | `src/blit_server.c`, `src/blit_touchpad.h`, `src/blit_input_*.h` | evdev discovery and identity, keyboard and pointer settings, routing to sessions, pointer lock |
-| Glyphs | `src/blit_font.c`, `src/blit_raster.c`, `src/blit_cell_geometry.h` | text fonts, the glyph stack, HarfBuzz shaping, colour glyphs, cell-exact line drawing, the glyph cache |
+| Glyphs | `src/blit_font.c`, `src/blit_raster.c`, `src/blit_cell_geometry.h`, `src/blit_window_glyphs.h`, `src/blit_control_glyphs.h` | text fonts, the glyph stack, HarfBuzz shaping, colour glyphs, cell-exact line drawing, the glyph cache |
 | KMS | `src/blit_kms.c`, `src/blit_kms_hotplug.h` | connectors, modes, buffers, page flips, refresh scheduling, hotplug |
 | GPU compositor | `src/blit_gles.c`, `src/blit_kms_gles.c` | composing panes, glyphs, images and effects with OpenGL ES; Mesa is loaded at run time |
 | Effects | `src/blit_effects.h` | the one list of effects, their parameters and order, shared by both compositors |

@@ -60,7 +60,9 @@ Dir.chdir(ROOT)
 # The catalogue.
 catalogue = JSON.parse(File.read('assets/fonts/icons/catalogue.json'))
 geometry = catalogue.fetch('cell_geometry')
-window = geometry.select { |e| SETS.keys.any? { |s| e['id'].start_with?("#{s}-") } }
+# The window glyphs are U+100231-100276; the controls (ADR 0212) follow the
+# retired Slate dark range, and have their own gate.
+window = geometry.select { |e| e['codepoint'].to_i(16).between?(0x100231, 0x100276) }
 expected = SETS.flat_map do |style, first|
   NAMES.each_with_index.map do |name, i|
     ["#{style}-#{name}", format('%06X', first + i), false, style == 'chalk' ? 'foreground' : 'cell']
@@ -76,7 +78,8 @@ codes = window.map { |e| e['codepoint'].to_i(16) }
 check((codes & icon_codes).empty? && (codes & retired).empty?, 'a window glyph reuses an icon or retired codepoint')
 check(codes == (0x100231..0x100276).to_a, 'the window glyphs are not U+100231-100276')
 check((0x100277..0x100299).all? { |c| retired.include?(c) }, 'Slate dark (U+100277-100299) is not retired')
-check(!(icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).include?(0x10029A), 'U+10029A is no longer free')
+check(geometry.none? { |e| e['codepoint'].to_i(16).between?(0x100277, 0x100299) },
+      'a glyph is mapped in the retired Slate dark range')
 
 # The raster, at every size.
 freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")

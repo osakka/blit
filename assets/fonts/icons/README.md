@@ -62,7 +62,45 @@ draw title bars, boxes, window and notification frames, dialog borders
 and button ends. Blit draws them from the geometry table in
 `src/blit_window_glyphs.h`; `tools/fonts/draw-window-glyphs.py` is the
 design, writes their catalogue entries, and is what `window_glyph_gate`
-holds the raster to. U+10029A is the next free codepoint.
+holds the raster to.
+
+U+10029A–U+1002AD are the controls (ADR 0212), also cell geometry, 20
+glyphs in this order: a checkbox in Chalk then Slate (off, on, mixed), a
+compact switch two cells wide in Chalk then Slate (off-left, off-right,
+on-left, on-right), and a capsule switch three cells wide (off-left,
+off-mid, off-right, on-left, on-mid, on-right). A multi-cell piece is
+written side by side, one codepoint per cell. The capsule has no colour of
+its own: its track is the foreground (green when on, grey when off, as the
+application chooses), its knob the underline colour, its smoothed edge the
+mean of the foreground and the background. Blit draws them from
+`src/blit_control_glyphs.h` and the window table;
+`tools/fonts/draw-control-glyphs.py` is the design and writes their
+entries, and `control_glyph_gate` holds the raster to it. U+1002AE is the
+next free codepoint.
+
+### What an application sets for a cell-geometry glyph
+
+Every `cell_geometry` entry carries, besides its `id`, `codepoint`, `colour`
+(always false), `shape`, and for the window and control sets `set` and
+`pens`, fields an application reads to set the cell's pens from data. They
+are generated from the same geometry tables as the glyphs, and
+`catalogue_fields_gate` checks them against these words and the OpenAPI
+schema (`CellGeometryGlyph`):
+
+| Field | Values and meaning |
+| --- | --- |
+| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners have neither this nor `set`. |
+| `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`. |
+| `part` | What the glyph is a piece of: `bar-corner`, `title-bar` (stripes, title, close, shade, zoom), `note-close`, `frame`, `dialog-border`, `button-cap`, `checkbox`, `switch`, `capsule`. |
+| `cells` | `{span, position}`: how many cells the whole piece spans (1 to 3), written side by side, and this glyph's place in it from 0. |
+| `background` | What the cell's background should be: `bar` (the title bar's colour), `panel` (what a control or a note sits on), `wallpaper` (the default background), `dialog-face`, `button-face`. |
+| `foreground` | `ink` (lines and outlines), `track` (the capsule's track, in the colour the application chooses), `bar` (the corners' fill: the bar's colour). |
+| `line` | What SGR 58 is: `none` (Chalk, frames, corners), `highlight` (the bar's highlight, and a window box's face), `box-face` (a note's close box or a checkbox), `dialog-face`, `button-face`, `knob` (a switch's or the capsule's knob, and a switch track's highlight). Unset, it is white. |
+
+`GET /v1/fonts/icons` also returns `revision`, the SHA-256 of the catalogue
+file as packaged (the hash `fonts.source.json` pins), and sends it as the
+`ETag`. A client that keeps the catalogue compares the revision, or sends it
+in `If-None-Match` and is answered 304 while it is current.
 
 These explicitly selected colour glyphs occupy one terminal cell. Plane16
 private-use mappings are a Blit contract, not Unicode or Nerd assignments;

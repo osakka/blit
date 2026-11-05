@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
 """The window-chrome glyph sets, Chalk and Slate (ADR 0210): the design.
 
-Blit draws these 105 codepoints itself, as cell geometry, in
+Blit draws these 70 codepoints itself, as cell geometry, in
 src/blit_window_glyphs.h. Every length comes from the geometry table in
 that header, which this script reads, so there is one table. The rules
 that lay the table out are written here once more, so a gate can compare
 every glyph Blit rasters with the one drawn here, pixel for pixel, at the
 owner's 11x22 cell and at other sizes (window_glyph_gate).
 
-Three sets of 35, in one order: Chalk (one colour: the cell's foreground
-over its background, so a theme recolours it) at U+100231, Slate light at
-U+100254 and Slate dark at U+100277: the same geometry in Slate's own
-colours. A pixel no rule sets is transparent in both: the cell's
-background shows, which for a frame cell on a held desktop is the
-wallpaper.
+Two sets of 35, in one order: Chalk (one colour: the cell's foreground
+over its background, so a theme recolours it) at U+100231 and Slate at
+U+100254: the same geometry in the cell's own pens (ADR 0211). Slate dark,
+once at U+100277-100299, is retired. A pixel no rule sets is transparent in
+both: the cell's background shows, which for a frame cell on a held desktop
+is the wallpaper. The controls that follow (U+10029A on) are
+draw-control-glyphs.py's.
 
-Pixel-designed for 11x22. At other sizes lines, stripes and the rings keep their widths in pixels; the box (the cell's width), the
-number of stripes (six at 22 px, in proportion) and a button end's radius
-scale with the cell.
+Pixel-designed for 11x22. At other sizes lines, stripes and the rings keep
+their widths in pixels; the box (the cell's width), the number of stripes
+(six at 22 px, in proportion) and a button end's radius scale with the
+cell.
 
     draw-window-glyphs.py --catalogue    rewrite the catalogue's entries
+    draw-window-glyphs.py --check        fail if the catalogue's entries are not what the tables give
     draw-window-glyphs.py --reference W H   print every glyph at W x H
     draw-window-glyphs.py --sheet PNG [--scale N]   an enlarged preview
 """
@@ -72,7 +75,6 @@ NAMES = [
 STYLES = [('chalk', 0x100231), ('slate-light', 0x100254)]
 # Slate dark took U+100277-100299 until ADR 0211; retired, never reused.
 RETIRED = (0x100277, 0x100299)
-NEXT_FREE = 0x10029A
 
 HEADER = ROOT / 'src/blit_window_glyphs.h'
 # Slate's roles (ADR 0211), resolved in the cell it is drawn in: K the
@@ -119,6 +121,21 @@ def round_normal(x, y, x0, x1, y0, y1, r):
     return vx, vy
 
 
+def band_box(w, h):
+    """The title bar's stripes and the box among them, as blit_window_band:
+    n stripes (L thick and L apart, six at 22 px and as many in proportion
+    at other heights, at least one), centred in a band of 2n lines; and the
+    box, square, the cell's width or the band less a line, centred on the
+    stripes. The checkbox and switch (ADR 0212) stand on it too."""
+    L = T['LINE']
+    n = (T['STRIPES'] * h + T['DESIGN_HEIGHT'] // 2) // T['DESIGN_HEIGHT']
+    n = max(1, min(n, (h - 4 * L) // (2 * L)))
+    band = 2 * L * n
+    top = (h - band) // 2
+    side = min(w, band - L)
+    return n, top, side, (w - side) // 2, top + (band - L - side) // 2
+
+
 class Cell:
     def __init__(self, w, h):
         self.w, self.h = w, h
@@ -144,15 +161,8 @@ def draw(style, index, w, h):
     d4 = d3 + T['DIALOG_OUTER']
     c = Cell(w, h)
     ink = 'K'
-    # The title bar's stripes: L thick, L apart, six at 22 px and as many
-    # in proportion at other heights, centred.
-    n = (T['STRIPES'] * h + T['DESIGN_HEIGHT'] // 2) // T['DESIGN_HEIGHT']
-    n = max(1, min(n, (h - 4 * L) // (2 * L)))
-    band = 2 * L * n
-    top = (h - band) // 2
-    # A box: square, the cell's width, centred on the stripes.
-    side = min(w, band - L)
-    bx, by = (w - side) // 2, top + (band - L - side) // 2
+    # The title bar's stripes and the box among them.
+    n, top, side, bx, by = band_box(w, h)
 
     def bar(x0=0, x1=w, stripes=True):
         if slate:
@@ -309,6 +319,36 @@ def reference(w, h):
     return '\n'.join(lines) + '\n'
 
 
+def structure(style, name):
+    """What a glyph is and the pens an application sets for it, as the
+    catalogue's structured fields (vocabulary in assets/fonts/icons/README.md):
+    its part, the cells it spans, what the cell's background, foreground and
+    SGR 58 are."""
+    slate = style != 'chalk'
+    if name.startswith('stripe') or name in ('title', 'close', 'shade', 'zoom'):
+        part, background, line = 'title-bar', 'bar', 'highlight' if slate else 'none'
+    elif name == 'note-close':
+        part, background, line = 'note-close', 'panel', 'box-face' if slate else 'none'
+    elif name.startswith('frame-'):
+        part, background, line = 'frame', 'wallpaper', 'none'
+    elif name.startswith('dialog-'):
+        # Slate paints the dialog's face itself, in the line pen, so its cells
+        # keep the wallpaper; Chalk, one colour, needs the face behind it.
+        part, background, line = 'dialog-border', 'wallpaper' if slate else 'dialog-face', \
+            'dialog-face' if slate else 'none'
+    else:
+        part, background, line = 'button-cap', 'dialog-face' if slate else 'button-face', \
+            'button-face' if slate else 'none'
+    return {'part': part, 'cells': {'span': 1, 'position': 0}, 'background': background,
+            'foreground': 'ink', 'line': line}
+
+
+# The bar corners (U+100007, U+100008) are cell geometry too (blit#140); the
+# raster draws them, and their entries are kept as they were, with these.
+CORNER = {'part': 'bar-corner', 'cells': {'span': 1, 'position': 0}, 'background': 'wallpaper',
+          'foreground': 'bar', 'line': 'none'}
+
+
 def catalogue_entries():
     entries = []
     for cp, style, index in glyphs():
@@ -318,16 +358,18 @@ def catalogue_entries():
         # the foreground, Slate in the cell's pens.
         entries.append({'id': f'{style}-{name}', 'codepoint': f'{cp:06X}',
                         'colour': False, 'pens': 'foreground' if style == 'chalk' else 'cell',
-                        'set': style, 'shape': f'{set_name} set: {shape}'})
+                        'set': style, 'shape': f'{set_name} set: {shape}', **structure(style, name)})
     return entries
 
 
 def write_catalogue():
     text = CATALOGUE.read_text(encoding='utf-8')
     data = json.loads(text)
-    sets = [s for s, _ in STYLES] + ['slate-dark']
-    keep = [e for e in data['cell_geometry'] if not any(e['id'].startswith(s + '-') for s in sets)]
-    rows = keep + catalogue_entries()
+    # The entries of the other families (the corners, the controls) are kept;
+    # the corners get their structured fields. Everything is in codepoint order.
+    keep = [e for e in data['cell_geometry'] if not STYLES[0][1] <= int(e['codepoint'], 16) <= RETIRED[0] - 1]
+    keep = [{**e, **CORNER} if e['id'].startswith('bar-corner-') else e for e in keep]
+    rows = sorted(keep + catalogue_entries(), key=lambda e: int(e['codepoint'], 16))
     # Slate dark's codepoints, retired by ADR 0211 and never reused.
     retired = {'from': f'{RETIRED[0]:06X}', 'to': f'{RETIRED[1]:06X}',
                'was': 'the Slate dark window-chrome glyph set',
@@ -343,6 +385,18 @@ def write_catalogue():
                  text, flags=re.S)
     json.loads(new)
     CATALOGUE.write_text(new, encoding='utf-8')
+
+
+def check_catalogue():
+    """Is every one of this script's entries in the catalogue exactly what
+    the tables give, structured fields included, and the corners' too?"""
+    data = json.loads(CATALOGUE.read_text(encoding='utf-8'))
+    have = [e for e in data['cell_geometry'] if STYLES[0][1] <= int(e['codepoint'], 16) < RETIRED[0]]
+    want = catalogue_entries()
+    corners = [e for e in data['cell_geometry'] if e['id'].startswith('bar-corner-')]
+    ok = have == want and len(corners) == 2 and all(all(e.get(k) == v for k, v in CORNER.items()) for e in corners)
+    print('catalogue matches the window tables' if ok else 'the catalogue differs from the window tables: run --catalogue')
+    return 0 if ok else 1
 
 
 def sheet(path, scale):
@@ -372,12 +426,15 @@ def sheet(path, scale):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('--catalogue', action='store_true')
+    parser.add_argument('--check', action='store_true')
     parser.add_argument('--reference', nargs=2, type=int, metavar=('W', 'H'))
     parser.add_argument('--sheet')
     parser.add_argument('--scale', type=int, default=6)
     args = parser.parse_args()
     if args.catalogue:
         write_catalogue()
+    if args.check:
+        raise SystemExit(check_catalogue())
     if args.reference:
         print(reference(*args.reference), end='')
     if args.sheet:

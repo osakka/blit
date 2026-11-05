@@ -14,6 +14,7 @@
 #include "blit_touchpad.h"
 #include "blit_audio_control.h"
 #include "blit_cell_geometry.h"
+#include "blit_sha256.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
 
@@ -2667,10 +2668,13 @@ static int send_bytes_blocking(int fd, const void *data, size_t length)
     return 1;
 }
 
-static void send_http(int fd, int status, const char *reason,
-                      const char *content_type, const char *body)
+/* A response with its own Cache-Control and extra header lines (each ending
+   in CRLF, or none): the catalogue's ETag (ADR 0212). */
+static void send_http_with(int fd, int status, const char *reason,
+                           const char *content_type, const char *cache_control,
+                           const char *extra_headers, const char *body)
 {
-    char header[512];
+    char header[768];
     size_t body_length = strlen(body);
     int header_length = snprintf(
         header, sizeof(header),
@@ -2679,9 +2683,10 @@ static void send_http(int fd, int status, const char *reason,
         "X-Blit-Version: %s\r\n"
         "Content-Length: %lu\r\n"
         "Connection: close\r\n"
-        "Cache-Control: no-store\r\n\r\n",
+        "%s"
+        "Cache-Control: %s\r\n\r\n",
         status, reason, content_type, blit_version,
-        (unsigned long)body_length);
+        (unsigned long)body_length, extra_headers, cache_control);
 
     if (header_length > 0 && (size_t)header_length < sizeof(header)) {
         /* Finite HTTP responses can be much larger than the socket send
@@ -2693,6 +2698,12 @@ static void send_http(int fd, int status, const char *reason,
         send_bytes_blocking(fd, header, (size_t)header_length);
         send_bytes_blocking(fd, body, body_length);
     }
+}
+
+static void send_http(int fd, int status, const char *reason,
+                      const char *content_type, const char *body)
+{
+    send_http_with(fd, status, reason, content_type, "no-store", "", body);
 }
 
 static int queue_http_bytes_extra(BlitHttpClient *client, int status,
@@ -3644,7 +3655,8 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"login-manager\",\"network-terminal-input\",\"diagnostics\","
              "\"runtime-diagnostics\",\"observation-snapshot\","
              "\"lifecycle-control\","
-             "\"effects\",\"overlays\",\"font-selection\"],\"display_count\":%d,"
+             "\"effects\",\"overlays\",\"font-selection\","
+             "\"sgr-framed\",\"sgr-framed-bar\",\"sgr-shadow\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
@@ -17930,6 +17942,41 @@ static int font_icons_json(char *body, size_t capacity)
     return 1;
 }
 
+/* ADR 0212: the catalogue as served. Its revision is the SHA-256 of the file
+   as packaged -- the hash fonts.source.json pins -- put first in the body as
+   "revision" and sent as the ETag, so a client holding a long connection can
+   tell the catalogue changed, and a conditional request (If-None-Match) is
+   answered 304. no-cache, not no-store: it may be kept, and must be asked
+   about. */
+static void font_icons_response(int fd, const char *request, char *body, size_t capacity)
+{
+    static const char key[] = "\"revision\":\"";
+    char revision[65], etag[96], extra[128], match[512];
+    size_t length, add = sizeof(key) - 1 + 64 + 2;
+    char *brace;
+    if (capacity < add + 2 || !font_icons_json(body, capacity - add - 1) ||
+        (brace = strchr(body, '{')) == NULL) {
+        send_problem(fd, 503, "Service Unavailable", "font_icon_catalogue_unavailable",
+            "The packaged font icon catalogue is missing, unreadable or exceeds its size limit.");
+        return;
+    }
+    length = strlen(body);
+    blit_sha256_hex(body, length, revision);
+    snprintf(etag, sizeof(etag), "\"%s\"", revision);
+    snprintf(extra, sizeof(extra), "ETag: %s\r\n", etag);
+    if (((request_header(request, "If-None-Match:", match, sizeof(match)) ||
+          request_header(request, "if-none-match:", match, sizeof(match))) &&
+         (strcmp(match, "*") == 0 || strstr(match, revision) != NULL))) {
+        send_http_with(fd, 304, "Not Modified", "application/json", "no-cache", extra, "");
+        return;
+    }
+    memmove(brace + 1 + add, brace + 1, length - (size_t)(brace + 1 - body) + 1);
+    memcpy(brace + 1, key, sizeof(key) - 1);
+    memcpy(brace + 1 + sizeof(key) - 1, revision, 64);
+    memcpy(brace + 1 + sizeof(key) - 1 + 64, "\",", 2);
+    send_http_with(fd, 200, "OK", "application/json", "no-cache", extra, body);
+}
+
 static int font_path_for_id(const char *id, char *path, size_t capacity)
 {
     int i;
@@ -25165,10 +25212,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         fonts_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/fonts/icons") == 0) {
-        if (font_icons_json(body, sizeof(body)))
-            send_http(fd, 200, "OK", "application/json", body);
-        else send_problem(fd, 503, "Service Unavailable", "font_icon_catalogue_unavailable",
-            "The packaged font icon catalogue is missing, unreadable or exceeds its size limit.");
+        font_icons_response(fd, request, body, sizeof(body));
     } else if (strcmp(path, "/v1/settings") == 0) {
         settings_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);

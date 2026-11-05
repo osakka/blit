@@ -193,6 +193,38 @@ are retired.
     shows round the border. For a black-and-white dialog with no halo, use
     the Slate glyphs with a black foreground and SGR 58 white.
 
+## Controls: checkbox, switch and capsule
+
+ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
+same roles as the window chrome, listed in the catalogue's `cell_geometry`
+section. The next free codepoint is U+1002AE.
+- **Checkbox,** one cell: an 11x11 square on the text row (as the window
+  boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
+  `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,
+  a dash when mixed. Slate: an outline, a face (SGR 58), a shade down and
+  right (the mean of foreground and background), a 2 px check mark, a
+  heavier dash.
+- **Compact switch,** two cells wide (22x11), written side by side: left
+  then right, off and on, in Chalk and Slate (`chalk-switch-off-left`,
+  `-off-right`, `-on-left`, `-on-right`; `slate-switch-*`). Chalk: a ring
+  and a solid knob on the left when off, a solid track with an empty knob on
+  the right when on. Slate: a bevelled track with a knob in SGR 58, a mixed
+  grey track when on.
+- **Capsule switch,** three cells wide (33x22), left, middle and right, off
+  and on (`capsule-off-left`, `-off-mid`, `-off-right`, `-on-*`). It has no
+  outline and no colour of its own: the track is the cell's **foreground**
+  (green when on, grey when off: the application chooses), the knob SGR 58
+  (white), the smoothed edge the mean of the foreground and background.
+  It scales with the cell's height; the checkbox and switch scale as the
+  window boxes do. At a 4x8 cell the checkbox's *on* and *mixed* are the
+  same pixel.
+- **Pens to set,** for every cell-geometry glyph, are in the catalogue as
+  data (`part`, `cells`, `background`, `foreground`, `line`) and described in
+  [the icon contract](../assets/fonts/icons/README.md): a control's cells sit
+  on the panel; Slate's checkbox sets SGR 58 to its face, its switch to the
+  knob; the capsule sets the foreground to the track's colour and SGR 58
+  white.
+
 ## Discover first; retain a fallback
 
 Read-only discovery (the update credential is not needed):

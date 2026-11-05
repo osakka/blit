@@ -186,6 +186,12 @@ Clients should discover before mutating:
 
 Do not infer capabilities from a screenshot or from a device filename. A
 resource is usable only when its API state and capability fields say it is.
+`GET /v1/server`'s `capabilities` is the list to switch on, not the
+version. Among its flags, the terminal's SGR extensions: `sgr-framed` (SGR
+51 framed, with Blit's 51:3 thick and 51:5 rule, ended by 54),
+`sgr-framed-bar` (51:2, a Slate title bar's rows in the cell's pens; 51:4
+is its alias) and `sgr-shadow` (66 and 67, a drop shadow under the cell's
+glyph). See [the terminal reference](terminal.md#sgr).
 
 ## Presentation configuration ownership
 
@@ -1628,11 +1634,30 @@ and different remaps, which is what makes per-device routing usable.
 colour icons (status icons, the hui badge, telephones, file-manager icons):
 each icon's id, codepoint, how many columns it spans, and the codepoints
 retired and never reused. Its `cell_geometry` section lists the glyphs
-Blit draws as cell geometry: the bar corners and the 105 window-chrome
-glyphs (ADR 0210), each with `colour`, `set` (`chalk` or `slate-light`)
-and `pens` (`foreground`, or `cell` for Slate, ADR 0211). Slate dark's
-codepoints are under `retired`. Authentication is the same as other read
-endpoints. A missing, unreadable or oversized catalogue returns 503
+Blit draws as cell geometry: the bar corners, the 70 window-chrome glyphs
+(ADR 0210) and the 20 controls (ADR 0212), each with `colour`, `set`
+(`chalk`, `slate-light`, `slate` or `capsule`) and `pens` (`foreground`, or
+`cell` for Slate and the capsule, ADR 0211). Slate dark's codepoints are
+under `retired`.
+
+**Every cell-geometry entry says which pens to set**, as data, so a client
+maps the glyphs without a table of its own: `part` (what it is a piece
+of), `cells` (`{span, position}`: how many cells the piece spans and this
+one's place in it), `background` (the cell's background should be the
+title bar's, a panel, the wallpaper, a dialog's face or a button's),
+`foreground` (ink, a capsule's track, or the bar's colour) and `line`
+(what SGR 58 is: nothing, a highlight, a box's, dialog's or button's
+face, or a knob). The words are in
+[the icon contract](../assets/fonts/icons/README.md) and typed in OpenAPI.
+
+**The catalogue has a revision.** The body's first member, `revision`, is
+the SHA-256 of the catalogue file as packaged (the hash `fonts.source.json`
+pins), and the response's `ETag` is the same value, quoted. A client that
+keeps the catalogue compares it, or sends it back as `If-None-Match` and is
+answered 304 with no body while it is current; the response is
+`Cache-Control: no-cache`, so it may be kept and must be asked about. The
+catalogue is about 61 KB; the endpoint's limit is 256 KiB. Authentication
+is the same as other read endpoints. A missing, unreadable or oversized catalogue returns 503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)
 and [full developer glyph reference](font-reference.md) for generated category

@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'timeout'
 require 'rbconfig'
 require 'fileutils'
+require 'digest'
 require_relative 'gate_port'
 require_relative 'test_profile'
 port = gate_port(19573)
@@ -36,8 +37,54 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
     TestProfile.verify!(request.call('GET','/v1/diagnostics'))
     display=TestProfile.display_id!(request.call('GET','/v1/displays'))
     expected=JSON.parse(File.read(File.join(TestProfile::ROOT,'assets/fonts/icons/catalogue.json')))
-    raise 'API catalogue differs from generator source' unless request.call('GET','/v1/fonts/icons')==expected
+    # ADR 0212: the catalogue's revision is the SHA-256 of the file as packaged,
+    # first in the body and the ETag; a current If-None-Match is answered 304; a
+    # changed catalogue changes both, so a long-lived client can tell.
+    get_icons=lambda do |match=nil|
+      q=Net::HTTP::Get.new(base+'/v1/fonts/icons'); q['If-None-Match']=match if match
+      Net::HTTP.start(base.host,base.port,read_timeout:5){|h|h.request(q)}
+    end
+    file=File.binread(File.join(TestProfile::ROOT,'assets/fonts/icons/catalogue.json'))
+    response=get_icons.call
+    raise "catalogue: #{response.code}" unless response.code=='200'
+    served=JSON.parse(response.body)
+    revision=served.delete('revision')
+    raise 'API catalogue differs from generator source' unless served==expected
+    raise 'the revision is not the SHA-256 of the catalogue file' unless revision==Digest::SHA256.hexdigest(file)
+    raise 'the revision is not the first member' unless response.body.start_with?('{"revision":"'+revision+'",')
+    raise "ETag #{response['ETag'].inspect} is not the quoted revision" unless response['ETag']=='"'+revision+'"'
+    raise "Cache-Control #{response['Cache-Control'].inspect}, not no-cache" unless response['Cache-Control']=='no-cache'
+    raise 'the catalogue is over the 256 KiB the API allows' unless response.body.bytesize<262144
+    ['"'+revision+'"','W/"'+revision+'"','*','"x", "'+revision+'"'].each do |match|
+      not_modified=get_icons.call(match)
+      raise "If-None-Match #{match} gave #{not_modified.code}, not 304" unless not_modified.code=='304'
+      raise 'a 304 has a body or no ETag' unless not_modified.body.to_s.empty? && not_modified['ETag']=='"'+revision+'"'
+    end
+    stale=get_icons.call('"'+('0'*64)+'"')
+    raise 'a stale If-None-Match was not answered with the catalogue' unless stale.code=='200' && JSON.parse(stale.body)['revision']==revision
     catalogue=File.join(fonts,'icons/catalogue.json')
+    original=File.binread(catalogue)
+    begin
+      File.binwrite(catalogue,original+"\n")
+      changed=get_icons.call('"'+revision+'"')
+      raise 'a changed catalogue was answered 304' unless changed.code=='200'
+      new_revision=JSON.parse(changed.body)['revision']
+      raise 'a changed catalogue kept its revision' if new_revision==revision
+      raise 'a changed catalogue has the wrong ETag' unless new_revision==Digest::SHA256.hexdigest(original+"\n") && changed['ETag']=='"'+new_revision+'"'
+      # SHA-256 pads to a 64-byte block: a message ending 56 bytes or more into
+      # one (residues 56-63) takes a second block, and 55 is the most that fits
+      # in the first, and an exact multiple takes a whole one. Trailing spaces
+      # keep the JSON valid.
+      [0,1,55,56,60,63].each do |residue|
+        padded=original+' '*((residue-original.bytesize)%64)
+        File.binwrite(catalogue,padded)
+        got=JSON.parse(get_icons.call.body)['revision']
+        raise "revision of a #{padded.bytesize}-byte catalogue (residue #{residue}) is #{got}, not its SHA-256" unless got==Digest::SHA256.hexdigest(padded)
+      end
+    ensure
+      File.binwrite(catalogue,original)
+    end
+    cases+=1
     File.rename(catalogue,catalogue+'.saved')
     begin
       raise 'missing catalogue not diagnosed' unless request.call('GET','/v1/fonts/icons',nil,503)['code']=='font_icon_catalogue_unavailable'
@@ -85,7 +132,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
         end
       end
     end
-    puts "CUSTOM_ICON_API_PASS catalogue=canonical profiles=2 sizes=16+17+22 real_PTY=contiguous+bytewise specimens=icons+Arabic_marks_digits cases=#{cases} private_advances=1 presented_API_parity=exact scope=local_SDL_not_physical"
+    puts "CUSTOM_ICON_API_PASS revision=sha256+etag+304+change_detected catalogue=canonical profiles=2 sizes=16+17+22 real_PTY=contiguous+bytewise specimens=icons+Arabic_marks_digits cases=#{cases} private_advances=1 presented_API_parity=exact scope=local_SDL_not_physical"
   rescue Exception
     warn File.read(File.join(work,'server.log'))
     raise

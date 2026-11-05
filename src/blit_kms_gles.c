@@ -634,7 +634,7 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
                         blit_gles_rect(kms->gles, left, top, right - left, bottom - top, underline, 255);
                 }
             }
-            if (blit_window_colour(cp))
+            if (blit_chrome_colour(cp))
                 kms_gles_window_glyph(kms, r, cp, x, y, width, ch, &pens);
             else
                 kms_gles_glyph(kms, r, view, index, x, y, width, ch, fg, lean, (attr & 1) != 0);

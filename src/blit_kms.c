@@ -6,7 +6,7 @@
 #include "blit_raster.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
-#include "blit_window_glyphs.h"
+#include "blit_control_glyphs.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1462,7 +1462,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             /* ADR 0062: a wide character's glyph is 16 pixels wide and lives
                in the wide font; a codepoint that font does not map stays on
                the primary one, whose substitute is the visible marker. */
-            if (!(attr & KMS_ATTR_CONTINUATION) && blit_window_colour(cp))
+            if (!(attr & KMS_ATTR_CONTINUATION) && blit_chrome_colour(cp))
                 draw_window_cell(output, font, cp, x, y, glyph_width, ch, &pens);
             else if (!(attr & KMS_ATTR_CONTINUATION)) {
                 draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL,
