@@ -10,15 +10,16 @@ require 'json'
 require 'net/http'
 require 'uri'
 require_relative 'gate_server'
+require_relative 'gate_port'
 
-port = Integer(ENV.fetch('BLIT_PANE_SPLIT_PORT', '19291'), 10)
+port = gate_port(Integer(ENV.fetch('BLIT_PANE_SPLIT_PORT', '19291'), 10))
 env = {
   **gate_display_env,
   
   'BLIT_PSF_FONT' => 'assets/fonts/Blit-Terminus16.psf'
 }
 pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
-                    out: '/tmp/blit-pane-split-gate.log', err: [:child, :out])
+                    out: "/tmp/blit-pane-split-gate-#{Process.pid}.log", err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil
   Process.wait(pid) rescue nil

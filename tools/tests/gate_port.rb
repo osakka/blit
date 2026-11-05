@@ -18,6 +18,13 @@ require 'socket'
 
 GATE_PORT_TIMEOUT = Float(ENV.fetch('BLIT_GATE_PORT_TIMEOUT', '15'))
 
+# ADR 0216. Every gate owns a fixed port in 18995..19900, so two suites, or two
+# workers of one suite, cannot run at once. BLIT_GATE_PORT_OFFSET is added to
+# whatever port a gate chose: each parallel worker, and each checkout or agent
+# that runs gates at the same time, gets its own offset. The runner gives its
+# workers a stride of 1000, which is wider than the range.
+GATE_PORT_OFFSET = Integer(ENV.fetch('BLIT_GATE_PORT_OFFSET', '0'), 10)
+
 def gate_port_holder(port)
   listing = `ss -ltnp 2>/dev/null || netstat -ltnp 2>/dev/null`
   listing.lines.grep(/[:.]#{port}\s/).map(&:strip).join('; ')
@@ -26,7 +33,7 @@ rescue StandardError
 end
 
 def gate_port(port, name = File.basename($PROGRAM_NAME))
-  port = Integer(port)
+  port = Integer(port) + GATE_PORT_OFFSET
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + GATE_PORT_TIMEOUT
   waited = false
   loop do

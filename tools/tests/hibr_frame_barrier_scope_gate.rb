@@ -18,11 +18,18 @@ require 'fileutils'
 require 'uri'
 require 'tmpdir'
 require_relative 'gate_server'
+require_relative 'gate_port'
 
-PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '18998'))
+PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '18998'), 10))
 ROOT = File.expand_path('../..', __dir__)
-FAKE_DESKTOP = File.expand_path('../../build/blit/desktop', __dir__)
-FAKE_DESKTOP_IMPL = File.expand_path('../../build/blit/desktop-frame-barrier-scope-gate.sh', __dir__)
+# ADR 0216: a private directory, not build/blit/, so two gates that fake the
+# desktop cannot replace each other's symlink while both are running. The
+# basename must stay 'desktop': the server keys on it.
+require 'tmpdir'
+FAKE_DESKTOP_DIR = Dir.mktmpdir('blit-fake-desktop')
+at_exit { FileUtils.rm_rf(FAKE_DESKTOP_DIR) }
+FAKE_DESKTOP = File.join(FAKE_DESKTOP_DIR, 'desktop')
+FAKE_DESKTOP_IMPL = File.join(FAKE_DESKTOP_DIR, 'desktop-frame-barrier-scope-gate.sh')
 SERVER = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 
 FileUtils.mkdir_p(File.dirname(FAKE_DESKTOP))
@@ -37,7 +44,7 @@ File.write(env.fetch('BLIT_DRM_MOCK_STATE'), "2 0 0 0\n1 1024 768\n2 1024 768\n"
 env = env.merge('BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                 'BLIT_SETTINGS' => 'ignore', 'BLIT_LOGIN_AUTOSTART' => '0',
                 'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP)
-pid = Process.spawn(env, SERVER, PORT.to_s, out: '/tmp/blit-frame-barrier-scope-gate.log',
+pid = Process.spawn(env, SERVER, PORT.to_s, out: "/tmp/blit-frame-barrier-scope-gate-#{Process.pid}.log",
                                             err: %i[child out])
 sessions = []
 BASE = URI("http://127.0.0.1:#{PORT}")

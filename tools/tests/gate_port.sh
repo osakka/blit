@@ -1,19 +1,30 @@
 # shellcheck shell=sh
 # Issue #28. See the comment in gate_port.rb: a gate must know its port is
 # free before it binds, or a sequencing problem is reported as a gate failure.
+# ADR 0216: BLIT_GATE_PORT_OFFSET is added to the port, as in gate_port.rb.
 # Sourced, not executed.
 
+# Is something listening on $1? /dev/tcp is a bash feature: under dash, which
+# runs these gates on Debian, the redirection always fails, which reads as
+# "free" and made the wait below a no-op. Ask the kernel's socket table first.
+gate_port_busy() {
+    if command -v ss >/dev/null 2>&1; then
+        [ -n "$(ss -H -ltn "sport = :$1" 2>/dev/null)" ]
+    else
+        (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+    fi
+}
+
 gate_port() {
-    _gp_port=$1
+    _gp_port=$(($1 + ${BLIT_GATE_PORT_OFFSET:-0}))
     _gp_name=${2:-$(basename "$0")}
     _gp_timeout=${BLIT_GATE_PORT_TIMEOUT:-15}
     _gp_deadline=$(($(date +%s) + _gp_timeout))
     while :; do
-        if ! (exec 3<>"/dev/tcp/127.0.0.1/$_gp_port") 2>/dev/null; then
+        if ! gate_port_busy "$_gp_port"; then
             printf '%s\n' "$_gp_port"
             return 0
         fi
-        exec 3>&- 2>/dev/null || true
         if [ "$(date +%s)" -gt "$_gp_deadline" ]; then
             _gp_holder=$(ss -ltnp 2>/dev/null | grep ":$_gp_port " || true)
             printf '%s: TCP port %s is still serving after %ss, so this gate cannot bind it. This is a port conflict, not a failure of what the gate asserts. %s\n' \

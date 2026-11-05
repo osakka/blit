@@ -4,11 +4,18 @@ require 'json'
 require 'net/http'
 require 'fileutils'
 require_relative 'gate_server'
+require_relative 'gate_port'
 
-port = 18_997
+port = gate_port(18_997)
 root = File.expand_path('../..', __dir__)
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(root, 'build/blit/blit-server'))
-fake_desktop = File.expand_path('../../build/blit/desktop', __dir__)
+# ADR 0216: a private directory, not build/blit/, so two gates that fake the
+# desktop cannot replace each other's symlink while both are running. The
+# basename must stay 'desktop': the server keys on it.
+require 'tmpdir'
+FAKE_DESKTOP_DIR = Dir.mktmpdir('blit-fake-desktop')
+at_exit { FileUtils.rm_rf(FAKE_DESKTOP_DIR) }
+fake_desktop = File.join(FAKE_DESKTOP_DIR, 'desktop')
 FileUtils.mkdir_p(File.dirname(fake_desktop))
 FileUtils.rm_f(fake_desktop)
 File.symlink('/bin/sh', fake_desktop)
@@ -19,7 +26,7 @@ env = {
   'BLIT_COMMAND_ALLOWLIST' => fake_desktop
 }
 pid = Process.spawn(env, BINARY, port.to_s,
-                    out: '/tmp/blit-hibr-singleton-gate.log', err: [:child, :out])
+                    out: "/tmp/blit-hibr-singleton-gate-#{Process.pid}.log", err: [:child, :out])
 sessions = []
 at_exit do
   sessions.each do |session_id|

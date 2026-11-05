@@ -4,7 +4,9 @@ set -euo pipefail
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 source "$root/tools/diagnostics/http.sh"
 
-port=$((20000 + ($$ % 1000)))
+# One of the gates' fixed ports (ADR 0216): the same offset rule as the rest.
+. "$root/tools/tests/gate_port.sh"
+port=$(gate_port 19830)
 ready=$(mktemp /tmp/blit-diagnostic-auth-ready.XXXXXX)
 out=$(mktemp /tmp/blit-diagnostic-auth-output.XXXXXX)
 token_file=$(mktemp /tmp/blit-diagnostic-auth-token.XXXXXX)

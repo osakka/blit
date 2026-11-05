@@ -12,11 +12,18 @@ require 'net/http'
 require 'fileutils'
 require 'uri'
 require_relative 'gate_server'
+require_relative 'gate_port'
 
-PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '18998'))
+PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '18998'), 10))
 ROOT = File.expand_path('../..', __dir__)
-FAKE_DESKTOP = File.expand_path('../../build/blit/desktop', __dir__)
-FAKE_DESKTOP_IMPL = File.expand_path('../../build/blit/desktop-gate.sh', __dir__)
+# ADR 0216: a private directory, not build/blit/, so two gates that fake the
+# desktop cannot replace each other's symlink while both are running. The
+# basename must stay 'desktop': the server keys on it.
+require 'tmpdir'
+FAKE_DESKTOP_DIR = Dir.mktmpdir('blit-fake-desktop')
+at_exit { FileUtils.rm_rf(FAKE_DESKTOP_DIR) }
+FAKE_DESKTOP = File.join(FAKE_DESKTOP_DIR, 'desktop')
+FAKE_DESKTOP_IMPL = File.join(FAKE_DESKTOP_DIR, 'desktop-gate.sh')
 SERVER = File.join(ROOT, 'build/blit/blit-server')
 
 FileUtils.mkdir_p(File.dirname(FAKE_DESKTOP))
@@ -36,7 +43,7 @@ env = {
   'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP
 }
 pid = Process.spawn(env, SERVER, PORT.to_s,
-                    out: '/tmp/blit-hibr-join-viewport-gate.log', err: [:child, :out])
+                    out: "/tmp/blit-hibr-join-viewport-gate-#{Process.pid}.log", err: [:child, :out])
 sessions = []
 
 def request(base, method, path, payload = nil)

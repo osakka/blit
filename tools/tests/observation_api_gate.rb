@@ -58,7 +58,7 @@ server = Process.spawn({
   'BLIT_LOGIN_AUTOSTART' => '0',
   'BLIT_EXPECT_DESKTOP' => '0',
   'BLIT_PSF_FONT' => FONT,
-}, BINARY, PORT.to_s, out: '/tmp/blit-observation-api-gate.log', err: [:child, :out])
+}, BINARY, PORT.to_s, out: "/tmp/blit-observation-api-gate-#{Process.pid}.log", err: [:child, :out])
 
 at_exit do
   Process.kill('TERM', server) rescue nil

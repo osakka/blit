@@ -6,7 +6,8 @@ require 'tmpdir'
 require 'timeout'
 ROOT=File.expand_path('../..',__dir__)
 BINARY=ENV.fetch('BLIT_TEST_SERVER',File.join(ROOT,'build/blit/blit-server'))
-PORT=Integer(ENV.fetch('BLIT_LAYOUT_GATE_PORT','19498'))
+require_relative 'gate_port'
+PORT=gate_port(Integer(ENV.fetch('BLIT_LAYOUT_GATE_PORT','19498'),10))
 BASE=URI("http://127.0.0.1:#{PORT}")
 def req(method,path,body=nil,revision=nil)
   q={'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'PUT'=>Net::HTTP::Put,'DELETE'=>Net::HTTP::Delete}.fetch(method).new(BASE+path)
