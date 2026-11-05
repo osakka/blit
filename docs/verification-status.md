@@ -1,5 +1,43 @@
 # Verification status
 
+## 2026-11-05: 0.3.43 a fitted glyph is never trimmed (the Wi-Fi and volume icons)
+
+- **Root cause** (ADR 0215), found by a sweep of every catalogue icon and the
+  symbol classes at 8-64 px: `draw_fitted` fitted a colour glyph from its
+  base glyph's outline, but a layered (COLR) glyph is drawn from its layers.
+  For `wifi-1` the base box is x[30,131] and the layer union x[30,536], so
+  the composite landed about 40% past the right edge at every size, the
+  owner's 11x22 included. Beyond that, a hinted render differed from the
+  unhinted prediction by about a pixel and the trim loop discarded the
+  overhang silently, and percentage margins left under 1 px per side at small
+  cells (Nerd icons up to 19 px). Spanning icons did not clip at the owner's
+  sizes (the `fit*one > w` theory refuted by measurement); their halves
+  disagreed by 1 px in 60-95% of icons because each half was hinted and
+  phased separately.
+- **Fix:** a colour glyph is fitted by the union of its layers; non-spanning
+  fitted glyphs use `FT_LOAD_TARGET_LIGHT`; spanning icons use
+  `FT_LOAD_NO_HINTING` at a scale where one advance is a whole number of 26.6
+  steps, from a grid origin, so both halves share a phase and join; the
+  bitmap is measured after the render (re-fitted smaller up to 3 times,
+  slid in by whole pixels if askew, never for a spanning part), and a glyph
+  that still does not fit falls back visibly, never trimmed silently. At
+  11x22 the Wi-Fi and volume icons change completely (now whole), and the
+  file-manager icons soften slightly; Bluetooth, battery and symbols are
+  near-identical (before/after sheets at 11x22, 14x28, 20x40).
+- **Gates:** `icon_clip_gate` (about 800,000 glyph renders at 3 fonts, and
+  10,134,890 at all 7 fonts, stride 8: ink whole, no fallback, spanning
+  halves identical, full-cell glyphs reach their edges) fails on 0.3.42
+  (about 16,000 glyph-sizes) and passes; `glyph_edge_sweep_gate` runs the
+  real server on both compositors at 22-64 px over blocks, box lines,
+  powerline, the Chalk and Slate window boxes and a few symbols and checks
+  every cell pixel against the production raster's coverage (4.58 million
+  pixels, no clip). Blit's drawing does not clip window buttons or cells; a
+  clip seen at 40+ is not in the raster or the compositor's cell drawing.
+- **Suites:** font 43/43, renderer on GLES 80 pass (1 skip), all 177 pass
+  (6 skip) + 1 failure: `hibr_split_capture_gate` ("capture failed pid ...
+  exit 1") while three other suites were running on this host; alone it
+  passed 3 of 3 afterwards.
+
 ## 2026-11-05: 0.3.42 a picture deleted inside a synchronized update stays drawn; the graphics ledger
 
 - **The owner's blink on entering full screen was Blit's** (ADR 0213).
