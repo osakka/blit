@@ -76,7 +76,7 @@ static int blit_control_pen_index(uint32_t scalar)
 /* One dense index for every glyph drawn in pens, window or control, so the
    raster keeps one plane cache: Slate's window glyphs first, then the
    controls, then Slate's two title-end cells (ADR 0214). */
-#define BLIT_FRAME_PENS 2U
+#define BLIT_FRAME_PENS 4U
 #define BLIT_CHROME_PENS (BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS)
 
 static int blit_chrome_glyph(uint32_t scalar)

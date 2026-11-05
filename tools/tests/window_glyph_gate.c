@@ -19,8 +19,8 @@
 /* ADR 0214: the outer-edge frame, nine glyphs; the last two (Slate's title
    ends) are drawn in pens, the first seven are coverage. */
 #define FRAME_FIRST 0x1002AEU
-#define FRAME_LAST 0x1002B6U
-#define FRAME_SLATE 0x1002B5U
+#define FRAME_LAST 0x1002BAU /* 0.3.45: four plain title ends, U+1002B7-1002BA */
+#define FRAME_SLATE 0x1002B5U /* Slate's title ends, U+1002B5-B6, and the plain ones, U+1002B9-BA */
 
 int main(int argc, char **argv)
 {
@@ -40,7 +40,7 @@ int main(int argc, char **argv)
             int pen_drawn;
             int p;
             cp = n <= LAST - FIRST ? FIRST + n : FRAME_FIRST + (n - (LAST - FIRST + 1));
-            pen_drawn = (cp >= SLATE && cp <= LAST) || cp >= FRAME_SLATE;
+            pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U || cp == 0x1002BAU;
             if (!blit_raster_get(raster, cp, 1, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;

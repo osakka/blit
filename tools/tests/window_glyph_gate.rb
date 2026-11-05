@@ -14,7 +14,8 @@
 #   and at eleven other cell sizes. Chalk as coverage; Slate as its role
 #   map, read from its three pen planes (FG, LINE, MIX), which the harness
 #   requires to be disjoint and together its one-colour lookup.
-# - The outer-edge frame (ADR 0214), U+1002AE-1002B6: nine more glyphs. The
+# - The outer-edge frame (ADR 0214), U+1002AE-1002BA: thirteen more glyphs (the last four, 0.3.45, are
+#   the plain title ends, below). The
 #   five frame cells (frame-left, -right, -bottom-left, -bottom,
 #   -bottom-right) are one set, Chalk and Slate alike: a 1 px line on the
 #   cell's OUTERMOST edge and no other ink in the cell, at every size, in
@@ -64,9 +65,10 @@ SETS = { 'chalk' => 0x100231, 'slate-light' => 0x100254 }.freeze
 FRAME_FIRST = 0x1002AE
 FRAME_NAMES = %w[frame-left frame-right frame-bottom-left frame-bottom frame-bottom-right
                  chalk-title-end-left chalk-title-end-right slate-light-title-end-left
-                 slate-light-title-end-right].freeze
-FRAME_SETS = %w[frame frame frame frame frame chalk chalk slate-light slate-light].freeze
-FRAME_PENS = %w[foreground foreground foreground foreground foreground foreground foreground cell cell].freeze
+                 slate-light-title-end-right chalk-title-end-plain-left chalk-title-end-plain-right
+                 slate-light-title-end-plain-left slate-light-title-end-plain-right].freeze
+FRAME_SETS = %w[frame frame frame frame frame chalk chalk slate-light slate-light chalk chalk slate-light slate-light].freeze
+FRAME_PENS = %w[foreground foreground foreground foreground foreground foreground foreground cell cell foreground foreground cell cell].freeze
 
 def fail!(why)
   abort "WINDOW_GLYPH_FAIL #{why}"
@@ -101,10 +103,10 @@ check(codes == (0x100231..0x100276).to_a, 'the window glyphs are not U+100231-10
 check((0x100277..0x100299).all? { |c| retired.include?(c) }, 'Slate dark (U+100277-100299) is not retired')
 check(geometry.none? { |e| e['codepoint'].to_i(16).between?(0x100277, 0x100299) },
       'a glyph is mapped in the retired Slate dark range')
-frames = geometry.select { |e| e['codepoint'].to_i(16).between?(FRAME_FIRST, FRAME_FIRST + 8) }
+frames = geometry.select { |e| e['codepoint'].to_i(16).between?(FRAME_FIRST, FRAME_FIRST + 12) }
 check(frames.map { |e| [e['id'], e['codepoint'], e['set'], e['pens'], e['colour']] } ==
       FRAME_NAMES.each_with_index.map { |n, i| [n, format('%06X', FRAME_FIRST + i), FRAME_SETS[i], FRAME_PENS[i], false] },
-      'the catalogue does not list the nine outer-edge frame glyphs (U+1002AE-1002B6) in order with their sets and pens')
+      'the catalogue does not list the thirteen outer-edge frame glyphs (U+1002AE-1002BA) in order with their sets and pens')
 check(frames.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'an outer-edge frame glyph has no shape')
 check((frames.map { |e| e['codepoint'].to_i(16) } & (icon_codes + retired)).empty?, 'a frame glyph reuses an icon or retired codepoint')
 
@@ -141,7 +143,7 @@ Dir.mktmpdir('blit-window-glyphs') do |work|
     end
   end
 end
-check(raster.size == 79 * SIZES.size, "the raster drew #{raster.size} of #{79 * SIZES.size}")
+check(raster.size == 83 * SIZES.size, "the raster drew #{raster.size} of #{83 * SIZES.size}")
 mismatches = []
 raster.each do |key, got|
   mismatches << format('U+%X at %dx%d', key[1], *key[0]) unless design[key] == got
@@ -363,6 +365,38 @@ SIZES.each do |w, h|
     end
   end
 end
+# The plain title ends (0.3.45), the inactive bar's: the title-end cell without
+# stripes. Written out: the outer line down the outer edge, the top line and
+# rule across, nothing else in Chalk; in Slate also the bevel (highlight under
+# the line, shade over the rule) and no pixel for the bar. Beside the plain
+# `title` bar cell it seams at every size: the column that meets it is that
+# cell's column, row for row, and every other column is the title cell's.
+SIZES.each do |w, h|
+  %w[chalk slate-light].each do |style|
+    title = glyph(raster, style, 'title', w, h)
+    { 'left' => 0, 'right' => w - 1 }.each do |side, edge|
+      far = side == 'left' ? w - 1 : 0
+      plain = frame_pixels.call("#{style}-title-end-plain-#{side}", w, h)
+      (0...h).each do |y|
+        check(plain[y][far] == title[y][far], "#{style}-title-end-plain-#{side} at #{w}x#{h}: row #{y} does not join the title cell")
+        (0...w).each do |x|
+          want = x == edge ? [255, style == 'chalk' ? nil : 'K'] : title[y][x]
+          check(plain[y][x] == want, "#{style}-title-end-plain-#{side} at #{w}x#{h}: pixel #{x},#{y} is #{plain[y][x].inspect}, want #{want.inspect}")
+        end
+      end
+      stripes = frame_pixels.call("#{style}-title-end-#{side}", w, h)
+      check((0...h).count { |y| (0...w).count { |x| stripes[y][x] != plain[y][x] } }.positive?, "#{style}-title-end-#{side} has no stripes the plain cell lacks")
+    end
+  end
+end
+g = frame_pixels.call('chalk-title-end-plain-left', 11, 22)
+check((0...22).select { |y| g[y][5][0] == 255 } == [0, 21] && (0...22).select { |y| g[y][0][0] == 255 } == (0...22).to_a &&
+      (1...11).all? { |x| [1, 20].none? { |y| g[y][x][0] == 255 } },
+      'chalk-title-end-plain-left at 11x22 is not the outer line, top line and rule alone')
+g = frame_pixels.call('slate-light-title-end-plain-right', 11, 22)
+check((0...22).map { |y| g[y][10][1] } == ['K'] * 22 && (0...22).map { |y| g[y][5][1] } == ['K', 'L'] + [nil] * 18 + ['M', 'K'],
+      'slate-light-title-end-plain-right at 11x22 is not the outer line and bevel of the plain bar')
+
 # At the owner's 11x22, by eye: the left cell's stripe rows run from x 2 to
 # its right edge (x 1 clear), the right cell's from its left edge to x 8.
 g = frame_pixels.call('chalk-title-end-left', 11, 22)
@@ -495,7 +529,7 @@ SIZES.each do |w, h|
   end
 end
 
-puts "WINDOW_GLYPH_PASS glyphs=70+9_frame(U+1002AE-1002B6) outer_edge=line_only title_ends=stripes_join,2px_clear " \
+puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA) outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
      "slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
      "sizes=#{SIZES.map { |s| s.join('x') }.join(',')} design=pixel-exact chalk=coverage slate=pen_planes " \
      "pewter=0.3.38_except_mix(#{mix_differs}_px,#{compared}_glyphs) dialog=no_halo,line+fg_only caps=corners_clear " \

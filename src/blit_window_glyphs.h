@@ -53,7 +53,7 @@
 #define BLIT_WINDOW_BUTTON_RADIUS_NUM 4 /* that end's radius: 4/11 of the cell */
 #define BLIT_WINDOW_BUTTON_RADIUS_DEN 11 /*   height, within half of it and the cell */
 #define BLIT_FRAME_FIRST 0x1002AEU      /* the outer-edge frame (ADR 0214): */
-#define BLIT_FRAME_COUNT 9U             /*   five frame cells, four title-end cells */
+#define BLIT_FRAME_COUNT 13U            /*   five frame cells, four title-end cells, four plain ones */
 #define BLIT_WINDOW_ZOOM_NUM 2          /* the zoom box's inner square: 2/3 of the */
 #define BLIT_WINDOW_ZOOM_DEN 3          /*   box, from its top-left corner */
 
@@ -343,10 +343,13 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
    the bar -- its top line and rule, Slate's bevel rows -- with the outer
    line down its outer edge, and the stripes run into the cell, stopping
    BLIT_WINDOW_STRIPE_INSET px from the cell's outer edge (the line and one
-   clear pixel), so they join the stripes of the next cell. */
+   clear pixel), so they join the stripes of the next cell.
+   Revision (0.3.45): four plain title-end cells, the inactive bar's ends:
+   the same without stripes. */
 enum {
     FR_LEFT, FR_RIGHT, FR_BOTTOM_LEFT, FR_BOTTOM, FR_BOTTOM_RIGHT,
-    FR_CHALK_END_LEFT, FR_CHALK_END_RIGHT, FR_SLATE_END_LEFT, FR_SLATE_END_RIGHT
+    FR_CHALK_END_LEFT, FR_CHALK_END_RIGHT, FR_SLATE_END_LEFT, FR_SLATE_END_RIGHT,
+    FR_CHALK_PLAIN_LEFT, FR_CHALK_PLAIN_RIGHT, FR_SLATE_PLAIN_LEFT, FR_SLATE_PLAIN_RIGHT
 };
 
 static int blit_frame_glyph(uint32_t scalar)
@@ -354,11 +357,16 @@ static int blit_frame_glyph(uint32_t scalar)
     return scalar >= BLIT_FRAME_FIRST && scalar < BLIT_FRAME_FIRST + BLIT_FRAME_COUNT;
 }
 
-/* Only Slate's two title-end cells draw in pens: 0 and 1; -1 for the rest. */
+/* Only Slate's title-end cells draw in pens: the two with stripes are 0 and
+   1, the two plain ones 2 and 3; -1 for the rest. */
 static int blit_frame_pen_index(uint32_t scalar)
 {
-    if (!blit_frame_glyph(scalar) || scalar - BLIT_FRAME_FIRST < FR_SLATE_END_LEFT) return -1;
-    return (int)(scalar - BLIT_FRAME_FIRST) - FR_SLATE_END_LEFT;
+    unsigned i;
+    if (!blit_frame_glyph(scalar)) return -1;
+    i = scalar - BLIT_FRAME_FIRST;
+    if (i == FR_SLATE_END_LEFT || i == FR_SLATE_END_RIGHT) return (int)(i - FR_SLATE_END_LEFT);
+    if (i == FR_SLATE_PLAIN_LEFT || i == FR_SLATE_PLAIN_RIGHT) return (int)(i - FR_SLATE_PLAIN_LEFT) + 2;
+    return -1;
 }
 
 static void blit_frame_roles(uint32_t scalar, unsigned char *roles, int w, int h)
@@ -377,9 +385,11 @@ static void blit_frame_roles(uint32_t scalar, unsigned char *roles, int w, int h
     case FR_BOTTOM_RIGHT: wg_fill(&cell, w - L, w, 0, h, WR_FG); wg_fill(&cell, 0, w, h - L, h, WR_FG); return;
     default: break;
     }
-    right = index == FR_CHALK_END_RIGHT || index == FR_SLATE_END_RIGHT;
+    right = index == FR_CHALK_END_RIGHT || index == FR_SLATE_END_RIGHT ||
+        index == FR_CHALK_PLAIN_RIGHT || index == FR_SLATE_PLAIN_RIGHT;
     blit_window_band(w, h, &n, &top, &side, &bx, &by);
-    wg_bar(&cell, index >= FR_SLATE_END_LEFT, 1, right ? 0 : BLIT_WINDOW_STRIPE_INSET,
+    wg_bar(&cell, index == FR_SLATE_END_LEFT || index == FR_SLATE_END_RIGHT ||
+           index >= FR_SLATE_PLAIN_LEFT, index < FR_CHALK_PLAIN_LEFT, right ? 0 : BLIT_WINDOW_STRIPE_INSET,
            right ? w - BLIT_WINDOW_STRIPE_INSET : w, n, top);
     if (right) wg_fill(&cell, w - L, w, 0, h, WR_FG);
     else wg_fill(&cell, 0, L, 0, h, WR_FG);

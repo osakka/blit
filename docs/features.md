@@ -90,6 +90,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Drop shadow under any cell (SGR 66/67), in the cell's underline colour or foreground | 0.3.39 | 0211 | Tested |
 | Icon catalogue for applications (`GET /v1/fonts/icons`) | 0.1.588 | 0172 | Used |
 | Window frame with its line on the outer edge: one frame set (five cells) and the title bar's end cells, Chalk and Slate, whose stripes run into them; the old frame glyphs and `stripe-first`/`-last` are deprecated in the catalogue (`deprecated`, `replaced_by`) and still drawn | 0.3.41 | 0214 | Tested |
+| Inactive title-bar end cells: four plain title-end glyphs (the outer line, top line and rule, Slate's bevel, no stripes), Chalk and Slate, for the inactive bar beside the plain `title` cell | 0.3.44 | 0214 | Tested |
 | Controls glyph set: a checkbox, a compact two-cell switch and a three-cell capsule switch, in Chalk, Slate and the capsule's own pens | 0.3.40 | 0212 | Tested |
 | Graphics ledger (`GET /v1/diagnostics/graphics-ledger`) and blink counters: a picture that vanishes from presented frames and returns is counted; pictures deleted inside a synchronized update stay until it ends, so a whole-output redraw shows no hole | 0.3.42 | 0213 | Tested |
 | A fitted icon or symbol is never trimmed at any font size, 8 to 64 px; the Wi-Fi and volume icons are fitted by their drawn layers; a spanning icon's halves join to the pixel | 0.3.43 | 0215 | Tested |

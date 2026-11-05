@@ -77,11 +77,14 @@ mean of the foreground and the background. Blit draws them from
 `tools/fonts/draw-control-glyphs.py` is the design and writes their
 entries, and `control_glyph_gate` holds the raster to it.
 
-U+1002AE–U+1002B6 are the outer-edge frame (ADR 0214), also cell geometry,
-nine glyphs: the one frame set, `frame-left`, `frame-right`,
+U+1002AE–U+1002BA are the outer-edge frame (ADR 0214), also cell geometry,
+thirteen glyphs: the one frame set, `frame-left`, `frame-right`,
 `frame-bottom-left`, `frame-bottom`, `frame-bottom-right` (U+1002AE–1002B2),
 and the title bar's end cells, `chalk-title-end-left`, `-right` and
-`slate-light-title-end-left`, `-right` (U+1002B3–1002B6). A window has one
+`slate-light-title-end-left`, `-right` (U+1002B3–1002B6), then the same
+four without stripes for an inactive bar, `chalk-title-end-plain-left`,
+`-right` and `slate-light-title-end-plain-left`, `-right` (U+1002B7–1002BA,
+0.3.45). A window has one
 frame, and its line sits on the outermost edge of each frame cell: the left
 cell's left edge, the right cell's right edge, the bottom row's bottom edge
 (the bottom corners have two lines). Nothing else in the cell is drawn, so
@@ -97,7 +100,7 @@ foreground the ink, SGR 58 the highlight). A drop shadow (SGR 66) goes in
 the cells beyond the frame cells, with inset 0. `tools/fonts/draw-window-glyphs.py`
 is the design and writes their entries; `window_glyph_gate` holds the raster
 to it. The old frame glyphs and `stripe-first`/`stripe-last` of the window
-sets are deprecated by these (see `deprecated` below) and still drawn. U+1002B7
+sets are deprecated by these (see `deprecated` below) and still drawn. U+1002BB
 is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph

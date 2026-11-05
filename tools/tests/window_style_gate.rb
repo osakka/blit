@@ -12,7 +12,7 @@
 #   Slate's roles in the cell's pens -- K the foreground, L the underline
 #   colour (white when unset), M each channel (fg + bg) / 2 -- and the
 #   background wherever nothing is drawn.
-# - The outer-edge frame (ADR 0214, U+1002AE-1002B6): its nine glyphs on a
+# - The outer-edge frame (ADR 0214, U+1002AE-1002BA): its thirteen glyphs on a
 #   row, every pixel the design's (the frame cells' background the window's
 #   face, the line the foreground; Chalk's title ends in the foreground,
 #   Slate's in the cell's pens); then two whole windows built from them, a
@@ -22,6 +22,10 @@
 #   cells into their neighbours with no gap (and one clear pixel beside the
 #   outer line), and the shadow, SGR 66 with inset 0, starting in the cell
 #   beyond the frame at the pixel next to its line.
+# - Inactive windows (0.3.45), Chalk and Slate, built from the plain title
+#   ends: the bar with no stripes anywhere (the end cells, the plain `title`
+#   cells between), the outer line on both edges, the body and bottom as in
+#   the active windows.
 # - SGR 66 (ADR 0211): each shadow kind at each width is exactly its strips,
 #   in the foreground or the underline colour, under the cell's glyph (a
 #   frame glyph's line stays on top); SGR 67 and SGR 0 end it.
@@ -142,7 +146,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     # with a 2 px shadow.
     face_pens = sgr("0;38;2;#{rgb(INK)};48;2;#{rgb(FACE)}")
     bar_pens = sgr("0;38;2;#{rgb(INK)};48;2;#{rgb(BAR)};58;2;#{rgb(HI)}")
-    nine = (0...9).map { |i| (i < 5 ? face_pens : bar_pens) + u(FRAME_FIRST + i) }.join + sgr('0') + colours
+    nine = (0...13).map { |i| (i < 5 ? face_pens : bar_pens) + u(FRAME_FIRST + i) }.join + sgr('0') + colours
     at = ->(x, y, text) { "\\033[#{y + 1};#{x + 1}H#{text}" }
     win_text = lambda do |x0, y0, slate, thick|
       w = WIN_COLS
@@ -167,7 +171,20 @@ Dir.mktmpdir('blit-window-style') do |root|
       out << at.call(x0 + w, by + 1, shadow_pens + sgr("66:5:#{t}:0") + ' ')
       out << sgr('0') + colours
     end
-    frames_scene = at.call(2, 10, nine) + win_text.call(2, 12, true, false) + win_text.call(2, 20, false, true)
+    # Inactive windows: plain title ends round plain `title` cells, no stripes.
+    inactive_text = lambda do |x0, y0, slate|
+      first = slate ? 0x100254 : 0x100231
+      ends = [FRAME_FIRST + (slate ? 11 : 9), FRAME_FIRST + (slate ? 12 : 10)]
+      title = [ends[0]] + [first + 5] * (WIN_COLS - 2) + [ends[1]]
+      out = at.call(x0, y0, bar_pens + title.map { |c| u(c) }.join)
+      (1..WIN_BODY).each do |r|
+        out << at.call(x0, y0 + r, face_pens + u(FRAME_FIRST) + ' ' * (WIN_COLS - 2) + u(FRAME_FIRST + 1))
+      end
+      out << at.call(x0, y0 + WIN_BODY + 1, face_pens + u(FRAME_FIRST + 2) + u(FRAME_FIRST + 3) * (WIN_COLS - 2) + u(FRAME_FIRST + 4))
+      out << sgr('0') + colours
+    end
+    frames_scene = at.call(2, 10, nine) + win_text.call(2, 12, true, false) + win_text.call(2, 20, false, true) +
+                   inactive_text.call(16, 12, true) + inactive_text.call(16, 20, false)
     shadows = SHADOWS.map { |k, t, i| "#{sgr("66:#{k}:#{t}:#{i}")} #{sgr('67')} " }.join +
               "#{sgr('58;2;255;0;0;66:1:2')} #{sgr('0')}#{colours}#{sgr('66:1:2;0')}#{colours} " \
               "#{sgr('58;2;255;0;0;66:1:2')}#{u(FIRST + 14)}#{sgr('0')}#{colours}"
@@ -213,7 +230,7 @@ Dir.mktmpdir('blit-window-style') do |root|
                                          '--reference', cw.to_s, ch.to_s)
     check(status.success?, "the design does not run: #{err}")
     lines = design.lines
-    check(lines.size == 79, "the design has #{lines.size} glyphs, not 79")
+    check(lines.size == 83, "the design has #{lines.size} glyphs, not 83")
     # Chalk on row 1; Slate on row 2 (no underline colour: LINE is white)
     # and row 3 (underline colour LINE).
     [[0, 1, nil], [35, 2, [255, 255, 255]], [35, 3, LINE]].each do |offset, row, line_pen|
@@ -250,8 +267,38 @@ Dir.mktmpdir('blit-window-style') do |root|
         end
       end
     end
-    9.times do |i|
+    13.times do |i|
       cell_ok.call(2 + i, 10, FRAME_FIRST + i, INK, i < 5 ? FACE : BAR, HI, "frame glyph #{i}")
+    end
+    # Inactive windows: every cell the design's; no stripe anywhere in the bar
+    # (every pixel off the bevel rows and the outer lines is the bar colour);
+    # the body and bottom as the active windows'.
+    [[12, true, 0x100254], [20, false, 0x100231]].each do |y0, slate, first|
+      w = WIN_COLS
+      ends = [FRAME_FIRST + (slate ? 11 : 9), FRAME_FIRST + (slate ? 12 : 10)]
+      ([ends[0]] + [first + 5] * (w - 2) + [ends[1]]).each_with_index do |cp, i|
+        cell_ok.call(16 + i, y0, cp, INK, BAR, HI, "inactive window title cell #{i}")
+      end
+      (2...ch - 2).each do |dy|
+        (1...w * cw - 1).each do |ax|
+          colour = px.call(16 + ax / cw, y0, ax % cw, dy)
+          check(colour == BAR, "the inactive #{slate ? 'Slate' : 'Chalk'} bar has a stripe at #{ax},#{dy}: #{colour.inspect}")
+          checked += 1
+        end
+      end
+      (1..WIN_BODY + 1).each do |r|
+        w.times do |c|
+          ch.times do |dy|
+            cw.times do |dx|
+              bottom = r == WIN_BODY + 1
+              line = (c.zero? && dx.zero?) || (c == w - 1 && dx == cw - 1) || (bottom && dy == ch - 1)
+              got = px.call(16 + c, y0 + r, dx, dy)
+              check(got == (line ? INK : FACE), "inactive window cell #{c},#{r} pixel #{dx},#{dy} is #{got.inspect}")
+              checked += 1
+            end
+          end
+        end
+      end
     end
     [[12, true, 1, 0x100254], [20, false, 2, 0x100231]].each do |y0, slate, t, first|
       w = WIN_COLS
@@ -449,7 +496,7 @@ Dir.mktmpdir('blit-window-style') do |root|
             "the #{thick == 3 ? 'default ' : ''}button's left end is not 2 px in")
     end
     request('DELETE', "/v1/terminal-sessions/#{session['id']}")
-    puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70+9_frame windows=slate+chalk(outer_edge,stripes_run_in,shadow_inset_0) pixels=#{checked} " \
+    puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70+13_frame inactive_windows=plain_title_ends windows=slate+chalk(outer_edge,stripes_run_in,shadow_inset_0) pixels=#{checked} " \
          'chalk=foreground slate=cell_pens(fg,line,mix) transparent=background sgr51=1px sgr51:3=3px ' \
          'sgr51:5=bottom_rule underline_colour=used sgr54,sgr0=end buttons=continuous ' \
          'dialog=no_halo,no_fixed_colour caps=corners_show_dialog_face titles=51:2=51:4=bar_rows shadow=5_kinds*2_widths*2_insets,colour,under_glyph sgr67,sgr0=end'

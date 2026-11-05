@@ -52,7 +52,7 @@ frame_adr = Dir['docs/adr/*outer-edge-frame*.md'].first or raise 'no ADR records
 raise "#{frame_adr} is not in docs/adr/README.md" unless index.include?("(#{File.basename(frame_adr)})")
 adr_text = File.read(frame_adr)
 raise "#{frame_adr} does not record the frame, the title ends, the deprecation and the shadow note" unless
-  ['U+1002AE', 'U+1002B6', 'U+1002B7', 'title-end', 'deprecated: true', 'replaced_by', 'inset 0', 'Deprecation, not retirement'].all? { |t| adr_text.include?(t) }
+  ['U+1002AE', 'U+1002B6', 'U+1002BA', 'U+1002BB', 'title-end', 'title-end-plain', 'Revision 2026-11-05', 'deprecated: true', 'replaced_by', 'inset 0', 'Deprecation, not retirement'].all? { |t| adr_text.include?(t) }
 raise 'docs/features.md does not list the outer-edge frame' unless File.read('docs/features.md').include?('| 0214 |')
 
 broken = []

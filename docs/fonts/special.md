@@ -375,5 +375,9 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `chalk-title-end-right` | `U+1002B4` | `"\udbc0\udeb4"` | foreground | Chalk set: title bar, right end cell: the outer line, the bar's top line and rule, stripes to 2 px short |
 | `slate-light-title-end-left` | `U+1002B5` | `"\udbc0\udeb5"` | cell pens | Slate set: title bar, left end cell: the outer line, the bar's bevel, stripes from 2 px in |
 | `slate-light-title-end-right` | `U+1002B6` | `"\udbc0\udeb6"` | cell pens | Slate set: title bar, right end cell: the outer line, the bar's bevel, stripes to 2 px short |
+| `chalk-title-end-plain-left` | `U+1002B7` | `"\udbc0\udeb7"` | foreground | Chalk set: inactive title bar, left end cell: the outer line, the bar's top line and rule, no stripes |
+| `chalk-title-end-plain-right` | `U+1002B8` | `"\udbc0\udeb8"` | foreground | Chalk set: inactive title bar, right end cell: the outer line, the bar's top line and rule, no stripes |
+| `slate-light-title-end-plain-left` | `U+1002B9` | `"\udbc0\udeb9"` | cell pens | Slate set: inactive title bar, left end cell: the outer line, the bar's bevel, no stripes |
+| `slate-light-title-end-plain-right` | `U+1002BA` | `"\udbc0\udeba"` | cell pens | Slate set: inactive title bar, right end cell: the outer line, the bar's bevel, no stripes |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

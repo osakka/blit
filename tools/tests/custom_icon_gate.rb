@@ -35,9 +35,9 @@ Dir.chdir(root) do
   # of the icons and every retired range; a deprecated glyph names live,
   # non-deprecated replacements and keeps its place (it is not retired).
   geometry = icons.fetch('cell_geometry')
-  frame = geometry.select { |g| g['codepoint'].to_i(16).between?(0x1002AE, 0x1002B6) }
-  raise 'the outer-edge frame (U+1002AE-1002B6) is not cell geometry in the catalogue' unless
-    frame.size == 9 && frame.map { |g| g['codepoint'].to_i(16) } == (0x1002AE..0x1002B6).to_a
+  frame = geometry.select { |g| g['codepoint'].to_i(16).between?(0x1002AE, 0x1002BA) }
+  raise 'the outer-edge frame (U+1002AE-1002BA) is not cell geometry in the catalogue' unless
+    frame.size == 13 && frame.map { |g| g["codepoint"].to_i(16) } == (0x1002AE..0x1002BA).to_a
   raise 'a cell-geometry glyph reuses an icon or retired codepoint' unless
     (geometry.map { |g| g['codepoint'].to_i(16) } &
      (icons.fetch('icons').map { |i| i['codepoint'].to_i(16) } +

@@ -18,7 +18,7 @@ draw-control-glyphs.py's.
 
 The outer-edge frame (ADR 0214), U+1002AE-1002B6, is here too: ONE frame
 set (the line on the outermost edge of each frame cell, nothing else
-drawn), and the title bar's four end cells, Chalk's and Slate's, which
+drawn), and the title bar's four end cells (and, from 0.3.45, the four plain ones of the inactive bar), Chalk's and Slate's, which
 carry that outer line and run the stripes into the cell. The frame glyphs
 and stripe-first/-last of the two sets above are deprecated (the catalogue
 says so, and what replaces them); they draw unchanged until Hibr moves.
@@ -83,7 +83,7 @@ STYLES = [('chalk', 0x100231), ('slate-light', 0x100254)]
 # Slate dark took U+100277-100299 until ADR 0211; retired, never reused.
 RETIRED = (0x100277, 0x100299)
 
-# ADR 0214: the outer-edge frame, nine glyphs in this order. The first five
+# ADR 0214: the outer-edge frame, thirteen glyphs in this order. The first five
 # are the one frame set (one colour, coverage in the foreground); the title
 # ends are the bar's end cells in each title-bar style.
 FRAME_FIRST = 0x1002AE
@@ -97,6 +97,11 @@ FRAMES = [
     ('chalk-title-end-right', 'chalk', 'title bar, right end cell: the outer line, the bar\'s top line and rule, stripes to 2 px short'),
     ('slate-light-title-end-left', 'slate-light', 'title bar, left end cell: the outer line, the bar\'s bevel, stripes from 2 px in'),
     ('slate-light-title-end-right', 'slate-light', 'title bar, right end cell: the outer line, the bar\'s bevel, stripes to 2 px short'),
+    # 0.3.45: the inactive bar's end cells, the same without stripes.
+    ('chalk-title-end-plain-left', 'chalk', 'inactive title bar, left end cell: the outer line, the bar\'s top line and rule, no stripes'),
+    ('chalk-title-end-plain-right', 'chalk', 'inactive title bar, right end cell: the outer line, the bar\'s top line and rule, no stripes'),
+    ('slate-light-title-end-plain-left', 'slate-light', 'inactive title bar, left end cell: the outer line, the bar\'s bevel, no stripes'),
+    ('slate-light-title-end-plain-right', 'slate-light', 'inactive title bar, right end cell: the outer line, the bar\'s bevel, no stripes'),
 ]
 # The glyphs that ADR 0214 deprecates: each old frame piece and the stripe
 # cells beside the frame, and what an application draws instead (the title
@@ -330,7 +335,7 @@ def draw(style, index, w, h):
 
 
 def draw_frame(index, w, h):
-    """One outer-edge frame glyph's role map (ADR 0214), index 0-8 of FRAMES."""
+    """One outer-edge frame glyph's role map (ADR 0214), index 0-12 of FRAMES."""
     name = FRAMES[index][0]
     L, inset = T['LINE'], T['STRIPE_INSET']
     c = Cell(w, h)
@@ -350,7 +355,7 @@ def draw_frame(index, w, h):
         x0, x1 = (0, w - inset) if right else (inset, w)
         if slate:
             c.fill(0, w, 0, h, 'B')
-        for k in range(n):
+        for k in range(0 if '-plain-' in name else n):
             y = top + 2 * L * k
             c.fill(x0, x1, y, y + L, 'M' if slate else 'K')
             if slate:

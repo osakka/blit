@@ -201,7 +201,7 @@ are retired.
 
 ## Window frame: one frame, its line on the outer edge
 
-ADR 0214. 9 glyphs at U+1002AE–1002B6 are the window frame as the owner
+ADR 0214. 13 glyphs at U+1002AE–1002BA are the window frame as the owner
 wants it: **one frame, and its line sits on the outermost edge of each
 frame cell** (the left cell's left edge, the right cell's right edge, the
 bottom row's bottom edge). Nothing else in the cell is drawn, so the cell's
@@ -217,6 +217,8 @@ window's face and the face runs out to the line.
 | `frame-bottom-right` | U+1002B2 | bottom-right corner (right and bottom lines) | fg = the line |
 | `chalk-title-end-left`, `-right` | U+1002B3, U+1002B4 | the title row's end cells | fg = the ink, bg = the bar |
 | `slate-light-title-end-left`, `-right` | U+1002B5, U+1002B6 | the title row's end cells | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `chalk-title-end-plain-left`, `-right` | U+1002B7, U+1002B8 | the inactive title row's end cells (no stripes) | fg = the ink, bg = the bar |
+| `slate-light-title-end-plain-left`, `-right` | U+1002B9, U+1002BA | the inactive title row's end cells (no stripes) | bg = the bar, fg = the ink, SGR 58 = the highlight |
 
 - **One frame set.** Chalk's and Slate's frame glyphs were the same 1 px
   foreground line, so the frame cells are one set (catalogue `set: frame`,
@@ -227,7 +229,9 @@ window's face and the face runs out to the line.
   into it**, starting (left) or stopping (right) 2 px from the cell's outer
   edge: the line and one clear pixel. They join the next cell's stripes at
   every cell size. Chalk's are coverage; Slate's use the cell's pens as the
-  Slate bar glyphs do. `stripe-first` and `stripe-last` are redundant.
+  Slate bar glyphs do. The **plain** title ends (0.3.45) are the same cells
+  without stripes, for the inactive bar: they sit beside the plain `title`
+  cells and join them at every size. `stripe-first` and `stripe-last` are redundant.
 - **The shadow is unchanged** (SGR 66, ADR 0211), but goes in the cells
   beyond the frame cells with **inset 0** (`66:kind:width:0`), so its strip
   begins at the pixel next to the frame's line.
@@ -244,8 +248,8 @@ window's face and the face runs out to the line.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002B7 (the outer-edge frame, below,
-is U+1002AE–1002B6).
+section. The next free codepoint is U+1002BB (the outer-edge frame, below,
+is U+1002AE–1002BA).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

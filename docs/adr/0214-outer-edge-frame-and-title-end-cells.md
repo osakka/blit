@@ -147,6 +147,30 @@ never reused).
   types them, the new codepoints keep clear of the icons and every retired
   range, and this record and its index entry exist.
 
+## Revision 2026-11-05: the inactive bar's end cells (0.3.45)
+
+Hibr draws an inactive window's title bar without stripes (the plain `title`
+cell, ADR 0210), and its end cells then need the outer line too. Four glyphs
+are added after the title ends; **the next free codepoint is U+1002BB**:
+
+| Codepoint | Id | Where | Pens |
+| --- | --- | --- | --- |
+| U+1002B7 | `chalk-title-end-plain-left` | inactive title row, left end | fg = the ink, bg = the bar |
+| U+1002B8 | `chalk-title-end-plain-right` | inactive title row, right end | fg = the ink, bg = the bar |
+| U+1002B9 | `slate-light-title-end-plain-left` | inactive title row, left end | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| U+1002BA | `slate-light-title-end-plain-right` | inactive title row, right end | as above |
+
+Each is the title-end cell without stripes: the outer line, the bar's top
+line and rule, Slate's bevel rows, the bar's background. Away from the outer
+line it is pixel for pixel the plain `title` cell, so the two seam at every
+cell size. Same sets, `part`, `cells` and structured pen roles as the title
+ends; the geometry is `blit_frame_roles` with the stripes switched off
+(`wg_bar`'s `stripes` flag), and Slate's two new cells take pen indices 2 and
+3 (`BLIT_FRAME_PENS` 4, `BLIT_CHROME_PENS` 52). Nothing is deprecated.
+`window_glyph_gate` holds them to the design at the 12 sizes and to the
+`title` cell beside them; `window_style_gate` draws an inactive Chalk and an
+inactive Slate window from them on both compositors.
+
 ## Considered and not done
 
 - **Two frame sets (Chalk's and Slate's).** They were identical; one set.
