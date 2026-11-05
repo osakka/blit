@@ -1,5 +1,46 @@
 # Verification status
 
+## 2026-11-05: 0.3.42 a picture deleted inside a synchronized update stays drawn; the graphics ledger
+
+- **The owner's blink on entering full screen was Blit's** (ADR 0213).
+  Hibr sends each frame as one `CSI ?2026h` update: `a=d,d=I` of the old
+  wallpaper, then `a=T` of a new image id in 4096-byte chunks (`m=1`).
+  Blit holds a synchronized view by skipping it in both compositors, except
+  on a whole-output redraw, which drew every view from live state, where
+  the old picture was already freed and the new one incomplete: a hole for
+  a frame. A whole-output redraw follows a change in the number of views,
+  a pane origin moving, or overlays and effects changing, and a full-screen
+  transition makes a burst of them over 2-3 s: the 5-6 blinks. In steady
+  state nothing redraws the whole output, so only the transition blinked.
+  The frame barrier is not the cause (it only decides whether an output
+  renders; its holds and timeouts are now counted). **Fix:** inside a 2026
+  update a capital-letter delete (`d=I`, `d=A`) of a complete image that is
+  drawn now keeps its pixels and placements as a retired image the program
+  cannot find, so any redraw still draws it; it is freed when the update
+  ends (2026 off, a reset, `ESC c`), with ledger reason `delete-d=I,held`.
+  A full image store gives up retired images first; an API graphics reset
+  frees them at once.
+- **A graphics ledger and counters** make any flicker measurable
+  afterwards: `GET /v1/diagnostics/graphics-ledger?since=&limit=` (a
+  512-entry ring, never shared with the trace; transmit, place, delete,
+  free, reset, blink and barrier events with the output's presented-frame
+  number, ids, rectangle, bytes and reason; a cursor, `lost` and per-output
+  `present_frames`), and cumulative counters in `/v1/diagnostics/runtime`
+  `performance`: placements, deletes, images freed, upload bytes, full
+  repaints, blink frames and events, barrier holds and timeouts,
+  synchronized live draws. A blink: a picture in the previous presented
+  frame is absent from this one and the same id, or a covering successor, is
+  drawn again within 8 presented frames.
+- **`graphics_blink_gate`** (renderer suite, both compositors): a split
+  replace blinks and the ledger shows delete, frames, place; an atomic
+  replace and Hibr's real sequence in a 2026 batch, slowly and with views
+  appearing mid-batch, do not. On 0.3.41 it fails with 1 blink event, 6
+  blink frames and 6 synchronized live draws.
+- **Suites:** font 42/42, all 176 pass (6 skip), renderer on GLES 79 pass
+  (1 skip); no failures. The agent's earlier `all` run was stopped by hand
+  on a hung `output_occupancy_gate` (it passes alone in 69 s; the hang was
+  contention between concurrent suites).
+
 ## 2026-11-05: 0.3.41 one frame, its line on the outer edge; title-bar end cells
 
 - **One window frame, line on the outermost edge** (ADR 0214, owner's
