@@ -305,6 +305,7 @@ suite_renderer() {
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate kitty_frame_edit_gate.rb ruby tools/tests/kitty_frame_edit_gate.rb
     run_gate kitty_delete_gate.rb ruby tools/tests/kitty_delete_gate.rb
+    run_gate graphics_blink_gate.rb ruby tools/tests/graphics_blink_gate.rb
     run_gate kms_frame_timing_gate.rb ruby tools/tests/kms_frame_timing_gate.rb
     run_gate graphics_reset_gate.rb ruby tools/tests/graphics_reset_gate.rb
     run_gate sixel_decoder_gate.rb ruby tools/tests/sixel_decoder_gate.rb

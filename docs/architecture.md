@@ -70,7 +70,11 @@ Beside the main loop:
    updated and reported in `/v1/diagnostics/runtime`.
 
 A program can hold its pane still while it draws with synchronized output
-(mode 2026).
+(mode 2026). A picture it deletes inside the update stays drawn until the
+update ends, so a whole-output redraw cannot show a hole
+([ADR 0213](adr/0213-graphics-ledger-blink-counters-and-held-pictures.md)).
+What the compositors drew is measured afterwards: the graphics ledger and the
+blink counters in `/v1/diagnostics`.
 
 ## Decisions that shape everything
 

@@ -91,6 +91,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Icon catalogue for applications (`GET /v1/fonts/icons`) | 0.1.588 | 0172 | Used |
 | Window frame with its line on the outer edge: one frame set (five cells) and the title bar's end cells, Chalk and Slate, whose stripes run into them; the old frame glyphs and `stripe-first`/`-last` are deprecated in the catalogue (`deprecated`, `replaced_by`) and still drawn | 0.3.41 | 0214 | Tested |
 | Controls glyph set: a checkbox, a compact two-cell switch and a three-cell capsule switch, in Chalk, Slate and the capsule's own pens | 0.3.40 | 0212 | Tested |
+| Graphics ledger (`GET /v1/diagnostics/graphics-ledger`) and blink counters: a picture that vanishes from presented frames and returns is counted; pictures deleted inside a synchronized update stay until it ends, so a whole-output redraw shows no hole | 0.3.41 | 0213 | Tested |
 | A catalogue a client can map: structured pen roles (part, cells, background, foreground, SGR 58) on every cell-geometry glyph; a revision, an ETag and `If-None-Match`; SGR capability flags (`sgr-framed`, `sgr-framed-bar`, `sgr-shadow`) in `GET /v1/server` | 0.3.40 | 0212 | Tested |
 
 The [font reference](font-reference.md) lists every glyph and icon codepoint.

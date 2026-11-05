@@ -398,11 +398,11 @@ status codes.
 | Input | `GET /v1/input/devices`, `GET/PATCH /v1/input/devices/{id}`, `POST /v1/input/inject`, `GET /v1/input/routes`, `PUT/DELETE /v1/input/routes/{id}` | Discover, configure, and route physical or synthetic input |
 | Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
 | Graphics | `GET /v1/effects`, `GET/POST /v1/overlays`, `DELETE /v1/overlays/{id}` | Report pane effects; manage bounded overlays |
-| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/console`, `/processes`, `/observation`, `/trace`, `/screenshots/{display_id}` | Inspect aggregate state, timing, the console, busy processes, events, and evidence captures |
+| Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/console`, `/processes`, `/observation`, `/trace`, `/graphics-ledger`, `/screenshots/{display_id}` | Inspect aggregate state, timing, the console, busy processes, events, picture events and blinks, and evidence captures |
 | Control | `POST /v1/control/shutdown`, `/restart`, `GET/PUT /v1/control/shutdown-key` | Stop or restart the server; program the keyboard chord that stops it |
 | Updates | `PUT /v1/control/update`, `GET .../status`, `POST .../cancel`, `POST .../reset` | Upload and supervise a verified package update |
 
-The schema contains 49 path templates (`api_schema_gate.rb` checks the
+The schema contains 50 path templates (`api_schema_gate.rb` checks the
 count). Keep this table synchronized when a path is added, removed, or
 renamed; the schema remains the authoritative count.
 
@@ -1736,6 +1736,36 @@ missed deadlines, input
 dispatch counters, terminal bytes, surface/frame commits, queue pressure, and
 a bounded event log. `GET /v1/diagnostics/trace?limit=32` provides correlated
 input, surface, and render-path events.
+
+### Measuring a picture that blinks
+
+A picture that is on screen, absent from a few presented frames, and back is
+a *blink* ([ADR 0213](adr/0213-graphics-ledger-blink-counters-and-held-pictures.md)).
+`GET /v1/diagnostics/runtime` counts them in `performance`:
+`graphics_blink_events` (each vanish-and-return) and `graphics_blink_frames`
+(the presented frames they were absent), beside `graphics_placements`,
+`graphics_deletes`, `graphics_images_freed`, `graphics_upload_bytes`
+(GPU texture uploads), `graphics_bytes_landed`, `graphics_full_repaints`,
+`graphics_barrier_holds`, `graphics_barrier_timeouts` and
+`graphics_synchronized_live_draws`. `GET /v1/diagnostics/graphics-ledger`
+says what happened around one: a ring of the last 512 picture events
+(`transmit`, `place`, `delete`, `free`, `reset`, `blink`, `barrier`), each
+stamped with the output's presented-frame count, the image and placement,
+the rectangle in cells and pixels, the bytes and a reason. It is its own
+ring, not the trace's, so a burst of pointer events cannot evict it. Read it
+incrementally with `since`:
+
+```sh
+before=$(curl -s "$base/v1/diagnostics/runtime" | jq '.performance | {graphics_blink_events,graphics_blink_frames,graphics_barrier_timeouts}')
+cursor=$(curl -s "$base/v1/diagnostics/graphics-ledger?limit=1" | jq .sequence)
+# ... do the thing that blinks ...
+curl -s "$base/v1/diagnostics/runtime" | jq '.performance | {graphics_blink_events,graphics_blink_frames,graphics_barrier_timeouts}'
+curl -s "$base/v1/diagnostics/graphics-ledger?since=$cursor" | jq '.events[] | {sequence,kind,frame,image_id,reason,frames,cells}'
+```
+
+The response's `next` is the cursor for the following read and `lost`
+counts events the ring overwrote since yours. A `blink` event's `reason` is
+what last deleted the image, then `;returned` or `;successor=<id>`.
 
 Capture one display with:
 

@@ -64,6 +64,7 @@ struct KmsGlesResources {
     /* Time this frame spent making sprites and uploading textures. */
     long long upload_us;
     unsigned long long partial_uploads;
+    unsigned long long upload_bytes;
     uint32_t *scratch_black, *scratch_white;
     unsigned char *sprite_pixels;
     size_t scratch_pixels;
@@ -342,6 +343,7 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
                                          image->width * bytes) == 0) {
                 r->upload_us += kms_now_us() - uploaded;
                 ++r->partial_uploads;
+                r->upload_bytes += (unsigned long long)ew * (unsigned long long)eh * bytes;
                 slot->generation = image->generation;
                 slot->used_frame = r->frame;
                 return slot->texture;
@@ -360,6 +362,8 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
         return 0;
     }
     r->upload_us += kms_now_us() - uploaded;
+    r->upload_bytes += (unsigned long long)image->width *
+        (unsigned long long)image->height * bytes;
     slot->image = image;
     slot->generation = image->generation;
     slot->width = image->width;
@@ -849,6 +853,10 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
                     if (!bounded) partial = 0;
                 }
             }
+            /* A synchronized view reaches here only on a whole-scene redraw,
+               which draws what it holds now: the server is told (ADR 0213). */
+            if (view->synchronized && view->synchronized_drawn != NULL)
+                *view->synchronized_drawn = 1;
             kms_gles_view(kms, r, output, view, partial, dx, dy, dx + dw, dy + dh);
             if (drawn_count < BLIT_KMS_PRESENT_PANES) {
                 drawn_x[drawn_count] = view->effect_x;
@@ -1055,6 +1063,7 @@ static int kms_gles_compose(BlitKms *kms, KmsOutput *output,
     output->info.gles_frame_quads = (vertices_after - vertices_before) / 6;
     output->info.gles_upload_ms = (double)r->upload_us / 1000.0;
     output->info.gles_image_partial_uploads = r->partial_uploads;
+    output->info.gles_image_upload_bytes = r->upload_bytes;
     output->info.effects_quads = r->effect_quads;
     output->info.effects_last_ms = 0;
     {

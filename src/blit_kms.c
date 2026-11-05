@@ -2514,9 +2514,12 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
     global_pointer_y -= hotspot_y;
     if (submitted_output_mask != NULL) *submitted_output_mask = 0;
     if (deferred_output_mask != NULL) *deferred_output_mask = 0;
-    for (i = 0; i < view_count; ++i)
+    for (i = 0; i < view_count; ++i) {
         if (views[i].damage_consumed != NULL)
             *views[i].damage_consumed = 0;
+        if (views[i].synchronized_drawn != NULL)
+            *views[i].synchronized_drawn = 0;
+    }
     if (getenv("BLIT_KMS_TRACE_TIMING") != NULL)
         started = kms_now_us();
 
@@ -2726,6 +2729,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
            background is restored for every non-full repaint, not only when
            the pointer moved; terminal damage can otherwise preserve a
            pointer-shaped hole in the scene cache. */
+        if (full_redraw)
+            ++output->info.full_repaints;
         prepare_repaint_buffer(output, full_redraw, render_scene);
         /* A held scene keeps its panel and overlays as drawn, and what was
            under them. */
@@ -2760,6 +2765,9 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                    rather than a hole. */
                 if (views[view_index].synchronized && !full_redraw)
                     continue;
+                if (views[view_index].synchronized &&
+                    views[view_index].synchronized_drawn != NULL)
+                    *views[view_index].synchronized_drawn = 1;
                 /* A zoomed output's pointer is outside the logical scene. */
                 if (pointer_changed && !zoomed) {
                     int pointer_x0 = 0, pointer_y0 = 0;

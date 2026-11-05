@@ -750,6 +750,40 @@ paths:
                 $ref: '#/components/schemas/Observation'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/diagnostics/graphics-ledger:
+    get:
+      tags: [diagnostics]
+      operationId: getGraphicsLedger
+      summary: Read the graphics ledger -- pictures transmitted, placed, deleted, freed, held and blinked (ADR 0213)
+      description: >-
+        A dedicated ring of the last 512 picture events, never shared with the
+        pointer or input trace. An event carries the presented-frame count of
+        the output it happened on, so what happened between two presented
+        frames is read off the counters. `blink` events say a picture that was
+        on screen was absent from `frames` presented frames and came back;
+        `reason` names what removed it (the delete letter, an eviction) and
+        whether the same image or a successor returned. Read it incrementally:
+        pass the `next` of the last response as `since`.
+      parameters:
+        - in: query
+          name: since
+          required: false
+          description: Return events with a sequence greater than this; 0 or absent starts at the oldest still held.
+          schema: {type: integer, minimum: 0, default: 0}
+        - in: query
+          name: limit
+          required: false
+          description: Maximum events to return, oldest first; defaults to and is capped at 512.
+          schema: {type: integer, minimum: 1, maximum: 512, default: 512}
+      responses:
+        '200':
+          description: Ledger events after the cursor, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphicsLedger'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/diagnostics/trace:
     get:
       tags: [diagnostics]
@@ -3549,7 +3583,7 @@ components:
           additionalProperties: false
         performance:
           type: object
-          required: [process_cpu_ms, desktop_cpu_ms, system_load_1m, uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, frame_rate_hz, input_events, pointer_position_changes, last_input_dispatch_ms, max_input_dispatch_ms, evdev_mouse_events, evdev_mouse_syncs, evdev_mouse_motion_events, evdev_mouse_wheel_events, evdev_mouse_button_events, evdev_mouse_button_repeats_ignored, evdev_mouse_button_state_coalesced, last_evdev_mouse_event_age_ms, last_evdev_mouse_path, last_evdev_mouse_device_id, last_evdev_mouse_device_present, evdev_keyboard_events, evdev_keyboard_key_presses, evdev_keyboard_keys_delivered, evdev_keyboard_keys_undelivered, last_evdev_keyboard_event_age_ms, last_evdev_keyboard_path, last_evdev_keyboard_device_id, last_evdev_keyboard_device_present, input_keys_dropped, input_reports_dropped, pointer_lock_reports, pointer_lock_releases, pointer_lock_engages, pointer_lock_released, evdev_service_budget_yields, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_payloads, graphics_payloads_kitty, graphics_payloads_sixel, graphics_payloads_rejected, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, glyph_cache_hits, glyph_cache_misses, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, surface_commits, surface_commit_hz, surface_commit_frames, surface_commit_window_ms, surface_commit_window_sequence, surface_commit_age_ms, last_surface_commit_gap_ms, max_surface_commit_gap_ms, frame_commits, present_calls, last_loop_gap_ms, max_loop_gap_ms, loop_gap_window_ms, loop_gap_window_sequence, loop_gap_window_max_ms, last_kms_present_ms, max_kms_present_ms, last_select_ms, max_select_ms, last_evdev_scan_ms, max_evdev_scan_ms, evdev_scan_opens, evdev_open_requests, evdev_open_requests_dropped, evdev_open_queue_depth, evdev_opener_thread]
+          required: [process_cpu_ms, desktop_cpu_ms, system_load_1m, uptime_ms, frames, last_frame_gap_ms, max_frame_gap_ms, last_render_ms, max_render_ms, missed_deadlines, frame_rate_max_render_ms, frame_rate_missed_deadlines, frame_rate_window_sequence, last_terminal_ms, max_terminal_ms, terminal_bytes, frame_rate_hz, input_events, pointer_position_changes, last_input_dispatch_ms, max_input_dispatch_ms, evdev_mouse_events, evdev_mouse_syncs, evdev_mouse_motion_events, evdev_mouse_wheel_events, evdev_mouse_button_events, evdev_mouse_button_repeats_ignored, evdev_mouse_button_state_coalesced, last_evdev_mouse_event_age_ms, last_evdev_mouse_path, last_evdev_mouse_device_id, last_evdev_mouse_device_present, evdev_keyboard_events, evdev_keyboard_key_presses, evdev_keyboard_keys_delivered, evdev_keyboard_keys_undelivered, last_evdev_keyboard_event_age_ms, last_evdev_keyboard_path, last_evdev_keyboard_device_id, last_evdev_keyboard_device_present, input_keys_dropped, input_reports_dropped, pointer_lock_reports, pointer_lock_releases, pointer_lock_engages, pointer_lock_released, evdev_service_budget_yields, stream_queue_bytes, stream_queue_peak_bytes, stream_dropped_events, stream_backpressure_disconnects, graphics_payloads, graphics_payloads_kitty, graphics_payloads_sixel, graphics_payloads_rejected, graphics_placements, graphics_deletes, graphics_images_freed, graphics_upload_bytes, graphics_bytes_landed, graphics_full_repaints, graphics_blink_frames, graphics_blink_events, graphics_barrier_holds, graphics_barrier_timeouts, graphics_synchronized_live_draws, graphics_ledger_sequence, pixel_frames_accepted, pixel_frame_errors, pixel_frames_pending, glyph_cache_hits, glyph_cache_misses, frame_rate_frames, frame_rate_window_ms, frame_rate_age_ms, loop_iterations, terminal_reads, surface_commits, surface_commit_hz, surface_commit_frames, surface_commit_window_ms, surface_commit_window_sequence, surface_commit_age_ms, last_surface_commit_gap_ms, max_surface_commit_gap_ms, frame_commits, present_calls, last_loop_gap_ms, max_loop_gap_ms, loop_gap_window_ms, loop_gap_window_sequence, loop_gap_window_max_ms, last_kms_present_ms, max_kms_present_ms, last_select_ms, max_select_ms, last_evdev_scan_ms, max_evdev_scan_ms, evdev_scan_opens, evdev_open_requests, evdev_open_requests_dropped, evdev_open_queue_depth, evdev_opener_thread]
           properties:
             uptime_ms: {type: integer, minimum: 0}
             process_cpu_ms:
@@ -3697,6 +3731,18 @@ components:
               description: >-
                 Payloads that reached the parser and were rejected by it. A
                 single payload counts once however many images it named.
+            graphics_placements: {type: integer, minimum: 0, description: Kitty placements made (`a=p`, and `a=T`); ADR 0213.}
+            graphics_deletes: {type: integer, minimum: 0, description: Kitty `a=d` commands, of any target.}
+            graphics_images_freed: {type: integer, minimum: 0, description: Images released, with the reason in the ledger.}
+            graphics_upload_bytes: {type: integer, minimum: 0, description: Picture bytes uploaded to GPU textures by the GLES compositor; 0 on the CPU compositor, which draws from the image store.}
+            graphics_bytes_landed: {type: integer, minimum: 0, description: Picture bytes of completed Kitty transmissions, which is when the pixels become presentable.}
+            graphics_full_repaints: {type: integer, minimum: 0, description: Frames an output composed whole, summed over outputs.}
+            graphics_blink_frames: {type: integer, minimum: 0, description: Presented frames in which a picture shown in the frame before was absent and then came back within 8 presented frames. See `graphics_blink_events` and the ledger.}
+            graphics_blink_events: {type: integer, minimum: 0, description: 'Distinct vanish-and-return events (ADR 0213). A picture deleted for good is not one; neither is a window that moved, nor a picture replaced within one presented frame.'}
+            graphics_barrier_holds: {type: integer, minimum: 0, description: Hibr frame barriers opened.}
+            graphics_barrier_timeouts: {type: integer, minimum: 0, description: Hibr frame barriers that expired, releasing the output with members still undrawn.}
+            graphics_synchronized_live_draws: {type: integer, minimum: 0, description: Frames a view held by synchronized output (mode 2026) was drawn anyway, because the frame was a whole redraw.}
+            graphics_ledger_sequence: {type: integer, minimum: 0, description: The last ledger sequence assigned.}
             pixel_frames_accepted: {type: integer, minimum: 0}
             pixel_frame_errors: {type: integer, minimum: 0}
             pixel_frames_pending: {type: integer, minimum: 0}
@@ -3789,6 +3835,83 @@ components:
               detail: {type: string}
             additionalProperties: false
       additionalProperties: false
+    GraphicsLedger:
+      type: object
+      required: [capacity, sequence, lost, present_frames, events, next]
+      properties:
+        capacity: {type: integer, const: 512}
+        sequence: {type: integer, minimum: 0, description: The last sequence assigned.}
+        lost:
+          type: integer
+          minimum: 0
+          description: Events after `since` the ring had already overwritten.
+        present_frames:
+          type: array
+          description: Presented frames counted per output since the server started; an event's `frame` is on this clock.
+          items:
+            type: object
+            required: [display_id, frames]
+            properties:
+              display_id: {type: string}
+              frames: {type: integer, minimum: 0}
+        next: {type: integer, minimum: 0, description: The cursor to pass as `since` next time.}
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/GraphicsLedgerEvent'
+    GraphicsLedgerEvent:
+      type: object
+      required: [sequence, time_us, kind, session, display_id, frame, image_id, placement_id, cells, pixels, bytes, frames, reason]
+      properties:
+        sequence: {type: integer, minimum: 1}
+        time_us: {type: integer, minimum: 0, description: Monotonic microseconds, the trace's clock.}
+        kind:
+          type: string
+          enum: [transmit, place, delete, free, reset, blink, barrier]
+          description: >-
+            `transmit` is an upload beginning (reason `begin`) or complete
+            (reason `complete`, `complete,replace`, `complete,edit`, with
+            `bytes`); `place` a placement (`a=p`, `a=T`); `delete` one
+            placement removed by an `a=d` (reason `delete-d=<letter>`); `free`
+            an image's data released, with why (`delete-d=I`,
+            `delete-d=I,held`, `evicted-unshown`, `frame-abandoned`, ...);
+            `reset` an API reset or a session's end; `barrier` a Hibr frame
+            barrier `hold`, `release` or `timeout`; `blink` a picture that
+            vanished from presented frames and came back (ADR 0213).
+        session: {type: string, description: 'Empty for events no session owns, such as a barrier.'}
+        display_id: {type: string}
+        frame:
+          type: integer
+          minimum: 0
+          description: The output's presented-frame count when the event happened.
+        image_id: {type: integer, minimum: 0}
+        placement_id: {type: integer, minimum: 0}
+        cells:
+          type: object
+          required: [x, y, width, height]
+          description: The placement's rectangle in cells; zero when the event has none.
+          properties:
+            x: {type: integer}
+            y: {type: integer}
+            width: {type: integer}
+            height: {type: integer}
+        pixels:
+          type: object
+          required: [x, y, width, height]
+          properties:
+            x: {type: integer}
+            y: {type: integer}
+            width: {type: integer}
+            height: {type: integer}
+        bytes: {type: integer, minimum: 0, description: 'Picture bytes of a complete `transmit` or a `free`.'}
+        frames: {type: integer, minimum: 0, description: 'A `blink`: how many presented frames the picture was absent.'}
+        reason:
+          type: string
+          description: >-
+            A `blink`'s reason is the cause (the last delete or free of that
+            image) then `;returned` when the same image came back or
+            `;successor=<id>` when another image covering at least half of its
+            rectangle took its place.
     Observation:
       type: object
       required: [observation_version, captured_monotonic_us, consistency,

@@ -355,6 +355,78 @@ typedef struct {
     uint16_t *links;
 } BlitScrollbackLine;
 
+/* ADR 0213: the graphics ledger. One ring of picture events -- what was
+   transmitted, placed, deleted and freed, when presentation was held, and
+   every blink -- kept apart from the trace so a burst of pointer events
+   cannot push a flicker out of it. An entry is a struct appended in O(1):
+   no allocation, no lock, no formatting until it is read. */
+#define BLIT_GRAPHICS_LEDGER_ENTRIES 512
+/* A placement that was shown, vanished, and is shown again within this many
+   presented frames is a blink (ADR 0213). */
+#define BLIT_BLINK_WINDOW_FRAMES 8
+#define BLIT_BLINK_TRACKS 32
+
+typedef enum {
+    BLIT_LEDGER_TRANSMIT,
+    BLIT_LEDGER_PLACE,
+    BLIT_LEDGER_DELETE,
+    BLIT_LEDGER_FREE,
+    BLIT_LEDGER_RESET,
+    BLIT_LEDGER_BLINK,
+    BLIT_LEDGER_BARRIER
+} BlitLedgerKind;
+
+typedef struct {
+    unsigned long long sequence;
+    unsigned long long time_us;
+    unsigned long long session;      /* 0 when no session owns the event */
+    unsigned long long frame;        /* the output's presented-frame count */
+    unsigned long long bytes;
+    unsigned int image_id;
+    unsigned int placement_id;
+    int kind;
+    int output;
+    int x, y, width, height;         /* pixels */
+    int cell_x, cell_y, cell_width, cell_height;
+    int frames;                      /* a blink: presented frames it was gone */
+    char reason[48];
+} BlitGraphicsLedgerEntry;
+
+typedef struct {
+    BlitGraphicsLedgerEntry entries[BLIT_GRAPHICS_LEDGER_ENTRIES];
+    unsigned long long sequence;     /* the last one assigned */
+    /* Presented frames per output, counted where the compositor reports a
+       submission, and the display each output is. */
+    unsigned long long present_frames[BLIT_MAX_DISPLAYS];
+    unsigned long long display_ids[BLIT_MAX_DISPLAYS];
+    int output_count;
+    /* Cumulative, in /v1/diagnostics/runtime's performance. */
+    unsigned long long placements;
+    unsigned long long deletes;
+    unsigned long long images_freed;
+    unsigned long long upload_bytes_landed;
+    unsigned long long blink_frames;
+    unsigned long long blink_events;
+    unsigned long long barrier_holds;
+    unsigned long long barrier_timeouts;
+    unsigned long long synchronized_live_draws;
+} BlitGraphicsLedger;
+
+/* What a surface showed at its last presented frame, and the placements
+   that have vanished since and are being watched for their return. */
+typedef struct {
+    unsigned int image_id;
+    int x, y, width, height;
+} BlitBlinkShown;
+
+typedef struct {
+    int used;
+    unsigned int image_id;
+    int x, y, width, height;
+    int frames;
+    char reason[40];
+} BlitBlinkTrack;
+
 typedef struct {
     int used;
     unsigned long long id;
@@ -421,6 +493,11 @@ typedef struct {
        2026 batch -- which is what makes a capture's identity checkable
        instead of merely plausible. */
     unsigned long long presented_revision;
+    /* ADR 0213: the blink detector's memory of this surface. */
+    BlitBlinkShown blink_shown[BLIT_GRAPHICS_MAX_DRAWS];
+    int blink_shown_count;
+    int blink_shown_valid;
+    BlitBlinkTrack blink_track[BLIT_BLINK_TRACKS];
 } BlitSurface;
 
 typedef struct {
@@ -2163,6 +2240,89 @@ static uint64_t monotonic_us(void)
         (uint64_t)now.tv_nsec / 1000ULL;
 }
 
+/* ADR 0213: the ledger and its append. */
+static BlitGraphicsLedger graphics_ledger;
+
+static const char *const graphics_ledger_kinds[] = {
+    "transmit", "place", "delete", "free", "reset", "blink", "barrier"
+};
+
+/* The output a session shows on, as the presented-frame counters index it.
+   An unknown or unset display is output 0, as a session's is elsewhere. */
+static int graphics_ledger_output(const char *display_id)
+{
+    unsigned long long id;
+    int index;
+
+    if (display_id == NULL || display_id[0] == '\0')
+        return 0;
+    id = strtoull(display_id + (strncmp(display_id, "display-", 8) == 0 ? 8 : 0),
+                  NULL, 10);
+    for (index = 0; index < graphics_ledger.output_count; ++index)
+        if (graphics_ledger.display_ids[index] == id)
+            return index;
+    return 0;
+}
+
+static BlitGraphicsLedgerEntry *graphics_ledger_append(
+    int kind, unsigned long long session, int output, unsigned int image_id,
+    unsigned int placement_id, const char *reason)
+{
+    BlitGraphicsLedgerEntry *entry = &graphics_ledger.entries[
+        (graphics_ledger.sequence + 1) % BLIT_GRAPHICS_LEDGER_ENTRIES];
+
+    memset(entry, 0, sizeof(*entry));
+    entry->sequence = ++graphics_ledger.sequence;
+    entry->time_us = monotonic_us();
+    entry->session = session;
+    entry->output = output;
+    entry->frame = output >= 0 && output < BLIT_MAX_DISPLAYS ?
+        graphics_ledger.present_frames[output] : 0;
+    entry->kind = kind;
+    entry->image_id = image_id;
+    entry->placement_id = placement_id;
+    snprintf(entry->reason, sizeof(entry->reason), "%s",
+             reason != NULL ? reason : "");
+    return entry;
+}
+
+static void graphics_ledger_rect(BlitGraphicsLedgerEntry *entry, int cw, int ch,
+                                 int x, int y, int width, int height)
+{
+    int first_column, first_row;
+
+    if (cw < 1) cw = 8;
+    if (ch < 1) ch = 16;
+    entry->x = x;
+    entry->y = y;
+    entry->width = width;
+    entry->height = height;
+    first_column = x >= 0 ? x / cw : -((-x + cw - 1) / cw);
+    first_row = y >= 0 ? y / ch : -((-y + ch - 1) / ch);
+    entry->cell_x = first_column;
+    entry->cell_y = first_row;
+    entry->cell_width = width > 0 ? (x - first_column * cw + width + cw - 1) / cw : 0;
+    entry->cell_height = height > 0 ? (y - first_row * ch + height + ch - 1) / ch : 0;
+}
+
+/* One picture event of a session. `draw` is the placement's resolved
+   rectangle, or NULL when the event has none. */
+static void graphics_ledger_note(const BlitSession *session, int kind,
+                                 unsigned int image_id, unsigned int placement_id,
+                                 const BlitGraphicsDraw *draw,
+                                 unsigned long long bytes, const char *reason)
+{
+    BlitGraphicsLedgerEntry *entry = graphics_ledger_append(
+        kind, session->id, graphics_ledger_output(session->display_id),
+        image_id, placement_id, reason);
+
+    entry->bytes = bytes;
+    if (draw != NULL)
+        graphics_ledger_rect(entry, session->terminal_cell_width,
+                             session->terminal_cell_height,
+                             draw->x, draw->y, draw->width, draw->height);
+}
+
 static uint64_t output_render_period_us(const BlitRuntime *runtime,
                                         int output_index)
 {
@@ -3388,6 +3548,82 @@ static void diagnostic_processes_json(const BlitRuntime *runtime, char *body,
     if (used < capacity) snprintf(body + used, capacity - used, "]}");
 }
 
+/* ADR 0213: a compositor counter summed over the outputs -- picture bytes
+   uploaded to GPU textures (0), or frames repainted whole (1). */
+static unsigned long long graphics_output_total(const BlitRuntime *runtime, int which)
+{
+    unsigned long long total = 0;
+    int output;
+
+    for (output = 0; output < runtime->output_count; ++output) {
+        int display_index = display_index_for_output(runtime, output);
+        BlitKmsDisplayInfo info;
+        if (display_index >= 0 &&
+            blit_kms_display_info(runtime->kms, display_index, &info) == 0)
+            total += which ? info.full_repaints : info.gles_image_upload_bytes;
+    }
+    return total;
+}
+
+/* GET /v1/diagnostics/graphics-ledger?since=<sequence>&limit=<n>: the
+   ledger's entries after `since`, oldest first, at most `limit`. `next` is
+   the cursor to ask with next time; `lost` counts entries the ring
+   overwrote after `since`. */
+static void graphics_ledger_json(const BlitRuntime *runtime, char *body,
+                                 size_t capacity, unsigned long long since,
+                                 int limit)
+{
+    unsigned long long oldest = graphics_ledger.sequence > BLIT_GRAPHICS_LEDGER_ENTRIES ?
+        graphics_ledger.sequence - BLIT_GRAPHICS_LEDGER_ENTRIES + 1 : 1;
+    unsigned long long first = since + 1 > oldest ? since + 1 : oldest;
+    unsigned long long lost = first > since + 1 ? first - since - 1 : 0;
+    unsigned long long sequence;
+    unsigned long long next = since;
+    size_t used = 0;
+    int written = 0;
+    int output;
+
+    if (since > graphics_ledger.sequence)
+        since = next = graphics_ledger.sequence;
+    if (limit < 1 || limit > BLIT_GRAPHICS_LEDGER_ENTRIES)
+        limit = BLIT_GRAPHICS_LEDGER_ENTRIES;
+    used += (size_t)snprintf(body, capacity,
+        "{\"capacity\":%d,\"sequence\":%llu,\"lost\":%llu,"
+        "\"present_frames\":[", BLIT_GRAPHICS_LEDGER_ENTRIES,
+        graphics_ledger.sequence, lost);
+    for (output = 0; output < graphics_ledger.output_count; ++output)
+        used += (size_t)snprintf(body + used, capacity - used,
+            "%s{\"display_id\":\"display-%llu\",\"frames\":%llu}",
+            output ? "," : "", graphics_ledger.display_ids[output],
+            graphics_ledger.present_frames[output]);
+    used += (size_t)snprintf(body + used, capacity - used, "],\"events\":[");
+    for (sequence = first; sequence <= graphics_ledger.sequence && written < limit &&
+         used + 640 < capacity; ++sequence, ++written) {
+        const BlitGraphicsLedgerEntry *e = &graphics_ledger.entries[
+            sequence % BLIT_GRAPHICS_LEDGER_ENTRIES];
+        char reason[128];
+        json_escape(e->reason, reason, sizeof(reason));
+        used += (size_t)snprintf(body + used, capacity - used,
+            "%s{\"sequence\":%llu,\"time_us\":%llu,\"kind\":\"%s\","
+            "\"session\":\"%s%llu\",\"display_id\":\"display-%llu\","
+            "\"frame\":%llu,\"image_id\":%u,\"placement_id\":%u,"
+            "\"cells\":{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
+            "\"pixels\":{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d},"
+            "\"bytes\":%llu,\"frames\":%d,\"reason\":\"%s\"}",
+            written ? "," : "", e->sequence, e->time_us,
+            graphics_ledger_kinds[e->kind], e->session ? "session-" : "",
+            e->session,
+            e->output >= 0 && e->output < graphics_ledger.output_count ?
+                graphics_ledger.display_ids[e->output] : 0ULL,
+            e->frame, e->image_id, e->placement_id, e->cell_x, e->cell_y,
+            e->cell_width, e->cell_height, e->x, e->y, e->width, e->height,
+            e->bytes, e->frames, reason);
+        next = sequence;
+    }
+    snprintf(body + used, capacity - used, "],\"next\":%llu}", next);
+    (void)runtime;
+}
+
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
@@ -3488,6 +3724,13 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"graphics_payloads\":%llu,\"graphics_payloads_kitty\":%llu,"
         "\"graphics_payloads_sixel\":%llu,"
         "\"graphics_payloads_rejected\":%llu,"
+        "\"graphics_placements\":%llu,\"graphics_deletes\":%llu,"
+        "\"graphics_images_freed\":%llu,\"graphics_upload_bytes\":%llu,"
+        "\"graphics_bytes_landed\":%llu,\"graphics_full_repaints\":%llu,"
+        "\"graphics_blink_frames\":%llu,\"graphics_blink_events\":%llu,"
+        "\"graphics_barrier_holds\":%llu,\"graphics_barrier_timeouts\":%llu,"
+        "\"graphics_synchronized_live_draws\":%llu,"
+        "\"graphics_ledger_sequence\":%llu,"
         "\"pixel_frames_accepted\":%llu,\"pixel_frame_errors\":%llu,"
         "\"pixel_frames_pending\":%llu,"
         "\"glyph_cache_hits\":%llu,\"glyph_cache_misses\":%llu,"
@@ -3588,6 +3831,12 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->graphics_payloads_kitty,
         runtime->graphics_payloads_sixel,
         runtime->graphics_payloads_rejected,
+        graphics_ledger.placements, graphics_ledger.deletes,
+        graphics_ledger.images_freed, graphics_output_total(runtime, 0),
+        graphics_ledger.upload_bytes_landed, graphics_output_total(runtime, 1),
+        graphics_ledger.blink_frames, graphics_ledger.blink_events,
+        graphics_ledger.barrier_holds, graphics_ledger.barrier_timeouts,
+        graphics_ledger.synchronized_live_draws, graphics_ledger.sequence,
         runtime->pixel_frames_accepted,
         runtime->pixel_frame_errors,
         diagnostic_pixel_frames_pending(runtime),
@@ -10355,7 +10604,8 @@ static BlitGraphicsImage *graphics_image_find(BlitSession *session,
 {
     int index;
     for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-        if (session->graphics[index].used && session->graphics[index].id == id)
+        if (session->graphics[index].used && !session->graphics[index].retired &&
+            session->graphics[index].id == id)
             return &session->graphics[index];
     return NULL;
 }
@@ -10994,6 +11244,9 @@ static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
 {
     if (image->used) {
         char detail[96];
+        ++graphics_ledger.images_freed;
+        graphics_ledger_note(session, BLIT_LEDGER_FREE, image->id, 0, NULL,
+                             (unsigned long long)image->bytes, reason);
         snprintf(detail, sizeof(detail), "session=session-%llu i=%u protocol=%s complete=%d reason=%s",
                  session->id, image->id, image->protocol, image->complete, reason);
         graphics_trace_note(session, "image_freed", detail);
@@ -11043,6 +11296,7 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
     int by_position = kind == 'c' || kind == 'p' || kind == 'q' ||
         kind == 'x' || kind == 'y';
     int freed = 0;
+    unsigned long long ledger_before = graphics_ledger.sequence;
     char detail[112];
     char reason[16];
     if (!(kind == 'a' || kind == 'i' || kind == 'z' || by_position))
@@ -11050,10 +11304,18 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
     /* Each image freed is traced by id; the line after says the delete. */
     snprintf(reason, sizeof(reason), "delete-d=%c", target);
     ++session->kitty_deletes[strchr(kitty_delete_kinds, target) - kitty_delete_kinds];
+    ++graphics_ledger.deletes;
     for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
         BlitGraphicsImage *image = &session->graphics[index];
+        BlitGraphicsImage before;
         int removed = 0;
-        if (!image->used) continue;
+        int hold;
+        if (!image->used || image->retired) continue;
+        /* ADR 0213: a picture the program deletes inside a synchronized
+           update is still the frame being held. */
+        hold = free_data && session->terminal_synchronized && image->complete &&
+            kitty_image_has_placement(image);
+        if (hold) before = *image;
         if (by_position && strcmp(image->protocol, "kitty") != 0) continue;
         if (kind == 'i' && image->id != image_id) continue;
         for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
@@ -11094,14 +11356,25 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
                 break;
             }
             if (match) {
-                if (image->complete && blit_graphics_draw_resolve(image,
+                int resolved = blit_graphics_draw_resolve(image,
                     placed.x, placed.y, placed.width, placed.height, placed.z,
-                    placed.src_x, placed.src_y, placed.src_w, placed.src_h, &draw))
+                    placed.src_x, placed.src_y, placed.src_w, placed.src_h, &draw);
+                if (image->complete && resolved)
                     mark_graphics_damage(surface, draw.x, draw.y,
                         draw.width, draw.height, cw, ch);
+                graphics_ledger_note(session, BLIT_LEDGER_DELETE, image->id, id,
+                                     resolved ? &draw : NULL, 0, reason);
                 kitty_placement_remove(image, id);
                 ++removed;
             }
+        }
+        if (hold && (removed > 0 || kind == 'a') &&
+            !kitty_image_has_placement(image)) {
+            *image = before;
+            image->retired = 1;
+            snprintf(image->retired_reason, sizeof(image->retired_reason), "%s", reason);
+            ++freed;
+            continue;
         }
         if (free_data && (removed > 0 || kind == 'a') &&
             !kitty_image_has_placement(image)) {
@@ -11110,12 +11383,60 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
             ++freed;
         }
     }
+    /* A delete that matched nothing is still a delete. */
+    if (graphics_ledger.sequence == ledger_before)
+        graphics_ledger_note(session, BLIT_LEDGER_DELETE, image_id,
+                             placement_id, NULL, 0, reason);
     session->kitty_delete_freed += (unsigned long)freed;
     snprintf(detail, sizeof(detail), "session=session-%llu d=%c i=%u freed=%d",
              session->id, target, image_id, freed);
     graphics_trace_note(session, "kitty_delete", detail);
     if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
     return 1;
+}
+
+/* ADR 0213: the synchronized update is over. What the program deleted inside
+   it, and the frame kept showing, goes now, and the cells it covered are
+   drawn again. */
+static void graphics_release_retired(BlitSession *session, BlitSurface *surface)
+{
+    int cw = session->terminal_cell_width > 0 ? session->terminal_cell_width : 8;
+    int ch = session->terminal_cell_height > 0 ? session->terminal_cell_height : 16;
+    int index;
+    int slot;
+
+    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
+        BlitGraphicsImage *image = &session->graphics[index];
+        char reason[24];
+        if (!image->used || !image->retired) continue;
+        for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+            unsigned int id = slot < 0 ? 0U : image->placements[slot].id;
+            BlitGraphicsPlacement placed;
+            BlitGraphicsDraw draw;
+            if (slot >= 0 && !image->placements[slot].used) continue;
+            if (kitty_placement_get(image, id, &placed) &&
+                blit_graphics_draw_resolve(image, placed.x, placed.y, placed.width,
+                    placed.height, placed.z, placed.src_x, placed.src_y,
+                    placed.src_w, placed.src_h, &draw))
+                mark_graphics_damage(surface, draw.x, draw.y, draw.width,
+                                     draw.height, cw, ch);
+        }
+        snprintf(reason, sizeof(reason), "%.15s,held", image->retired_reason);
+        frame_note_deleted(session, image);
+        graphics_image_free(session, image, reason);
+    }
+    if (!surface->damage_valid) mark_surface_damage(surface, 0, 0);
+}
+
+/* Mode 2026 on or off. Off lets go of what the update was holding. */
+static void terminal_set_synchronized(BlitSession *session, BlitSurface *surface,
+                                      int on)
+{
+    int was = session->terminal_synchronized;
+
+    session->terminal_synchronized = on;
+    if (was && !on)
+        graphics_release_retired(session, surface);
 }
 
 static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
@@ -11438,6 +11759,9 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             new_valid = blit_graphics_draw_resolve(image, current.x, current.y,
                 current.width, current.height, current.z, current.src_x,
                 current.src_y, current.src_w, current.src_h, &new_draw);
+        ++graphics_ledger.placements;
+        graphics_ledger_note(session, BLIT_LEDGER_PLACE, image->id, placement.id,
+                             new_valid ? &new_draw : NULL, 0, "a=p");
         if (old_valid) mark_graphics_damage(surface, old_draw.x, old_draw.y,
             old_draw.width, old_draw.height, cell_width, cell_height);
         if (new_valid) mark_graphics_damage(surface, new_draw.x, new_draw.y,
@@ -11515,6 +11839,15 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                 image = &session->graphics[index];
                 break;
             }
+        /* A full store gives up what a synchronized update was holding
+           before it gives up anything else: the held frame is not worth
+           refusing a picture for. */
+        for (index = 0; image == NULL && index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
+            if (session->graphics[index].used && session->graphics[index].retired) {
+                graphics_image_free(session, &session->graphics[index],
+                                    "evicted-retired");
+                image = &session->graphics[index];
+            }
         if (image == NULL) {
             for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
                 if (session->graphics[index].used &&
@@ -11578,6 +11911,9 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         image->revision = 1;
         image->generation = next_graphics_generation();
     }
+    if (action[0] != '\0')
+        graphics_ledger_note(session, BLIT_LEDGER_TRANSMIT, (unsigned int)image_id,
+                             0, NULL, 0, stage ? "begin,replace" : "begin");
     if (display_on_complete) {
         /* Preserve a=T's display intent while later q=2 chunks arrive.  The
            renderer still waits for complete, so this cannot expose partial
@@ -11596,6 +11932,17 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             return;
         }
         (stage ? shown : image)->advance = keep_cursor ? 0 : placement_id + 1;
+        {
+            BlitGraphicsDraw placed_draw;
+            const BlitGraphicsImage *placed_image = stage ? shown : image;
+            int resolved = blit_graphics_draw_resolve(placed_image, x, y,
+                placement_width, placement_height, z, src_x, src_y, src_w,
+                src_h, &placed_draw);
+            ++graphics_ledger.placements;
+            graphics_ledger_note(session, BLIT_LEDGER_PLACE, placed_image->id,
+                                 placement.id, resolved ? &placed_draw : NULL, 0,
+                                 stage ? "a=T,replace" : "a=T");
+        }
     }
     if (image->width != width || image->height != height || image->format != format ||
         !kitty_decode_chunk(image, separator + 1)) {
@@ -11675,6 +12022,12 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         }
         image->complete = 1;
         image->generation = next_graphics_generation();
+        graphics_ledger.upload_bytes_landed += (unsigned long long)image->bytes;
+        graphics_ledger_note(session, BLIT_LEDGER_TRANSMIT, (unsigned int)image_id,
+                             0, NULL, (unsigned long long)image->bytes,
+                             stage ? (session->terminal_kitty_stage_mode == 2 ?
+                                      "complete,edit" : "complete,replace") :
+                                     "complete");
         if (session->terminal_kitty_upload_active &&
             session->terminal_kitty_upload_id == image->id)
             session->terminal_kitty_upload_active = 0;
@@ -13340,7 +13693,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         if (terminal_csi_has_mode(sequence, 7701))
             terminal_set_pointer_lock(session, enabled);
         if (terminal_csi_has_mode(sequence, 2026))
-            session->terminal_synchronized = enabled;
+            terminal_set_synchronized(session, surface, enabled);
         if (terminal_csi_has_mode(sequence, 25)) {
             int cursor_was_visible = surface->cursor_visible;
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
@@ -13469,7 +13822,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         session->terminal_mouse_pixels = 0;
         terminal_drop_pointer_lock(session, "reset");
         session->terminal_pointer_depth = 0;
-        session->terminal_synchronized = 0;
+        terminal_set_synchronized(session, surface, 0);
         terminal_sixel_reset_palette(session);
         session->terminal_sixel_display_mode = 0;
         session->terminal_sixel_cursor_right = 0;
@@ -14298,7 +14651,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                 session->terminal_mouse_pixels = 0;
                 terminal_drop_pointer_lock(session, "reset");
                 session->terminal_pointer_depth = 0;
-                session->terminal_synchronized = 0;
+                terminal_set_synchronized(session, surface, 0);
                 session->terminal_alternate_mode = 0;
                 terminal_scrollback_release(surface);
                 session->terminal_foreground = 0;
@@ -16386,6 +16739,8 @@ static void arm_hibr_frame_barrier(BlitRuntime *runtime,
                  group, output, members, dirty, (unsigned long long)deadline,
                  (unsigned long long)(deadline - now));
         diagnostic_trace(runtime, "hibr_frame_barrier", detail);
+        ++graphics_ledger.barrier_holds;
+        graphics_ledger_append(BLIT_LEDGER_BARRIER, 0, output, 0, 0, "hold");
     }
 }
 
@@ -16405,6 +16760,7 @@ static void service_hibr_frame_barriers(BlitRuntime *runtime, uint64_t now)
         if (!hibr_frame_barrier_is_incomplete(runtime, o)) {
             snprintf(detail, sizeof(detail), "output=%d all_active_members_dirty", o);
             diagnostic_trace(runtime, "hibr_frame_barrier_release", detail);
+            graphics_ledger_append(BLIT_LEDGER_BARRIER, 0, o, 0, 0, "release");
             runtime->hibr_frame_barrier_until_us[o] = 0;
             continue;
         }
@@ -16423,6 +16779,8 @@ static void service_hibr_frame_barriers(BlitRuntime *runtime, uint64_t now)
         snprintf(detail, sizeof(detail),
                  "output=%d deadline_expired_bounded_release excluded=%d", o, excluded);
         diagnostic_trace(runtime, "hibr_frame_barrier_timeout", detail);
+        ++graphics_ledger.barrier_timeouts;
+        graphics_ledger_append(BLIT_LEDGER_BARRIER, 0, o, 0, 0, "timeout");
         runtime->hibr_frame_barrier_until_us[o] = 0;
     }
 }
@@ -18317,8 +18675,16 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
             }
         }
     }
-    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
+    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i) {
+        if (session->graphics[i].used) {
+            ++graphics_ledger.images_freed;
+            graphics_ledger_note(session, BLIT_LEDGER_RESET,
+                                 session->graphics[i].id, 0, NULL,
+                                 (unsigned long long)session->graphics[i].bytes,
+                                 "session-ended");
+        }
         graphics_image_release(&session->graphics[i]);
+    }
     graphics_image_release(&session->terminal_kitty_stage);
     if (session->focused)
         session->focused = 0;
@@ -24042,7 +24408,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
             snprintf(detail, sizeof(detail), "session=session-%llu", session->id);
             diagnostic_trace(runtime, "graphics_reset", detail);
         }
+        graphics_ledger_note(session, BLIT_LEDGER_RESET, 0, 0, NULL, 0, "api-reset");
         kitty_delete(session, surface, 'A', 0, 0, 0, 0, 0);
+        /* Recovery frees at once, even from a synchronized update that never ends (ADR 0213). */
+        graphics_release_retired(session, surface);
         ++session->revision;
         session_json(runtime, session, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -25221,6 +25590,23 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/runtime") == 0) {
         runtime_diagnostics_json(runtime, body, sizeof(body));
+        send_http(fd, 200, "OK", "application/json", body);
+    } else if (strncmp(path, "/v1/diagnostics/graphics-ledger",
+                       strlen("/v1/diagnostics/graphics-ledger")) == 0 &&
+               (path[strlen("/v1/diagnostics/graphics-ledger")] == '\0' ||
+                path[strlen("/v1/diagnostics/graphics-ledger")] == '?')) {
+        const char *since_value = strstr(path, "since=");
+        const char *limit_value = strstr(path, "limit=");
+        unsigned long long since = 0;
+        int ledger_limit = 0;
+        if (since_value != NULL)
+            since = strtoull(since_value + strlen("since="), NULL, 10);
+        if (limit_value != NULL) {
+            long parsed = strtol(limit_value + strlen("limit="), NULL, 10);
+            if (parsed > 0 && parsed <= INT_MAX)
+                ledger_limit = (int)parsed;
+        }
+        graphics_ledger_json(runtime, body, sizeof(body), since, ledger_limit);
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/diagnostics/processes") == 0) {
         diagnostic_processes_json(runtime, body, sizeof(body));
@@ -26660,6 +27046,131 @@ static void graphics_stamp_damage(void *owner, const BlitGraphicsStamp *stamp)
                           stamp->height, d->cw, d->ch);
 }
 
+/* ADR 0213: the blink detector. After each presented frame of a surface it
+   is given the scene that frame drew. A picture shown in the frame before
+   and absent from this one starts being watched; if the same image, or one
+   covering at least half of its rectangle, is shown again within
+   BLIT_BLINK_WINDOW_FRAMES presented frames the gap was a blink, and the
+   frames it was gone are counted. A picture that never returns was deleted,
+   and is not a blink. */
+static unsigned int graphics_blink_successor(const BlitGraphicsScene *scene,
+                                             unsigned int image_id,
+                                             int x, int y, int width, int height)
+{
+    long long area = (long long)width * height;
+    int index;
+
+    for (index = 0; index < scene->count; ++index) {
+        const BlitGraphicsStamp *stamp = &scene->items[index];
+        long long overlap_x, overlap_y;
+        int left = x > stamp->x ? x : stamp->x;
+        int top = y > stamp->y ? y : stamp->y;
+        int right = x + width < stamp->x + stamp->width ?
+            x + width : stamp->x + stamp->width;
+        int bottom = y + height < stamp->y + stamp->height ?
+            y + height : stamp->y + stamp->height;
+        if (stamp->image_id == image_id)
+            return image_id;
+        overlap_x = right - left;
+        overlap_y = bottom - top;
+        if (overlap_x > 0 && overlap_y > 0 && overlap_x * overlap_y * 2 >= area)
+            return stamp->image_id;
+    }
+    return 0;
+}
+
+/* What removed an image, as the ledger last heard it. */
+static void graphics_blink_cause(unsigned long long session_id,
+                                 unsigned int image_id, char *out, size_t size)
+{
+    unsigned long long sequence = graphics_ledger.sequence;
+    unsigned long long oldest = sequence > BLIT_GRAPHICS_LEDGER_ENTRIES ?
+        sequence - BLIT_GRAPHICS_LEDGER_ENTRIES + 1 : 1;
+
+    snprintf(out, size, "unknown");
+    for (; sequence >= oldest && sequence > 0; --sequence) {
+        const BlitGraphicsLedgerEntry *entry = &graphics_ledger.entries[
+            sequence % BLIT_GRAPHICS_LEDGER_ENTRIES];
+        if (entry->session == session_id && entry->image_id == image_id &&
+            (entry->kind == BLIT_LEDGER_DELETE || entry->kind == BLIT_LEDGER_FREE ||
+             entry->kind == BLIT_LEDGER_RESET)) {
+            snprintf(out, size, "%s", entry->reason);
+            return;
+        }
+    }
+}
+
+static void graphics_blink_present(BlitSurface *surface, const BlitSession *session,
+                                   int output, const BlitGraphicsScene *scene)
+{
+    int index, other;
+
+    for (index = 0; index < BLIT_BLINK_TRACKS; ++index) {
+        BlitBlinkTrack *track = &surface->blink_track[index];
+        unsigned int back;
+        if (!track->used)
+            continue;
+        back = graphics_blink_successor(scene, track->image_id, track->x,
+                                        track->y, track->width, track->height);
+        if (back != 0) {
+            BlitGraphicsLedgerEntry *entry;
+            char reason[48];
+            snprintf(reason, sizeof(reason), back == track->image_id ?
+                     "%.30s;returned" : "%.24s;successor=%u",
+                     track->reason, back);
+            entry = graphics_ledger_append(BLIT_LEDGER_BLINK, session->id, output,
+                                           track->image_id, 0, reason);
+            entry->frames = track->frames;
+            graphics_ledger_rect(entry, session->terminal_cell_width,
+                                 session->terminal_cell_height, track->x,
+                                 track->y, track->width, track->height);
+            ++graphics_ledger.blink_events;
+            graphics_ledger.blink_frames += (unsigned long long)track->frames;
+            track->used = 0;
+        } else if (++track->frames > BLIT_BLINK_WINDOW_FRAMES) {
+            track->used = 0;
+        }
+    }
+    for (index = 0; surface->blink_shown_valid && index < surface->blink_shown_count;
+         ++index) {
+        const BlitBlinkShown *was = &surface->blink_shown[index];
+        BlitBlinkTrack *free_track = NULL;
+        int tracked = 0;
+        for (other = 0; other < index; ++other)
+            if (surface->blink_shown[other].image_id == was->image_id)
+                tracked = 1;
+        for (other = 0; !tracked && other < BLIT_BLINK_TRACKS; ++other) {
+            if (surface->blink_track[other].used &&
+                surface->blink_track[other].image_id == was->image_id)
+                tracked = 1;
+            else if (!surface->blink_track[other].used && free_track == NULL)
+                free_track = &surface->blink_track[other];
+        }
+        if (tracked || free_track == NULL ||
+            graphics_blink_successor(scene, was->image_id, was->x, was->y,
+                                     was->width, was->height) != 0)
+            continue;
+        free_track->used = 1;
+        free_track->image_id = was->image_id;
+        free_track->x = was->x;
+        free_track->y = was->y;
+        free_track->width = was->width;
+        free_track->height = was->height;
+        free_track->frames = 1;
+        graphics_blink_cause(session->id, was->image_id, free_track->reason,
+                             sizeof(free_track->reason));
+    }
+    surface->blink_shown_count = scene->count;
+    for (index = 0; index < scene->count; ++index) {
+        surface->blink_shown[index].image_id = scene->items[index].image_id;
+        surface->blink_shown[index].x = scene->items[index].x;
+        surface->blink_shown[index].y = scene->items[index].y;
+        surface->blink_shown[index].width = scene->items[index].width;
+        surface->blink_shown[index].height = scene->items[index].height;
+    }
+    surface->blink_shown_valid = 1;
+}
+
 static void prepare_graphics_damage(BlitRuntime *runtime, BlitFramePlan *plan)
 {
     int i;
@@ -26703,6 +27214,8 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
     BlitKmsSurfaceView views[BLIT_MAX_SESSIONS];
     BlitKmsOverlay kms_overlays[BLIT_MAX_OVERLAYS];
     int damage_consumed[BLIT_MAX_SESSIONS];
+    int synchronized_drawn[BLIT_MAX_SESSIONS];
+    int view_output[BLIT_MAX_SESSIONS];
     int view_count = 0;
     int kms_overlay_count = 0;
     uint64_t kms_present_started;
@@ -26737,6 +27250,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
 
     visual_revision = runtime->effects_revision ^ runtime->next_overlay_id;
     memset(damage_consumed, 0, sizeof(damage_consumed));
+    memset(synchronized_drawn, 0, sizeof(synchronized_drawn));
     memset(kms_overlays, 0, sizeof(kms_overlays));
     for (overlay_index = 0; overlay_index < BLIT_MAX_OVERLAYS;
          ++overlay_index) {
@@ -26824,6 +27338,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         views[view_count].damage_height = surface->damage_height;
         views[view_count].damage_consumed =
             &damage_consumed[view_count];
+        views[view_count].synchronized_drawn =
+            &synchronized_drawn[view_count];
+        view_output[view_count] = output_index_for_surface;
         /* Synchronized output retains its last presented frame.  The view
            is submitted so the output's view count does not move -- a
            count change is a full redraw, which clears the frame being
@@ -26870,6 +27387,17 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         fprintf(stderr, "blit: direct KMS present failed\n");
     kms_present_ms = (double)(monotonic_us() - kms_present_started) /
         1000.0;
+    /* ADR 0213: the ledger counts frames per output, and knows which display
+       each is, so a session's events carry the frame they happened in. */
+    graphics_ledger.output_count = runtime->output_count < BLIT_MAX_DISPLAYS ?
+        runtime->output_count : BLIT_MAX_DISPLAYS;
+    for (surface_index = 0; surface_index < graphics_ledger.output_count;
+         ++surface_index) {
+        graphics_ledger.display_ids[surface_index] =
+            runtime->outputs[surface_index].display_id;
+        if (kms_submitted_output_mask & (1U << surface_index))
+            ++graphics_ledger.present_frames[surface_index];
+    }
     runtime->kms_retry_outputs |= kms_deferred_output_mask;
     runtime->kms_retry_outputs &= ~kms_submitted_output_mask;
     /* A capture asks for one frame: once it is submitted the request
@@ -26926,9 +27454,40 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         if (damage_consumed[surface_index]) {
             BlitSurface *surface = find_surface_id(
                 runtime, views[surface_index].surface_id);
+            /* ADR 0213: a synchronized view is held, unless the frame was a
+               whole redraw, which draws it as it is now -- then the blink
+               detector is shown that, built from the live pictures. */
+            if (surface != NULL && views[surface_index].synchronized &&
+                synchronized_drawn[surface_index]) {
+                BlitSession *held = find_session_id(runtime, surface->owner_session_id);
+                if (held != NULL) {
+                    BlitSession *source = hibr_render_source(runtime, held);
+                    static BlitGraphicsScene live;
+                    ++graphics_ledger.synchronized_live_draws;
+                    blit_graphics_scene_build(&live,
+                        (source != NULL ? source : held)->graphics,
+                        BLIT_GRAPHICS_MAX_IMAGES);
+                    graphics_blink_present(surface, held, view_output[surface_index], &live);
+                }
+            }
             if (surface != NULL && !views[surface_index].synchronized) {
                 BlitSession *session = find_session_id(
                     runtime, surface->owner_session_id);
+                if (session != NULL) {
+                    /* The scene the frame drew: the prepared one, or, for a
+                       surface the plan did not carry, the live pictures. */
+                    static BlitGraphicsScene shown;
+                    const BlitGraphicsScene *scene = &surface->graphics_prepared;
+                    if (!surface->graphics_damage_prepared) {
+                        BlitSession *source = hibr_render_source(runtime, session);
+                        blit_graphics_scene_build(&shown,
+                            (source != NULL ? source : session)->graphics,
+                            BLIT_GRAPHICS_MAX_IMAGES);
+                        scene = &shown;
+                    }
+                    graphics_blink_present(surface, session,
+                                           view_output[surface_index], scene);
+                }
                 surface->damage_valid = 0;
                 if (surface->graphics_damage_prepared)
                     surface->graphics_presented = surface->graphics_prepared;

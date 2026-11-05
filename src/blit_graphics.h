@@ -127,6 +127,13 @@ typedef struct {
        when the last chunk arrives, because the placement's size in cells is
        not known until then. Zero when nothing is owed. ADR 0060. */
     int advance;
+    /* ADR 0213: deleted by the program inside a synchronized update, which
+       is still holding the frame that shows it. The image keeps its pixels
+       and placements, so a whole redraw while the update is open draws the
+       held picture rather than a hole, and nothing can find it by id; it is
+       freed when the update ends. */
+    int retired;
+    char retired_reason[16];
 } BlitGraphicsImage;
 
 /* One thing a renderer draws: a placement with its defaults resolved and its

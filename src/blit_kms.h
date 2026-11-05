@@ -59,6 +59,9 @@ typedef struct {
     /* The surface is holding a DEC 2026 batch: it is passed through so the
        output's view count stays stable, and is not drawn. */
     int synchronized;
+    /* ADR 0213: set to 1 when a synchronized view was drawn anyway, from
+       its live cells and pictures, because the frame was a full redraw. */
+    int *synchronized_drawn;
     const BlitGraphicsImage *graphics;
     int graphics_count;
     /* Graphics placement/lifetime is independent of terminal cell revision.
@@ -173,6 +176,10 @@ typedef struct {
     /* ADR 0200: image textures refreshed only where an in-place edit
        changed them, rather than whole. */
     unsigned long long gles_image_partial_uploads;
+    /* ADR 0213: bytes of picture pixels uploaded to GPU textures, and the
+       frames this output repainted whole. */
+    unsigned long long gles_image_upload_bytes;
+    unsigned long long full_repaints;
     /* ADR 0186: what pane effects cost this output's last frame -- CPU time
        laying them on, or the quads the GPU drew for them -- and the worst
        CPU frame, so a new effect's cost is visible before it is a problem. */

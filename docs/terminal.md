@@ -190,6 +190,8 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 | Delete | `a i z c p q x y`, and their capitals to free the image too. Each is counted by letter in the session's `graphics_diagnostics.deletes`, with the images capitals freed in `delete_freed`, and traced as `kitty_delete`; an image freed any other way (eviction, a failed upload) is traced as `image_freed` with its reason |
 | Replies | `OK`, or an error for every failure (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`); only to a request with `i=`; `q=1` hides OK, `q=2` hides everything |
 | Frames by descriptor | A program in a session can send an image's pixels as a sealed memfd over `BLIT_FRAME_SOCKET` instead of base64, and place and delete it with Kitty escapes ([ADR 0202](adr/0202-local-frames-by-descriptor.md)). Local only: over ssh, pictures stay Kitty escapes |
+| Held by synchronized output | An image deleted by capital letter (`d=I`, `d=A`, ...) inside a `CSI ? 2026 h` update stays drawn, though the program can no longer find it, until the update ends ([ADR 0213](adr/0213-graphics-ledger-blink-counters-and-held-pictures.md)); a whole-output redraw mid-update then shows the held picture, not a hole |
+| Observing | Every transmit, place, delete and free goes in the graphics ledger (`GET /v1/diagnostics/graphics-ledger`), and a picture that vanishes from presented frames and returns is counted as a blink in `graphics_blink_events` and `graphics_blink_frames` |
 | Limits | 16 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
 
 Images scroll with their text and are clipped at the edge of the pane.
