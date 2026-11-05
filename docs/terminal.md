@@ -15,7 +15,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Area | Supported |
 | --- | --- |
 | Colour | 16, 256 and 24-bit truecolour; underline colour (SGR 58/59) |
-| Attributes | bold, dim, italic, underline, blink (drawn steady), reverse, hidden, strikethrough, framed (top and bottom only) |
+| Attributes | bold, dim, italic, underline, blink (drawn steady), reverse, hidden, strikethrough, framed (top and bottom only), drop shadow (Blit's SGR 66) |
 | Screens | main screen with 1,000 lines of scrollback; alternate screen (47, 1047, 1049) |
 | Editing | insert/delete characters and lines, erase, repeat, scroll regions, left/right margins, VT400 rectangle operations including copy (DECCRA) |
 | Mouse | X10/normal/button/any-motion tracking; legacy, SGR and SGR-pixel encodings; wheel and horizontal wheel |
@@ -98,8 +98,13 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 38, 48, 58 with `;5;n`, `;2;r;g;b`, `:5:n`, `:2:r:g:b` or `:2:CS:r:g:b` | 256 colours and truecolour for text, background and underline |
 | 39, 49, 59 | Default text, background and underline colour |
 | 51, 51:3, 54 | Framed: a line along the cell's top and bottom edges, 1 px (51) or 3 px (51:3, a Blit extension for a default button's ring), in the underline colour if set, else the foreground; 54 ends it |
-| 51:2, 51:4 | Blit extensions: a Slate light (51:2) or Slate dark (51:4) title bar's top and bottom rows (frame line and highlight, shade and rule) in that set's colours, so a title's text cells match the bar glyphs beside them (ADR 0210) |
+| 51:2 | Blit extension: a Slate title bar's top and bottom rows (frame line and highlight, shade and rule) in the cell's pens: foreground, underline colour (white if unset) and half foreground half background, so a title's text cells match the bar glyphs beside them (ADR 0210, 0211) |
 | 51:5 | Blit extension: a rule along the cell's bottom edge only, 1 px, in the underline colour if set, else the foreground: the line under a note's strip (ADR 0210) |
+| 66:kind:width:inset, 67 | Blit extension: a drop shadow drawn under the cell's glyph, in the underline colour if set, else the foreground; 67 (or 66:0) ends it. kind 1 right, 2 right from 2 px down (a window's first row), 3 under, 4 under from the 2 px offset (its first cell), 5 the corner; width 1 or 2 px, 2 if left out; inset 1 (default: 1 px in, just outside a Blit frame glyph's line) or 0 (at the cell's edge, beside a frame that fills its cells). Colon form only (ADR 0211) |
+
+**SGR 66 and 67 are Blit's own,** in a gap the references we read leave
+unassigned (ADR 0211 lists them); that is not a survey of every terminal.
+`66;1;2` is three SGRs, not a shadow.
 
 **SGR 51 deviates from ECMA-48.** The standard's *framed* draws a frame on
 all four sides; Blit draws the top and bottom only. It is for a button's

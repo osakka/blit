@@ -1629,8 +1629,9 @@ colour icons (status icons, the hui badge, telephones, file-manager icons):
 each icon's id, codepoint, how many columns it spans, and the codepoints
 retired and never reused. Its `cell_geometry` section lists the glyphs
 Blit draws as cell geometry: the bar corners and the 105 window-chrome
-glyphs (ADR 0210), each with `colour` and, for those, `set` (`chalk`,
-`slate-light` or `slate-dark`). Authentication is the same as other read
+glyphs (ADR 0210), each with `colour`, `set` (`chalk` or `slate-light`)
+and `pens` (`foreground`, or `cell` for Slate, ADR 0211). Slate dark's
+codepoints are under `retired`. Authentication is the same as other read
 endpoints. A missing, unreadable or oversized catalogue returns 503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)

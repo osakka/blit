@@ -85,7 +85,7 @@ int main(int argc,char **argv)
     int si,step,cases=0;
     BlitFont native_font;
     unsigned colours[ROWS*COLS]={0};
-    uint16_t attributes[ROWS*COLS]={0};
+    uint32_t attributes[ROWS*COLS]={0};
     memset(&native_font,0,sizeof(native_font)); font=&native_font;
     memset(&output,0,sizeof(output)); output.mode.hdisplay=W; output.mode.vdisplay=H;
     output.back.map=pixels; output.back.pitch=W*4;

@@ -136,42 +136,62 @@ U+100000 is `"\udbc0\udc00"`, not the invalid six-digit escape `"\u100000"`.
 
 ## Window chrome glyph sets: Chalk and Slate
 
-ADR 0210. 105 glyphs at U+100231–100299 draw retro Mac-style window
-chrome out of cells: three sets of 35 in one order (Chalk, Slate light,
-Slate dark), listed in the catalogue's `cell_geometry` section as
-`chalk-<name>`, `slate-light-<name>` and `slate-dark-<name>`.
+ADR 0210 and 0211. 70 glyphs at U+100231–100276 draw retro Mac-style
+window chrome out of cells. They are two sets of 35 in one order (Chalk,
+Slate), listed in the catalogue's `cell_geometry` section as
+`chalk-<name>` and `slate-light-<name>`. U+100277–100299, once Slate dark,
+are retired.
 - **A set per part.** Each part (title bar, frame, dialog border, button
   ends) takes its glyphs from whichever set the application picks for it,
   so the sets mix: a Slate title bar on a box-drawing frame, a Chalk title
   bar on a Slate frame. Every set has the same geometry, so parts from
   different sets meet at the same rows and columns.
 - **Chalk** is one colour: the cell's foreground over its background, so a
-  theme recolours it. **Slate** is the same geometry in its own colours.
-  Wherever a glyph draws nothing, the cell's background shows; on a held
+  theme recolours it.
+- **Slate** is the same geometry in the cell's pens. Each pixel is one of:
+  - **the foreground:** lines and outlines;
+  - **the underline colour (SGR 58, white if unset):** the bar's
+    highlights, box faces, and a dialog's and a button's face;
+  - **half the foreground and half the background, each channel:** the
+    stripes and shades;
+  - **the cell's background:** the bar.
+  One set therefore serves light and dark schemes alike. The Pewter
+  scheme (bar 214, ink black, SGR 58 white) draws 0.3.38's Slate light
+  except for those half-and-half pixels.
+- **The background shows wherever a glyph draws nothing.** On a held
   desktop that is the wallpaper, right up to the frame's line.
-- **No shadow.** The frame and dialog pieces draw only their lines and
-  borders. A drop shadow is the application's own setting (Hibr's
-  Shadow), not part of the glyphs. That is why `frame-right-top` draws as
-  `frame-right`, and `frame-bottom-first` as `frame-bottom`; both keep
-  their codepoints.
+- **No shadow in the glyphs.** The frame and dialog pieces draw only their
+  lines and borders, so `frame-right-top` draws as `frame-right` and
+  `frame-bottom-first` as `frame-bottom`; both keep their codepoints. A
+  drop shadow is SGR 66, which Blit draws under any glyph (see [the
+  terminal reference](terminal.md#sgr)).
 - They are pixel-designed for an 11x22 cell. At every size, lines,
   stripes and SGR 51 are 1 px, the dialog border's layers are 2/3/1/1 px
-  and the default ring is 3 px. The boxes stay as wide as the cell, the stripes
-  keep their proportion of the bar and a button's ends their roundness.
-  Neighbouring cells always join.
-- **A title** is text on the bar's background, framed to match the bar:
-  Chalk with SGR 51, which draws the frame line and the rule; Slate light
-  with SGR 51:2 and Slate dark with SGR 51:4, which also draw the bar's
-  highlight and shade rows. `stripe-before-title` and `stripe-after-title`
-  stand either side.
+  and the default ring is 3 px. The boxes stay as wide as the cell, the
+  stripes keep their proportion of the bar and a button's ends their
+  roundness. Neighbouring cells always join.
+- **A title** is text on the bar's background, framed to match the bar.
+  Chalk uses SGR 51, which draws the frame line and the rule. Slate uses
+  SGR 51:2, which also draws the bar's highlight and shade rows in the
+  cell's pens. `stripe-before-title` and `stripe-after-title` stand either
+  side.
 - **A button** is `button-left`, the label with SGR 51 on the button's
   face, and `button-right`. A default button is `default-button-left`, the
-  label with SGR 51:3, and `default-button-right`. Set SGR 58 to the
-  ring's colour: black, or 168,168,176 for Slate dark. See [the terminal reference](terminal.md#sgr).
-- **A dialog** is the `dialog-*` border round its content cells. Chalk's
-  border is one colour, so a Chalk dialog's frame cells take the dialog's
-  face as their background, and the face shows round the border. Slate
-  paints its own face, so its frame cells keep the desktop behind them.
+  label with SGR 51:3, and `default-button-right`. Set the label's SGR 58
+  to the ring's colour (the foreground of the caps). Slate's caps sit on
+  the dialog's face (their background), with SGR 58 set to the button's
+  face, which they paint inside the ring: the corners outside the ring
+  show the dialog's face. The shade down and right is half the foreground
+  and half that face. Chalk's caps and label share one background.
+- **A dialog** is the `dialog-*` border round its content cells.
+  - **Slate:** the frame cells keep the wallpaper as their background and
+    set SGR 58 to the dialog's face, which the margin and gap paint. The
+    3 px line is solid foreground. Nothing is drawn beyond the 7 px
+    border, so there is no halo.
+  - **Chalk,** being one colour, leaves its margin and gap transparent,
+    so its frame cells take the dialog's face as background and the face
+    shows round the border. For a black-and-white dialog with no halo, use
+    the Slate glyphs with a black foreground and SGR 58 white.
 
 ## Discover first; retain a fallback
 

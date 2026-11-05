@@ -15,14 +15,14 @@
 
 static uint32_t codepoints[COLS * ROWS], foreground[COLS * ROWS],
     background[COLS * ROWS];
-static uint16_t attributes[COLS * ROWS];
+static uint32_t attributes[COLS * ROWS];
 static uint32_t reference[W * H], gpu[W * H], retained[W * H];
 static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
 static unsigned char image_rgb[16 * 16 * 3], image_rgba[12 * 12 * 4];
 static BlitFont font, wide;
 static int max_diff, damage_scenes, scenes;
 
-static void text(int x, int y, const char *s, uint32_t fg, uint32_t bg, uint16_t attr)
+static void text(int x, int y, const char *s, uint32_t fg, uint32_t bg, uint32_t attr)
 {
     for (; *s && x < COLS; ++s, ++x) {
         int i = y * COLS + x;

@@ -43,10 +43,17 @@
 #define KMS_ATTR_CONCEAL 64
 #define KMS_ATTR_ITALIC 128
 #define KMS_ATTR_FRAMED 2048
-/* The server's framing field (BLIT_FRAMED_KIND: 0 thin, 1 thick, 2 and 3
-   the Slate bars, 4 the bottom rule) as blit_window_framed_bands' kind,
-   which is the SGR 51 sub-parameter: 1, 3, 2, 4, 5. */
-#define KMS_FRAMED_KIND(attr) ("\1\3\2\4\5\1\1\1"[((attr) >> 12) & 7U])
+/* The server's framing field (BLIT_FRAMED_KIND: 0 thin, 1 thick, 2 the
+   Slate bar, 3 its old dark twin, 4 the bottom rule) as
+   blit_window_framed_bands' kind, which is the SGR 51 sub-parameter: 1, 3,
+   2, 2, 5. */
+#define KMS_FRAMED_KIND(attr) ("\1\3\2\2\5\1\1\1"[((attr) >> 12) & 7U])
+/* ADR 0211: the server's shadow field, SGR 66's kind (three bits) and its
+   width bit. */
+#define KMS_ATTR_SHADOW_SHIFT 16
+#define KMS_ATTR_SHADOW (7U << KMS_ATTR_SHADOW_SHIFT)
+#define KMS_ATTR_SHADOW_THICK (1U << 19)
+#define KMS_ATTR_SHADOW_FLUSH (1U << 20)
 
 typedef struct {
     uint32_t fb;
@@ -1020,6 +1027,47 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     }
 }
 
+/* ADR 0211: a Slate window glyph in the cell's pens -- its FG, LINE and MIX
+   planes, each drawn as coverage in its pen. Without the planes (no
+   raster) it falls back to one colour, as Chalk draws. Bold and italic do
+   not apply to window chrome. */
+static void draw_window_cell(KmsOutput *output, const BlitFont *font, uint32_t cp,
+                             int x, int y, int cw, int ch, const BlitWindowPens *pens)
+{
+    static const int planes[3] = { WR_FG, WR_LINE, WR_MIX };
+    BlitRasterGlyph raster;
+    int i;
+    if (!font || !font->raster_plane_get || !font->raster_blend) {
+        draw_glyph(output, font, cp, x, y, cw, ch, pens->fg, 0, 0);
+        return;
+    }
+    for (i = 0; i < 3; ++i)
+        if (font->raster_plane_get(font->raster_state, cp, planes[i], &raster))
+            draw_cell_raster(output, font, &raster, x, y, cw, ch,
+                             planes[i] == WR_FG ? pens->fg :
+                             planes[i] == WR_LINE ? pens->line : pens->mix, 0, 0);
+}
+
+/* ADR 0211: SGR 66's shadow, under the glyph, clipped like the underline. */
+static void draw_shadow(KmsOutput *output, uint32_t attr, int x, int y, int w, int ch,
+                        uint32_t colour, int clip_x0, int clip_y0, int clip_x1, int clip_y1)
+{
+    BlitWindowRect rect[2];
+    int count = blit_window_shadow_rects((int)((attr & KMS_ATTR_SHADOW) >> KMS_ATTR_SHADOW_SHIFT),
+                                         (attr & KMS_ATTR_SHADOW_THICK) != 0,
+                                         (attr & KMS_ATTR_SHADOW_FLUSH) != 0, w, ch, rect), i;
+    for (i = 0; i < count; ++i) {
+        int left = x + rect[i].x0, right = x + rect[i].x1;
+        int top = y + rect[i].y0, bottom = y + rect[i].y1;
+        if (left < clip_x0) left = clip_x0;
+        if (right > clip_x1) right = clip_x1;
+        if (top < clip_y0) top = clip_y0;
+        if (bottom > clip_y1) bottom = clip_y1;
+        if (right > left && bottom > top)
+            fill_rect(output, left, top, right - left, bottom - top, colour);
+    }
+}
+
 /* Kitty z bands (issue #84, #88): below
    -2^30 an image is under cell backgrounds, from there up to zero it is over
    backgrounds and under text, and from zero up it is over text. */
@@ -1390,25 +1438,33 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 view->foreground[index] - 1 : view->default_foreground;
             uint32_t bg = view->background[index] ?
                 view->background[index] - 1 : view->default_background;
-            uint32_t underline = view->underline_color != NULL &&
-                view->underline_color[index] ?
-                view->underline_color[index] - 1 : fg;
+            int line_set = view->underline_color != NULL && view->underline_color[index];
+            uint32_t underline = line_set ? view->underline_color[index] - 1 : fg;
             uint32_t cp = view->codepoints[index] ? view->codepoints[index] : ' ';
-            uint16_t attr = view->attributes[index];
+            uint32_t attr = view->attributes[index];
             int glyph_width = (attr & KMS_ATTR_WIDE) ? cw * 2 : cw;
             int lean = (attr & KMS_ATTR_ITALIC) ? italic_lean : 0;
             int x = view->origin_x + column * cw;
             int y = view->origin_y + row * ch;
+            BlitWindowPens pens;
             if (attr & 8) { uint32_t t = fg; fg = bg; bg = t; }
             if (attr & 2) fg = (fg & 0xfefefeU) >> 1;
-            if (cp == ' ' && bg == floor_colour && !(attr & (4 | KMS_ATTR_FRAMED)) &&
+            if (cp == ' ' && bg == floor_colour &&
+                !(attr & (4 | KMS_ATTR_FRAMED | KMS_ATTR_SHADOW)) &&
                 (view->combining_count == NULL ||
                  view->combining_count[index] == 0))
                 continue;
+            pens = blit_window_pens(fg, bg, line_set, underline);
+            /* ADR 0211: the shadow is under whatever the cell holds. */
+            if (!(attr & KMS_ATTR_CONTINUATION) && (attr & KMS_ATTR_SHADOW))
+                draw_shadow(output, attr, x, y, glyph_width, ch, underline,
+                            clip_x0, clip_y0, clip_x1, clip_y1);
             /* ADR 0062: a wide character's glyph is 16 pixels wide and lives
                in the wide font; a codepoint that font does not map stays on
                the primary one, whose substitute is the visible marker. */
-            if (!(attr & KMS_ATTR_CONTINUATION)) {
+            if (!(attr & KMS_ATTR_CONTINUATION) && blit_window_colour(cp))
+                draw_window_cell(output, font, cp, x, y, glyph_width, ch, &pens);
+            else if (!(attr & KMS_ATTR_CONTINUATION)) {
                 draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL,
                     cp, view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
                     view->combining_count ? view->combining_count[index] : 0,
@@ -1433,7 +1489,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 BlitWindowBand band[4];
                 int left = x > clip_x0 ? x : clip_x0;
                 int right = x + glyph_width < clip_x1 ? x + glyph_width : clip_x1;
-                int bands = blit_window_framed_bands(KMS_FRAMED_KIND(attr), ch, underline, band), b;
+                int bands = blit_window_framed_bands(KMS_FRAMED_KIND(attr), ch, underline, &pens, band), b;
                 for (b = 0; b < bands; ++b) {
                     int top = y + band[b].top, bottom = y + band[b].bottom;
                     if (top < clip_y0) top = clip_y0;
@@ -1460,7 +1516,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
             view->cursor_x : view->columns - 1;
         int cursor_cells = 1;
         int cursor_index;
-        uint16_t cursor_attr;
+        uint32_t cursor_attr;
         int cursor_x;
         int cursor_y = view->origin_y + view->cursor_y * ch;
         if (cursor_column < 0) cursor_column = 0;
@@ -1504,7 +1560,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 for (sy=sources.source_y0; sy<sources.source_y1; ++sy)
                     for (sx=sources.source_x0; sx<sources.source_x1; ++sx) {
                         int at=sy*view->stride+sx;
-                        uint16_t a=view->attributes[at];
+                        uint32_t a=view->attributes[at];
                         uint32_t cp=view->codepoints[at];
                         if (!cp || (a & (KMS_ATTR_CONTINUATION|KMS_ATTR_CONCEAL))) continue;
                         draw_cell_glyphs(output,font,(a & KMS_ATTR_WIDE)?wide_font:NULL,

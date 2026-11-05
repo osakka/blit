@@ -5362,18 +5362,36 @@ components:
         concealed: {type: boolean}
         framed:
           type: string
-          enum: [none, thin, thick, slate-light-bar, slate-dark-bar, rule]
+          enum: [none, thin, thick, bar, rule, slate-light-bar, slate-dark-bar]
           description: >-
             SGR 51 (thin) or Blit's 51:3 (thick): a line along the cell's top
             and bottom edges, 1 px or the default button's 3 px ring, in the
-            underline colour if set, else the foreground. Blit's 51:2 and
-            51:4 (slate-light-bar, slate-dark-bar) draw a Slate title bar's
-            top and bottom rows instead: frame line and highlight, shade and
-            rule, in that set's colours. Blit's 51:5 (rule) draws only the
-            bottom line, 1 px, in the underline colour or the foreground:
-            the rule under a note's strip. ECMA-48 frames all four sides; Blit
-            draws top and bottom only, and the button glyphs close the ends
-            (ADR 0210). SGR 54 ends it.
+            underline colour if set, else the foreground. Blit's 51:2 (bar)
+            draws a Slate title bar's top and bottom rows instead: frame line
+            and highlight, shade and rule, in the cell's pens (foreground,
+            underline colour or white, and half foreground half background;
+            ADR 0211). Blit's 51:5 (rule) draws only the bottom line, 1 px,
+            in the underline colour or the foreground: the rule under a
+            note's strip. ECMA-48 frames all four sides; Blit draws top and
+            bottom only, and the button glyphs close the ends (ADR 0210).
+            SGR 54 ends it. Blit reports bar; slate-light-bar and
+            slate-dark-bar, the names before ADR 0211, are still accepted on
+            input and mean bar.
+        shadow:
+          type: string
+          pattern: '^(none|(right|right-start|under|under-start|corner):[12](:[01])?)$'
+          description: >-
+            Blit's drop shadow, SGR 66:kind:width:inset, ended by SGR 67 (ADR
+            0211): its kind, its width in pixels, and ":0" when it is flush.
+            right and right-start are a strip down the cell's left side
+            (right-start from 2 px down, a window's first row); under and
+            under-start a strip along its top (under-start from the shadow's
+            2 px offset, a window's first cell); corner where they meet.
+            Inset (the default) the strips start 1 px in, just outside a
+            Blit frame glyph's line in the same cell; flush (:0) at the
+            cell's edge. Drawn under the cell's glyph, in the underline
+            colour if set, else the foreground. Blit reports none, or the
+            kind and width with ":0" only when flush; it accepts ":1" too.
         underline_color:
           type: string
           pattern: '^#[0-9a-fA-F]{6}$'

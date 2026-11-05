@@ -116,11 +116,11 @@ def generate():
         cp = int(icon['codepoint'], 16)
         special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` |\n'
     special += '\nBerkanan preserves its runic meaning; it is not the Bluetooth icon. Existing standard/Nerd assignments are not repurposed.\n'
-    special += '\n## Cell geometry\n\nDrawn by the shared raster at every cell size, edge to edge, so neighbouring cells join without a seam: no outline font carries them. One cell each, in every font. Those marked colour (the Slate glyph sets, ADR 0210) carry their own colours; the rest are drawn in the terminal foreground.\n\n'
+    special += '\n## Cell geometry\n\nDrawn by the shared raster at every cell size, edge to edge, so neighbouring cells join without a seam: no outline font carries them. One cell each, in every font. Those marked cell pens (the Slate glyph set, ADR 0211) draw in the cell's foreground, underline colour and a mix of foreground and background; the rest are drawn in the terminal foreground.\n\n'
     special += '| Semantic ID | Codepoint | JSON string | Colour | Shape |\n| --- | --- | --- | --- | --- |\n'
     for icon in icons.get('cell_geometry', []):
         cp = int(icon['codepoint'], 16)
-        colour = 'colour' if icon.get('colour') else 'foreground'
+        colour = 'colour' if icon.get('colour') else 'cell pens' if icon.get('pens') == 'cell' else 'foreground'
         special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {colour} | {icon["shape"]} |\n'
     special += '\n[Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).\n'
     outputs['special.md'] = special

@@ -2,11 +2,12 @@
 #define BLIT_WINDOW_GLYPHS_H
 
 /* ADR 0210: the window-chrome glyph sets, Chalk and Slate, drawn as cell
-   geometry. Three sets of 35 in one order -- Chalk at U+100231, Slate light
-   at U+100254, Slate dark at U+100277 -- listed in the catalogue's
-   cell_geometry section. Chalk is one colour: coverage, drawn in the cell's
-   foreground. Slate is the same geometry in its own colours: premultiplied
-   RGBA. A pixel no rule sets is transparent in both, so a frame cell shows
+   geometry. Two sets of 35 in one order -- Chalk at U+100231, Slate at
+   U+100254 -- listed in the catalogue's cell_geometry section; Slate dark,
+   once at U+100277, is retired (ADR 0211). Chalk is one colour: coverage,
+   drawn in the cell's foreground. Slate is the same geometry in the cell's
+   own pens (ADR 0211): each pixel is a role, resolved when the cell is
+   drawn. A pixel no rule sets is transparent in both, so a frame cell shows
    its background (on a held desktop, the wallpaper).
 
    The geometry table below is the one source of every length. The design
@@ -23,7 +24,10 @@
 
 #define BLIT_WINDOW_FIRST 0x100231U
 #define BLIT_WINDOW_SET 35U
-#define BLIT_WINDOW_LAST (BLIT_WINDOW_FIRST + 3U * BLIT_WINDOW_SET - 1U)
+/* Chalk, then Slate. The third set, Slate dark (U+100277-100299), is
+   retired (ADR 0211): Slate takes its colours from the cell, so one set
+   draws light and dark alike. */
+#define BLIT_WINDOW_LAST (BLIT_WINDOW_FIRST + 2U * BLIT_WINDOW_SET - 1U)
 
 /* The geometry table, in pixels. */
 #define BLIT_WINDOW_LINE 1              /* frame lines, stripes, outlines, SGR 51 */
@@ -32,6 +36,8 @@
 #define BLIT_WINDOW_STRIPES 6           /* stripes at that height; 1 px, 1 px apart */
 #define BLIT_WINDOW_STRIPE_INSET 2      /* clear beside a frame or a box */
 #define BLIT_WINDOW_TITLE_GAP 5         /* clear before and after the title */
+#define BLIT_WINDOW_SHADOW 2            /* SGR 66's thick shadow (ADR 0211) */
+#define BLIT_WINDOW_SHADOW_OFFSET 2     /* where its first row and cell start */
 #define BLIT_WINDOW_DIALOG_MARGIN 2     /* dialog border, from the content out: */
 #define BLIT_WINDOW_DIALOG_BAND 3       /*   face margin, the wide line, */
 #define BLIT_WINDOW_DIALOG_GAP 1        /*   a gap of the face, */
@@ -47,7 +53,8 @@ static int blit_window_glyph(uint32_t scalar)
     return scalar >= BLIT_WINDOW_FIRST && scalar <= BLIT_WINDOW_LAST;
 }
 
-/* Slate (light and dark) carries colours; Chalk takes the foreground. */
+/* Slate draws in three of the cell's pens (ADR 0211); Chalk in one, the
+   foreground. */
 static int blit_window_colour(uint32_t scalar)
 {
     return blit_window_glyph(scalar) && scalar >= BLIT_WINDOW_FIRST + BLIT_WINDOW_SET;
@@ -67,24 +74,40 @@ enum {
     WG_DEFAULT_LEFT, WG_DEFAULT_RIGHT
 };
 
-/* Slate's colour roles: K frame and outlines, D dark grey, L highlight,
-   B the title bar, W a box's face, G a dialog's face, F a
-   button's face, N a button's shade; and the controls' lines: O a
-   button's ring and a dialog's outer line, R the dialog's wide line, H
-   the highlight down its middle. In light, O, R and H are K, D and L;
-   dark lifts them so they read on its dark faces. Chalk inks every role
-   it uses. */
-enum { WR_NONE, WR_K, WR_D, WR_L, WR_B, WR_W, WR_G, WR_F, WR_N, WR_O, WR_R, WR_H,
-       WR_ROLES };
+/* The roles a pixel can have (ADR 0211). Chalk inks every role it uses in
+   the foreground. Slate resolves each in the cell it is drawn in:
+   - BG, the cell's background: the bar. Drawn as nothing, since the
+     cell's background is under it.
+   - FG, the foreground: frame lines, outlines, box ink, a dialog's
+     lines, a button's ring.
+   - LINE, the underline colour (SGR 58), white if unset: the bar's
+     highlights and a box's face, and the dialog's face (its margin and
+     gap) and a button's face, which the application sets as SGR 58 on
+     those cells.
+   - MIX, half the foreground and half the background: the dark stripe,
+     the bar's shade, a button's shade.
+   A dialog's or button's own cell background shows where nothing is
+   drawn: round a dialog's border the wallpaper, and in a cap's corners
+   outside its ring the dialog's face.
+   blit_window_pens resolves them; the compositors draw FG, LINE and MIX
+   as three coverage planes. */
+enum { WR_NONE, WR_FG, WR_LINE, WR_MIX, WR_BG };
 
-static const unsigned char blit_window_palette[2][WR_ROLES][3] = {
-    { {0, 0, 0}, {0, 0, 0}, {119, 119, 119}, {255, 255, 255}, {214, 214, 214},
-      {255, 255, 255}, {238, 238, 238}, {221, 221, 221}, {153, 153, 153},
-      {0, 0, 0}, {119, 119, 119}, {255, 255, 255} },
-    { {0, 0, 0}, {8, 8, 10}, {30, 30, 34}, {112, 112, 122}, {60, 60, 67},
-      {200, 200, 206}, {52, 52, 58}, {78, 78, 86}, {40, 40, 45},
-      {168, 168, 176}, {122, 122, 130}, {190, 190, 198} },
-};
+/* The three pens a Slate cell draws with, 0xRRGGBB. */
+typedef struct { uint32_t fg, line, mix; } BlitWindowPens;
+
+static BlitWindowPens blit_window_pens(uint32_t fg, uint32_t bg, int line_set, uint32_t line)
+{
+    BlitWindowPens pens;
+    int shift;
+    pens.fg = fg & 0xffffffU;
+    pens.line = line_set ? line & 0xffffffU : 0xffffffU;
+    pens.mix = 0;
+    /* Each channel halved, rounded down: (fg + bg) / 2. */
+    for (shift = 0; shift <= 16; shift += 8)
+        pens.mix |= ((((fg >> shift) & 255U) + ((bg >> shift) & 255U)) / 2U) << shift;
+    return pens;
+}
 
 typedef struct {
     unsigned char *roles;
@@ -104,8 +127,8 @@ static void wg_fill(WindowCell *c, int x0, int x1, int y0, int y1, unsigned char
 
 static void wg_outline(WindowCell *c, int x0, int x1, int y0, int y1, int t)
 {
-    wg_fill(c, x0, x1, y0, y0 + t, WR_K); wg_fill(c, x0, x1, y1 - t, y1, WR_K);
-    wg_fill(c, x0, x0 + t, y0, y1, WR_K); wg_fill(c, x1 - t, x1, y0, y1, WR_K);
+    wg_fill(c, x0, x1, y0, y0 + t, WR_FG); wg_fill(c, x0, x1, y1 - t, y1, WR_FG);
+    wg_fill(c, x0, x0 + t, y0, y1, WR_FG); wg_fill(c, x1 - t, x1, y0, y1, WR_FG);
 }
 
 static int wg_max3(int a, int b, int c)
@@ -172,30 +195,30 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
     default: break;
     }
     if (index <= WG_ZOOM) {
-        if (slate) wg_fill(&cell, 0, w, 0, h, WR_B);
+        if (slate) wg_fill(&cell, 0, w, 0, h, WR_BG);
         for (k = 0; stripes && k < n; ++k) {
             y = top + 2 * L * k;
-            wg_fill(&cell, sx0, sx1, y, y + L, slate ? WR_D : WR_K);
-            if (slate) wg_fill(&cell, sx0, sx1, y + L, y + 2 * L, WR_L);
+            wg_fill(&cell, sx0, sx1, y, y + L, slate ? WR_MIX : WR_FG);
+            if (slate) wg_fill(&cell, sx0, sx1, y + L, y + 2 * L, WR_LINE);
         }
         /* The frame line and the rule under the bar; Slate's bevel is a
            highlight under the line and a shade over the rule. */
-        wg_fill(&cell, 0, w, 0, L, WR_K);
-        wg_fill(&cell, 0, w, h - L, h, WR_K);
+        wg_fill(&cell, 0, w, 0, L, WR_FG);
+        wg_fill(&cell, 0, w, h - L, h, WR_FG);
         if (slate) {
-            wg_fill(&cell, 0, w, L, 2 * L, WR_L);
-            wg_fill(&cell, 0, w, h - 2 * L, h - L, WR_D);
+            wg_fill(&cell, 0, w, L, 2 * L, WR_LINE);
+            wg_fill(&cell, 0, w, h - 2 * L, h - L, WR_MIX);
         }
     }
     if (index == WG_CLOSE || index == WG_SHADE || index == WG_ZOOM || index == WG_NOTE_CLOSE) {
-        if (slate) wg_fill(&cell, bx, bx + side, by, by + side, WR_W);
+        if (slate) wg_fill(&cell, bx, bx + side, by, by + side, WR_LINE);
         wg_outline(&cell, bx, bx + side, by, by + side, L);
         if (index == WG_ZOOM) {
             int inner = (BLIT_WINDOW_ZOOM_NUM * side + BLIT_WINDOW_ZOOM_DEN / 2) / BLIT_WINDOW_ZOOM_DEN;
             wg_outline(&cell, bx, bx + inner, by, by + inner, L);
         } else if (index == WG_SHADE) {
             y = by + (side - 3 * L) / 2;
-            wg_fill(&cell, bx, bx + side, y, y + L, WR_K);
+            wg_fill(&cell, bx, bx + side, y, y + L, WR_FG);
         }
         return;
     }
@@ -204,14 +227,14 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
        0210, revised 2026-11-04), so the -top and -first pieces now draw the
        same as their plain neighbours; they keep their codepoints. */
     switch (index) {
-    case WG_FRAME_LEFT: wg_fill(&cell, w - L, w, 0, h, WR_K); return;
-    case WG_FRAME_RIGHT_TOP: case WG_FRAME_RIGHT: wg_fill(&cell, 0, L, 0, h, WR_K); return;
-    case WG_FRAME_BOTTOM_LEFT: wg_fill(&cell, w - L, w, 0, L, WR_K); return;
-    case WG_FRAME_BOTTOM_FIRST: case WG_FRAME_BOTTOM: wg_fill(&cell, 0, w, 0, L, WR_K); return;
-    case WG_FRAME_BOTTOM_RIGHT: wg_fill(&cell, 0, L, 0, L, WR_K); return;
-    case WG_FRAME_TOP_LEFT: wg_fill(&cell, w - L, w, h - L, h, WR_K); return;
-    case WG_FRAME_TOP: wg_fill(&cell, 0, w, h - L, h, WR_K); return;
-    case WG_FRAME_TOP_RIGHT: wg_fill(&cell, 0, L, h - L, h, WR_K); return;
+    case WG_FRAME_LEFT: wg_fill(&cell, w - L, w, 0, h, WR_FG); return;
+    case WG_FRAME_RIGHT_TOP: case WG_FRAME_RIGHT: wg_fill(&cell, 0, L, 0, h, WR_FG); return;
+    case WG_FRAME_BOTTOM_LEFT: wg_fill(&cell, w - L, w, 0, L, WR_FG); return;
+    case WG_FRAME_BOTTOM_FIRST: case WG_FRAME_BOTTOM: wg_fill(&cell, 0, w, 0, L, WR_FG); return;
+    case WG_FRAME_BOTTOM_RIGHT: wg_fill(&cell, 0, L, 0, L, WR_FG); return;
+    case WG_FRAME_TOP_LEFT: wg_fill(&cell, w - L, w, h - L, h, WR_FG); return;
+    case WG_FRAME_TOP: wg_fill(&cell, 0, w, h - L, h, WR_FG); return;
+    case WG_FRAME_TOP_RIGHT: wg_fill(&cell, 0, L, h - L, h, WR_FG); return;
     default: break;
     }
     if (index >= WG_DIALOG_TOP_LEFT && index <= WG_DIALOG_BOTTOM_RIGHT) {
@@ -226,15 +249,13 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
             index == WG_DIALOG_BOTTOM_RIGHT;
         int upper = index <= WG_DIALOG_TOP_RIGHT;
         int lower = index >= WG_DIALOG_BOTTOM_LEFT;
-        int mid = D1 + (D2 - D1) / 2;
         for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
             int dx = left ? w - 1 - x : right ? x : 0;
             int dy = upper ? h - 1 - y : lower ? y : 0;
             int d = dx > dy ? dx : dy;
             unsigned char role = WR_NONE;
-            if (d < D1 || (d >= D2 && d < D3)) role = slate ? WR_G : WR_NONE;
-            else if (d < D2) role = slate ? (d == mid ? WR_H : WR_R) : WR_K;
-            else if (d < D4) role = slate ? WR_O : WR_K;
+            if (d < D1 || (d >= D2 && d < D3)) role = slate ? WR_LINE : WR_NONE;
+            else if (d < D4) role = WR_FG;
             if (role != WR_NONE) roles[y * w + x] = role;
         }
         return;
@@ -259,19 +280,19 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
             int mx = mirror ? w - 1 - x : x;
             unsigned char role;
             if (!wg_inside_round(mx, y, x0, x1, 0, h, r)) continue;
-            if (!wg_inside_round(mx, y, x0 + t, x1 - t, t, h - t, r1)) role = slate ? WR_O : WR_K;
+            if (!wg_inside_round(mx, y, x0 + t, x1 - t, t, h - t, r1)) role = WR_FG;
             else if (!slate) continue;
             else {
-                /* The face, and a bevel round the end only (the label's
-                   cells between the ends are flat): light where the edge
-                   faces up and left, shade where it faces down and right. */
-                role = WR_F;
+                /* The face (LINE, the application's SGR 58), and a shade
+                   round the end only where its edge faces down or right;
+                   the label's cells between the ends are flat. */
+                role = WR_LINE;
                 if (!wg_inside_round(mx, y, x0 + t + L, x1 - t - L, t + L, h - t - L, r2)) {
                     int vx, vy;
                     wg_round_normal(mx, y, x0 + t, x1 - t, t, h - t, r1, &vx, &vy);
                     if (vx) {
                         if (mirror) vx = -vx;
-                        role = vx + vy < 0 ? WR_L : WR_N;
+                        if (vx + vy >= 0) role = WR_MIX;
                     }
                 }
             }
@@ -282,31 +303,25 @@ static void blit_window_roles(uint32_t scalar, unsigned char *roles, int w, int 
 
 /* ADR 0210: what SGR 51 draws in a framed cell, as up to four horizontal
    bands {top, bottom, colour}. kind is 1 (51, thin), 3 (51:3, the default
-   button's ring), 2 or 4 (51:2 and 51:4, the Slate light and dark title
-   bar: frame line and highlight at the top, shade and rule at the bottom,
-   the rows every bar glyph has, in the same palette), or 5 (51:5, a rule
-   along the bottom only, under a note's strip). line is the thin, thick
-   and rule lines' colour, 0xRRGGBB. Both compositors draw from this, so
-   a framed title meets the bar glyphs beside it row for row. */
+   button's ring), 2 (51:2, a Slate title bar's top and bottom rows: frame
+   line and highlight, shade and rule, in the cell's pens as every bar
+   glyph has them, ADR 0211; 4, once Slate dark's, is the same), or 5
+   (51:5, a rule along the bottom only). line is the thin, thick and rule
+   lines' colour, 0xRRGGBB: the underline colour, else the foreground.
+   Both compositors draw from this, so a framed title meets the bar glyphs
+   beside it row for row. */
 typedef struct { int top, bottom; uint32_t colour; } BlitWindowBand;
 
-static uint32_t wg_rgb(int dark, int role)
-{
-    return (uint32_t)blit_window_palette[dark][role][0] << 16 |
-        (uint32_t)blit_window_palette[dark][role][1] << 8 |
-        (uint32_t)blit_window_palette[dark][role][2];
-}
-
-static int blit_window_framed_bands(int kind, int h, uint32_t line, BlitWindowBand band[4])
+static int blit_window_framed_bands(int kind, int h, uint32_t line,
+                                    const BlitWindowPens *pens, BlitWindowBand band[4])
 {
     int L = BLIT_WINDOW_LINE, t;
     if (kind == 2 || kind == 4) {
-        int dark = kind == 4;
         if (h < 4 * L) return 0;
-        band[0].top = 0; band[0].bottom = L; band[0].colour = wg_rgb(dark, WR_K);
-        band[1].top = L; band[1].bottom = 2 * L; band[1].colour = wg_rgb(dark, WR_L);
-        band[2].top = h - 2 * L; band[2].bottom = h - L; band[2].colour = wg_rgb(dark, WR_D);
-        band[3].top = h - L; band[3].bottom = h; band[3].colour = wg_rgb(dark, WR_K);
+        band[0].top = 0; band[0].bottom = L; band[0].colour = pens->fg;
+        band[1].top = L; band[1].bottom = 2 * L; band[1].colour = pens->line;
+        band[2].top = h - 2 * L; band[2].bottom = h - L; band[2].colour = pens->mix;
+        band[3].top = h - L; band[3].bottom = h; band[3].colour = pens->fg;
         return 4;
     }
     if (kind == 5) {
@@ -320,25 +335,60 @@ static int blit_window_framed_bands(int kind, int h, uint32_t line, BlitWindowBa
     return 2;
 }
 
-/* Draws the glyph into a raster entry's pixels: coverage for Chalk,
-   premultiplied RGBA for Slate, in the raster's byte order.
+/* ADR 0211: SGR 66's drop shadow in a cell, as up to two rectangles
+   [x0, x1) x [y0, y1). kind: 1 right, 2 right from the shadow's offset
+   down (a window's first row), 3 under, 4 under from the offset in (its
+   first cell), 5 the corner. width is BLIT_WINDOW_LINE, or
+   BLIT_WINDOW_SHADOW for a thick shadow. Inset (the default) the strips
+   begin BLIT_WINDOW_LINE in from the cell's left or top edge, so on a frame
+   glyph's cell they lie just outside its line: a frame glyph and a shadow
+   in one cell draw exactly what the frame glyphs drew before 0.3.38.
+   Flush they begin at the cell's edge, for the cell beside a frame that
+   fills its own cell (a box-drawing border on the window's face). */
+typedef struct { int x0, y0, x1, y1; } BlitWindowRect;
+
+static int blit_window_shadow_rects(int kind, int thick, int flush, int w, int h,
+                                    BlitWindowRect rect[2])
+{
+    int L = flush ? 0 : BLIT_WINDOW_LINE, t = thick ? BLIT_WINDOW_SHADOW : BLIT_WINDOW_LINE;
+    int SO = BLIT_WINDOW_SHADOW_OFFSET;
+    switch (kind) {
+    case 1: case 2:
+        rect[0].x0 = L; rect[0].x1 = L + t; rect[0].y0 = kind == 2 ? SO : 0; rect[0].y1 = h;
+        return 1;
+    case 3: case 4:
+        /* Inset, the left frame's outer edge is L into the previous cell,
+           so the first cell's strip starts SO - L in; flush, the window's
+           edge is this cell's own, and it starts SO in. */
+        rect[0].x0 = kind == 4 ? SO - L : 0; rect[0].x1 = w; rect[0].y0 = L; rect[0].y1 = L + t;
+        return 1;
+    case 5:
+        /* Where the right strip and the under strip meet: inset an L, not
+           the square, so the frame's corner pixel stays the frame's;
+           flush the square. */
+        rect[0].x0 = L; rect[0].x1 = L + t; rect[0].y0 = 0; rect[0].y1 = L + t;
+        rect[1].x0 = 0; rect[1].x1 = L + t; rect[1].y0 = L; rect[1].y1 = L + t;
+        return 2;
+    default:
+        return 0;
+    }
+}
+
+/* Draws one plane of the glyph as coverage (255 or 0): plane 0, every
+   pixel a role inks (Chalk, and the one-colour fallback for Slate), or
+   WR_FG, WR_LINE or WR_MIX, that role's pixels alone. BG is never drawn.
    Returns 0 when the cell is too large for the scratch map. */
-static int blit_window_draw(uint32_t scalar, unsigned char *pixels, int stride,
-                            int w, int h, int rgba)
+static int blit_window_draw(uint32_t scalar, int plane, unsigned char *pixels, int stride,
+                            int w, int h)
 {
     unsigned char roles[128 * 128];
-    int x, y, dark = scalar >= BLIT_WINDOW_FIRST + 2U * BLIT_WINDOW_SET;
+    int x, y;
     if (w <= 0 || h <= 0 || w > 128 || h > 128) return 0;
     blit_window_roles(scalar, roles, w, h);
     for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
         unsigned char role = roles[y * w + x];
-        unsigned char *out = pixels + y * stride + x * (rgba ? 4 : 1);
-        if (role == WR_NONE) continue;
-        if (!rgba) { out[0] = 255; continue; }
-        out[0] = blit_window_palette[dark][role][0];
-        out[1] = blit_window_palette[dark][role][1];
-        out[2] = blit_window_palette[dark][role][2];
-        out[3] = 255;
+        if (role == WR_NONE || role == WR_BG || (plane && role != plane)) continue;
+        pixels[y * stride + x] = 255;
     }
     return 1;
 }

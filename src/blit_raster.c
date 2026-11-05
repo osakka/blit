@@ -54,6 +54,8 @@ struct BlitRaster {
     unsigned long long hits, misses;
     unsigned reclaim_slot;
     RasterEntry cache[RASTER_SLOTS];
+    /* ADR 0211: each Slate glyph's FG, LINE and MIX planes. */
+    unsigned char *window_planes[BLIT_WINDOW_SET][3];
 };
 
 static int ceil_26_6(FT_Pos value) { return (int)((value + 63) / 64); }
@@ -72,6 +74,7 @@ void blit_raster_close(BlitRaster *raster)
     int i;
     if (!raster) return;
     for (i = 0; i < RASTER_SLOTS; ++i) free(raster->cache[i].pixels);
+    for (i = 0; i < (int)BLIT_WINDOW_SET * 3; ++i) free(raster->window_planes[i / 3][i % 3]);
     if (raster->shape_buffer) hb_buffer_destroy(raster->shape_buffer);
     if (raster->colour_font) hb_font_destroy(raster->colour_font);
     if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
@@ -1238,10 +1241,11 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
-    /* ADR 0210: Chalk takes the foreground, Slate carries its colours. */
+    /* ADR 0210, 0211: the window glyphs are coverage. Chalk is drawn in the
+       foreground; looked up whole, a Slate glyph is the same one-colour
+       fallback, and its pens come from blit_raster_get_window_plane. */
     if (key->length == 1 && blit_window_glyph(scalar))
-        next.glyph.format = blit_window_colour(scalar) ?
-            BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
+        next.glyph.format = BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
     else if (key->length > 1 && !arabic) {
         colour_index = colour_cluster_glyph(raster, key);
@@ -1262,9 +1266,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     } else if (key->length == 1 && bar_corner(scalar)) {
         draw_bar_corner(scalar, &next); result = 1;
     } else if (key->length == 1 && blit_window_glyph(scalar)) {
-        result = blit_window_draw(scalar, next.pixels, next.glyph.stride,
-                                  next.glyph.width, next.glyph.height,
-                                  next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED) ? 1 : -1;
+        result = blit_window_draw(scalar, 0, next.pixels, next.glyph.stride,
+                                  next.glyph.width, next.glyph.height) ? 1 : -1;
     } else if (key->length == 1 && scalar >= 0x2500 && scalar <= 0x257f &&
                next.glyph.format == BLIT_RASTER_COVERAGE) {
         draw_box_drawing(scalar, &next); result = 1;
@@ -1357,6 +1360,37 @@ int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
     return raster_get_key(raster, &key, glyph);
 }
 
+/* ADR 0211: one pen's plane of a Slate glyph -- WR_FG, WR_LINE or WR_MIX --
+   as coverage, which the compositor tints with that pen. Kept beside the
+   glyph cache, one entry per glyph and pen (the set is 35 glyphs), freed
+   with the raster. */
+int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
+                                 BlitRasterGlyph *glyph)
+{
+    unsigned index;
+    unsigned char **pixels;
+    if (!raster || !glyph || !blit_window_colour(scalar) || plane < WR_FG || plane > WR_MIX)
+        return 0;
+    index = scalar - (BLIT_WINDOW_FIRST + BLIT_WINDOW_SET);
+    pixels = &raster->window_planes[index][plane - WR_FG];
+    if (!*pixels) {
+        *pixels = calloc((size_t)raster->width, (size_t)raster->height);
+        if (!*pixels) return 0;
+        if (!blit_window_draw(scalar, plane, *pixels, raster->width, raster->width, raster->height)) {
+            free(*pixels);
+            *pixels = NULL;
+            return 0;
+        }
+    }
+    memset(glyph, 0, sizeof(*glyph));
+    glyph->width = glyph->stride = raster->width;
+    glyph->height = raster->height;
+    glyph->baseline = raster->baseline;
+    glyph->format = BLIT_RASTER_COVERAGE;
+    glyph->pixels = *pixels;
+    return 1;
+}
+
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterGlyph *glyph)
 {
@@ -1385,6 +1419,9 @@ unsigned long blit_raster_render_count(const BlitRaster *raster)
 static int attached_get(void *state, uint32_t scalar, int columns,
                          BlitRasterGlyph *glyph)
 { return blit_raster_get((BlitRaster *)state, scalar, columns, glyph); }
+static int attached_plane_get(void *state, uint32_t scalar, int plane,
+                              BlitRasterGlyph *glyph)
+{ return blit_raster_get_window_plane((BlitRaster *)state, scalar, plane, glyph); }
 static void attached_free(void *state)
 { blit_raster_close((BlitRaster *)state); }
 static int attached_cluster_get(void *state, const BlitCellCluster *key,
@@ -1397,6 +1434,7 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster)
     font->raster_state = raster;
     font->raster_get = raster ? attached_get : NULL;
     font->raster_cluster_get = raster ? attached_cluster_get : NULL;
+    font->raster_plane_get = raster ? attached_plane_get : NULL;
     font->raster_free = raster ? attached_free : NULL;
     font->raster_blend = raster ? blit_raster_blend : NULL;
     font->raster_cell_width = raster ? raster->width : 0;

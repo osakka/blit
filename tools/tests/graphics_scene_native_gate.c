@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     BlitGraphicsImage images[3] = {{0}};
     BlitGraphicsScene old, next;
     uint32_t cells[40*12] = {0}, reference[320*192];
-    uint16_t attributes[40*12] = {0};
+    uint32_t attributes[40*12] = {0};
     unsigned char wallpaper[320*192*4], window[32*24*4], overlap[32*24*4];
     unsigned long long visual = 1;
     int i, step, row;

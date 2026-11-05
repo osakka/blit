@@ -1,17 +1,28 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR 0210: the window-chrome glyph sets, Chalk and Slate (U+100231-100299).
+# ADR 0210, 0211: the window-chrome glyph sets, Chalk (U+100231-100253)
+# and Slate (U+100254-100276); Slate dark (U+100277-100299) is retired.
 #
-# - The catalogue lists all 105 by name, as cell geometry, in three sets of
-#   35 in one order, clear of the icons and of every retired codepoint.
+# - The catalogue lists all 70 by name, as cell geometry, in two sets of
+#   35 in one order, clear of the icons and of every retired codepoint, and
+#   lists Slate dark as retired. The harness requires the retired range to
+#   draw nothing of its own.
 # - Through the production raster, every glyph equals the design
 #   (tools/fonts/draw-window-glyphs.py, which reads the geometry table in
 #   src/blit_window_glyphs.h) pixel for pixel: at the owner's 11x22 cell
-#   and at seven other cell sizes.
-# - Chalk is coverage (the foreground), Slate premultiplied RGBA in its
-#   own colours; every pixel is fully set or fully transparent, and the
-#   frame cells are transparent off their lines.
+#   and at eleven other cell sizes. Chalk as coverage; Slate as its role
+#   map, read from its three pen planes (FG, LINE, MIX), which the harness
+#   requires to be disjoint and together its one-colour lookup.
+# - Every pixel is fully set or fully clear, and the frame cells are
+#   transparent off their lines.
+# - Pewter (ADR 0211): Slate drawn in the cell's pens with bg 214, fg black
+#   and SGR 58 white is 0.3.38's Slate light, except where a pixel is the
+#   MIX pen, and except the dialog and the button caps, which ADR 0211
+#   redrew: a dialog's margin and gap are the line pen (SGR 58 its face),
+#   its lines solid foreground, nothing outside them; a cap's face is the
+#   line pen (SGR 58 the button's), its corners outside the ring nothing
+#   (the dialog's face shows), no highlight, a shade only down and right.
 # - At 11x22 the approved mock-up's pixels hold, written here, not read
 #   from the design: stripe and bevel rows, the full-width 11x11 box, the
 #   insets, the dialog's layers, the buttons' ends.
@@ -34,7 +45,7 @@ NAMES = %w[stripe stripe-first stripe-last stripe-before-title stripe-after-titl
            dialog-top-left dialog-top dialog-top-right dialog-left dialog-right
            dialog-bottom-left dialog-bottom dialog-bottom-right button-left button-right
            default-button-left default-button-right].freeze
-SETS = { 'chalk' => 0x100231, 'slate-light' => 0x100254, 'slate-dark' => 0x100277 }.freeze
+SETS = { 'chalk' => 0x100231, 'slate-light' => 0x100254 }.freeze
 
 def fail!(why)
   abort "WINDOW_GLYPH_FAIL #{why}"
@@ -51,16 +62,20 @@ catalogue = JSON.parse(File.read('assets/fonts/icons/catalogue.json'))
 geometry = catalogue.fetch('cell_geometry')
 window = geometry.select { |e| SETS.keys.any? { |s| e['id'].start_with?("#{s}-") } }
 expected = SETS.flat_map do |style, first|
-  NAMES.each_with_index.map { |name, i| ["#{style}-#{name}", format('%06X', first + i), style != 'chalk'] }
+  NAMES.each_with_index.map do |name, i|
+    ["#{style}-#{name}", format('%06X', first + i), false, style == 'chalk' ? 'foreground' : 'cell']
+  end
 end
-check(window.map { |e| [e['id'], e['codepoint'], e['colour']] } == expected,
-      'the catalogue does not list the 105 window glyphs in order with their names')
+check(window.map { |e| [e['id'], e['codepoint'], e['colour'], e['pens']] } == expected,
+      'the catalogue does not list the 70 window glyphs in order with their names and pens')
+check(geometry.none? { |e| e['id'].start_with?('slate-dark-') }, 'the catalogue still lists Slate dark')
 check(window.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'a window glyph has no shape')
 icon_codes = catalogue.fetch('icons').map { |i| i['codepoint'].to_i(16) }
 retired = catalogue.fetch('retired').flat_map { |r| (r['from'].to_i(16)..r['to'].to_i(16)).to_a }
 codes = window.map { |e| e['codepoint'].to_i(16) }
 check((codes & icon_codes).empty? && (codes & retired).empty?, 'a window glyph reuses an icon or retired codepoint')
-check(codes == (0x100231..0x100299).to_a, 'the window glyphs are not U+100231-100299')
+check(codes == (0x100231..0x100276).to_a, 'the window glyphs are not U+100231-100276')
+check((0x100277..0x100299).all? { |c| retired.include?(c) }, 'Slate dark (U+100277-100299) is not retired')
 check(!(icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).include?(0x10029A), 'U+10029A is no longer free')
 
 # The raster, at every size.
@@ -96,21 +111,22 @@ Dir.mktmpdir('blit-window-glyphs') do |work|
     end
   end
 end
-check(raster.size == 105 * SIZES.size, "the raster drew #{raster.size} of #{105 * SIZES.size}")
+check(raster.size == 70 * SIZES.size, "the raster drew #{raster.size} of #{70 * SIZES.size}")
 mismatches = []
 raster.each do |key, got|
   mismatches << format('U+%X at %dx%d', key[1], *key[0]) unless design[key] == got
 end
 check(mismatches.empty?, "differs from the design: #{mismatches.first(8).join(', ')}#{mismatches.size > 8 ? " and #{mismatches.size - 8} more" : ''}")
 
-# Pixels as [alpha or coverage, rgb] rows.
+# Pixels as [coverage, role] rows: Chalk's role is nil, Slate's K, L or M
+# (nothing drawn: coverage 0, role nil).
 def pixels(raster, w, h, cp)
-  fmt, hex = raster.fetch([[w, h], cp])
-  bytes = [hex].pack('H*').bytes
+  fmt, data = raster.fetch([[w, h], cp])
   if fmt == 'coverage'
+    bytes = [data].pack('H*').bytes
     Array.new(h) { |y| Array.new(w) { |x| [bytes[y * w + x], nil] } }
   else
-    Array.new(h) { |y| Array.new(w) { |x| b = bytes[(y * w + x) * 4, 4]; [b[3], b[0, 3]] } }
+    Array.new(h) { |y| Array.new(w) { |x| r = data[y * w + x]; r == '.' ? [0, nil] : [255, r] } }
   end
 end
 
@@ -123,7 +139,7 @@ SETS.each do |style, first|
   NAMES.each_index do |i|
     SIZES.each do |w, h|
       fmt, = raster.fetch([[w, h], first + i])
-      check(fmt == (style == 'chalk' ? 'coverage' : 'rgba'), "#{style}-#{NAMES[i]} is #{fmt}")
+      check(fmt == (style == 'chalk' ? 'coverage' : 'roles'), "#{style}-#{NAMES[i]} is #{fmt}")
       check(pixels(raster, w, h, first + i).flatten(1).all? { |a, _| [0, 255].include?(a) },
             "#{style}-#{NAMES[i]} at #{w}x#{h} has a partial pixel")
     end
@@ -134,28 +150,15 @@ end
 ink = ->(g, x, y) { g[y][x][0] == 255 }
 rgb = ->(g, x, y) { g[y][x][1] }
 STRIPE_ROWS = [5, 7, 9, 11, 13, 15].freeze
-LIGHT = { K: [0, 0, 0], D: [119, 119, 119], L: [255, 255, 255], B: [214, 214, 214], W: [255, 255, 255],
-          G: [238, 238, 238] }.freeze
-# Colours in the raster's byte order: Slate dark's frame is (8, 8, 10).
-g = glyph(raster, 'slate-dark', 'stripe')
-check(rgb.call(g, 0, 0) == [8, 8, 10] && rgb.call(g, 0, 2) == [60, 60, 67], "Slate dark's colours are #{rgb.call(g, 0, 0)}")
-# Slate dark's controls read on its faces: the button ring on the button
-# face (78,78,86), the dialog's outer and wide lines on the dialog face
-# (52,52,58), each at least 60 levels apart.
-luma = ->(c) { (c[0] * 299 + c[1] * 587 + c[2] * 114) / 1000 }
-ring = glyph(raster, 'slate-dark', 'button-left')
-check(luma.call(rgb.call(ring, 2, 11)) - luma.call([78, 78, 86]) >= 60, "Slate dark's button ring #{rgb.call(ring, 2, 11)} does not read on its face")
-ring = glyph(raster, 'slate-dark', 'default-button-left')
-check(luma.call(rgb.call(ring, 3, 11)) - luma.call([78, 78, 86]) >= 60, "Slate dark's default ring #{rgb.call(ring, 3, 11)} does not read")
-border = glyph(raster, 'slate-dark', 'dialog-left')
-[4, 6, 8].each do |x|
-  check(luma.call(rgb.call(border, x, 10)) - luma.call([52, 52, 58]) >= 60,
-        "Slate dark's dialog line at x #{x} (#{rgb.call(border, x, 10)}) does not read on its face")
-end
+# Slate's roles under the approved Slate light names: K frame, D the dark
+# grey (now the MIX pen), L and W the highlight and the box face (now the
+# LINE pen); the bar and the faces are the cell's background, not drawn.
+LIGHT = { K: 'K', D: 'M', L: 'L', W: 'L' }.freeze
+role_name = ->(r) { { 'K' => :K, 'M' => :D, 'L' => :L }.fetch(r, :B) }
 g = glyph(raster, 'chalk', 'stripe')
 check((0...22).select { |y| ink.call(g, 5, y) } == [0, *STRIPE_ROWS, 21], 'Chalk stripes are not rows 5-15 with the frame and rule')
 g = glyph(raster, 'slate-light', 'stripe')
-column = (0...22).map { |y| LIGHT.key(rgb.call(g, 5, y)) }
+column = (0...22).map { |y| role_name.call(rgb.call(g, 5, y)) }
 want = %i[K L B B B D L D L D L D L D L D L B B B D K]
 check(column == want, "Slate light stripe column is #{column.join}, not #{want.join}")
 { 'stripe-first' => [2, 11], 'stripe-from-box' => [2, 11], 'stripe-last' => [0, 9], 'stripe-to-box' => [0, 9],
@@ -189,8 +192,8 @@ g = glyph(raster, 'slate-light', 'frame-bottom-first')
 check((0...11).all? { |x| rgb.call(g, x, 0) == LIGHT[:K] && g[1][x][0].zero? && g[2][x][0].zero? },
       'frame-bottom-first: no line against the content, or a shadow under it')
 g = glyph(raster, 'slate-light', 'dialog-left')
-layers = (0...11).map { |x| g[10][x][0].zero? ? :none : LIGHT.key(rgb.call(g, x, 10)) }
-want = %i[none none none none K G D L D G G]
+layers = (0...11).map { |x| g[10][x][0].zero? ? :none : role_name.call(rgb.call(g, x, 10)) }
+want = %i[none none none none K L K K K L L]
 check(layers == want, "the Slate dialog border is #{layers.inspect}, not #{want.inspect}")
 g = glyph(raster, 'chalk', 'dialog-left')
 check((0...11).map { |x| ink.call(g, x, 10) } == [false] * 4 + [true, false, true, true, true, false, false],
@@ -243,10 +246,98 @@ SIZES.each do |w, h|
           dy = sides.include?('top') ? h - 1 - y : sides.include?('bottom') ? y : 0
           d = [dx, dy].max
           inked = g[y][x][0] == 255
+          # Chalk's margin and gap are its cell's background; Slate's are
+          # the line pen, the dialog's face (ADR 0211).
           want = style == 'chalk' ? (d.between?(2, 4) || d == 6) : d < 7
           check(inked == want, "#{style}-dialog-#{part} at #{w}x#{h}: pixel #{x},#{y} (#{d} px out) is #{inked ? 'set' : 'clear'}")
         end
       end
+    end
+  end
+end
+
+# Pewter: Slate in the cell's pens, against 0.3.38's fixed Slate light
+# (tools/fixtures, made by 0.3.38's own design script). Each glyph sits on
+# the background Hibr gives it: the bar 214, a note's close box 238; frame
+# pieces have no background role. A pixel may differ only where it is the
+# MIX pen, whose half of fg and bg replaced the palette's fixed greys. The
+# dialog and the button caps are not compared: ADR 0211 redrew them.
+pewter_bg = ->(name) { name == 'note-close' ? [238, 238, 238] : [214, 214, 214] }
+old = {}
+File.foreach('tools/tests/fixtures/window-slate-light-0.3.38-11x22.txt') do |line|
+  cp, _, hex = line.split
+  old[cp.to_i(16)] = [hex].pack('H*').bytes.each_slice(4).to_a
+end
+check(old.size == 35, 'the 0.3.38 Slate light reference is incomplete')
+mix_differs = 0
+compared = 0
+NAMES.each_with_index do |name, i|
+  next if name.start_with?('dialog-') || name.include?('button-')
+
+  cp = SETS.fetch('slate-light') + i
+  bg = pewter_bg.call(name)
+  pen = { 'K' => [0, 0, 0], 'L' => [255, 255, 255], 'M' => bg.map { |c| c / 2 } }
+  g = pixels(raster, 11, 22, cp)
+  compared += 1
+  22.times do |y|
+    11.times do |x|
+      was = old.fetch(cp)[y * 11 + x]
+      role = g[y][x][1]
+      now = role ? pen.fetch(role) : (was[3].zero? ? nil : bg)
+      then_ = was[3].zero? ? nil : was[0, 3]
+      next if now == then_
+      check(role == 'M', "Pewter slate-light-#{name} at #{x},#{y} is #{now.inspect}, 0.3.38 drew #{then_.inspect}")
+      mix_differs += 1
+    end
+  end
+end
+check(compared == 23, "Pewter compared #{compared} glyphs, not the 23 that ADR 0211 left alone")
+
+# The dialog (ADR 0211): its cells keep the wallpaper as their background,
+# so Slate draws the face itself, as the line pen (SGR 58 the dialog's face):
+# only the foreground and the line pen, no MIX, and nothing at all outside
+# the border's 7 px. The margin (2 px) and the gap (1 px) are the line pen;
+# the 3 px line and the 1 px outer line are the foreground.
+%w[top-left top top-right left right bottom-left bottom bottom-right].each do |part|
+  sides = part.split('-')
+  g = pixels(raster, 11, 22, SETS.fetch('slate-light') + NAMES.index("dialog-#{part}"))
+  22.times do |y|
+    11.times do |x|
+      dx = sides.include?('left') ? 10 - x : sides.include?('right') ? x : 0
+      dy = sides.include?('top') ? 21 - y : sides.include?('bottom') ? y : 0
+      d = [dx, dy].max
+      want = if d >= 7 then nil elsif d.between?(2, 4) || d == 6 then 'K' else 'L' end
+      check(g[y][x][1] == want, "slate-dialog-#{part} pixel #{x},#{y} (#{d} px out) is #{g[y][x][1].inspect}, want #{want.inspect}: " \
+                                'a fixed colour or a halo outside the border')
+    end
+  end
+end
+
+# The button caps (ADR 0211): they sit on the dialog's face, so the corners
+# outside the ring draw nothing and the dialog's face shows there; the face
+# inside the ring is the line pen (SGR 58 the button's face); no highlight;
+# the shade (MIX) only where the end's edge faces down or right.
+%w[button default-button].each do |kind|
+  thick = kind == 'default-button' ? 3 : 1
+  %w[left right].each do |side|
+    g = pixels(raster, 11, 22, SETS.fetch('slate-light') + NAMES.index("#{kind}-#{side}"))
+    roles = g.flat_map { |row| row.map { |_, r| r } }
+    check(roles.include?('L') && roles.include?('K') && roles.include?('M'), "#{kind}-#{side}: not ring, face and shade")
+    outer = side == 'left' ? (0...2) : (9...11)
+    check(22.times.all? { |y| outer.all? { |x| g[y][x][1].nil? } }, "#{kind}-#{side}: the 2 px inset is not clear")
+    corner = side == 'left' ? (2...7) : (4...9)
+    check([0, 21].all? { |y| corner.all? { |x| g[y][x][1].nil? } },
+          "#{kind}-#{side}: the corners outside the ring are not clear, so the dialog's face would not show")
+    # The face is one pen, solid from the ring to the seam where the label
+    # begins (no second, highlight, pen): every pixel of the middle row
+    # past the ring is drawn.
+    span = side == 'left' ? (2...11) : (0...9)
+    check(span.all? { |x| g[11][x][1] }, "#{kind}-#{side}: the face is not solid from the ring to the seam")
+    m = (0...22).flat_map { |y| (0...11).select { |x| g[y][x][1] == 'M' }.map { |x| [x, y] } }
+    if side == 'left'
+      check(m.all? { |_, y| y > 11 }, "#{kind}-left has a shade on its upper half: #{m.first(4).inspect}")
+    else
+      check(m.any? { |_, y| y < 11 } && m.all? { |x, y| x >= 4 || y > 11 }, "#{kind}-right's shade is not down and right")
     end
   end
 end
@@ -284,5 +375,7 @@ SIZES.each do |w, h|
   end
 end
 
-puts "WINDOW_GLYPH_PASS footprints=lines_only shadow=none glyphs=105 catalogue=named sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
-     'design=pixel-exact chalk=coverage slate=rgba pixels=crisp mockup_11x22=held seams=joined'
+puts "WINDOW_GLYPH_PASS glyphs=70 slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
+     "sizes=#{SIZES.map { |s| s.join('x') }.join(',')} design=pixel-exact chalk=coverage slate=pen_planes " \
+     "pewter=0.3.38_except_mix(#{mix_differs}_px,#{compared}_glyphs) dialog=no_halo,line+fg_only caps=corners_clear " \
+     'pixels=crisp mockup_11x22=held seams=joined'

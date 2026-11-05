@@ -69,29 +69,34 @@ NAMES = [
     ('default-button-left', 'default button, left end: rounded 3 px ring; SGR 51:3 draws the label\'s'),
     ('default-button-right', 'default button, right end'),
 ]
-STYLES = [('chalk', 0x100231), ('slate-light', 0x100254), ('slate-dark', 0x100277)]
+STYLES = [('chalk', 0x100231), ('slate-light', 0x100254)]
+# Slate dark took U+100277-100299 until ADR 0211; retired, never reused.
+RETIRED = (0x100277, 0x100299)
 NEXT_FREE = 0x10029A
 
 HEADER = ROOT / 'src/blit_window_glyphs.h'
-ROLES = 'KDLBWGFNORH'
+# Slate's roles (ADR 0211), resolved in the cell it is drawn in: K the
+# foreground, L the underline colour (white if unset; SGR 58 is also a
+# dialog's and a button's face), M half the foreground and half the
+# background, B the background (drawn as nothing; only the bar has it).
+# Chalk inks every role in the foreground.
+ROLES = 'KLMB'
 
 
 def table():
-    """The geometry table and the palettes, read from the C header."""
+    """The geometry table, read from the C header."""
     text = HEADER.read_text(encoding='utf-8')
-    t = {m[0]: int(m[1]) for m in re.findall(r'#define BLIT_WINDOW_([A-Z_]+) (\d+)\b', text)}
-    block = text[text.index('blit_window_palette[2][WR_ROLES][3] = {'):]
-    block = block[:block.index('};')]
-    triples = [tuple(int(v) for v in m) for m in re.findall(r'\{(\d+), (\d+), (\d+)\}', block)]
-    count = len(ROLES) + 1
-    assert len(triples) == 2 * count, 'palette table not found'
-    palettes = {}
-    for set_index, style in enumerate(('slate-light', 'slate-dark')):
-        palettes[style] = {role: triples[set_index * count + 1 + i] for i, role in enumerate(ROLES)}
-    return t, palettes
+    return {m[0]: int(m[1]) for m in re.findall(r'#define BLIT_WINDOW_([A-Z_]+) (\d+)\b', text)}
 
 
-T, PALETTES = table()
+def pens(fg, bg, line=None):
+    """A Slate cell's pens: fg, line (white if unset) and the mix, each
+    channel (fg + bg) // 2, as blit_window_pens."""
+    return {'K': fg, 'L': line if line is not None else (255, 255, 255),
+            'M': tuple((a + b) // 2 for a, b in zip(fg, bg)), 'B': bg}
+
+
+T = table()
 
 
 def inside_round(x, y, x0, x1, y0, y1, r):
@@ -155,7 +160,7 @@ def draw(style, index, w, h):
         if stripes:
             for k in range(n):
                 y = top + 2 * L * k
-                c.fill(x0, x1, y, y + L, 'D' if slate else ink)
+                c.fill(x0, x1, y, y + L, 'M' if slate else ink)
                 if slate:
                     c.fill(x0, x1, y + L, y + 2 * L, 'L')
         # The frame line and the rule under the bar; Slate's bevel is a
@@ -164,7 +169,7 @@ def draw(style, index, w, h):
         c.fill(0, w, h - L, h, ink)
         if slate:
             c.fill(0, w, L, 2 * L, 'L')
-            c.fill(0, w, h - 2 * L, h - L, 'D')
+            c.fill(0, w, h - 2 * L, h - L, 'M')
 
     def outline(x0, x1, y0, y1):
         c.fill(x0, x1, y0, y0 + L, ink); c.fill(x0, x1, y1 - L, y1, ink)
@@ -172,7 +177,7 @@ def draw(style, index, w, h):
 
     def box(kind):
         if slate:
-            c.fill(bx, bx + side, by, by + side, 'W')
+            c.fill(bx, bx + side, by, by + side, 'L')
         outline(bx, bx + side, by, by + side)
         if kind == 'zoom':
             inner = (T['ZOOM_NUM'] * side + T['ZOOM_DEN'] // 2) // T['ZOOM_DEN']
@@ -183,19 +188,16 @@ def draw(style, index, w, h):
 
     def dialog(distance):
         # The double border, outward from the content: a margin of the
-        # face, the wide line (Slate's grey with a highlight down its
-        # middle), a gap of the face, the outer line; nothing beyond it.
-        mid = d1 + (d2 - d1) // 2
+        # face (Slate: the line pen, SGR 58 the dialog's face), the wide
+        # line, a gap of the face, the outer line; nothing beyond it.
         for y in range(h):
             for x in range(w):
                 d = distance(x, y)
                 role = None
                 if d < d1 or d2 <= d < d3:
-                    role = 'G' if slate else None
-                elif d < d2:
-                    role = ('H' if d == mid else 'R') if slate else ink
+                    role = 'L' if slate else None
                 elif d < d4:
-                    role = 'O' if slate else ink
+                    role = ink
                 if role:
                     c.px[y][x] = role
 
@@ -216,17 +218,18 @@ def draw(style, index, w, h):
                 if not inside_round(mx, y, x0, x1, 0, h, r):
                     continue
                 if not inside_round(mx, y, x0 + t, x1 - t, t, h - t, r1):
-                    c.px[y][x] = 'O' if slate else ink
+                    c.px[y][x] = ink
                 elif slate:
-                    # The face, and a bevel round the end only (the label's
-                    # cells between the ends are flat): light where the edge
-                    # faces up and left, shade where it faces down and right.
-                    role = 'F'
+                    # The face (the line pen, SGR 58 the button's face), and
+                    # a shade round the end only where its edge faces down
+                    # or right; the label's cells between the ends are flat.
+                    role = 'L'
                     if not inside_round(mx, y, x0 + t + L, x1 - t - L, t + L, h - t - L, r2):
                         vx, vy = round_normal(mx, y, x0 + t, x1 - t, t, h - t, r1)
                         if vx:
                             vx = -vx if right else vx
-                            role = 'L' if vx + vy < 0 else 'N'
+                            if vx + vy >= 0:
+                                role = 'M'
                     c.px[y][x] = role
 
     gap = T['TITLE_GAP']
@@ -284,24 +287,25 @@ def glyphs():
             yield first + index, style, index
 
 
-def colour(style, role, foreground=(255, 255, 255)):
-    return foreground if style == 'chalk' else PALETTES[style][role]
+def colour(style, role, fg=(0, 0, 0), bg=(214, 214, 214), line=None):
+    """A role's colour in a cell with these colours (Chalk: the foreground)."""
+    return fg if style == 'chalk' else pens(fg, bg, line)[role]
 
 
 def reference(w, h):
-    """Every glyph as Blit's raster holds it: Chalk as coverage (one byte a
-    pixel, 255 or 0), Slate as premultiplied RGBA (opaque or 0)."""
+    """Every glyph as Blit's raster holds it. Chalk: coverage, one byte a
+    pixel, 255 or 0. Slate: its pen planes as one role map, a character a
+    pixel -- K, L or M, or '.' where nothing is drawn (the background
+    role included, which shows the cell's background)."""
     lines = []
     for cp, style, index in glyphs():
         rows = draw(style, index, w, h)
-        out = bytearray()
-        for row in rows:
-            for role in row:
-                if style == 'chalk':
-                    out.append(0 if role == '.' else 255)
-                else:
-                    out.extend((0, 0, 0, 0) if role == '.' else (*PALETTES[style][role], 255))
-        lines.append(f'{cp:X} {"rgba" if style != "chalk" else "coverage"} {out.hex()}')
+        if style == 'chalk':
+            out = bytes(0 if role == '.' else 255 for row in rows for role in row)
+            lines.append(f'{cp:X} coverage {out.hex()}')
+        else:
+            roles = ''.join('.' if role in '.B' else role for row in rows for role in row)
+            lines.append(f'{cp:X} roles {roles}')
     return '\n'.join(lines) + '\n'
 
 
@@ -309,18 +313,30 @@ def catalogue_entries():
     entries = []
     for cp, style, index in glyphs():
         name, shape = NAMES[index]
-        set_name = {'chalk': 'Chalk', 'slate-light': 'Slate light', 'slate-dark': 'Slate dark'}[style]
+        set_name = {'chalk': 'Chalk', 'slate-light': 'Slate'}[style]
+        # Neither set carries its own colours since ADR 0211: Chalk draws in
+        # the foreground, Slate in the cell's pens.
         entries.append({'id': f'{style}-{name}', 'codepoint': f'{cp:06X}',
-                        'colour': style != 'chalk', 'set': style,
-                        'shape': f'{set_name} set: {shape}'})
+                        'colour': False, 'pens': 'foreground' if style == 'chalk' else 'cell',
+                        'set': style, 'shape': f'{set_name} set: {shape}'})
     return entries
 
 
 def write_catalogue():
     text = CATALOGUE.read_text(encoding='utf-8')
     data = json.loads(text)
-    keep = [e for e in data['cell_geometry'] if not any(e['id'].startswith(s + '-') for s, _ in STYLES)]
+    sets = [s for s, _ in STYLES] + ['slate-dark']
+    keep = [e for e in data['cell_geometry'] if not any(e['id'].startswith(s + '-') for s in sets)]
     rows = keep + catalogue_entries()
+    # Slate dark's codepoints, retired by ADR 0211 and never reused.
+    retired = {'from': f'{RETIRED[0]:06X}', 'to': f'{RETIRED[1]:06X}',
+               'was': 'the Slate dark window-chrome glyph set',
+               'note': 'retired by ADR 0211: Slate takes its colours from the cell, so one set draws light and dark; never reused'}
+    if not any(r.get('from') == retired['from'] for r in data['retired']):
+        text = re.sub(r'("retired": \[\n(?:.*?\n)*?)(  \])',
+                      lambda m: m.group(1).rstrip('\n') + ',\n    ' +
+                      json.dumps(retired, ensure_ascii=False, separators=(', ', ':')) + '\n' + m.group(2),
+                      text, count=1)
     body = ',\n'.join('    ' + json.dumps(e, ensure_ascii=False, separators=(', ', ':'))
                       for e in rows)
     new = re.sub(r'"cell_geometry": \[\n.*?\n  \]', lambda _: '"cell_geometry": [\n' + body + '\n  ]',
@@ -334,15 +350,20 @@ def sheet(path, scale):
     w, h = 11, 22
     gap = 4
     cols = len(NAMES)
+    # Chalk in black on white; Slate in the Pewter scheme (bg 214, fg 0,
+    # SGR 58 white) and in a dark one (bg 60,60,67, fg 225, SGR 58 112).
+    shown = [('chalk', (0, 0, 0), (255, 255, 255), None),
+             ('slate-light', (0, 0, 0), (214, 214, 214), (255, 255, 255)),
+             ('slate-light', (225, 225, 225), (60, 60, 67), (112, 112, 112))]
     image = Image.new('RGB', (cols * (w * scale + gap) + gap, 3 * (h * scale + gap) + gap), (90, 110, 150))
     d = ImageDraw.Draw(image)
-    for row, (style, _) in enumerate(STYLES):
+    for row, (style, fg, bg, line) in enumerate(shown):
         for index in range(cols):
             rows = draw(style, index, w, h)
             ox, oy = gap + index * (w * scale + gap), gap + row * (h * scale + gap)
-            for y, line in enumerate(rows):
-                for x, role in enumerate(line):
-                    fill = (150, 170, 205) if role == '.' else colour(style, role, (0, 0, 0))
+            for y, line_roles in enumerate(rows):
+                for x, role in enumerate(line_roles):
+                    fill = (150, 170, 205) if role == '.' else colour(style, role, fg, bg, line)
                     d.rectangle([ox + x * scale, oy + y * scale, ox + x * scale + scale - 1,
                                  oy + y * scale + scale - 1], fill=fill)
     image.save(path)

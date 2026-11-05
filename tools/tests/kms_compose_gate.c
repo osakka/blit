@@ -17,7 +17,7 @@ static uint32_t pixels[W * H];
 static uint32_t codepoints[COLS * ROWS];
 static uint32_t foreground[COLS * ROWS];
 static uint32_t background[COLS * ROWS];
-static uint16_t attributes[COLS * ROWS];
+static uint32_t attributes[COLS * ROWS];
 static unsigned char image_pixels[4 * 8 * 3 * 2];
 static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
 static uint32_t front_pixels[W * H];

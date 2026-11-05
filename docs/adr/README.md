@@ -228,6 +228,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0208 — Burn-in keeps a per-pane history that fades in whole levels, on the frame clock only while it fades](0208-burn-in.md)
 - [0209 — The phosphor mask is a presentation effect on physical pixels](0209-phosphor-mask.md)
 - [0210 — Window chrome glyph sets (Chalk and Slate) are cell geometry, and SGR 51 frames button labels and titles](0210-window-chrome-glyphs-and-framed.md)
+- [0211 — Slate takes its colours from the cell, and the drop shadow is a Blit-drawn cell attribute](0211-slate-from-cell-colours-and-shadow.md)
 
 ## Status
 

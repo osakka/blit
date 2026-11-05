@@ -48,6 +48,10 @@ const char *blit_raster_arabic_family(const BlitRaster *raster);
 int blit_raster_baseline(const BlitRaster *raster);
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterGlyph *glyph);
+/* ADR 0211: a Slate window glyph's plane for one pen (1 FG, 2 LINE, 3 MIX,
+   as blit_window_glyphs.h numbers them), coverage, one cell. */
+int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
+                                 BlitRasterGlyph *glyph);
 /* Internal bounded colour/opt-in Arabic cluster path. Unsupported forms fail
    without replacing cache entries or the caller's output. Does not segment
    terminal input or choose a cluster's column allocation. */

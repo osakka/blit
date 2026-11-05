@@ -1,6 +1,6 @@
 # ADR 0210: Window chrome glyph sets (Chalk and Slate) are cell geometry, and SGR 51 frames button labels and titles
 
-- Status: accepted
+- Status: accepted; Slate's colours and the shadow revised by ADR 0211
 - Date: 2026-11-03
 - Scope: `src/blit_window_glyphs.h` (new), `blit_raster.c`, both
   compositors (`blit_kms.c`, `blit_kms_gles.c`), the SGR parser, DECRQSS,
@@ -196,7 +196,8 @@ title).
 - **Every font.** The glyphs come ahead of the icon font in the stack (ADR
   0195). A pixel font has none of them, so it takes them from the stack,
   as it does the bar corners. Checked under Blit Terminus 16: on its 8x16
-  cell, all 105 match the design on screen.
+  cell, all 105 matched the design on screen, and all 70 again after ADR
+  0211.
 
 ### SGR 51 and 54
 
@@ -411,3 +412,11 @@ set. Against the 0.3.37 drawing it fails at the first: "frame-right-top:
 no line against the content, or a shadow beside it". `window_style_gate`
 compares every glyph cell with the design on both compositors, so it
 covers the change on screen.
+
+## Revised by ADR 0211 (2026-11-05)
+
+Slate now takes its colours from the cell: fg, bg, the underline colour
+and their mix. Slate dark (U+100277–100299) is retired, and SGR 51:4 is
+an alias of 51:2. The drop shadow is SGR 66, a cell attribute Blit draws
+under any glyph. The palette, roles and dark-set notes above describe
+0.3.36–0.3.38.

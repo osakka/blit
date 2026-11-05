@@ -1068,8 +1068,8 @@ raise 'SGR 0 left g framed' if cells.fetch([6, 0]).key?('style')
 raise 'an unframed cell reports framed' if cells.fetch([0, 0]).key?('style')
 snapshot = run_case(base, 'framed-bar-sgr', "printf '\\033[51:2ma\\033[51:4mb\\033[51mc\\033[54md'")
 cells = cell_map(snapshot)
-assert_equal(%w[slate-light-bar slate-dark-bar thin], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
-             'SGR 51:2 and 51:4 are the Slate bars, and 51 replaces them')
+assert_equal(%w[bar bar thin], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
+             'SGR 51:2 is the Slate bar, 51:4 its old alias (ADR 0211), and 51 replaces them')
 raise 'SGR 54 left d framed' if cells.fetch([3, 0]).key?('style')
 snapshot = run_case(base, 'framed-rule-sgr', "printf '\\033[51:5ma\\033[51:7mb\\033[51:5mc\\033[54md'")
 cells = cell_map(snapshot)
@@ -1098,6 +1098,58 @@ historical = cell_map(request(base, 'GET', "/v1/surfaces/surface-#{framed_id}/ce
 assert_equal('thick', historical.fetch([0, 0]).fetch('style').fetch('framed'), 'framed kept in scrollback')
 request(base, 'DELETE', "/v1/terminal-sessions/#{framed_id}")
 puts 'PASS framed-scrollback'
+
+# ADR 0211: SGR 66:kind:width, Blit's drop shadow, ended by 67, by 66:0 and
+# by 0; an unknown kind or width leaves the pen alone; the width defaults
+# to 2.
+snapshot = run_case(base, 'shadow-sgr',
+                    "printf '\\033[66:1:1ma\\033[66:2:2mb\\033[66:3:1mc\\033[66:4:2md\\033[66:5me" \
+                    "\\033[67mf\\033[66:5:2m\\033[66:9:1mg\\033[66:0mh\\033[66:3:2m\\033[0mi'",
+                    width: 20)
+cells = cell_map(snapshot)
+assert_equal(%w[right:1 right-start:2 under:1 under-start:2 corner:2],
+             (0..4).map { |x| cells.fetch([x, 0]).fetch('style').fetch('shadow') },
+             'SGR 66 kinds and widths')
+assert_equal('corner:2', cells.fetch([6, 0]).fetch('style').fetch('shadow'), 'an unknown kind leaves the shadow alone')
+%w[5 7 8].each do |x|
+  raise "SGR 67/66:0/0 left a shadow at #{x}" if cells.fetch([x.to_i, 0]).key?('style')
+end
+snapshot = run_case(base, 'shadow-sgr-flush', "printf '\\033[66:4:1:0ma\\033[66:5:2:1mb\\033[66:1:2:7mc'")
+cells = cell_map(snapshot)
+assert_equal(%w[under-start:1:0 corner:2 corner:2], (0..2).map { |x| cells.fetch([x, 0]).fetch('style').fetch('shadow') },
+             'SGR 66 inset 0 is flush, 1 the default, and an unknown inset leaves the pen alone')
+
+# The shadow bits are above bit 15 of the cell's attributes (ADR 0211
+# widened them to 32): they survive scrollback, the alternate screen and
+# the cells API.
+created = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', "printf '\\033[66:5:2;51:3mA\\033[0m\\033[?1049hX\\033[?1049l\\nb\\nc'; sleep 1"],
+  'surface' => { 'width' => 4, 'height' => 2 }
+})
+shadow_id = created.fetch('id')
+Timeout.timeout(5) do
+  loop do
+    break if request(base, 'GET', "/v1/terminal-sessions/#{shadow_id}").fetch('state') != 'starting' &&
+             request(base, 'GET', "/v1/surfaces/surface-#{shadow_id}/scrollback").fetch('count') == 1
+
+    sleep 0.02
+  end
+end
+request(base, 'PATCH', "/v1/surfaces/surface-#{shadow_id}/scrollback", { 'view' => 1 })
+historical = cell_map(request(base, 'GET', "/v1/surfaces/surface-#{shadow_id}/cells"))
+style = historical.fetch([0, 0]).fetch('style')
+assert_equal(%w[corner:2 thick], [style.fetch('shadow'), style.fetch('framed')],
+             'shadow and framing kept through the alternate screen and into scrollback')
+request(base, 'PATCH', "/v1/surfaces/surface-#{shadow_id}/scrollback", { 'view' => 0 })
+revision = request(base, 'GET', "/v1/surfaces/surface-#{shadow_id}/cells").fetch('revision')
+request(base, 'PUT', "/v1/surfaces/surface-#{shadow_id}/cells",
+        { 'base_revision' => revision,
+          'cells' => [{ 'x' => 1, 'y' => 0, 'text' => 'Z', 'style' => { 'shadow' => 'under-start:1' } }] })
+live = cell_map(request(base, 'GET', "/v1/surfaces/surface-#{shadow_id}/cells"))
+assert_equal('under-start:1', live.fetch([1, 0]).fetch('style').fetch('shadow'), 'the cells API writes and reads a shadow')
+request(base, 'DELETE', "/v1/terminal-sessions/#{shadow_id}")
+puts 'PASS shadow-scrollback-alternate-api'
 
 snapshot = run_case(base, 'synchronized-output',
                     "printf '\\033[?2026hA\\033[?2026lB'")
@@ -2511,9 +2563,12 @@ assert_equal(hex("\eP1$r0;51:3m\e\\"),
 assert_equal(hex("\eP1$r0;51m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-framed-thin', '\\033[51m\\033P$qm\\033\\\\\\033[0m', 12)),
              'DECRQSS SGR reports 51')
-assert_equal(hex("\eP1$r0;51:4m\e\\"),
+assert_equal(hex("\eP1$r0;51:2m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-framed-bar', '\\033[51:4m\\033P$qm\\033\\\\\\033[0m', 14)),
-             'DECRQSS SGR reports 51:4')
+             'DECRQSS SGR reports 51:4 as the one bar, 51:2')
+assert_equal(hex("\eP1$r0;66:2:1m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-shadow', '\\033[66:2:1m\\033P$qm\\033\\\\\\033[0m', 16)),
+             'DECRQSS SGR reports the shadow')
 assert_equal(hex("\eP1$r0;51:5m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-framed-rule', '\\033[51:5m\\033P$qm\\033\\\\\\033[0m', 14)),
              'DECRQSS SGR reports 51:5')

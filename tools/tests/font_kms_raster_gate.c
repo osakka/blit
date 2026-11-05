@@ -10,7 +10,7 @@ static int attachment_layout_gate(BlitFont *font, KmsOutput *output,
     /* Match the actual server's sixteen-slot cell layout. Visible ASCII
        sentinels deliberately test indexing, not Unicode combining policy. */
     uint32_t cp[12] = {0}, fg[12] = {0}, bg[12] = {0};
-    uint16_t attr[12] = {0};
+    uint32_t attr[12] = {0};
     uint32_t marks[12 * 16], expected[160 * 96];
     unsigned char counts[12] = {0};
     int cases[] = {0, 1, 5, 16};
@@ -53,7 +53,7 @@ static int cluster_view_gate(BlitFont *font, KmsOutput *output, uint32_t *pixels
             uint32_t cp[2] = {emoji_samples[sample][0], 0};
             uint32_t marks[2 * BLIT_MAX_COMBINING] = {0}, colours[2] = {0};
             unsigned char counts[2] = {emoji_lengths[sample] - 1, 0};
-            uint16_t attrs[2] = {1 | (span == 2 ? KMS_ATTR_WIDE : 0), KMS_ATTR_CONTINUATION};
+            uint32_t attrs[2] = {1 | (span == 2 ? KMS_ATTR_WIDE : 0), KMS_ATTR_CONTINUATION};
             BlitKmsSurfaceView view;
             BlitCellCluster key;
             BlitRasterGlyph glyph;

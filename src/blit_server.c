@@ -190,18 +190,34 @@ extern char **environ;
 /* ADR 0210: SGR 51, framed. FRAMED marks a framed cell; the three bits
    above it are its kind, one field (BLIT_FRAMED_KIND), in SGR terms:
    0 thin (51: a line along the top and bottom), 1 thick (51:3, the default
-   button's ring, BLIT_WINDOW_THICK_RING wide), 2 and 3 a Slate light and
-   dark title bar's rows (51:2, 51:4), 4 a rule along the bottom only
-   (51:5, under a note's strip). SGR 54 ends any of them. */
+   button's ring, BLIT_WINDOW_THICK_RING wide), 2 a Slate title bar's rows
+   (51:2, in the cell's own colours since ADR 0211; 51:4, once Slate dark's,
+   is parsed as 51:2), 4 a rule along the bottom only (51:5, under a note's
+   strip). 3 is no longer stored. SGR 54 ends any of them. */
 #define BLIT_ATTR_FRAMED 2048
 #define BLIT_ATTR_FRAMED_SHIFT 12
 #define BLIT_ATTR_FRAMED_ALL (BLIT_ATTR_FRAMED | (7U << BLIT_ATTR_FRAMED_SHIFT))
 #define BLIT_FRAMED_KIND(attributes) (((attributes) >> BLIT_ATTR_FRAMED_SHIFT) & 7U)
 /* The field value for each SGR 51 sub-parameter, and back. */
-static const unsigned char blit_framed_kind_for_sgr[6] = { 0, 0, 2, 1, 3, 4 };
-static const char blit_framed_sgr_for_kind[5] = { 0, 3, 2, 4, 5 };
+static const unsigned char blit_framed_kind_for_sgr[6] = { 0, 0, 2, 1, 2, 4 };
 static const char *const blit_framed_names[5] = {
-    "thin", "thick", "slate-light-bar", "slate-dark-bar", "rule"
+    "thin", "thick", "bar", "bar", "rule"
+};
+/* ADR 0211: a Blit-drawn drop shadow, SGR 66:kind:width:inset, ended by
+   SGR 67. The kind is three bits (BLIT_SHADOW_KIND): 1 right, 2 right from
+   2 px down (the first row), 3 under, 4 under from the shadow's offset (the
+   first cell), 5 the corner; THICK makes it BLIT_WINDOW_SHADOW wide
+   instead of BLIT_WINDOW_LINE; FLUSH (inset 0) puts its strips at the
+   cell's edge instead of just outside a frame glyph's line. Its geometry is
+   blit_window_shadow_rects. */
+#define BLIT_ATTR_SHADOW_SHIFT 16
+#define BLIT_ATTR_SHADOW_THICK (1U << 19)
+#define BLIT_ATTR_SHADOW_FLUSH (1U << 20)
+#define BLIT_ATTR_SHADOW_ALL ((7U << BLIT_ATTR_SHADOW_SHIFT) | BLIT_ATTR_SHADOW_THICK | \
+                              BLIT_ATTR_SHADOW_FLUSH)
+#define BLIT_SHADOW_KIND(attributes) (((attributes) >> BLIT_ATTR_SHADOW_SHIFT) & 7U)
+static const char *const blit_shadow_names[6] = {
+    "none", "right", "right-start", "under", "under-start", "corner"
 };
 
 typedef struct {
@@ -210,18 +226,47 @@ typedef struct {
 
 /* ADR 0210: a cell's SGR 51 framing, as the cells API names it and as
    DECRQSS reports it. */
-static const char *framed_name(uint16_t attributes)
+static const char *framed_name(uint32_t attributes)
 {
     unsigned kind = BLIT_FRAMED_KIND(attributes);
     if (!(attributes & BLIT_ATTR_FRAMED) || kind > 4) return "none";
     return blit_framed_names[kind];
 }
 
-static const char *framed_sgr(uint16_t attributes)
+static const char *framed_sgr(uint32_t attributes)
 {
-    static const char *const sgr[5] = { ";51", ";51:3", ";51:2", ";51:4", ";51:5" };
+    static const char *const sgr[5] = { ";51", ";51:3", ";51:2", ";51:2", ";51:5" };
     unsigned kind = BLIT_FRAMED_KIND(attributes);
     return kind <= 4 ? sgr[kind] : ";51";
+}
+
+/* ADR 0211: a cell's shadow as the cells API names it: "none", or its
+   kind and width, "right:2", and ":0" after them when it is flush. */
+static void shadow_name(uint32_t attributes, char *out, size_t size)
+{
+    unsigned kind = BLIT_SHADOW_KIND(attributes);
+    if (kind == 0 || kind > 5) snprintf(out, size, "none");
+    else snprintf(out, size, "%s:%d%s", blit_shadow_names[kind],
+                  (attributes & BLIT_ATTR_SHADOW_THICK) ? 2 : 1,
+                  (attributes & BLIT_ATTR_SHADOW_FLUSH) ? ":0" : "");
+}
+
+static int shadow_parse(const char *text, uint32_t *attributes)
+{
+    unsigned kind;
+    for (kind = 1; kind <= 5; ++kind) {
+        size_t n = strlen(blit_shadow_names[kind]);
+        if (strncmp(text, blit_shadow_names[kind], n) == 0 && text[n] == ':' &&
+            (text[n + 1] == '1' || text[n + 1] == '2') &&
+            (text[n + 2] == '\0' || strcmp(text + n + 2, ":0") == 0 ||
+             strcmp(text + n + 2, ":1") == 0)) {
+            *attributes |= (uint32_t)(kind << BLIT_ATTR_SHADOW_SHIFT) |
+                (text[n + 1] == '2' ? BLIT_ATTR_SHADOW_THICK : 0) |
+                (strcmp(text + n + 2, ":0") == 0 ? BLIT_ATTR_SHADOW_FLUSH : 0);
+            return 1;
+        }
+    }
+    return strcmp(text, "none") == 0;
 }
 
 typedef struct {
@@ -285,7 +330,7 @@ typedef struct {
     int y;
     uint32_t foreground;
     uint32_t background;
-    uint16_t attributes;
+    uint32_t attributes;
     int foreground_set;
     int background_set;
     uint32_t underline_color;
@@ -305,7 +350,7 @@ typedef struct {
     uint32_t *foreground;
     uint32_t *background;
     uint32_t *underline_color;
-    uint16_t *attributes;
+    uint32_t *attributes;
     uint16_t *links;
 } BlitScrollbackLine;
 
@@ -324,7 +369,7 @@ typedef struct {
     uint32_t foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    uint16_t attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint16_t links[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     char alternate_cells[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_codepoints[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
@@ -333,7 +378,7 @@ typedef struct {
     uint32_t alternate_foreground[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_background[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint32_t alternate_underline_color[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
-    uint16_t alternate_attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
+    uint32_t alternate_attributes[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     uint16_t alternate_links[BLIT_MAX_CELL_ROWS][BLIT_MAX_CELL_COLS];
     int cursor_x;
     int cursor_y;
@@ -1044,7 +1089,7 @@ typedef struct {
        worth reading twice (issue #11). */
     int terminal_sixel_display_mode;
     int terminal_sixel_cursor_right;
-    uint16_t terminal_attributes;
+    uint32_t terminal_attributes;
     int terminal_foreground_set;
     int terminal_background_set;
     int terminal_alternate;
@@ -7339,7 +7384,7 @@ static int surface_snapshot_json(const BlitSurface *surface,
             char escaped[256];
             uint32_t codepoint = surface->codepoints[y][x];
             unsigned combining_count = surface->combining_count[y][x];
-            uint16_t attributes = surface->attributes[y][x];
+            uint32_t attributes = surface->attributes[y][x];
             uint16_t link = surface->links[y][x];
             int cell_width = (attributes & BLIT_ATTR_CONTINUATION) ? 0 :
                 ((attributes & BLIT_ATTR_WIDE) ? 2 : 1);
@@ -7358,18 +7403,20 @@ static int surface_snapshot_json(const BlitSurface *surface,
                 return 0;
             first = 0;
             if (styled) {
+                char shadow[24];
                 uint32_t foreground = surface->foreground[y][x] ?
                     surface->foreground[y][x] - 1 :
                     session_default_foreground(session);
                 uint32_t background = surface->background[y][x] ?
                     surface->background[y][x] - 1 :
                     session_default_background(session);
+                shadow_name(attributes, shadow, sizeof(shadow));
                 if (!json_appendf(body, capacity, &used,
                     ",\"style\":{\"foreground\":\"#%06x\","
                     "\"background\":\"#%06x\",\"bold\":%s,"
                     "\"dim\":%s,\"italic\":%s,\"underline\":%s,"
                     "\"blink\":%s,\"inverse\":%s,\"strike\":%s,"
-                    "\"concealed\":%s,\"framed\":\"%s\","
+                    "\"concealed\":%s,\"framed\":\"%s\",\"shadow\":\"%s\","
                     "\"underline_color\":\"#%06x\"}",
                     (unsigned int)foreground, (unsigned int)background,
                     attributes & BLIT_ATTR_BOLD ? "true" : "false",
@@ -7380,7 +7427,7 @@ static int surface_snapshot_json(const BlitSurface *surface,
                     attributes & BLIT_ATTR_INVERSE ? "true" : "false",
                     attributes & BLIT_ATTR_STRIKE ? "true" : "false",
                     attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
-                    framed_name(attributes),
+                    framed_name(attributes), shadow,
                     (unsigned int)(surface->underline_color[y][x] ?
                         surface->underline_color[y][x] - 1 : 0)))
                     return 0;
@@ -7650,7 +7697,7 @@ static const char *cell_misplaced_style_key(const char *cell_json)
     static const char *const style_keys[] = {
         "foreground", "background", "underline_color", "bold", "dim",
         "italic", "underline", "blink", "inverse", "strike", "concealed",
-        "framed"
+        "framed", "shadow"
     };
     size_t i;
 
@@ -8500,7 +8547,7 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
         uint32_t foreground = 0;
         uint32_t background = 0;
         uint32_t underline_color = 0;
-        uint16_t attributes = 0;
+        uint32_t attributes = 0;
         int foreground_set = 0;
         int background_set = 0;
         int underline_color_set = 0;
@@ -8572,11 +8619,19 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
                 unsigned kind;
                 for (kind = 0; kind < 5 && strcmp(color_text, blit_framed_names[kind]) != 0; ++kind)
                     ;
+                /* Before ADR 0211 the bar was two kinds; both names still
+                   mean the one bar. */
+                if (strcmp(color_text, "slate-light-bar") == 0 ||
+                    strcmp(color_text, "slate-dark-bar") == 0)
+                    kind = 2;
                 if (kind < 5)
-                    attributes |= (uint16_t)(BLIT_ATTR_FRAMED | (kind << BLIT_ATTR_FRAMED_SHIFT));
+                    attributes |= (uint32_t)(BLIT_ATTR_FRAMED | (kind << BLIT_ATTR_FRAMED_SHIFT));
                 else if (strcmp(color_text, "none") != 0)
                     style_valid = 0;
             }
+            if (json_string(cell_json, "shadow", color_text, sizeof(color_text)) &&
+                !shadow_parse(color_text, &attributes))
+                style_valid = 0;
             if (json_string(cell_json, "underline_color", color_text,
                             sizeof(color_text))) {
                 underline_color_set = parse_color(color_text, &underline_color);
@@ -8886,7 +8941,7 @@ static int terminal_cell_matches(const BlitSession *session,
                                  const BlitSurface *surface, int x, int y,
                                  uint32_t codepoint, int cell_width)
 {
-    uint16_t attributes;
+    uint32_t attributes;
     uint32_t foreground;
     uint32_t background;
     uint32_t underline_color;
@@ -8932,7 +8987,7 @@ static int terminal_cell_matches(const BlitSession *session,
 
 static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y)
 {
-    uint16_t attributes;
+    uint32_t attributes;
 
     if (surface == NULL || x < 0 || y < 0 ||
         x >= surface->width || y >= surface->height)
@@ -8962,7 +9017,7 @@ static void terminal_normalize_wide_row(BlitSurface *surface, int y)
     if (surface == NULL || y < 0 || y >= surface->height)
         return;
     for (x = 0; x < surface->width; ++x) {
-        uint16_t attributes = surface->attributes[y][x];
+        uint32_t attributes = surface->attributes[y][x];
         if ((attributes & BLIT_ATTR_CONTINUATION) &&
             (x == 0 || !(surface->attributes[y][x - 1] & BLIT_ATTR_WIDE)))
             terminal_clear_cell(surface, x, y);
@@ -9081,7 +9136,7 @@ static int scrollback_line_prepare(BlitScrollbackLine *line, int width)
                                               sizeof(*line->background));
         line->underline_color = (uint32_t *)calloc(
             (size_t)width, sizeof(*line->underline_color));
-        line->attributes = (uint16_t *)calloc((size_t)width,
+        line->attributes = (uint32_t *)calloc((size_t)width,
                                               sizeof(*line->attributes));
         line->links = (uint16_t *)calloc((size_t)width,
                                           sizeof(*line->links));
@@ -12381,6 +12436,11 @@ static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
             if (session->terminal_attributes & BLIT_ATTR_FRAMED)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used, "%s",
                                  framed_sgr(session->terminal_attributes));
+            if (BLIT_SHADOW_KIND(session->terminal_attributes))
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";66:%u:%d%s",
+                                 BLIT_SHADOW_KIND(session->terminal_attributes),
+                                 (session->terminal_attributes & BLIT_ATTR_SHADOW_THICK) ? 2 : 1,
+                                 (session->terminal_attributes & BLIT_ATTR_SHADOW_FLUSH) ? ":0" : "");
             if (session->terminal_foreground_set)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used,
                                  ";38:2::%u:%u:%u",
@@ -12583,7 +12643,7 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
                dotted and 4:5 dashed are all drawn as the one underline Blit
                has. */
             if (param->subs > 0 && param->sub[0] == 0)
-                session->terminal_attributes &= (uint16_t)~BLIT_ATTR_UNDERLINE;
+                session->terminal_attributes &= (uint32_t)~BLIT_ATTR_UNDERLINE;
             else
                 session->terminal_attributes |= BLIT_ATTR_UNDERLINE;
         } else if (value == 5 || value == 6) {
@@ -12592,23 +12652,23 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             session->terminal_attributes |= BLIT_ATTR_INVERSE;
         } else if (value == 22) {
             session->terminal_attributes &=
-                (uint16_t)~(BLIT_ATTR_BOLD | BLIT_ATTR_DIM);
+                (uint32_t)~(BLIT_ATTR_BOLD | BLIT_ATTR_DIM);
         } else if (value == 23) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_ITALIC;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_ITALIC;
         } else if (value == 24) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_UNDERLINE;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_UNDERLINE;
         } else if (value == 25) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_BLINK;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_BLINK;
         } else if (value == 27) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_INVERSE;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_INVERSE;
         } else if (value == 8) {
             session->terminal_attributes |= BLIT_ATTR_CONCEAL;
         } else if (value == 28) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_CONCEAL;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_CONCEAL;
         } else if (value == 9) {
             session->terminal_attributes |= BLIT_ATTR_STRIKE;
         } else if (value == 29) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_STRIKE;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_STRIKE;
         } else if (value == 51) {
             /* ADR 0210: framed. Blit's sub-parameters: 51:3 the default
                button's thick frame, 51:2 and 51:4 a Slate light and dark
@@ -12617,11 +12677,31 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
                bottom only. An unknown sub-parameter is plain 51. */
             int sub = param->subs > 0 ? param->sub[0] : 1;
             unsigned kind = sub >= 0 && sub <= 5 ? blit_framed_kind_for_sgr[sub] : 0;
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_FRAMED_ALL;
-            session->terminal_attributes |= (uint16_t)(BLIT_ATTR_FRAMED |
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_FRAMED_ALL;
+            session->terminal_attributes |= (uint32_t)(BLIT_ATTR_FRAMED |
                 (kind << BLIT_ATTR_FRAMED_SHIFT));
         } else if (value == 54) {
-            session->terminal_attributes &= (uint16_t)~BLIT_ATTR_FRAMED_ALL;
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_FRAMED_ALL;
+        } else if (value == 66) {
+            /* ADR 0211: Blit's drop shadow, 66:kind:width:inset (width 1 or
+               2 px, 2 if left out; inset 1, just outside a frame glyph's
+               line, or 0, at the cell's edge; 1 if left out). Only the
+               colon form: 66;1;2 would be three SGRs. 66 with no kind, or
+               kind 0, ends it, as 67 does; an unknown kind, width or inset
+               leaves the pen alone. */
+            int kind = param->subs > 0 ? param->sub[0] : 0;
+            int width = param->subs > 1 && param->sub[1] >= 0 ? param->sub[1] : 2;
+            int inset = param->subs > 2 && param->sub[2] >= 0 ? param->sub[2] : 1;
+            if (kind <= 0)
+                session->terminal_attributes &= (uint32_t)~BLIT_ATTR_SHADOW_ALL;
+            else if (kind <= 5 && (width == 1 || width == 2) && (inset == 0 || inset == 1)) {
+                session->terminal_attributes &= (uint32_t)~BLIT_ATTR_SHADOW_ALL;
+                session->terminal_attributes |= (uint32_t)((unsigned)kind << BLIT_ATTR_SHADOW_SHIFT) |
+                    (width == 2 ? BLIT_ATTR_SHADOW_THICK : 0) |
+                    (inset == 0 ? BLIT_ATTR_SHADOW_FLUSH : 0);
+            }
+        } else if (value == 67) {
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_SHADOW_ALL;
         } else if (value == 39) {
             session->terminal_foreground_set = 0;
         } else if (value == 49) {
@@ -12842,7 +12922,8 @@ static void terminal_copy_rectangle(const BlitSession *session,
     struct {
         uint32_t codepoint, foreground, background, underline_color;
         uint32_t combining[BLIT_MAX_COMBINING];
-        uint16_t attributes, link;
+        uint32_t attributes;
+        uint16_t link;
         char cell;
         unsigned char combining_count;
     } row[BLIT_MAX_CELL_COLS];
@@ -12953,8 +13034,8 @@ static void terminal_attribute_rectangle(BlitSession *session,
                                          int reverse)
 {
     BlitRectangle rectangle;
-    uint16_t set = 0;
-    uint16_t clear = 0;
+    uint32_t set = 0;
+    uint32_t clear = 0;
     int index;
     int x;
     int y;
@@ -12967,7 +13048,7 @@ static void terminal_attribute_rectangle(BlitSession *session,
         switch (params[index]) {
         case 0:
             /* For DECCARA, clear all four. For DECRARA, toggle all four. */
-            set |= (uint16_t)(BLIT_ATTR_BOLD | BLIT_ATTR_UNDERLINE |
+            set |= (uint32_t)(BLIT_ATTR_BOLD | BLIT_ATTR_UNDERLINE |
                               BLIT_ATTR_BLINK | BLIT_ATTR_INVERSE);
             if (!reverse) {
                 clear |= set;
@@ -12997,11 +13078,11 @@ static void terminal_attribute_rectangle(BlitSession *session,
             to = y == rectangle.bottom ? rectangle.right : surface->width - 1;
         }
         for (x = from; x <= to; ++x) {
-            uint16_t attributes = surface->attributes[y][x];
+            uint32_t attributes = surface->attributes[y][x];
             if (reverse)
                 attributes ^= set;
             else
-                attributes = (uint16_t)((attributes & ~clear) | set);
+                attributes = (uint32_t)((attributes & ~clear) | set);
             surface->attributes[y][x] = attributes;
         }
     }
@@ -13547,7 +13628,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             session->terminal_attributes |= BLIT_ATTR_PROTECTED;
         else
             session->terminal_attributes &=
-                (uint16_t)~BLIT_ATTR_PROTECTED;
+                (uint32_t)~BLIT_ATTR_PROTECTED;
     } else if (!private_mode && intermediate == 0 && command == 'r') {
         int top = has_first && first > 0 ? first - 1 : 0;
         int bottom = has_second && second > 0 ? second - 1 :

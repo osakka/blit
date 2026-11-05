@@ -1,5 +1,32 @@
 # Verification status
 
+## 2026-11-05: 0.3.39 Slate from the cell's colours; the shadow attribute
+
+- **Slate takes its colours from the cell** (ADR 0211, owner's decision).
+  Role art resolved per cell on both compositors: BG the cell background,
+  FG its foreground, LINE the underline colour (SGR 58, white if unset),
+  MIX the average of FG and BG. One function resolves the pens. Hibr's
+  Pewter scheme reproduces the approved look (only the MIX pixels differ
+  from 0.3.38's Slate light: 582 pixels of the glyph set, held by a
+  fixture of 0.3.38's own drawing). A dark scheme makes Slate dark; the
+  Slate dark glyph set U+100277-U+100299 is retired, never reused. The
+  dialog's frame cells keep the wallpaper and its margin and gap and the
+  buttons' faces are painted with LINE, so no halo or square corners.
+  SGR 51:2 draws the bar rows from the same pens, and 51:4 is an alias.
+- **The shadow is a cell attribute Blit draws**: `ESC[66:kind:width:inset m`,
+  ended by `ESC[67m`. Kinds 1 right, 2 right-start, 3 under, 4 under-start,
+  5 corner; width 1 or 2 px; inset 1 (on a Blit frame glyph) or 0 (beyond
+  a box-drawing frame). It uses the underline colour or the foreground and
+  is drawn before the glyph, so Frame and Shadow combine freely. Cell
+  attributes are now 32 bits through the cell, scrollback, alternate
+  screen, DECCRA/DECCARA and the compositors (about 320 KiB more per
+  surface). DECRQSS and the cells API (`style.shadow`) report it. Gated on
+  both compositors: all 20 kind, width and inset combinations pixel for
+  pixel, the colour, a glyph over a shadow, SGR 67 and SGR 0.
+  `window_style_gate` fails on 0.3.38 ("does not hold SGR 66").
+- **Suites:** font 40/40, all 172 pass (6 skip), renderer on GLES 77
+  pass (1 skip); no failures.
+
 ## 2026-11-04: 0.3.38 no shadow in the frame glyphs
 
 - **The frame, note-frame and dialog glyphs draw no shadow** (ADR 0210

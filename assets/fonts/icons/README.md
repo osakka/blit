@@ -53,9 +53,11 @@ is a wide character, so no width table changes.
 U+100007 and U+100008 are the bar corners, drawn as cell geometry (see
 `cell_geometry` in the catalogue).
 
-U+100231–U+100299 are the window-chrome glyph sets, also cell geometry (ADR
-0210). There are three sets of 35 in one order: Chalk (one colour, the
-cell's foreground), Slate light and Slate dark (their own colours). They
+U+100231–U+100276 are the window-chrome glyph sets, also cell geometry (ADR
+0210). There are two sets of 35 in one order: Chalk (one colour, the
+cell's foreground) and Slate (the cell's foreground, underline colour and
+a mix of foreground and background, ADR 0211). U+100277–U+100299, once
+Slate dark, are retired and never reused. They
 draw title bars, boxes, window and notification frames, dialog borders
 and button ends. Blit draws them from the geometry table in
 `src/blit_window_glyphs.h`; `tools/fonts/draw-window-glyphs.py` is the
