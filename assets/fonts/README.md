@@ -254,8 +254,12 @@ one glyph; it does not promise all Arabic forms exist. The face retains the
 source notices. FreeMono is GPLv3-or-later with its font
 embedding exception retained in the font and `FreeMono-README.txt`;
 `FreeMono-LICENSE.txt` is the GPL and `FreeMono-AUTHORS.txt` credits contributors.
-The complete upstream preferred-source/build archive is included at
-`sources/freefont-src-20120503.tar.gz`, pinned by the manifest; its
+The complete upstream preferred-source/build archive is kept in the
+repository at `sources/freefont-src-20120503.tar.gz`, pinned by the manifest.
+It is not in the runtime package: the separate `blit-font-sources` package
+installs it at `/usr/share/doc/blit-font-sources/`, and
+`/usr/lib/blit/fonts/FreeMono-SOURCE.txt` in the `blit` package points to it
+(ADR 0217); its
 `sfd/FreeMono.sfd`, FontForge generation scripts and build instructions are
 the source of the upstream outlines. Blit's offline derivative generator is
 the source of the naming/cmap modifications, not a new font-outline design.

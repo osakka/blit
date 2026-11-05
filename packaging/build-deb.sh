@@ -149,6 +149,39 @@ cp -a "$ROOT/packaging/blit-unprivileged.conf" \
 if [ -d "$ROOT/assets/fonts" ]; then
 	cp -a "$ROOT/assets/fonts/." "$stage/usr/lib/blit/fonts/"
 fi
+# ADR 0217: the 6 MB FreeMono source archive is not part of the runtime
+# package. It ships as the small blit-font-sources package, and the binary
+# carries a note saying where the complete corresponding source is.
+font_source_rel=sources/freefont-src-20120503.tar.gz
+font_source=$ROOT/assets/fonts/$font_source_rel
+font_source_url=https://ftp.gnu.org/gnu/freefont/freefont-src-20120503.tar.gz
+font_source_version=20120503-1
+font_source_sha256=$(sed -n 's/.*"source_sha256": "\([0-9a-f]*\)".*/\1/p' \
+	"$ROOT/assets/fonts/arabic-fonts.source.json")
+if [ ! -f "$font_source" ] ||
+   [ "$(sha256sum "$font_source" | awk '{print $1}')" != "$font_source_sha256" ]; then
+	echo "blit: FreeMono source archive missing or differs from arabic-fonts.source.json" >&2
+	exit 1
+fi
+rm -rf "$stage/usr/lib/blit/fonts/sources"
+cat > "$stage/usr/lib/blit/fonts/FreeMono-SOURCE.txt" <<EOF
+BlitArabicModern.ttf is derived from GNU FreeMono 20120503, which is
+GPLv3-or-later with the GNU font exception (see FreeMono-LICENSE.txt and
+FreeMono-README.txt).
+
+The complete corresponding source (the upstream preferred-form archive,
+including sfd/FreeMono.sfd and the FontForge build scripts) is:
+
+  package:  blit-font-sources $font_source_version
+            /usr/share/doc/blit-font-sources/freefont-src-20120503.tar.gz
+  upstream: $font_source_url
+  sha256:   $font_source_sha256
+
+Blit's own derivation script is tools/fonts/build-arabic-profile.py in the
+Blit source tree; assets/fonts/arabic-fonts.source.json records the pinned
+hashes of the source and of the generated font.
+EOF
+chmod 0644 "$stage/usr/lib/blit/fonts/FreeMono-SOURCE.txt"
 # The repository documentation and OpenAPI schema are authoritative.  The
 # bundle is an installable runtime artifact, not a second documentation tree.
 if [ -d "$ROOT/openapi" ]; then
@@ -181,7 +214,8 @@ elif [ -d "$ROOT/docs" ]; then
 else
 	cp -a "$BUNDLE/docs" "$stage/usr/share/doc/blit/"
 fi
-cp -a "$stage/usr/share/doc/blit/docs" "$stage/usr/lib/blit/docs"
+# ADR 0217: one copy. It used to be copied a second time to
+# /usr/lib/blit/docs, which nothing read.
 
 mkdir -p "$stage/DEBIAN"
 cat > "$stage/DEBIAN/postinst" <<'EOF'
@@ -292,7 +326,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
 Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0)
-Suggests: hibr
+Suggests: hibr, blit-font-sources
 Description: API-driven native KMS text display server
  Blit provides a text-first display server with one terminal surface per
  physical display or pane, HTTP control, streaming, and Hibr integration.
@@ -325,3 +359,52 @@ if dpkg-deb --contents "$output" | grep -E -f "$ROOT/tools/release/runtime-entry
 	exit 1
 fi
 echo "$output"
+
+# ADR 0217: the font-source package, built beside the main one. Its version is
+# the upstream FreeFont version, not Blit's, so it only needs publishing when
+# its content changes.
+sstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-fontsrc-deb.XXXXXX")
+trap 'rm -rf "$stage" "$sstage"' EXIT HUP INT TERM
+sdoc=$sstage/usr/share/doc/blit-font-sources
+mkdir -p "$sdoc" "$sstage/DEBIAN"
+cp -a "$font_source" "$sdoc/freefont-src-20120503.tar.gz"
+chmod 0644 "$sdoc/freefont-src-20120503.tar.gz"
+cat > "$sdoc/README" <<EOF
+blit-font-sources: complete corresponding source of Blit's Arabic font
+
+This package carries freefont-src-20120503.tar.gz, the upstream preferred-form
+source and build archive of GNU FreeMono 20120503, from which Blit Arabic
+Modern (BlitArabicModern.ttf in the blit package) is derived.
+
+  upstream: $font_source_url
+  sha256:   $font_source_sha256
+
+The archive contains sfd/FreeMono.sfd and the FontForge generation scripts.
+Blit's derivation step is tools/fonts/build-arabic-profile.py in the Blit
+source tree. The blit package suggests this package and says in
+/usr/lib/blit/fonts/FreeMono-SOURCE.txt where to find the source.
+EOF
+cat > "$sdoc/copyright" <<EOF
+GNU FreeFont (FreeMono), 20120503, is distributed under the GNU General Public
+License, version 3 or later, with the GNU font embedding exception. The full
+licence text and the authors' list are inside the archive and are also
+installed by the blit package under /usr/lib/blit/fonts/ (FreeMono-LICENSE.txt,
+FreeMono-README.txt, FreeMono-AUTHORS.txt). On Debian systems the GPL-3 text is
+in /usr/share/common-licenses/GPL-3.
+EOF
+chmod 0644 "$sdoc/README" "$sdoc/copyright"
+cat > "$sstage/DEBIAN/control" <<EOF
+Package: blit-font-sources
+Version: $font_source_version
+Section: misc
+Priority: optional
+Architecture: all
+Maintainer: ITD Labs <itdlabs@localhost>
+Description: Source archive of GNU FreeMono, the origin of Blit Arabic Modern
+ The upstream FreeFont 20120503 source archive (GPLv3-or-later with the font
+ exception), kept so the complete corresponding source of the Arabic font in
+ the blit package stays available without being installed with every Blit.
+EOF
+soutput=$OUT/blit-font-sources_${font_source_version}_all.deb
+dpkg-deb --build --root-owner-group "$sstage" "$soutput" >/dev/null
+echo "$soutput"

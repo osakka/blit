@@ -62,8 +62,27 @@ test -f "$stage/usr/lib/blit/fonts/Blit-Spleen16.psf"
 test -f "$stage/usr/lib/blit/fonts/text/3270-Regular.ttf"
 test -f "$stage/usr/lib/blit/fonts/nerd-glyphnames-v3.4.0.json"
 test -f "$stage/usr/lib/blit/fonts/licenses/IBM3270-LICENSE.txt"
+# ADR 0217: the FreeMono source archive is not in the runtime package. The
+# font identity gate pins it by path, so lay the archive from the sources
+# package (or, when that is not beside this package, the repository's copy)
+# under the extracted fonts for the duration of that one check.
+if [ -e "$stage/usr/lib/blit/fonts/sources" ]; then
+    echo "PACKAGE_ARTIFACT_FAIL font source archive shipped in the runtime package" >&2
+    exit 1
+fi
+sources_package=$(dirname "$package")/blit-font-sources_20120503-1_all.deb
+mkdir -p "$stage/usr/lib/blit/fonts/sources"
+if [ -f "$sources_package" ]; then
+    dpkg-deb --fsys-tarfile "$sources_package" | tar -xO \
+        ./usr/share/doc/blit-font-sources/freefont-src-20120503.tar.gz \
+        > "$stage/usr/lib/blit/fonts/sources/freefont-src-20120503.tar.gz"
+else
+    cp "$root/assets/fonts/sources/freefont-src-20120503.tar.gz" \
+        "$stage/usr/lib/blit/fonts/sources/"
+fi
 BLIT_GATE_FONT_ROOT="$stage/usr/lib/blit/fonts" \
     ruby "$root/tools/tests/font_assets_gate.rb"
+rm -rf "$stage/usr/lib/blit/fonts/sources"
 test -f "$stage/usr/lib/blit/fonts/licenses/Spleen-LICENSE.txt"
 test -f "$stage/usr/lib/blit/fonts/licenses/Terminus-OFL.txt"
 test -f "$stage/usr/lib/blit/fonts/licenses/DejaVu-notice.txt"
@@ -107,7 +126,7 @@ for icon_asset in $(git -C "$root" ls-tree --name-only "$source_commit" assets/f
         exit 1
     }
 done
-for font_asset in BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt sources/freefont-src-20120503.tar.gz; do
+for font_asset in BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL Arabic asset differs from recorded source: $font_asset" >&2
@@ -165,12 +184,53 @@ for document in README.md features.md terminal.md roadmap.md verification-status
         echo "PACKAGE_ARTIFACT_FAIL documentation differs from recorded commit: $document" >&2
         exit 1
     }
-    cmp -s "$stage/usr/share/doc/blit/docs/$document" \
-        "$stage/usr/lib/blit/docs/$document" || {
-        echo "PACKAGE_ARTIFACT_FAIL installed documentation copies disagree: $document" >&2
+done
+# ADR 0217: the documentation is installed once.
+if [ -e "$stage/usr/lib/blit/docs" ]; then
+    echo "PACKAGE_ARTIFACT_FAIL second documentation copy /usr/lib/blit/docs present" >&2
+    exit 1
+fi
+# The runtime package keeps only the pointer that carries the GPL source offer.
+font_source_sha=$(sed -n 's/^  *"source_sha256": "\(.*\)"/\1/p' \
+    "$root/assets/fonts/arabic-fonts.source.json")
+note="$stage/usr/lib/blit/fonts/FreeMono-SOURCE.txt"
+test -f "$note"
+for needle in blit-font-sources https://ftp.gnu.org/gnu/freefont/freefont-src-20120503.tar.gz "$font_source_sha"; do
+    grep -Fq "$needle" "$note" || {
+        echo "PACKAGE_ARTIFACT_FAIL FreeMono-SOURCE.txt does not mention $needle" >&2
         exit 1
     }
 done
+dpkg-deb -f "$package" Suggests | grep -Fq blit-font-sources || {
+    echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-font-sources" >&2
+    exit 1
+}
+# The sources package is checked when it sits beside the main one.
+if [ -f "$sources_package" ]; then
+    test "$(dpkg-deb -f "$sources_package" Package)" = blit-font-sources
+    test "$(dpkg-deb -f "$sources_package" Architecture)" = all
+    test "$(dpkg-deb -f "$sources_package" Version)" = 20120503-1
+    sstage=$(mktemp -d /tmp/blit-sources-gate.XXXXXX)
+    trap 'rm -rf "$stage" "$sstage"' EXIT HUP INT TERM
+    dpkg-deb -x "$sources_package" "$sstage"
+    sdoc=$sstage/usr/share/doc/blit-font-sources
+    for f in freefont-src-20120503.tar.gz README copyright; do
+        test -f "$sdoc/$f" || {
+            echo "PACKAGE_ARTIFACT_FAIL blit-font-sources lacks $f" >&2
+            exit 1
+        }
+    done
+    test "$(sha256sum "$sdoc/freefont-src-20120503.tar.gz" | awk '{print $1}')" = "$font_source_sha" || {
+        echo "PACKAGE_ARTIFACT_FAIL font source archive differs from manifest source_sha256" >&2
+        exit 1
+    }
+    grep -Fq "$font_source_sha" "$sdoc/README"
+    extra=$(cd "$sstage" && find . -type f | sort | grep -v -e '/freefont-src-20120503.tar.gz$' -e '/README$' -e '/copyright$' || true)
+    test -z "$extra" || {
+        echo "PACKAGE_ARTIFACT_FAIL unexpected files in blit-font-sources: $extra" >&2
+        exit 1
+    }
+fi
 # The manual pages are the repository's, with the package's version in
 # their title line.
 for page in blit.8 blit.env.5 blit-update-helper.8; do

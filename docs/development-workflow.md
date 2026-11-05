@@ -272,6 +272,16 @@ tools/tests/package_artifact_gate.sh "$deb"
 tools/deploy/update-live.sh HOST "$deb"
 ```
 
+`packaging/build-deb.sh` writes two packages to the output directory:
+`blit_X.Y.Z-1_amd64.deb` and `blit-font-sources_20120503-1_all.deb` (the
+FreeMono source archive behind the Arabic font, versioned by upstream;
+[ADR 0217](adr/0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)).
+The manifest generator, the artifact gate and `update-live.sh` take the main
+package; the gate also checks the sources package when it sits beside it.
+The documentation is installed once, under `/usr/share/doc/blit/docs`. The
+sources package only needs publishing (`publish.sh` given each `.deb`) when
+its content changes, not every release.
+
 `releases/<version>.yaml` is generated from the package, not written by
 hand, apart from the `status:` line the operator adds. The two commit
 variables are needed when the manifest is recorded in a later commit than
@@ -289,7 +299,7 @@ Package documentation is compared with `package_documentation_commit`, not
 whatever handoff notes have since been committed to HEAD. Rebuilding that
 artifact uses `BLIT_PACKAGE_DOCUMENTATION_COMMIT=<recorded-commit>` so updated
 verification notes do not silently change the package or force a checksum
-rewrite. Both installed documentation locations derive from the same snapshot.
+rewrite. The installed documentation derives from that snapshot.
 
 When evidence contradicts an assumption, stop repeating the same invocation.
 Preserve the log, identify the boundary that produced the contradiction, and
