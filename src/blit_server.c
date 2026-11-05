@@ -12567,6 +12567,16 @@ static const char *terminal_termcap_value(const BlitSession *session,
         *boolean = 1;
         return storage;
     }
+    if (strcmp(name, "sgr-framed") == 0 ||
+        strcmp(name, "sgr-framed-bar") == 0 ||
+        strcmp(name, "sgr-shadow") == 0) {
+        /* Blit's own SGR extensions, under the names GET /v1/server lists in
+           `capabilities`, so a client that holds the terminal and not the HTTP
+           API can ask the terminal itself (hibr#476). Booleans: present or
+           refused, never a version. */
+        *boolean = 1;
+        return storage;
+    }
     (void)session;
     return NULL;
 }

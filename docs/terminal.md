@@ -156,7 +156,7 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 | --- | --- |
 | `DCS … q` | Sixel image |
 | `DCS $ q` | Request a setting (DECRQSS): margins, cursor style, SGR with its colours, protection, conformance and others |
-| `DCS + q` | Terminal capabilities (XTGETTCAP): name, colours, RGB, size, `Tc`, `bce` |
+| `DCS + q` | Terminal capabilities (XTGETTCAP): name, colours, RGB, size, `Tc`, `bce`, and Blit's `sgr-framed`, `sgr-framed-bar`, `sgr-shadow` (booleans: `DCS 1 + r <hex name> ST` when present, `DCS 0 + r <hex name> ST` otherwise) |
 
 ## Mouse, paste, focus and keyboard
 

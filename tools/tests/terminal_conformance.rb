@@ -1413,6 +1413,20 @@ assert_equal('1b50312b72343336463d3332333533361b5c' \
              '1b50312b723532343734323d333832463338324633381b5c',
              row_text(snapshot), 'XTGETTCAP answers every name in a request')
 
+# hibr#476. A client that holds the terminal and not the HTTP API asks here
+# for the SGR extensions GET /v1/server lists. Each is a boolean: present
+# answers with its hex name and no value.
+{ 'sgr-framed' => ['7367722d6672616d6564', 27,
+                   '1b50312b7237333637373232443636373236313644363536341b5c'],
+  'sgr-framed-bar' => ['7367722d6672616d65642d626172', 35,
+                       '1b50312b72373336373732324436363732363136443635363432443632363137321b5c'],
+  'sgr-shadow' => ['7367722d736861646f77', 27,
+                   '1b50312b7237333637373232443733363836313634364637371b5c'] }.each do |name, (hex, count, expected)|
+  snapshot = run_case(base, "xtgettcap-#{name}",
+                      "stty -icanon -echo min 0 time 5; printf '\\033P+q#{hex}\\033\\\\'; dd if=/dev/tty bs=1 count=#{count} 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
+  assert_equal(expected, row_text(snapshot), "XTGETTCAP reports #{name} by presence")
+end
+
 def margin_rows(snapshot)
   grid = {}
   snapshot.fetch('cells').each do |cell|
