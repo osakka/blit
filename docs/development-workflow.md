@@ -162,6 +162,39 @@ BLIT_GATE_LIVE=http://HOST:8080 tools/run-gates.sh timing
 Prefer it over invoking a gate directly. `packaging` is a suite of its own,
 skipped unless `BLIT_GATE_PACKAGE` names a `.deb`.
 
+The runner is measured, bounded and parallel (ADR 0216):
+
+| Variable | Effect |
+|---|---|
+| `BLIT_GATE_JOBS` | Gates run at once; default `min(4, nproc/2)`. `1` is the plain serial run. |
+| `BLIT_GATE_TIMEOUT` | Seconds one gate may take; default 300, with more for the few gates that wait on purpose. A gate over it is killed with its server and reported `FAIL ... TIMEOUT`; it is never retried. |
+| `BLIT_GATE_PORT_OFFSET` | Added to every fixed gate port. Parallel workers add a stride of 1000 each. Give each checkout or agent running gates at the same time its own offset: 0, 4000, 8000 (the runner refuses offsets that reach the ephemeral port range). |
+
+Gates that depend on a quiet machine (cadence, frame rate, "saved within N
+ms", the soak, update/restart timing) are marked `run_serial_gate`: they run
+alone, after every parallel gate, in the order they are listed, whatever
+`BLIT_GATE_JOBS` is. A gate that fails only under parallel load is a bug in the
+gate or the server, or belongs in that lane; it is not retried.
+
+Every report line ends with the gate's wall time. The run ends with the 20
+slowest gates and the time per suite, then the unchanged `RUN_GATES_PASS` or
+`RUN_GATES_FAIL` line. "Time per suite" and "gate time" are sums over gates, so
+with several jobs they exceed the `wall` time. Look at the slowest gates first:
+a gate that is slow because it sleeps for a production period is a candidate for
+a test-mode knob, not for a retry or a bigger timeout.
+
+`all` includes every other suite, `font` among them: do not run `font` as well.
+The release recipe below is `all`, then the renderer suite on GLES. When only
+the compositor-sensitive gates need the GLES pass, `renderer-gles` runs the
+renderer suite on GLES without the gates the compositor cannot change (their
+own C probes, the CPU-path hotplug gates); `all` still runs every one of them:
+
+```sh
+tools/run-gates.sh all
+BLIT_GATE_BACKEND=gles tools/run-gates.sh renderer   # the full GLES pass
+tools/run-gates.sh renderer-gles                     # the sensitive subset
+```
+
 Every gate runs against native KMS on the DRM mock (ADR 0184).
 `BLIT_GATE_BACKEND=gles` runs the same suites through the GLES compositor on
 Mesa's surfaceless platform, reading each frame back. It needs working EGL/GLES

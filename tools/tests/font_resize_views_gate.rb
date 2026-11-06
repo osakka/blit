@@ -15,12 +15,19 @@ require 'uri'
 require 'tmpdir'
 require 'timeout'
 require_relative 'gate_server'
+require_relative 'gate_port'
 
-PORT = Integer(ENV.fetch('BLIT_GATE_PORT', '18997'))
+PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '18997'), 10))
 ROOT = File.expand_path('../..', __dir__)
 SERVER = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
-FAKE_DESKTOP = File.join(ROOT, 'build/blit/desktop')
-FAKE_DESKTOP_IMPL = File.join(ROOT, 'build/blit/desktop-font-resize-gate.sh')
+# ADR 0216: a private directory, not build/blit/, so two gates that fake the
+# desktop cannot replace each other's symlink while both are running. The
+# basename must stay 'desktop': the server keys on it.
+require 'tmpdir'
+FAKE_DESKTOP_DIR = Dir.mktmpdir('blit-fake-desktop')
+at_exit { FileUtils.rm_rf(FAKE_DESKTOP_DIR) }
+FAKE_DESKTOP = File.join(FAKE_DESKTOP_DIR, 'desktop')
+FAKE_DESKTOP_IMPL = File.join(FAKE_DESKTOP_DIR, 'desktop-font-resize-gate.sh')
 SIZES = [22, 17, 16, 19, 26, 18, 22].freeze
 
 FileUtils.mkdir_p(File.dirname(FAKE_DESKTOP))
@@ -50,7 +57,7 @@ env = gate_display_env
 File.write(env.fetch('BLIT_DRM_MOCK_STATE'), "2 0 0 0\n1 1920 1080\n2 1280 720\n")
 env = env.merge('BLIT_FONT_ROOT' => File.join(ROOT, 'assets/fonts'), 'BLIT_SETTINGS' => 'ignore',
                 'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP)
-pid = Process.spawn(env, SERVER, PORT.to_s, out: '/tmp/blit-font-resize-views-gate.log', err: %i[child out])
+pid = Process.spawn(env, SERVER, PORT.to_s, out: "/tmp/blit-font-resize-views-gate-#{Process.pid}.log", err: %i[child out])
 sessions = []
 BASE = URI("http://127.0.0.1:#{PORT}")
 

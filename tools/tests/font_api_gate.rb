@@ -12,7 +12,7 @@ port = gate_port(Integer(ENV.fetch('BLIT_FONT_API_PORT','18995')))
 # console fonts this used to find installed on the host are retired.
 env = TestProfile.environment.merge('BLIT_FONT_ROOT' => File.expand_path('../../assets/fonts', __dir__))
 pid = Process.spawn(env, TestProfile.binary, port.to_s,
-                    out: '/tmp/blit-font-api-gate.log', err: [:child, :out])
+                    out: "/tmp/blit-font-api-gate-#{Process.pid}.log", err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil
   Process.wait(pid) rescue nil

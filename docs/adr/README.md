@@ -233,6 +233,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0213 — The graphics ledger, blink counters, and pictures held through a synchronized update](0213-graphics-ledger-blink-counters-and-held-pictures.md)
 - [0214 — One frame, its line on the outer edge; the title bar's end cells](0214-outer-edge-frame-and-title-end-cells.md)
 - [0215 — A fitted glyph is never trimmed: measured after the render, unhinted where it spans](0215-fitted-glyphs-are-never-trimmed.md)
+- [0216 — A gate runner that is measured, bounded and parallel](0216-a-gate-runner-that-is-measured-bounded-and-parallel.md)
 - [0217 — Slimming the package: one copy of the documentation, font sources in their own package](0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)
 
 ## Status

@@ -23,7 +23,8 @@ import urllib.request
 import zlib
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-PORT = int(os.environ.get('BLIT_GATE_PORT', '19821'))
+PORT = (int(os.environ.get('BLIT_GATE_PORT', '19821')) +
+        int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0')))
 BASE = 'http://127.0.0.1:%d' % PORT
 SEALS = fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
 
