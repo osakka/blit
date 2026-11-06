@@ -1,5 +1,27 @@
 # Verification status
 
+## 2026-11-06: 0.3.53 the wiretap tap in one cell, on and off
+
+- **Two one-column icons** for wiretap's Control Strip module, pane tile and
+  window: `wiretap-1` U+1002CB (on, with the drop) and `wiretap-1-off`
+  U+1002CC (off). Next free is U+1002CD. One source,
+  `assets/fonts/icons/wiretap-1.svg`, the drop a level (`data-level="1"`,
+  `data-inactive-fill="#2e8fe000"`), as the battery levels are.
+- **Why one source:** a one-column icon is fitted by its layer outlines, so a
+  separate drawing without the drop drew the off tap 2 px lower (1 px at 16 px)
+  than the on tap. With the drop a clear layer in the off state both share one
+  box; the tap's pixels are identical in all 16 compared cells, off shows no
+  drop in colour, and its monochrome shape has none.
+  `tools/fonts/build-blit-icons.py` now also takes `#rrggbbaa` fills (and still
+  rebuilds the previous font byte for byte).
+- **On and off differ by shape:** 17.6% of pixels at 22 px, 12.5% at 16 px
+  (`font_icon_shape_gate`, minimums 15% and 10%). Shown to and approved by the
+  owner from real-server renders; the tap is about 7 by 11 px in an 11 by 22
+  cell.
+- **Suites, glyph-only set** (no `src/` change since 0.3.52): `font` and
+  `schema` 56 pass, 0 fail; GLES `renderer` 81 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.52 the wiretap tap, on and off
 
 - **Two new two-cell icons** for wiretap (the Hibr network monitor): a water
