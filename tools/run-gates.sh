@@ -145,6 +145,9 @@ gate_timeout() {
     terminal_soak_gate.rb) echo $(( ${BLIT_SOAK_SECONDS:-120} + 300 )) ;;
     package_artifact_gate.sh) echo 1200 ;;
     output_occupancy_gate.rb|restart_after_update_gate.rb|hibr_identity_refresh_gate.rb) echo 600 ;;
+    # CPU-bound, not waiting: 170 to 235 s alone and past 300 s when several
+    # gates share the machine, so the default is too tight for it.
+    emoji_presentation_gate.rb) echo 600 ;;
     *) echo 300 ;;
     esac
 }
