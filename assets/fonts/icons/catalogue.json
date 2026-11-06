@@ -255,7 +255,11 @@
     {"id":"file-image-gif-left", "codepoint":"10022F", "source":"file-image-gif.svg", "columns":2, "column":0},
     {"id":"file-image-gif-right", "codepoint":"100230", "source":"file-image-gif.svg", "columns":2, "column":1},
     {"id":"hui-mark-left", "codepoint":"1002C5", "source":"hui-mark.svg", "columns":2, "column":0},
-    {"id":"hui-mark-right", "codepoint":"1002C6", "source":"hui-mark.svg", "columns":2, "column":1}
+    {"id":"hui-mark-right", "codepoint":"1002C6", "source":"hui-mark.svg", "columns":2, "column":1},
+    {"id":"wiretap-left", "codepoint":"1002C7", "source":"wiretap.svg", "columns":2, "column":0},
+    {"id":"wiretap-right", "codepoint":"1002C8", "source":"wiretap.svg", "columns":2, "column":1},
+    {"id":"wiretap-off-left", "codepoint":"1002C9", "source":"wiretap-off.svg", "columns":2, "column":0},
+    {"id":"wiretap-off-right", "codepoint":"1002CA", "source":"wiretap-off.svg", "columns":2, "column":1}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},

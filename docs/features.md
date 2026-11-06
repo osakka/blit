@@ -209,6 +209,7 @@ Errors are `application/problem+json` with stable codes.
 | Blit's colour icons can be drawn as a monochrome shape that says state (battery level, charging, mains, signal, volume) by shape, in black, white or the cell's foreground; 0.3.48 chose this with the global `fonts.icon_colour` setting, which 0.3.49 replaced with the per-cell icon pen | 0.3.48 | 0220, 0221 | Tested |
 | The icon pen is per cell: SGR 68:v (1 auto, 2 black, 3 white), ended by SGR 69, so a menu bar draws its icons monochrome while the desktop and file manager beside it keep them in colour; a change is cell damage only (no glyph-cache rebuild, no reflow); `style.icon_pen` in the cells API, `sgr-icon-pen` in the server capabilities and XTGETTCAP, reported by DECRQSS | 0.3.49 | 0221 | Tested |
 | The hui badge is a solid teal disc with white letters (its monochrome shape unchanged: the disc with the letters cut out); a new hui mark, the H-U-i monogram in teal without a disc, two columns (`hui-mark-left` + `-right`, U+1002C5-1002C6), its monochrome shape its own outline | 0.3.51 | 0197, 0220, 0221 | Tested |
+| Two wiretap icons for Hibr's network monitor and firewall, a water tap in water blue (#2e8fe0), two columns each: on, with a drop under the spout (`wiretap-left` + `-right`, U+1002C7-1002C8), and off, without it (`wiretap-off-left` + `-right`, U+1002C9-1002CA); each monochrome shape is its own outline, and on and off differ by shape (`font_icon_shape_gate`) | 0.3.52 | 0197, 0220, 0221 | Tested |
 | `blit --version` and `blit --help` | 0.3.20 | — | Tested |
 
 ## Diagnostics

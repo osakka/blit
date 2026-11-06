@@ -257,6 +257,10 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `file-image-gif-right` | `U+100230` | `"\udbc0\ude30"` | — |
 | `hui-mark-left` | `U+1002C5` | `"\udbc0\udec5"` | — |
 | `hui-mark-right` | `U+1002C6` | `"\udbc0\udec6"` | — |
+| `wiretap-left` | `U+1002C7` | `"\udbc0\udec7"` | — |
+| `wiretap-right` | `U+1002C8` | `"\udbc0\udec8"` | — |
+| `wiretap-off-left` | `U+1002C9` | `"\udbc0\udec9"` | — |
+| `wiretap-off-right` | `U+1002CA` | `"\udbc0\udeca"` | — |
 
 ## Themed text additions
 

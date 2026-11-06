@@ -3,7 +3,10 @@
    Wi-Fi bars, volume waves) are drawn in the black pen and compared as
    masks, binarised at 50% alpha: for every pair in a family
    |A xor B| / |A or B| must be at least 15% at 22 px (a cell of 11x22) and
-   10% at 16 px (8x16). The table is printed, so the margin is visible. */
+   10% at 16 px (8x16). The table is printed, so the margin is visible.
+   A two-column icon (ADR 0197) is compared as its whole badge, its left and
+   right columns side by side: wiretap on (a drop under the spout) against
+   wiretap off (no drop). */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
@@ -22,26 +25,33 @@ static const Icon kIcons[] = {
     {"volume-0", 0x100014}, {"volume-1", 0x100015}, {"volume-2", 0x100016},
     {"volume-3", 0x100017},
     {"wifi-1", 0x100002}, {"wifi-2", 0x100003}, {"wifi-3", 0x100004}, {"wifi-4", 0x100005},
+    {"wiretap", 0x1002c7}, {"wiretap-off", 0x1002c9},
 };
 #define NICONS ((int)(sizeof(kIcons) / sizeof(kIcons[0])))
-enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15 };
+/* A two-column icon's entry is its left codepoint; its right is the next. */
+enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19 };
 
 typedef struct { int w, h; unsigned char *m; } Mask;
 
 static int mask_of(const BlitFont *font, const char *outline, const char *colour,
-                   int size, uint32_t cp, Mask *out)
+                   int size, uint32_t cp, int columns, Mask *out)
 {
     BlitRaster *raster = blit_raster_open(font, outline, colour, (size + 1) / 2, size);
     BlitRasterGlyph g;
-    int x, y;
+    int x, y, c;
     if (!raster) return 0;
-    if (!blit_raster_get(raster, cp, 1, BLIT_RASTER_ICON_BLACK, &g) || g.format != BLIT_RASTER_RGBA_PREMULTIPLIED) return 0;
-    out->w = g.width; out->h = g.height;
-    out->m = calloc((size_t)g.width, (size_t)g.height);
-    if (!out->m) return 0;
-    for (y = 0; y < g.height; ++y)
-        for (x = 0; x < g.width; ++x)
-            out->m[y * g.width + x] = g.pixels[y * g.stride + x * 4 + 3] >= 128;
+    out->m = NULL;
+    for (c = 0; c < columns; ++c) {
+        if (!blit_raster_get(raster, cp + (uint32_t)c, 1, BLIT_RASTER_ICON_BLACK, &g) || g.format != BLIT_RASTER_RGBA_PREMULTIPLIED) return 0;
+        if (!out->m) {
+            out->w = g.width * columns; out->h = g.height;
+            out->m = calloc((size_t)out->w, (size_t)g.height);
+            if (!out->m) return 0;
+        }
+        for (y = 0; y < g.height; ++y)
+            for (x = 0; x < g.width; ++x)
+                out->m[y * out->w + c * g.width + x] = g.pixels[y * g.stride + x * 4 + 3] >= 128;
+    }
     blit_raster_close(raster);
     return 1;
 }
@@ -79,7 +89,7 @@ int main(int argc, char **argv)
         double min = kSizes[s] == 22 ? MIN22 : MIN16;
         Mask m[NICONS];
         for (i = 0; i < NICONS; ++i)
-            if (!mask_of(&font, argv[2], argv[3], kSizes[s], kIcons[i].cp, &m[i])) {
+            if (!mask_of(&font, argv[2], argv[3], kSizes[s], kIcons[i].cp, i >= TAP ? 2 : 1, &m[i])) {
                 fprintf(stderr, "FAIL: %s did not render\n", kIcons[i].name);
                 return 1;
             }
@@ -90,6 +100,7 @@ int main(int argc, char **argv)
         for (i = B0; i < B0 + 10; ++i) pair(m, AC, i, min, "ac");
         for (i = W1; i < W1 + 4; ++i) for (j = i + 1; j < W1 + 4; ++j) pair(m, i, j, min, "wifi");
         for (i = V0; i < V0 + 4; ++i) for (j = i + 1; j < V0 + 4; ++j) pair(m, i, j, min, "volume");
+        pair(m, TAP, TAP + 1, min, "wiretap");
         for (i = 0; i < NICONS; ++i) free(m[i].m);
     }
     if (failures) {
