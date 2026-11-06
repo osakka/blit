@@ -1,5 +1,22 @@
 # Verification status
 
+## 2026-11-06: 0.3.50 the settings revision moves with the content (issue #150)
+
+- **A false 409 on `PUT /v1/settings`, fixed.** The revision was raised when
+  the writer thread put the document on disk, after the coalescing interval,
+  so a change made before a client's GET was saved a moment later and the
+  revision moved under the client with nothing new to read; its `If-Match`
+  failed. `settings_persistence_gate` hit it under load, and the Control Panel
+  pane retried around it. The revision now moves when the content changes
+  (`settings_mark_dirty`); a save writes the current revision and only
+  `storage.saved_revision` catches up. `docs/api.md` says so.
+- **Gates:** `settings_persistence_gate` waited for a higher revision as a sign
+  of the disk write; it now also waits for `storage.state` clean, and passes.
+  Also on main since 0.3.49, tests only: `graphics_blink_gate` reads how long
+  a picture was gone from the ledger (issue #149, closed).
+- **Suites:** `all` 181 pass, 10 skip, 0 fail (JOBS=2); GLES `renderer` 81 pass,
+  1 skip, 0 fail; `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.49 the icon pen is a cell attribute (SGR 68:v, 69)
 
 - **Per cell, not global** (ADR 0221; replaces the run-time half of ADR 0220):
