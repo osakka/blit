@@ -1,5 +1,29 @@
 # Verification status
 
+## 2026-11-06: 0.3.47 font hinting setting, pressed boxes and a grow box, a faster gate runner
+
+- **`fonts.hinting`** (`full`, `light`, `none`; ADR 0218) chooses the FreeType
+  hinting for text glyphs. The default `full` is what text used before, and
+  `font_hinting_gate` pins its raster hash from the pre-change code, so default
+  output is unchanged. Fitted icons, shaped Arabic and colour emoji ignore it.
+  `GET/PUT /v1/fonts` reports and takes it, the settings document stores it, a
+  bad value is a 400, and it survives a restart.
+- **Pressed title-bar boxes and a grow corner** (ADR 0219; the pressed look is
+  also the hover look): ten glyphs, U+1002BB-1002C4, in Chalk and Slate, shown to
+  and approved by the owner from real-server renders. Details in the entry below.
+- **A measured, bounded, parallel gate runner** (ADR 0216) is merged:
+  per-gate timing, timeouts, port offsets and a serial timing lane. `all` takes
+  about 10 to 11 minutes at 4 jobs against 23 serially. `emoji_presentation_gate`
+  now has a 600 s limit: it is CPU-bound at 170 to 235 s alone and passed 300 s
+  when several gates shared the machine.
+- **Suites** on the merged tree at JOBS=2: `all` 177 pass, 10 skip, 0 fail;
+  GLES `renderer` 80 pass, 1 skip, 0 fail; `package_artifact_gate` passes
+  (reproducibility check skipped). Earlier runs on the same code, with other
+  sessions' gates and desktops loading the machine, failed `emoji_presentation_gate`
+  on the old 300 s limit and `graphics_blink_gate` on GLES; the latter also
+  failed on the 0.3.46 build under that load and passes alone (13 s), so it is
+  sensitive to load, not to this change. No retry was added.
+
 ## 2026-11-06: pressed title-bar boxes and a grow box (ADR 0219, 0.3.47)
 
 - **Ten glyphs**, U+1002BB-1002C4 (next free U+1002C5), five a set, Chalk's then
