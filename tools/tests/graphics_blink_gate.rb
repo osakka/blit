@@ -201,10 +201,20 @@ Dir.mktmpdir('blit-graphics-blink') do |root|
   split_new = parts.call(2, blue, 4, *quarter)
   split_same = parts.call(1, blue, 4, *quarter)
   # The split cases keep the picture away for fewer presented frames than the
-  # detector's window (8), so a gap is a blink and not a deletion.
+  # detector's window (8), so a gap is a blink and not a deletion. The gap is
+  # the delete and the pieces, each followed by a sleep: five sleeps. At
+  # 25 ms that was about 125 ms, 7.5 frames at 60 Hz, at the window's edge,
+  # and a slow run kept the picture away 9 frames (issue #149). The sleep
+  # after the delete stays GAP, so at least one frame passes before the
+  # replacement: without it a same-id replace lands in the delete's own
+  # frame, nothing is ever absent, and there is no blink to count. Only the
+  # sleeps between the pieces are SPLIT_GAP. The barrier case below needs a
+  # replace slower than the barrier and keeps GAP.
   GAP = '0.025'
+  SPLIT_GAP = '0.012'
 
   results = {}
+  blinked = 0
 
   # split: absent for frames, then back. The same sequence for each kind.
   { 'd=I,new id' => ['del_I1', split_new, 2, 'delete-d=I'],
@@ -215,7 +225,7 @@ Dir.mktmpdir('blit-graphics-blink') do |root|
     before = counters
     cursor = ledger.fetch('sequence')
     lines = ["cat #{delete}", "sleep #{GAP}"]
-    pieces.each { |piece| lines.push("cat #{piece}", "sleep #{GAP}") }
+    pieces.each { |piece| lines.push("cat #{piece}", "sleep #{SPLIT_GAP}") }
     lines.push('mark split_done')
     send_steps.call(session, *lines)
     wait_until("#{label}: split sequence ran") { marked.call('split_done') }
@@ -228,27 +238,38 @@ Dir.mktmpdir('blit-graphics-blink') do |root|
     placed = events.find { |e| e['kind'] == 'place' && e['image_id'] == id }
     landed = events.find { |e| e['kind'] == 'transmit' && e['image_id'] == id &&
                                 e['reason'].start_with?('complete') }
-    check((after['graphics_blink_events'] - before['graphics_blink_events']) >= 1,
-          "split #{label}: no blink counted: #{events.map { |e| [e["kind"], e["frame"], e["image_id"], e["reason"]] }.inspect}")
-    # A new id is absent until its last chunk; the same id again (the data
-    # kept by a lowercase delete) is placed on its old pixels at the first.
-    least = id == 2 ? 2 : 1
-    check(after['graphics_blink_frames'] - before['graphics_blink_frames'] >= least,
-          "split #{label}: the picture was gone for at least #{least} presented frames")
-    check(!blinks.empty? && blinks.first['reason'].start_with?(cause) && blinks.first['frames'] >= least,
-          "split #{label}: the blink names its cause #{cause}: #{blinks.first.inspect}")
-    check(deleted && placed && landed && blinks.first,
-          "split #{label}: ledger lacks delete, place, transmit or blink: #{events.map { |e| e['kind'] }}")
-    check(deleted['frame'] < landed['frame'] && deleted['sequence'] < landed['sequence'],
-          "split #{label}: the ledger shows frames between the delete (#{deleted['frame']}) and the " \
-          "new picture's last chunk (#{landed['frame']})")
+    trail = events.map { |e| [e['kind'], e['frame'], e['image_id'], e['reason']] }.inspect
+    check(deleted && placed && landed, "split #{label}: ledger lacks delete, place or transmit: #{trail}")
+    # How long the picture was really gone is read from the ledger, not
+    # assumed from the sleeps (issue #149): a new id is absent until its last
+    # chunk; the same id again (the data a lowercase delete keeps) is back at
+    # its place. The detector's rule (ADR 0213) then decides the answer: back
+    # in the delete's own frame was never absent, so no blink; back within
+    # the window (8 frames) is a blink; later is a deletion, not a blink.
+    back = id == 2 ? landed['frame'] : placed['frame']
+    gap = back - deleted['frame']
+    counted = after['graphics_blink_events'] - before['graphics_blink_events']
+    if gap >= 1 && gap <= 8
+      check(counted >= 1, "split #{label}: gone #{gap} frames, inside the window, and no blink counted: #{trail}")
+      check(!blinks.empty? && blinks.first['reason'].start_with?(cause) && blinks.first['frames'] >= 1 &&
+            blinks.first['frames'] <= 8,
+            "split #{label}: the blink names its cause #{cause} and its frames: #{blinks.first.inspect}")
+      results["split #{label}"] = "#{blinks.first['frames']} frames"
+      blinked += 1
+    else
+      check(counted.zero?, "split #{label}: gone #{gap} frames, outside the window, yet a blink was counted: #{trail}")
+      results["split #{label}"] = gap.zero? ? 'never absent' : "gone #{gap} frames, a deletion"
+    end
     check(placed['cells']['width'] == COLUMNS && placed['cells']['height'] == ROWS &&
           placed['pixels']['width'] == WIDTH && landed['bytes'] == quarter[0] * quarter[1] * 3,
           "split #{label}: the ledger carries the rectangle and the bytes: #{placed.inspect} #{landed.inspect}")
-    results["split #{label}"] = "#{blinks.first['frames']} frames"
     close.call(session)
     wait_frames.call(3)
   end
+
+  # The split cases are sized to land inside the window; if none did, the
+  # counting was not exercised at all and the gate proves nothing.
+  check(blinked >= 1, "split: no case was gone for 1..8 frames, so no blink was exercised: #{results}")
 
   # atomic: the delete and a whole new picture in one read.
   session = script_session.call
@@ -368,8 +389,20 @@ Dir.mktmpdir('blit-graphics-blink') do |root|
   wait_frames.call(12)
   after = counters
   events = ledger(cursor).fetch('events')
-  check(after['graphics_blink_events'] > before['graphics_blink_events'],
-        'barrier: a replace slower than the barrier interval must show as a blink')
+  # As in the split cases, how long the picture was gone is read from the
+  # ledger (issue #149): inside the window it must count as a blink, longer
+  # it is a deletion by ADR 0213's rule and must not.
+  trail = events.map { |e| [e['kind'], e['frame'], e['image_id'], e['reason']] }.inspect
+  gone = events.find { |e| e['kind'] == 'delete' && e['image_id'] == 1 }
+  back = events.find { |e| e['kind'] == 'transmit' && e['image_id'] == 3 && e['reason'].start_with?('complete') }
+  check(gone && back, "barrier: ledger lacks the delete or the replacement's last chunk: #{trail}")
+  gap = back['frame'] - gone['frame']
+  counted = after['graphics_blink_events'] - before['graphics_blink_events']
+  if gap >= 1 && gap <= 8
+    check(counted >= 1, "barrier: a replace slower than the barrier, gone #{gap} frames, must show as a blink: #{trail}")
+  else
+    check(counted.zero?, "barrier: gone #{gap} frames, outside the window, yet a blink was counted: #{trail}")
+  end
   check(after['graphics_barrier_timeouts'] > before['graphics_barrier_timeouts'] &&
         events.any? { |e| e['kind'] == 'barrier' && e['reason'] == 'timeout' },
         "barrier: the barrier timed out and the ledger says so: #{events.map { |e| [e['kind'], e['reason']] }}")
