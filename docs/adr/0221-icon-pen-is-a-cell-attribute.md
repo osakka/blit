@@ -35,8 +35,9 @@ smooth, with no per-frame cost.
 **The attribute.** Two bits of the cell attribute word, bits 21–22, above
 the shadow (bits 16–20), in `BlitRasterIconPen`'s values: 0 colour (the
 default, and what a cell without it is), 1 auto, 2 black, 3 white. SGR 0
-resets it. It is a style like framed and shadow: kept in scrollback and the
-alternate screen, compared whole by the no-op write check.
+resets it. It is a style like framed and shadow, in the same 32-bit word
+that scrollback and the alternate screen keep (gated for the shadow, not
+separately for the pen), and compared whole by the no-op write check.
 
 **The sequence: SGR 68:v, ended by SGR 69.** Exactly as SGR 66/67 (ADR 0211):
 - v is 1 auto, 2 black, 3 white; `68:0` and a bare `68` end it, as `69`
