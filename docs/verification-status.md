@@ -1,5 +1,24 @@
 # Verification status
 
+## 2026-11-06: 0.3.54 a minimise box, Flat and Embossed
+
+- **Four window glyphs** (ADR 0222): `chalk-minimise` U+1002CD,
+  `chalk-minimise-pressed` U+1002CE, `slate-light-minimise` U+1002CF,
+  `slate-light-minimise-pressed` U+1002D0. Next free is U+1002D1. Asked for by
+  the owner through Hibr, whose window-button list now offers close, zoom,
+  minimise and shade, each on or off and on either side.
+- **The mark** is a short bar along the bottom of the box (the owner chose it
+  over a corner square, from real-server renders of both): 5 px wide on box
+  row 8 at 11 by 22, apart from shade's bar across the middle and zoom's square
+  at the top left. Pressed forms follow ADR 0219: Chalk solid with the bar cut
+  out, Slate the mix pen with an inverted bevel.
+- **Gates:** `window_glyph_gate` (literal drawings and per-size rules),
+  `window_style_gate`, `glyph_edge_sweep_gate` (CPU and GLES), `icon_clip_gate`
+  and `control_glyph_gate`.
+- **Suites, full set** (this changes `src/blit_window_glyphs.h`): `all` 181
+  pass, 10 skip, 0 fail (JOBS=2); GLES `renderer` 81 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.53 the wiretap tap in one cell, on and off
 
 - **Two one-column icons** for wiretap's Control Strip module, pane tile and
