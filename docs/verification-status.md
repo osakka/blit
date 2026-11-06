@@ -27,9 +27,12 @@
 - **Suites:** `all` 181 pass, 10 skip, 0 fail (JOBS=2). GLES `renderer`: one run
   failed `graphics_blink_gate` ("no blink counted"); the rerun passed 81, skip
   1, fail 0. That gate failed the same way on 0.3.46 and 0.3.47 builds, and
-  passed 15 of 15 runs alone, so it is not this change. Its cause is not known
-  and is ticketed as issue #149. My earlier ledger note called it
-  load-sensitive; that was not shown. `package_artifact_gate` passes.
+  passed 15 of 15 runs alone, so it is not this change. Issue #149, since
+  fixed in the gate (127ce4d): it assumed its sleeps kept every gap inside the
+  detector's 8-frame window, and a slow run went 9 frames (a deletion by ADR
+  0213's rule) while a fast one never went absent; it now reads the gap from
+  the ledger. My earlier ledger note called it load-sensitive; that was wrong.
+  `package_artifact_gate` passes.
 
 ## 2026-11-06: 0.3.48 Blit icons in colour, black, white or auto, drawn so a state shows by shape
 
