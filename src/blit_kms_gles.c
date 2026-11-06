@@ -246,6 +246,18 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
     scratch.back.map = r->scratch_white;
     kms_sprite_draw(&scratch, font, wide, cp, &key, margin_x, margin_y, width, height, lean, bold);
 
+    /* The two renders cannot tell coverage from colour ink that is all grey:
+       a Blit icon in the white pen (ADR 0221), premultiplied white, reads as
+       coverage and would be tinted. Where the raster draws the cell's glyph,
+       its own format decides; the renders decide the rest. Asked once, when
+       the sprite is made. */
+    if (!key.plane && !key.count && font && font->raster_get && font->raster_cell_width > 0) {
+        BlitRasterGlyph glyph;
+        if (font->raster_get(font->raster_state, cp, width > font->raster_cell_width ? 2 : 1,
+                             key.pen, &glyph) &&
+            glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
+            premultiplied = 1;
+    }
     x0 = sw; y0 = sh; x1 = 0; y1 = 0;
     for (i = 0; i < (int)pixels; ++i) {
         uint32_t b = r->scratch_black[i] & 0xffffffU, w = r->scratch_white[i] & 0xffffffU;

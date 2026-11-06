@@ -94,8 +94,9 @@ end
 
 # ADR 0212: a client switches on a flag, not a version. The server names the
 # SGR extensions this file exercises below: sgr-framed (51, 51:3, 51:5, 54),
-# sgr-framed-bar (51:2, with 51:4 its alias) and sgr-shadow (66, 67).
-sgr_flags = %w[sgr-framed sgr-framed-bar sgr-shadow]
+# sgr-framed-bar (51:2, with 51:4 its alias), sgr-shadow (66, 67) and
+# sgr-icon-pen (68, 69; ADR 0221).
+sgr_flags = %w[sgr-framed sgr-framed-bar sgr-shadow sgr-icon-pen]
 advertised = request(base, 'GET', '/v1/server').fetch('capabilities')
 missing = sgr_flags - advertised
 raise "server capabilities lack #{missing.join(', ')}" unless missing.empty?
@@ -1129,6 +1130,29 @@ cells = cell_map(snapshot)
 assert_equal(%w[under-start:1:0 corner:2 corner:2], (0..2).map { |x| cells.fetch([x, 0]).fetch('style').fetch('shadow') },
              'SGR 66 inset 0 is flush, 1 the default, and an unknown inset leaves the pen alone')
 
+# ADR 0221: SGR 68:v, the icon pen of Blit's colour icons (1 auto, 2 black,
+# 3 white), ended by 69, by 68:0, by a bare 68 and by 0; an unknown value
+# leaves the pen alone. It is a style of its own: the other attributes stay.
+snapshot = run_case(base, 'icon-pen-sgr',
+                    "printf '\\033[68:1ma\\033[68:2mb\\033[68:3mc\\033[68:9md\\033[69me" \
+                    "\\033[68:2;1mf\\033[68:0mg\\033[68:3m\\033[68mh\\033[1;68:1m\\033[0mi" \
+                    "\\033[68:2;66:1:1mj\\033[69mk'",
+                    width: 20)
+cells = cell_map(snapshot)
+pen = ->(x) { cells.fetch([x, 0]).dig('style', 'icon_pen') }
+assert_equal(%w[auto black white white], (0..3).map { |x| pen.call(x) },
+             'SGR 68:1, 68:2, 68:3, and an unknown value leaves the pen alone')
+%w[4 6 7 8].each do |x|
+  raise "SGR 69/68:0/68/0 left an icon pen at #{x}" if cells.fetch([x.to_i, 0]).key?('style') &&
+                                                       pen.call(x.to_i) != 'colour'
+end
+assert_equal('black', pen.call(5), 'SGR 68:2 with bold')
+assert_equal(true, cells.fetch([5, 0]).fetch('style').fetch('bold'), 'SGR 68 leaves bold alone')
+assert_equal(true, cells.fetch([6, 0]).fetch('style').fetch('bold'), 'SGR 68:0 ends only the pen')
+assert_equal(%w[black right:1], [pen.call(9), cells.fetch([9, 0]).dig('style', 'shadow')], 'SGR 68 beside 66')
+assert_equal(%w[colour right:1], [pen.call(10), cells.fetch([10, 0]).dig('style', 'shadow')], 'SGR 69 ends only the pen')
+puts 'PASS icon-pen-sgr'
+
 # The shadow bits are above bit 15 of the cell's attributes (ADR 0211
 # widened them to 32): they survive scrollback, the alternate screen and
 # the cells API.
@@ -1421,7 +1445,9 @@ assert_equal('1b50312b72343336463d3332333533361b5c' \
   'sgr-framed-bar' => ['7367722d6672616d65642d626172', 35,
                        '1b50312b72373336373732324436363732363136443635363432443632363137321b5c'],
   'sgr-shadow' => ['7367722d736861646f77', 27,
-                   '1b50312b7237333637373232443733363836313634364637371b5c'] }.each do |name, (hex, count, expected)|
+                   '1b50312b7237333637373232443733363836313634364637371b5c'],
+  'sgr-icon-pen' => ['7367722d69636f6e2d70656e', 31,
+                     '1b50312b723733363737323244363936333646364532443730363536451b5c'] }.each do |name, (hex, count, expected)|
   snapshot = run_case(base, "xtgettcap-#{name}",
                       "stty -icanon -echo min 0 time 5; printf '\\033P+q#{hex}\\033\\\\'; dd if=/dev/tty bs=1 count=#{count} 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
   assert_equal(expected, row_text(snapshot), "XTGETTCAP reports #{name} by presence")
@@ -2593,6 +2619,12 @@ assert_equal(hex("\eP1$r0;51:2m\e\\"),
 assert_equal(hex("\eP1$r0;66:2:1m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-shadow', '\\033[66:2:1m\\033P$qm\\033\\\\\\033[0m', 16)),
              'DECRQSS SGR reports the shadow')
+assert_equal(hex("\eP1$r0;68:2m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-icon-pen', '\\033[68:2m\\033P$qm\\033\\\\\\033[0m', 14)),
+             'DECRQSS SGR reports the icon pen')
+assert_equal(hex("\eP1$r0m\e\\"),
+             row_text(reply_case(base, 'decrqss-sgr-icon-pen-off', '\\033[68:3;69m\\033P$qm\\033\\\\\\033[0m', 9)),
+             'DECRQSS SGR reports no icon pen after 69')
 assert_equal(hex("\eP1$r0;51:5m\e\\"),
              row_text(reply_case(base, 'decrqss-sgr-framed-rule', '\\033[51:5m\\033P$qm\\033\\\\\\033[0m', 14)),
              'DECRQSS SGR reports 51:5')

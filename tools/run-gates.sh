@@ -462,6 +462,7 @@ suite_font() {
     run_gate font_icon_shape_gate.sh sh tools/tests/font_icon_shape_gate.sh \
         "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/text/Hack-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
+    run_gate font_icon_colour_settings_gate.rb ruby tools/tests/font_icon_colour_settings_gate.rb
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh
     run_gate retro_outline_raster sh tools/tests/font_raster_gate.sh \
         "$FONT" "$ROOT/assets/fonts/text/3270-Regular.ttf" \
@@ -536,6 +537,7 @@ suite_renderer() {
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb
     run_gate window_style_gate.rb ruby tools/tests/window_style_gate.rb
+    run_gate icon_pen_gate.rb ruby tools/tests/icon_pen_gate.rb
     run_gate glyph_edge_sweep_gate.rb ruby tools/tests/glyph_edge_sweep_gate.rb
     run_gate control_style_gate.rb ruby tools/tests/control_style_gate.rb
     run_gate sixel_slot_gate.rb ruby tools/tests/sixel_slot_gate.rb
