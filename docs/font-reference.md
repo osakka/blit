@@ -80,16 +80,18 @@ hinted: it changes how crisp text is at small sizes, and nothing about the
 cell grid. Fitted icons and symbols, emoji and cell-geometry glyphs ignore it
 (ADR 0218). Set it with `PUT /v1/fonts`; it is stored with the font.
 
-`icon_colour` (`colour`, `black`, `white`, `auto`; default `colour`) is the pen
-of Blit's colour icons (U+100000 and up that carry colour): their own colours,
-or their monochrome shape in black, in white, or in the cell's foreground
-(`auto`, which follows a light or dark bar like the text beside it). The shape
-is decided when the icon font is built, from the SVG: inactive levels are left
-out and paths marked `data-mono="knockout"` are cut away, so a battery's level,
-charging bolt and mains plug, and the Wi-Fi bars and volume waves that are on,
-read by shape; the `hui` badge is a solid disc with its letters cut out. Window
-glyphs, controls, text and emoji ignore it (ADR 0220). Set it with
-`PUT /v1/fonts`; it is stored with the font.
+**The icon pen** is the pen of Blit's colour icons (U+100000 and up that
+carry colour), and it is per cell: SGR 68:v (`1` auto, `2` black, `3`
+white), ended by SGR 69 (ADR 0221). Without it an icon is drawn in its own
+colours. The other pens draw its monochrome shape: black, white, or the
+cell's foreground (`auto`, which follows a light or dark bar like the text
+beside it). The shape is decided when the icon font is built, from the SVG:
+inactive levels are left out and paths marked `data-mono="knockout"` are
+cut away, so a battery's level, charging bolt and mains plug, and the Wi-Fi
+bars and volume waves that are on, read by shape; the `hui` badge is a
+solid disc with its letters cut out (ADR 0220). Window glyphs, controls,
+text and emoji ignore the pen. So a menu bar can draw its icons in one pen
+while the desktop beside it keeps them in colour.
 
 ## Choose the right category
 

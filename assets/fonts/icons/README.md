@@ -158,7 +158,7 @@ supply one geometry; `signal_level` determines which parts are active
 (`data-level` at or below it), avoiding divergent drawings per level. One
 icon says the whole state: the charging bolt and the mains plug are inside
 the battery, not a second glyph beside it. Colour layers are COLR v0/CPAL.
-Each icon has a monochrome shape too, for `fonts.icon_colour` (ADR 0220),
+Each icon has a monochrome shape too, for the icon pen (SGR 68, ADR 0220, 0221),
 decided when the font is built, from its SVG: a path whose `data-level` is
 above the icon's `signal_level` is left out (so a battery shows its bands, Wi-Fi
 and volume their active bars and waves); `data-mono="knockout"` on a path cuts

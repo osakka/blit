@@ -190,8 +190,10 @@ resource is usable only when its API state and capability fields say it is.
 version. Among its flags, the terminal's SGR extensions: `sgr-framed` (SGR
 51 framed, with Blit's 51:3 thick and 51:5 rule, ended by 54),
 `sgr-framed-bar` (51:2, a Slate title bar's rows in the cell's pens; 51:4
-is its alias) and `sgr-shadow` (66 and 67, a drop shadow under the cell's
-glyph). See [the terminal reference](terminal.md#sgr).
+is its alias), `sgr-shadow` (66 and 67, a drop shadow under the cell's
+glyph) and `sgr-icon-pen` (68:v and 69, the pen of Blit's colour icons in
+that cell; the cells API's `style.icon_pen`). See
+[the terminal reference](terminal.md#sgr).
 
 ## Presentation configuration ownership
 
@@ -1042,21 +1044,10 @@ cache and redraws, as a size change does. Fitted icons and symbols and cell
 geometry ignore it. It is stored in `document.font.hinting`; a document
 without it means `full`.
 
-`icon_colour` (`colour`, `black`, `white` or `auto`; default `colour`) sets the
-pen of Blit's colour icons, the private-use icons from U+100000 that carry
-colour (ADR 0220). `colour` draws them in their own colours, as always. The
-other three draw the icon's monochrome shape, which the icon font carries and
-which says state by shape: a battery has as many bands as its level, a
-charging battery a bolt, mains a plug, Wi-Fi and volume only the bars and
-waves that are on. `black` is exactly black and `white` exactly white (the
-knockouts are transparent, so the bar shows through them); `auto` is drawn in
-the cell's foreground like the text beside it, so the icons follow a light or
-dark bar with no theme detection. Window glyphs and controls, text and emoji
-ignore it. It can be sent alone or with the other controls,
-`active.icon_colour` reports it, and anything else is a 400
-`invalid_font_icon_colour`. A change rebuilds the glyph cache and redraws. It
-is stored in `document.font.icon_colour`; a document without it means
-`colour`.
+The pen of Blit's colour icons is not a font setting: it is a cell
+attribute, SGR 68 (ADR 0221, which replaced 0.3.48's `icon_colour`; see
+[the terminal reference](terminal.md#sgr)). A stored document that still
+holds `font.icon_colour` loads; the key is ignored and not written back.
 
 Fonts are discovered (ADR 0195):
 
@@ -1141,7 +1132,7 @@ font selection.
 settings. The response has three relevant parts: `document` is the sparse
 stored document, `effective` is what this process is using now, and
 `revision` is the optimistic-concurrency value for replacement. The document
-holds `font` (`font_id` with `scale` or `size_px`, `hinting` and `icon_colour`) and `server` values:
+holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
 `effects_animation_hz`, `restart_after_update`, `expect_desktop` and

@@ -2167,19 +2167,6 @@ components:
             FT_LOAD_TARGET_NORMAL), light (FT_LOAD_TARGET_LIGHT) or none
             (FT_LOAD_NO_HINTING). Fitted icons and symbols ignore it. A change
             rebuilds the glyph cache and redraws, as a size change does.
-        icon_colour:
-          type: string
-          enum: [colour, black, white, auto]
-          description: >-
-            The pen of Blit's colour icons (ADR 0220). colour (the default)
-            draws them in their own colours. black, white and auto draw the
-            icon's monochrome shape, which the icon font carries: levels below
-            the signal level are left out and knockouts (a charging bolt, a
-            plug, the hui letters) are cut away, so a state reads by shape.
-            black is exactly black, white exactly white; auto is drawn in the
-            cell's foreground, with the cell's background showing through the
-            knockouts, like the text beside it. Window glyphs, controls, text
-            and emoji ignore it. A change rebuilds the glyph cache and redraws.
       additionalProperties: false
     FontProfiles:
       type: object
@@ -2188,7 +2175,7 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         active:
           type: object
-          required: [id, path, scale, size_px, sizing, hinting, icon_colour, cell_pixels, glyphs, mappings]
+          required: [id, path, scale, size_px, sizing, hinting, cell_pixels, glyphs, mappings]
           properties:
             id: {$ref: '#/components/schemas/ResourceId'}
             path: {type: string}
@@ -2199,7 +2186,6 @@ components:
             size_px: {type: integer, minimum: 1}
             sizing: {type: string, enum: [scale, pixels]}
             hinting: {type: string, enum: [full, light, none]}
-            icon_colour: {type: string, enum: [colour, black, white, auto]}
             rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
             colour_glyphs: {type: boolean}
             arabic_companion:
@@ -2262,8 +2248,10 @@ components:
             Runtime facts a client switches on instead of a version. Among
             them: `sgr-framed` (SGR 51 framed, with Blit's 51:3 thick and 51:5
             rule, and 54 to end it), `sgr-framed-bar` (51:2, a Slate title
-            bar's rows in the cell's pens; 51:4 is its alias) and `sgr-shadow`
-            (SGR 66, 67: a drop shadow drawn under the cell's glyph).
+            bar's rows in the cell's pens; 51:4 is its alias), `sgr-shadow`
+            (SGR 66, 67: a drop shadow drawn under the cell's glyph) and
+            `sgr-icon-pen` (SGR 68:v, 69: the pen Blit's colour icons are drawn
+            in, per cell; ADR 0221).
           items: {type: string}
         display_count: {type: integer, minimum: 0}
         display_backend:
@@ -2850,7 +2838,6 @@ components:
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
                 size_px: {type: integer, minimum: 8, maximum: 64}
                 hinting: {type: string, enum: [full, light, none]}
-                icon_colour: {type: string, enum: [colour, black, white, auto]}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
             effects:
               type: object
@@ -5672,6 +5659,18 @@ components:
             cell's edge. Drawn under the cell's glyph, in the underline
             colour if set, else the foreground. Blit reports none, or the
             kind and width with ":0" only when flush; it accepts ":1" too.
+        icon_pen:
+          type: string
+          enum: [colour, auto, black, white]
+          description: >-
+            The pen Blit's colour icons (U+100000 and up that carry colour)
+            are drawn in, SGR 68:v, ended by SGR 69 (ADR 0221). colour (the
+            default) draws an icon in its own colours. auto, black and white
+            draw its monochrome shape, which the icon font carries (levels
+            below the signal level left out, knockouts cut away): auto in the
+            cell's foreground, with the background showing through the
+            knockouts, black exactly black, white exactly white. Every other
+            glyph ignores it. A change redraws the cell only.
         underline_color:
           type: string
           pattern: '^#[0-9a-fA-F]{6}$'

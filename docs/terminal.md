@@ -15,7 +15,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Area | Supported |
 | --- | --- |
 | Colour | 16, 256 and 24-bit truecolour; underline colour (SGR 58/59) |
-| Attributes | bold, dim, italic, underline, blink (drawn steady), reverse, hidden, strikethrough, framed (top and bottom only), drop shadow (Blit's SGR 66) |
+| Attributes | bold, dim, italic, underline, blink (drawn steady), reverse, hidden, strikethrough, framed (top and bottom only), drop shadow (Blit's SGR 66), icon pen (Blit's SGR 68) |
 | Screens | main screen with 1,000 lines of scrollback; alternate screen (47, 1047, 1049) |
 | Editing | insert/delete characters and lines, erase, repeat, scroll regions, left/right margins, VT400 rectangle operations including copy (DECCRA) |
 | Mouse | X10/normal/button/any-motion tracking; legacy, SGR and SGR-pixel encodings; wheel and horizontal wheel |
@@ -101,14 +101,18 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 51:2 | Blit extension: a Slate title bar's top and bottom rows (frame line and highlight, shade and rule) in the cell's pens: foreground, underline colour (white if unset) and half foreground half background, so a title's text cells match the bar glyphs beside them (ADR 0210, 0211) |
 | 51:5 | Blit extension: a rule along the cell's bottom edge only, 1 px, in the underline colour if set, else the foreground: the line under a note's strip (ADR 0210) |
 | 66:kind:width:inset, 67 | Blit extension: a drop shadow drawn under the cell's glyph, in the underline colour if set, else the foreground; 67 (or 66:0) ends it. kind 1 right, 2 right from 2 px down (a window's first row), 3 under, 4 under from the 2 px offset (its first cell), 5 the corner; width 1 or 2 px, 2 if left out; inset 1 (default: 1 px in, just outside a Blit frame glyph's line) or 0 (at the cell's edge: the cells beyond a frame that fills its own, a box-drawing border or the outer-edge frame cells of ADR 0214, whose line is on the cell's outermost edge). Colon form only (ADR 0211) |
+| 68:v, 69 | Blit extension: the icon pen, the pen Blit's colour icons (U+100000 and up that carry colour) are drawn in, in this cell. v 1 auto (the icon's monochrome shape in the cell's foreground, the background showing through its knockouts), 2 black, 3 white; 69 (or 68:0, or 68 alone) ends it, and an unknown v leaves it alone. Without it an icon is in its own colours. Every other glyph ignores it, and a change redraws the cell only. Colon form only (ADR 0221) |
 
 **A client detects these extensions** from `GET /v1/server`'s `capabilities`:
 `sgr-framed` (51, 51:3, 51:5, 54), `sgr-framed-bar` (51:2, and 51:4 as its
-alias) and `sgr-shadow` (66, 67), not from the version.
+alias), `sgr-shadow` (66, 67) and `sgr-icon-pen` (68, 69), not from the
+version.
 
-**SGR 66 and 67 are Blit's own,** in a gap the references we read leave
-unassigned (ADR 0211 lists them); that is not a survey of every terminal.
-`66;1;2` is three SGRs, not a shadow.
+**SGR 66 to 69 are Blit's own,** in a gap the references we read leave
+unassigned (ADR 0211 lists them, ADR 0221 adds 68 and 69); that is not a
+survey of every terminal. `66;1;2` is three SGRs, not a shadow, and `68;2`
+is two, not a pen. SGR 69 is not DEC private mode 69 (DECLRMM, `CSI ? 69 h`,
+below).
 
 **SGR 51 deviates from ECMA-48.** The standard's *framed* draws a frame on
 all four sides; Blit draws the top and bottom only. It is for a button's
@@ -156,7 +160,7 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 | --- | --- |
 | `DCS … q` | Sixel image |
 | `DCS $ q` | Request a setting (DECRQSS): margins, cursor style, SGR with its colours, protection, conformance and others |
-| `DCS + q` | Terminal capabilities (XTGETTCAP): name, colours, RGB, size, `Tc`, `bce`, and Blit's `sgr-framed`, `sgr-framed-bar`, `sgr-shadow` (booleans: `DCS 1 + r <hex name> ST` when present, `DCS 0 + r <hex name> ST` otherwise) |
+| `DCS + q` | Terminal capabilities (XTGETTCAP): name, colours, RGB, size, `Tc`, `bce`, and Blit's `sgr-framed`, `sgr-framed-bar`, `sgr-shadow`, `sgr-icon-pen` (booleans: `DCS 1 + r <hex name> ST` when present, `DCS 0 + r <hex name> ST` otherwise) |
 
 ## Mouse, paste, focus and keyboard
 
