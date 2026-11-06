@@ -116,8 +116,9 @@ resolving a Nerd symbol; do not infer a scalar from an icon's label.
 The authoritative mapping is [icons/catalogue.json](../assets/fonts/icons/catalogue.json),
 also served unchanged by authenticated `GET /v1/fonts/icons`.
 [The generated table](fonts/special.md) gives every ID, codepoint and valid
-JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-1` through
-`wifi-4`, `bluetooth`, `blit`, `battery-0` through `battery-4`,
+JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-signal-1`
+through `wifi-signal-4` and `wifi-off` (Wi-Fi: a dot and three arcs, a cross when
+off), `cellular-1` through `cellular-4` (the mobile signal's four bars), `bluetooth`, `blit`, `battery-0` through `battery-4`,
 `battery-0-charging` through `battery-4-charging`, `battery-ac`, and
 `volume-0` (muted) through `volume-3`, `power`, `phone-off`, `phone-wait`,
 `phone-on`, `phone-ring`, their classic counterparts `phone-classic-off`
@@ -129,6 +130,14 @@ icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), `hui-left` +
 (the tap, no drop: off), and their one-column forms `wiretap-1` (on) and
 `wiretap-1-off` (off). Resolve those IDs from the catalogue
 instead of maintaining an independently numbered table in every application.
+
+**`wifi-1` through `wifi-4` are deprecated (0.3.55).** The four bars are the
+mobile signal, so they are named `cellular-1` through `cellular-4` (U+1002D6–1002D9,
+the same drawing at each level); each `wifi-N` entry carries `deprecated: true`
+and `replaced_by: ["cellular-N"]`, and Blit still draws it, unchanged, until a
+release retires it. Deprecated, not retired: a deprecated id never names a
+different picture. Wi-Fi itself is `wifi-signal-1` through `wifi-signal-4`
+(U+1002D1–1002D4) and `wifi-off` (U+1002D5).
 
 **One icon says the whole state.** The charging bolt and the mains plug are
 drawn inside the battery, so a status bar shows one glyph per state, never a
@@ -323,11 +332,12 @@ pressed.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002D1 (the outer-edge frame, below,
+section. The next free codepoint is U+1002DA (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
 hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
 off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
-minimise box U+1002CD–1002D0).
+minimise box U+1002CD–1002D0, then the Wi-Fi signal and cellular icons
+U+1002D1–1002D9).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

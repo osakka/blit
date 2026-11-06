@@ -30,7 +30,8 @@ Dir.chdir(root) do
     slots.call(%w[home boxer markdown spreadsheet diagram presentation font web terminal settings bundle link], true) +
     slots.call(%w[folder-git folder-config folder-local folder-system folder-desktop folder-downloads folder-documents folder-music folder-pictures folder-videos folder-apps folder-games rc history service key network cron readme license log kernel boot c asm makefile patch json vector rom ebook exe disc package library lock database usb share], true) +
     %w[jpg png gif].flat_map { |f| ["file-image-#{f}-left", "file-image-#{f}-right"] } +
-    %w[hui-mark-left hui-mark-right wiretap-left wiretap-right wiretap-off-left wiretap-off-right wiretap-1 wiretap-1-off]
+    %w[hui-mark-left hui-mark-right wiretap-left wiretap-right wiretap-off-left wiretap-off-right wiretap-1 wiretap-1-off] +
+    (1..4).map { |l| "wifi-signal-#{l}" } + %w[wifi-off] + (1..4).map { |l| "cellular-#{l}" }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
   # ADR 0214: the outer-edge frame is cell geometry at U+1002AE-1002B6, clear
   # of the icons and every retired range; a deprecated glyph names live,

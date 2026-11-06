@@ -1661,7 +1661,10 @@ minimise boxes (ADR 0222), each with `colour`, `set` (`chalk`, `slate-light`, `s
 capsule, ADR 0211). Slate dark's codepoints are under `retired`. An entry a
 later glyph replaces carries `deprecated: true` and `replaced_by` (the ids
 that replace it): Blit still draws it, unchanged, until a release retires
-it, so a client moves at its own pace (ADR 0214).
+it, so a client moves at its own pace (ADR 0214). An `icons` entry can carry
+the same two fields: since 0.3.55 `wifi-1`..`wifi-4` (the bars, the mobile
+signal) are deprecated, `replaced_by` `cellular-1`..`cellular-4`; Wi-Fi is
+`wifi-signal-1`..`wifi-signal-4` and `wifi-off`.
 
 **Every cell-geometry entry says which pens to set**, as data, so a client
 maps the glyphs without a table of its own: `part` (what it is a piece

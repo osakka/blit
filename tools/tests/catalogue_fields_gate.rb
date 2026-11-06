@@ -152,6 +152,25 @@ readme = File.read('assets/fonts/icons/README.md')
 end
 check(readme.match?(/`frame`.*the one frame set/m), 'assets/fonts/icons/README.md does not document the frame set')
 
+# 0.3.55: an icon can be deprecated the same way. Exactly wifi-1..4 are: the
+# bars are the cellular signal, cellular-1..4, the same drawing and level at
+# new codepoints (one codepoint is one id); wifi-signal-1..4 are the Wi-Fi fan.
+icons = catalogue.fetch('icons')
+icon_by_id = icons.to_h { |e| [e['id'], e] }
+icons.each do |e|
+  check(e.key?('deprecated') == e.key?('replaced_by'), "#{e['id']}: deprecated and replaced_by go together")
+  next unless e.key?('deprecated')
+
+  check(e['deprecated'] == true, "#{e['id']}: deprecated is not true (omit it if not deprecated)")
+  r = e['replaced_by']
+  check(r.is_a?(Array) && !r.empty? && r.all? { |to| icon_by_id.key?(to) && !icon_by_id[to].key?('deprecated') },
+        "#{e['id']}: replaced_by does not name live icons")
+end
+check(icons.select { |e| e.key?('deprecated') }.map { |e| [e['id'], e['replaced_by']] } == (1..4).map { |l| ["wifi-#{l}", ["cellular-#{l}"]] },
+      'the deprecated icons are not exactly wifi-1..4, replaced by cellular-1..4')
+check((1..4).all? { |l| icon_by_id["cellular-#{l}"]&.values_at('source', 'signal_level') == ['wifi-bars.svg', l] },
+      'cellular-1..4 are not the bars at their levels')
+
 # Generated, not hand-kept.
 %w[draw-window-glyphs.py draw-control-glyphs.py].each do |script|
   out, status = Open3.capture2e('python3', "tools/fonts/#{script}", '--check')
