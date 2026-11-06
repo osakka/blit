@@ -1635,8 +1635,8 @@ colour icons (status icons, the hui badge, telephones, file-manager icons):
 each icon's id, codepoint, how many columns it spans, and the codepoints
 retired and never reused. Its `cell_geometry` section lists the glyphs
 Blit draws as cell geometry: the bar corners, the 70 window-chrome glyphs
-(ADR 0210), the 20 controls (ADR 0212) and the 9 outer-edge frame glyphs
-(ADR 0214), each with `colour`, `set` (`chalk`, `slate-light`, `slate`,
+(ADR 0210), the 20 controls (ADR 0212), the 13 outer-edge frame glyphs
+(ADR 0214) and the 10 pressed-box and grow glyphs (ADR 0219), each with `colour`, `set` (`chalk`, `slate-light`, `slate`,
 `capsule` or `frame`) and `pens` (`foreground`, or `cell` for Slate and the
 capsule, ADR 0211). Slate dark's codepoints are under `retired`. An entry a
 later glyph replaces carries `deprecated: true` and `replaced_by` (the ids

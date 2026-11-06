@@ -244,12 +244,44 @@ window's face and the face runs out to the line.
   unchanged, until a later release retires them. The dialog, note and
   `frame-top-*` glyphs are not affected.
 
+## Pressed boxes and the grow box
+
+ADR 0219. 10 glyphs at U+1002BB–1002C4, five a set, Chalk's then Slate's:
+the title bar's three boxes **pressed**, and the window's **grow box** (the
+resize corner), normal and pressed.
+
+| Glyph | Codepoint | Put it | Pens |
+| --- | --- | --- | --- |
+| `chalk-close-pressed`, `-shade-pressed`, `-zoom-pressed` | U+1002BB–1002BD | in place of `chalk-close`, `-shade`, `-zoom` while the box is pressed or hovered | fg = the ink, bg = the bar |
+| `chalk-grow`, `chalk-grow-pressed` | U+1002BE, U+1002BF | the window's bottom-right cell, in place of `frame-bottom-right` | fg = the ink, bg = the window's face |
+| `slate-light-close-pressed`, `-shade-pressed`, `-zoom-pressed` | U+1002C0–1002C2 | in place of `slate-light-close`, `-shade`, `-zoom` | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `slate-light-grow`, `slate-light-grow-pressed` | U+1002C3, U+1002C4 | the window's bottom-right cell | bg = the window's face, fg = the ink, SGR 58 = the highlight |
+
+- **Hover is pressed.** There is one set of states: draw the pressed glyph
+  for a box the pointer is over or holding, the normal one otherwise.
+- **Chalk pressed** is the box solid in the foreground with its mark cleared
+  out, so the cell's background shows through it: close an X (7x7 at 11 px),
+  zoom a square outline (6x6, one clear pixel inside the border, in the
+  top-left), shade three bars (box rows 3, 5 and 7).
+- **Slate pressed** is the mix pen inside the box, the unpressed bevel
+  inverted (the foreground pen on the inner top and left, the line pen on the
+  inner bottom and right), and the mark in the foreground pen, about 5 px.
+- **The grow box** is an 11x11 square at the bottom of the cell (rows 11–21
+  at 11x22). Its right and bottom edges are the frame's own outer lines, so
+  the cell is the bottom-right corner of the frame (ADR 0214) with the box
+  in it: put it where `frame-bottom-right` goes. Inside, a `/` hatch with a
+  4 px period. Chalk: black lines. Slate: each a mix-pen line with a
+  line-pen line beside it. Pressed (dragging): Chalk is solid with the hatch
+  cleared out, Slate the mix pen with a foreground hatch.
+- At other cell sizes the box is the title bar's box (the band's square) and
+  the marks and hatch keep their pixel widths.
+
 ## Controls: checkbox, switch and capsule
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002BB (the outer-edge frame, below,
-is U+1002AE–1002BA).
+section. The next free codepoint is U+1002C5 (the outer-edge frame, below,
+is U+1002AE–1002BA, and the pressed boxes and grow box U+1002BB–1002C4).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

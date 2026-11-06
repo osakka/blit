@@ -16,6 +16,10 @@ both: the cell's background shows, which for a frame cell on a held desktop
 is the wallpaper. The controls that follow (U+10029A-1002AD) are
 draw-control-glyphs.py's.
 
+The pressed boxes and the grow box (ADR 0219), U+1002BB-1002C4, are here
+too: five glyphs a set (close, shade and zoom pressed, the grow cell and
+the grow cell dragged), Chalk's then Slate's.
+
 The outer-edge frame (ADR 0214), U+1002AE-1002B6, is here too: ONE frame
 set (the line on the outermost edge of each frame cell, nothing else
 drawn), and the title bar's four end cells (and, from 0.3.45, the four plain ones of the inactive bar), Chalk's and Slate's, which
@@ -119,6 +123,17 @@ for _style in ('chalk', 'slate-light'):
         f'{_style}-stripe-first': [f'{_style}-title-end-left'],
         f'{_style}-stripe-last': [f'{_style}-title-end-right'],
     })
+
+# ADR 0219: the pressed boxes and the grow box, five glyphs a set, Chalk's then
+# Slate's, from STATE_FIRST. Hover draws the pressed glyph.
+STATE_FIRST = 0x1002BB
+STATES = [
+    ('close-pressed', 'title bar with the close box pressed (also hover): the box filled, an X in it'),
+    ('shade-pressed', 'title bar with the window-shade box pressed (also hover): the box filled, bars in it'),
+    ('zoom-pressed', 'title bar with the zoom box pressed (also hover): the box filled, a square outline in its top-left'),
+    ('grow', 'the window\'s bottom-right corner with the grow box: the frame\'s right and bottom lines are its edges, a / hatch inside'),
+    ('grow-pressed', 'the grow box pressed or dragged: the box filled, the hatch in the opposite colour'),
+]
 
 HEADER = ROOT / 'src/blit_window_glyphs.h'
 # Slate's roles (ADR 0211), resolved in the cell it is drawn in: K the
@@ -372,6 +387,67 @@ def draw_frame(index, w, h):
     return c.rows()
 
 
+def draw_state(style, index, w, h):
+    """One pressed-box or grow glyph's role map (ADR 0219), index 0-4 of STATES."""
+    name = STATES[index][0]
+    slate = style != 'chalk'
+    L, gap = T['LINE'], T['PRESS_GAP']
+    c = Cell(w, h)
+    n, top, side, bx, by = band_box(w, h)
+
+    def outline(x0, x1, y0, y1, role):
+        c.fill(x0, x1, y0, y0 + L, role); c.fill(x0, x1, y1 - L, y1, role)
+        c.fill(x0, x0 + L, y0, y1, role); c.fill(x1 - L, x1, y0, y1, role)
+
+    if name.startswith('grow'):
+        pressed = name == 'grow-pressed'
+        x0, y0 = w - side, h - side
+        if pressed:
+            c.fill(x0 + L, w - L, y0 + L, h - L, 'M' if slate else 'K')
+        for y in range(y0 + L, h - L):
+            for x in range(x0 + L, w - L):
+                phase = ((x - x0) + (y - y0)) % T['GROW_PERIOD']
+                if phase == 0:
+                    c.px[y][x] = ('K' if slate else None) if pressed else ('M' if slate else 'K')
+                elif phase == L and slate and not pressed:
+                    c.px[y][x] = 'L'
+        outline(x0, w, y0, h, 'K')
+        # The frame's own lines, which are the box's right and bottom edges.
+        c.fill(w - L, w, 0, h, 'K'); c.fill(0, w, h - L, h, 'K')
+        return c.rows()
+    # The bar without stripes, and the box with its inside changed.
+    c.fill(0, w, 0, h, 'B') if slate else None
+    c.fill(0, w, 0, L, 'K'); c.fill(0, w, h - L, h, 'K')
+    if slate:
+        c.fill(0, w, L, 2 * L, 'L'); c.fill(0, w, h - 2 * L, h - L, 'M')
+    c.fill(bx, bx + side, by, by + side, 'M' if slate else 'K')
+    outline(bx, bx + side, by, by + side, 'K')
+    if slate:
+        c.fill(bx + L, bx + side - L, by + side - 2 * L, by + side - L, 'L')
+        c.fill(bx + side - 2 * L, bx + side - L, by + L, by + side - L, 'L')
+        c.fill(bx + L, bx + side - L, by + L, by + 2 * L, 'K')
+        c.fill(bx + L, bx + 2 * L, by + L, by + side - L, 'K')
+    inset = (2 * L if slate else L) + gap
+    m = side - 2 * inset
+    lo, ly = bx + inset, by + inset
+    if m < 1:
+        return c.rows()
+    ink = 'K' if slate else None
+    if name == 'close-pressed':
+        for k in range(m):
+            c.px[ly + k][lo + k] = ink
+            c.px[ly + k][lo + m - 1 - k] = ink
+    elif name == 'zoom-pressed':
+        outline(lo, lo + m - 1, ly, ly + m - 1, ink)
+    else:
+        centre = by + (side - 1) // 2
+        for k in ((-1, 1) if slate else (-2, 0, 2)):
+            y = centre + k * L
+            if ly <= y < ly + m:
+                c.fill(lo, lo + m, y, y + L, ink)
+    return c.rows()
+
+
 def glyphs():
     """Every (codepoint, style, index) in codepoint order. Window glyphs
     have the two sets' styles and index 0-34; the outer-edge frame glyphs
@@ -381,9 +457,14 @@ def glyphs():
             yield first + index, style, index
     for index, (_, style, _) in enumerate(FRAMES):
         yield FRAME_FIRST + index, style, 100 + index
+    for style, first in (('chalk', STATE_FIRST), ('slate-light', STATE_FIRST + len(STATES))):
+        for index in range(len(STATES)):
+            yield first + index, style, 200 + index
 
 
 def rows_of(style, index, w, h):
+    if index >= 200:
+        return draw_state(style, index - 200, w, h)
     return draw_frame(index - 100, w, h) if index >= 100 else draw(style, index, w, h)
 
 
@@ -460,11 +541,31 @@ def frame_entries():
     return entries
 
 
+def state_entries():
+    """The pressed boxes' and the grow cells' entries (ADR 0219). The boxes
+    are the title bar's; the grow cell is a frame cell, the window's
+    bottom-right corner, on the window's face."""
+    entries = []
+    for style, first in (('chalk', STATE_FIRST), ('slate-light', STATE_FIRST + len(STATES))):
+        set_name = {'chalk': 'Chalk', 'slate-light': 'Slate'}[style]
+        slate = style != 'chalk'
+        for index, (name, shape) in enumerate(STATES):
+            fields = structure(style, 'title')
+            if name.startswith('grow'):
+                fields = {**fields, 'part': 'frame', 'background': 'panel', 'line': 'highlight' if slate else 'none'}
+            entries.append({'id': f'{style}-{name}', 'codepoint': f'{first + index:06X}', 'colour': False,
+                            'pens': 'cell' if slate else 'foreground', 'set': style,
+                            'shape': f'{set_name} set: {shape}', **fields})
+    return entries
+
+
 def owned(entry):
     """Is this catalogue entry one of this script's: a window glyph
-    (U+100231-100276) or an outer-edge frame glyph (U+1002AE-1002B6)?"""
+    (U+100231-100276), an outer-edge frame glyph (U+1002AE-1002BA) or a
+    pressed-box or grow glyph (U+1002BB-1002C4)?"""
     cp = int(entry['codepoint'], 16)
-    return STYLES[0][1] <= cp < RETIRED[0] or FRAME_FIRST <= cp < FRAME_FIRST + len(FRAMES)
+    return (STYLES[0][1] <= cp < RETIRED[0] or FRAME_FIRST <= cp < FRAME_FIRST + len(FRAMES) or
+            STATE_FIRST <= cp < STATE_FIRST + 2 * len(STATES))
 
 
 def catalogue_entries():
@@ -483,7 +584,7 @@ def catalogue_entries():
             entry['deprecated'] = True
             entry['replaced_by'] = DEPRECATED[entry['id']]
         entries.append(entry)
-    return entries + frame_entries()
+    return entries + frame_entries() + state_entries()
 
 
 def write_catalogue():

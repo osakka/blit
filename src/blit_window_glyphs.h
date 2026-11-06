@@ -56,6 +56,11 @@
 #define BLIT_FRAME_COUNT 13U            /*   five frame cells, four title-end cells, four plain ones */
 #define BLIT_WINDOW_ZOOM_NUM 2          /* the zoom box's inner square: 2/3 of the */
 #define BLIT_WINDOW_ZOOM_DEN 3          /*   box, from its top-left corner */
+#define BLIT_STATE_FIRST 0x1002BBU      /* pressed boxes and the grow box (ADR 0219): */
+#define BLIT_STATE_SET 5U               /*   per set, three pressed boxes and two grow cells */
+#define BLIT_STATE_COUNT (2U * BLIT_STATE_SET) /* Chalk's five, then Slate's */
+#define BLIT_WINDOW_PRESS_GAP 1         /* a pressed box: clear between its border (and Slate's bevel) and the mark */
+#define BLIT_WINDOW_GROW_PERIOD 4       /* the grow box's '/' hatch: one line in every 4 px along a row */
 
 static int blit_window_glyph(uint32_t scalar)
 {
@@ -134,10 +139,15 @@ static void wg_fill(WindowCell *c, int x0, int x1, int y0, int y1, unsigned char
         for (x = x0; x < x1; ++x) c->roles[y * c->w + x] = role;
 }
 
+static void wg_outline_role(WindowCell *c, int x0, int x1, int y0, int y1, int t, unsigned char role)
+{
+    wg_fill(c, x0, x1, y0, y0 + t, role); wg_fill(c, x0, x1, y1 - t, y1, role);
+    wg_fill(c, x0, x0 + t, y0, y1, role); wg_fill(c, x1 - t, x1, y0, y1, role);
+}
+
 static void wg_outline(WindowCell *c, int x0, int x1, int y0, int y1, int t)
 {
-    wg_fill(c, x0, x1, y0, y0 + t, WR_FG); wg_fill(c, x0, x1, y1 - t, y1, WR_FG);
-    wg_fill(c, x0, x0 + t, y0, y1, WR_FG); wg_fill(c, x1 - t, x1, y0, y1, WR_FG);
+    wg_outline_role(c, x0, x1, y0, y1, t, WR_FG);
 }
 
 static int wg_max3(int a, int b, int c)
@@ -393,6 +403,99 @@ static void blit_frame_roles(uint32_t scalar, unsigned char *roles, int w, int h
            right ? w - BLIT_WINDOW_STRIPE_INSET : w, n, top);
     if (right) wg_fill(&cell, w - L, w, 0, h, WR_FG);
     else wg_fill(&cell, 0, L, 0, h, WR_FG);
+}
+
+/* ADR 0219: the pressed states of the title bar's three boxes, and the grow
+   box in the window's bottom-right corner, 5 glyphs per set from
+   BLIT_STATE_FIRST: Chalk's (coverage) then Slate's (pens). Hover draws the
+   pressed glyph: there is one set of states.
+   A pressed box is the box glyph (the bar without stripes, the 11x11 box
+   among them) with its inside changed. Chalk: the inside is the foreground
+   solid and the mark is clear (the cell's background shows), the close mark
+   an X, the zoom mark a square outline one pixel short of the mark area
+   (so it sits in the top-left), the shade mark three bars. Slate: the inside
+   is the mix pen, its inner edge a bevel inverted from the unpressed box's
+   (the foreground pen on the top and left, the line pen on the bottom and
+   right), the mark in the foreground. The mark area is the box less its
+   border, BLIT_WINDOW_PRESS_GAP and, in Slate, the bevel.
+   The grow cell is the window's bottom-right corner: the frame's right and
+   bottom lines (ADR 0214) are the box's own right and bottom edges, so the
+   box stands on the cell's bottom-right, as wide and high as the title
+   bar's box; inside, a '/' hatch with a BLIT_WINDOW_GROW_PERIOD px period.
+   Chalk: the lines in the foreground. Slate: each a mix pen line with a
+   line pen line beside it. Pressed (dragging): Chalk the inside solid with a
+   clear hatch; Slate the mix pen inside with a foreground hatch. */
+enum { WS_CLOSE_PRESSED, WS_SHADE_PRESSED, WS_ZOOM_PRESSED, WS_GROW, WS_GROW_PRESSED };
+
+static int blit_state_glyph(uint32_t scalar)
+{
+    return scalar >= BLIT_STATE_FIRST && scalar < BLIT_STATE_FIRST + BLIT_STATE_COUNT;
+}
+
+/* Slate's five are drawn in pens, 0 to 4; Chalk's, coverage, have none: -1. */
+static int blit_state_pen_index(uint32_t scalar)
+{
+    if (!blit_state_glyph(scalar) || scalar - BLIT_STATE_FIRST < BLIT_STATE_SET) return -1;
+    return (int)(scalar - BLIT_STATE_FIRST - BLIT_STATE_SET);
+}
+
+static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h)
+{
+    enum { L = BLIT_WINDOW_LINE };
+    unsigned index = (scalar - BLIT_STATE_FIRST) % BLIT_STATE_SET;
+    int slate = scalar - BLIT_STATE_FIRST >= BLIT_STATE_SET;
+    int n, top, side, bx, by, x, y, i, m, lo, ly;
+    WindowCell cell;
+    cell.roles = roles; cell.w = w; cell.h = h;
+    memset(roles, WR_NONE, (size_t)w * (size_t)h);
+    blit_window_band(w, h, &n, &top, &side, &bx, &by);
+    if (index == WS_GROW || index == WS_GROW_PRESSED) {
+        int pressed = index == WS_GROW_PRESSED;
+        int x0 = w - side, y0 = h - side;
+        /* The inside, then the hatch over it, then the four edges. */
+        if (pressed) wg_fill(&cell, x0 + L, w - L, y0 + L, h - L, slate ? WR_MIX : WR_FG);
+        for (y = y0 + L; y < h - L; ++y) for (x = x0 + L; x < w - L; ++x) {
+            int phase = ((x - x0) + (y - y0)) % BLIT_WINDOW_GROW_PERIOD;
+            if (phase == 0) roles[y * w + x] = pressed ? (slate ? WR_FG : WR_NONE) : (slate ? WR_MIX : WR_FG);
+            else if (phase == L && slate && !pressed) roles[y * w + x] = WR_LINE;
+        }
+        wg_outline(&cell, x0, w, y0, h, L);
+        /* The frame's own lines, which are the box's right and bottom edges. */
+        wg_fill(&cell, w - L, w, 0, h, WR_FG); wg_fill(&cell, 0, w, h - L, h, WR_FG);
+        return;
+    }
+    wg_bar(&cell, slate, 0, 0, w, n, top);
+    wg_fill(&cell, bx, bx + side, by, by + side, slate ? WR_MIX : WR_FG);
+    wg_outline(&cell, bx, bx + side, by, by + side, L);
+    if (slate) {
+        /* Inverted from the unpressed bevel: the foreground pen top and left,
+           the line pen bottom and right; the foreground keeps the corners. */
+        wg_fill(&cell, bx + L, bx + side - L, by + side - 2 * L, by + side - L, WR_LINE);
+        wg_fill(&cell, bx + side - 2 * L, bx + side - L, by + L, by + side - L, WR_LINE);
+        wg_fill(&cell, bx + L, bx + side - L, by + L, by + 2 * L, WR_FG);
+        wg_fill(&cell, bx + L, bx + 2 * L, by + L, by + side - L, WR_FG);
+    }
+    i = (slate ? 2 * L : L) + BLIT_WINDOW_PRESS_GAP;
+    m = side - 2 * i;
+    lo = bx + i; ly = by + i;
+    if (m < 1) return;
+    {
+        unsigned char ink = slate ? WR_FG : WR_NONE;
+        if (index == WS_CLOSE_PRESSED) {
+            for (y = 0; y < m; ++y) {
+                roles[(ly + y) * w + lo + y] = ink;
+                roles[(ly + y) * w + lo + m - 1 - y] = ink;
+            }
+        } else if (index == WS_ZOOM_PRESSED) {
+            wg_outline_role(&cell, lo, lo + m - 1, ly, ly + m - 1, L, ink);
+        } else {
+            int centre = by + (side - 1) / 2;
+            for (i = slate ? -1 : -2; i <= (slate ? 1 : 2); i += 2) {
+                y = centre + i * L;
+                if (y >= ly && y < ly + m) wg_fill(&cell, lo, lo + m, y, y + L, ink);
+            }
+        }
+    }
 }
 
 /* ADR 0210: what SGR 51 draws in a framed cell, as up to four horizontal

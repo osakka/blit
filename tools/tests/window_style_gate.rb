@@ -67,6 +67,7 @@ FACE = [120, 30, 150].freeze
 BTN = [230, 130, 20].freeze
 FIRST = 0x100231
 # ADR 0214: the outer-edge frame, and the windows built from it.
+STATE_FIRST = 0x1002BB # ADR 0219: the pressed boxes and grow cells, ten glyphs
 FRAME_FIRST = 0x1002AE
 INK = [0, 0, 0].freeze
 BAR = [214, 214, 214].freeze
@@ -183,7 +184,9 @@ Dir.mktmpdir('blit-window-style') do |root|
       out << at.call(x0, y0 + WIN_BODY + 1, face_pens + u(FRAME_FIRST + 2) + u(FRAME_FIRST + 3) * (WIN_COLS - 2) + u(FRAME_FIRST + 4))
       out << sgr('0') + colours
     end
-    frames_scene = at.call(2, 10, nine) + win_text.call(2, 12, true, false) + win_text.call(2, 20, false, true) +
+    # ADR 0219: the pressed boxes (on the bar) and the grow cells (on the face), beside them.
+    states = (0...10).map { |i| (i % 5 < 3 ? bar_pens : face_pens) + u(STATE_FIRST + i) }.join + sgr('0') + colours
+    frames_scene = at.call(2, 10, nine) + at.call(16, 10, states) + win_text.call(2, 12, true, false) + win_text.call(2, 20, false, true) +
                    inactive_text.call(16, 12, true) + inactive_text.call(16, 20, false)
     shadows = SHADOWS.map { |k, t, i| "#{sgr("66:#{k}:#{t}:#{i}")} #{sgr('67')} " }.join +
               "#{sgr('58;2;255;0;0;66:1:2')} #{sgr('0')}#{colours}#{sgr('66:1:2;0')}#{colours} " \
@@ -230,7 +233,7 @@ Dir.mktmpdir('blit-window-style') do |root|
                                          '--reference', cw.to_s, ch.to_s)
     check(status.success?, "the design does not run: #{err}")
     lines = design.lines
-    check(lines.size == 83, "the design has #{lines.size} glyphs, not 83")
+    check(lines.size == 93, "the design has #{lines.size} glyphs, not 93")
     # Chalk on row 1; Slate on row 2 (no underline colour: LINE is white)
     # and row 3 (underline colour LINE).
     [[0, 1, nil], [35, 2, [255, 255, 255]], [35, 3, LINE]].each do |offset, row, line_pen|
@@ -269,6 +272,10 @@ Dir.mktmpdir('blit-window-style') do |root|
     end
     13.times do |i|
       cell_ok.call(2 + i, 10, FRAME_FIRST + i, INK, i < 5 ? FACE : BAR, HI, "frame glyph #{i}")
+    end
+    # ADR 0219: the same through the compositor, each of the ten from the design.
+    10.times do |i|
+      cell_ok.call(16 + i, 10, STATE_FIRST + i, INK, i % 5 < 3 ? BAR : FACE, HI, "pressed or grow glyph #{i}")
     end
     # Inactive windows: every cell the design's; no stripe anywhere in the bar
     # (every pixel off the bevel rows and the outer lines is the bar colour);
@@ -496,7 +503,7 @@ Dir.mktmpdir('blit-window-style') do |root|
             "the #{thick == 3 ? 'default ' : ''}button's left end is not 2 px in")
     end
     request('DELETE', "/v1/terminal-sessions/#{session['id']}")
-    puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70+13_frame inactive_windows=plain_title_ends windows=slate+chalk(outer_edge,stripes_run_in,shadow_inset_0) pixels=#{checked} " \
+    puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70+13_frame+10_state(pressed_boxes,grow) inactive_windows=plain_title_ends windows=slate+chalk(outer_edge,stripes_run_in,shadow_inset_0) pixels=#{checked} " \
          'chalk=foreground slate=cell_pens(fg,line,mix) transparent=background sgr51=1px sgr51:3=3px ' \
          'sgr51:5=bottom_rule underline_colour=used sgr54,sgr0=end buttons=continuous ' \
          'dialog=no_halo,no_fixed_colour caps=corners_show_dialog_face titles=51:2=51:4=bar_rows shadow=5_kinds*2_widths*2_insets,colour,under_glyph sgr67,sgr0=end'

@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR 0210, 0211, 0214: the window-chrome glyph sets, Chalk (U+100231-100253)
+# ADR 0210, 0211, 0214, 0219: the window-chrome glyph sets, Chalk (U+100231-100253)
 # and Slate (U+100254-100276); Slate dark (U+100277-100299) is retired.
 #
 # - The catalogue lists all 70 by name, as cell geometry, in two sets of
@@ -143,7 +143,7 @@ Dir.mktmpdir('blit-window-glyphs') do |work|
     end
   end
 end
-check(raster.size == 83 * SIZES.size, "the raster drew #{raster.size} of #{83 * SIZES.size}")
+check(raster.size == 93 * SIZES.size, "the raster drew #{raster.size} of #{93 * SIZES.size}")
 mismatches = []
 raster.each do |key, got|
   mismatches << format('U+%X at %dx%d', key[1], *key[0]) unless design[key] == got
@@ -529,7 +529,391 @@ SIZES.each do |w, h|
   end
 end
 
-puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA) outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
+# ADR 0219: the pressed boxes and the grow cells, U+1002BB-1002C4, written out
+# here, not read from the design. Chalk's five, then Slate's.
+#
+# At the owner's 11x22 each is its literal map (K ink, L, M pens, . nothing):
+# the box 11x11 on rows 5-15, a pressed Chalk box solid with its mark cleared
+# out (close: a 7x7 X; zoom: a 6x6 outline one pixel in from the border, in the
+# top-left; shade: three bars on box rows 3, 5 and 7), a pressed Slate box the
+# mix pen with the bevel inverted (the foreground pen on the inner top and
+# left, the line pen on the inner bottom and right) and a 5 px mark in the
+# foreground; the grow box 11x11 on rows 11-21 with a '/' hatch, one line in
+# four.
+STATE_FIRST = 0x1002BB
+STATE_IDS = %w[close-pressed shade-pressed zoom-pressed grow grow-pressed].freeze
+state_ids = %w[chalk slate-light].flat_map { |s| STATE_IDS.map { |n| "#{s}-#{n}" } }
+states = geometry.select { |e| e['codepoint'].to_i(16).between?(STATE_FIRST, STATE_FIRST + 9) }
+check(states.map { |e| [e['id'], e['codepoint'], e['set'], e['pens'], e['colour']] } ==
+      state_ids.each_with_index.map { |n, i| [n, format('%06X', STATE_FIRST + i), n.start_with?('chalk') ? 'chalk' : 'slate-light',
+                                              n.start_with?('chalk') ? 'foreground' : 'cell', false] },
+      'the catalogue does not list the ten pressed-box and grow glyphs (U+1002BB-1002C4) in order with their sets and pens')
+check(states.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? && !e['deprecated'] },
+      'a pressed-box or grow glyph has no shape, or is deprecated')
+check((states.map { |e| e['codepoint'].to_i(16) } & (icon_codes + retired)).empty?, 'a pressed-box or grow glyph reuses an icon or retired codepoint')
+check(states.select { |e| e['id'].include?('grow') }.all? { |e| e['part'] == 'frame' && e['background'] == 'panel' } &&
+      states.reject { |e| e['id'].include?('grow') }.all? { |e| e['part'] == 'title-bar' && e['background'] == 'bar' },
+      'the grow cells are not frame cells on the window face, or the pressed boxes not the title bar\'s')
+
+state_pixels = ->(id, w, h) { pixels(raster, w, h, STATE_FIRST + state_ids.index(id)) }
+roles_map = lambda do |id, w, h|
+  px = state_pixels.call(id, w, h)
+  (0...h).map { |y| (0...w).map { |x| a, r = px[y][x]; a.zero? ? '.' : (r || 'K') }.join }
+end
+
+STATE_LITERAL = {
+  'chalk-close-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KK.KKKKK.KK
+    KKK.KKK.KKK
+    KKKK.K.KKKK
+    KKKKK.KKKKK
+    KKKK.K.KKKK
+    KKK.KKK.KKK
+    KK.KKKKK.KK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-shade-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KK.......KK
+    KKKKKKKKKKK
+    KK.......KK
+    KKKKKKKKKKK
+    KK.......KK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-zoom-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KK......KKK
+    KK.KKKK.KKK
+    KK.KKKK.KKK
+    KK.KKKK.KKK
+    KK.KKKK.KKK
+    KK......KKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-grow' => <<~'ROWS'.split,
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    KKKKKKKKKKK
+    K..K...K..K
+    K.K...K...K
+    KK...K...KK
+    K...K...K.K
+    K..K...K..K
+    K.K...K...K
+    KK...K...KK
+    K...K...K.K
+    K..K...K..K
+    KKKKKKKKKKK
+  ROWS
+  'chalk-grow-pressed' => <<~'ROWS'.split,
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    KKKKKKKKKKK
+    KKK.KKK.KKK
+    KK.KKK.KKKK
+    K.KKK.KKK.K
+    KKKK.KKK.KK
+    KKK.KKK.KKK
+    KK.KKK.KKKK
+    K.KKK.KKK.K
+    KKKK.KKK.KK
+    KKK.KKK.KKK
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-close-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKMMMMMMMLK
+    KKMKMMMKMLK
+    KKMMKMKMMLK
+    KKMMMKMMMLK
+    KKMMKMKMMLK
+    KKMKMMMKMLK
+    KKMMMMMMMLK
+    KKLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-shade-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKMKKKKKMLK
+    KKMMMMMMMLK
+    KKMKKKKKMLK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-zoom-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKMMMMMMMLK
+    KKMKKKKMMLK
+    KKMKMMKMMLK
+    KKMKMMKMMLK
+    KKMKKKKMMLK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-grow' => <<~'ROWS'.split,
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    KKKKKKKKKKK
+    K..ML..ML.K
+    K.ML..ML..K
+    KML..ML..MK
+    KL..ML..MLK
+    K..ML..ML.K
+    K.ML..ML..K
+    KML..ML..MK
+    KL..ML..MLK
+    K..ML..ML.K
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-grow-pressed' => <<~'ROWS'.split,
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    ..........K
+    KKKKKKKKKKK
+    KMMKMMMKMMK
+    KMKMMMKMMMK
+    KKMMMKMMMKK
+    KMMMKMMMKMK
+    KMMKMMMKMMK
+    KMKMMMKMMMK
+    KKMMMKMMMKK
+    KMMMKMMMKMK
+    KMMKMMMKMMK
+    KKKKKKKKKKK
+  ROWS
+}.freeze
+STATE_LITERAL.each do |id, want|
+  check(roles_map.call(id, 11, 22) == want, "#{id} at 11x22 is not the approved drawing")
+end
+
+# At every size. The box is the title bar's (the band's square); the grow box
+# the same size, standing on the cell's bottom-right.
+band = lambda do |w, h|
+  n = [[(6 * h + 11) / 22, (h - 4) / 2].min, 1].max
+  top = (h - 2 * n) / 2
+  side = [w, 2 * n - 1].min
+  [(w - side) / 2, top + (2 * n - 1 - side) / 2, side]
+end
+SIZES.each do |w, h|
+  bx, by, side = band.call(w, h)
+  inner = (by + 1...by + side - 1).to_a.product((bx + 1...bx + side - 1).to_a)
+  %w[chalk slate-light].each do |style|
+    slate = style == 'slate-light'
+    inset = slate ? 3 : 2
+    m = side - 2 * inset
+    lo_x = bx + inset
+    lo_y = by + inset
+    marks = {
+      'close-pressed' => m < 1 ? [] : (0...m).flat_map { |k| [[lo_y + k, lo_x + k], [lo_y + k, lo_x + m - 1 - k]] },
+      'zoom-pressed' => m < 2 ? [] : (0...m - 1).flat_map { |k| [[lo_y, lo_x + k], [lo_y + m - 2, lo_x + k], [lo_y + k, lo_x], [lo_y + k, lo_x + m - 2]] },
+      'shade-pressed' => m < 1 ? [] : (slate ? [-1, 1] : [-2, 0, 2]).map { |k| by + (side - 1) / 2 + k }
+                                                                       .select { |y| y >= lo_y && y < lo_y + m }
+                                                                       .flat_map { |y| (lo_x...lo_x + m).map { |x| [y, x] } }
+    }
+    plain = pixels(raster, w, h, SETS.fetch(style) + NAMES.index('title'))
+    %w[close-pressed shade-pressed zoom-pressed].each do |name|
+      got = state_pixels.call("#{style}-#{name}", w, h)
+      mark = marks.fetch(name).uniq
+      what = "#{style}-#{name} at #{w}x#{h}"
+      (0...h).each do |y|
+        (0...w).each do |x|
+          next if y.between?(by, by + side - 1) && x.between?(bx, bx + side - 1)
+          check(got[y][x] == plain[y][x], "#{what}: pixel #{x},#{y} outside the box is not the bar's")
+        end
+      end
+      # The border is the foreground pen (Chalk: ink), as the unpressed box's.
+      (by...by + side).each do |y|
+        (bx...bx + side).each do |x|
+          next if y.between?(by + 1, by + side - 2) && x.between?(bx + 1, bx + side - 2)
+          check(got[y][x] == [255, slate ? 'K' : nil], "#{what}: border pixel #{x},#{y} is #{got[y][x].inspect}")
+        end
+      end
+      inner.each do |y, x|
+        want = if slate
+                 if mark.include?([y, x]) then [255, 'K']
+                 elsif y == by + 1 || x == bx + 1 then [255, 'K']
+                 elsif y == by + side - 2 || x == bx + side - 2 then [255, 'L']
+                 else [255, 'M']
+                 end
+               else
+                 mark.include?([y, x]) ? [0, nil] : [255, nil]
+               end
+        check(got[y][x] == want, "#{what}: inside pixel #{x},#{y} is #{got[y][x].inspect}, want #{want.inspect}")
+      end
+      check(slate || m < (name == 'zoom-pressed' ? 2 : 1) || !mark.empty?, "#{what}: a Chalk box with room for a mark has none")
+      unpressed = pixels(raster, w, h, SETS.fetch(style) + NAMES.index(name.sub('-pressed', '')))
+      check(side < 7 || got != unpressed, "#{what} is the unpressed box")
+    end
+    # Hover draws the pressed glyph: there is one set of states, so no
+    # glyph in the catalogue is named hover.
+    check(state_ids.none? { |n| n.include?('hover') }, 'a hover glyph is in the set')
+
+    # The grow cell: its right and bottom edges are the frame's own outer
+    # lines (the bottom-right frame cell's), its other two the box's.
+    corner = frame_pixels.call('frame-bottom-right', w, h)
+    %w[grow grow-pressed].each do |name|
+      got = state_pixels.call("#{style}-#{name}", w, h)
+      what = "#{style}-#{name} at #{w}x#{h}"
+      x0 = w - side
+      y0 = h - side
+      pressed = name == 'grow-pressed'
+      (0...h).each do |y|
+        (0...w).each do |x|
+          edge_ink = [255, slate ? 'K' : nil]
+          on_frame = corner[y][x][0] == 255
+          if on_frame
+            check(got[y][x] == edge_ink, "#{what}: frame line pixel #{x},#{y} is not the line")
+          elsif y < y0 || x < x0
+            check(got[y][x][0].zero?, "#{what}: pixel #{x},#{y} outside the box is drawn")
+          elsif y == y0 || x == x0
+            check(got[y][x] == edge_ink, "#{what}: box edge pixel #{x},#{y} is #{got[y][x].inspect}")
+          else
+            phase = ((x - x0) + (y - y0)) % 4
+            want = if slate
+                     if pressed then phase.zero? ? [255, 'K'] : [255, 'M']
+                     elsif phase.zero? then [255, 'M']
+                     elsif phase == 1 then [255, 'L']
+                     else [0, nil]
+                     end
+                   elsif pressed then phase.zero? ? [0, nil] : [255, nil]
+                   else phase.zero? ? [255, nil] : [0, nil]
+                   end
+            check(got[y][x] == want, "#{what}: hatch pixel #{x},#{y} is #{got[y][x].inspect}, want #{want.inspect}")
+          end
+        end
+      end
+      # The box's right edge and bottom edge are in the cell's last column and last row.
+      check((0...h).all? { |y| got[y][w - 1][0] == 255 } && (0...w).all? { |x| got[h - 1][x][0] == 255 },
+            "#{what}: the frame's outer lines are not the cell's last column and row")
+    end
+  end
+end
+check(state_ids.each_with_index.all? { |_, i| SIZES.all? { |w, h| raster.fetch([[w, h], STATE_FIRST + i])[1].size == (state_ids[i].start_with?('chalk') ? w * h * 2 : w * h) } },
+      'a pressed-box or grow glyph is not exactly its cell')
+
+
+puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA)+10_state(U+1002BB-1002C4) states=pressed_inverse,slate_bevel,grow_edges_are_frame_lines,hatch_4px outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
      "slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
      "sizes=#{SIZES.map { |s| s.join('x') }.join(',')} design=pixel-exact chalk=coverage slate=pen_planes " \
      "pewter=0.3.38_except_mix(#{mix_differs}_px,#{compared}_glyphs) dialog=no_halo,line+fg_only caps=corners_clear " \

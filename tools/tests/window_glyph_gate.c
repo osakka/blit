@@ -21,6 +21,11 @@
 #define FRAME_FIRST 0x1002AEU
 #define FRAME_LAST 0x1002BAU /* 0.3.45: four plain title ends, U+1002B7-1002BA */
 #define FRAME_SLATE 0x1002B5U /* Slate's title ends, U+1002B5-B6, and the plain ones, U+1002B9-BA */
+/* ADR 0219: the pressed boxes and the grow cells, ten glyphs; Slate's five
+   (U+1002C0-1002C4) are drawn in pens. */
+#define STATE_FIRST 0x1002BBU
+#define STATE_LAST 0x1002C4U
+#define STATE_SLATE 0x1002C0U
 
 int main(int argc, char **argv)
 {
@@ -35,12 +40,15 @@ int main(int argc, char **argv)
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], w, h);
         if (!raster) { fprintf(stderr, "WINDOW_GLYPH_FAIL no raster at %dx%d\n", w, h); return 1; }
         printf("SIZE %d %d\n", w, h);
-        for (n = 0; n < (LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1); ++n) {
+        for (n = 0; n < (LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1) + (STATE_LAST - STATE_FIRST + 1); ++n) {
             BlitRasterGlyph glyph, plane[3];
             int pen_drawn;
             int p;
-            cp = n <= LAST - FIRST ? FIRST + n : FRAME_FIRST + (n - (LAST - FIRST + 1));
-            pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U || cp == 0x1002BAU;
+            cp = n <= LAST - FIRST ? FIRST + n : n <= LAST - FIRST + FRAME_LAST - FRAME_FIRST + 1 ?
+                FRAME_FIRST + (n - (LAST - FIRST + 1)) :
+                STATE_FIRST + (n - (LAST - FIRST + 1) - (FRAME_LAST - FRAME_FIRST + 1));
+            pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U ||
+                cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST);
             if (!blit_raster_get(raster, cp, 1, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;

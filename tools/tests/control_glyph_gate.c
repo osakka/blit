@@ -7,7 +7,7 @@
        their pen planes: K (FG), L (LINE), M (MIX), '.' none.
    It also requires, at every size, that a pen-drawn glyph's planes are
    disjoint and together equal its one-colour lookup, that Chalk has no
-   planes, and that the codepoints just beyond the set (U+1002BB and on; U+1002AE-1002BA are the frame's, ADR 0214)
+   planes, and that the codepoints just beyond the set (U+1002C5 and on; U+1002AE-1002C4 are the frame's, ADR 0214, and the pressed states', ADR 0219)
    draw nothing of their own. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
@@ -16,8 +16,8 @@
 
 #define FIRST 0x10029AU
 #define LAST 0x1002ADU
-/* ADR 0214's outer-edge frame is U+1002AE-1002BA; window_glyph_gate holds it. */
-#define NEXT_FREE 0x1002BBU
+/* ADR 0214's outer-edge frame is U+1002AE-1002BA and ADR 0219's pressed states U+1002BB-1002C4; window_glyph_gate holds them. */
+#define NEXT_FREE 0x1002C5U
 
 /* Pens are used by Slate's checkbox (the 4th to 6th glyph) and from the
    Slate switch on (the 11th): written out here, not read from the header. */
