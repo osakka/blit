@@ -1,5 +1,34 @@
 # Verification status
 
+## 2026-11-06: 0.3.48 Blit icons in colour, black, white or auto, drawn so a state shows by shape
+
+- **`fonts.icon_colour`** (`colour`, `black`, `white`, `auto`; ADR 0220) draws
+  Blit's colour icons in their own colours (the default, byte-identical to
+  before for the icons not edited), solid black, solid white, or `auto`: the
+  cell's foreground, with knock-outs showing the cell's background, so a Blit
+  icon behaves like the text and Nerd glyphs beside it in a bar. It touches only
+  Blit's colour icons, not the window glyphs, controls, text or emoji.
+- **The monochrome shape is decided when the icon font is built, from the SVG.**
+  A first pass tinted the colour raster at run time and gave every level of a
+  family the same silhouette (battery levels 0.0% apart, draining against
+  charging 1.3%, Wi-Fi and volume levels 0.0%): the owner could not tell plugged
+  in from draining. Now each icon's `.mono` glyph is its active paths minus any
+  path marked `data-mono="knockout"`; inactive paths are omitted. The Wi-Fi,
+  volume and battery SVGs were adjusted, with a larger bolt and a plug.
+- **`font_icon_shape_gate`** compares every pair in each state family in the
+  black pen: at least 15% of pixels differ at 22 px and 10% at 16 px. Lowest at
+  22 px: 15.0% (plugged in vs fully charging); battery levels 20.7% to 57.3%,
+  charging levels 17.7% to 62.0%, draining vs charging 24.1% to 34.0%, Wi-Fi
+  48.6% to 90.9%, volume 20.0% to 44.2%. At 16 px the lowest is 26.1%. Against the
+  first-pass build the same gate fails 78 pairs. The icon font grows by 2,568
+  bytes (299,060 to 301,628).
+- **Shown to the owner** from real-server renders at 22 and 16 px on light and
+  dark bars, in colour, black, white and auto; approved. Known weak spots:
+  charging levels are subtle by eye (the bolt dominates), plugged in vs fully
+  charging sits at the 15% line, and Wi-Fi level 1 is a single small bar.
+- **Suites:** `all` 180 pass, 10 skip, 0 fail (JOBS=2); GLES `renderer` 80 pass,
+  1 skip, 0 fail; `package_artifact_gate` passes (reproducibility skipped).
+
 ## 2026-11-06: 0.3.47 font hinting setting, pressed boxes and a grow box, a faster gate runner
 
 - **`fonts.hinting`** (`full`, `light`, `none`; ADR 0218) chooses the FreeType
