@@ -3,7 +3,7 @@
 
 # The compositors' cell edges. Full-cell glyphs (blocks, box lines, powerline,
 # Blit's Chalk and Slate window boxes, their pressed states and the grow
-# cells (ADR 0219), and the button dots) are exact
+# cells (ADR 0219), the minimise boxes (ADR 0222), and the button dots) are exact
 # geometry that runs edge to edge, so a pixel lost at a cell's edge is a
 # clipped button or a seam. This runs the real server on the DRM mock with the
 # CPU compositor and with the GLES compositor, at the owner's 22 px and at
@@ -40,7 +40,9 @@ ROWS = [
   [0x2550, 0x2551, 0x2500, 0x2502], [0xE0B0, 0xE0B1, 0xE0B2, 0xE0B3],
   [0x10023A, 0x10023B, 0x10023C, 0x10025D, 0x10025E, 0x10025F], [0x25CF, 0x25A0, 0x25C6, 0x2501],
   # ADR 0219: the pressed boxes and the grow cells, Chalk's five then Slate's.
-  (0x1002BB..0x1002BF).to_a, (0x1002C0..0x1002C4).to_a
+  (0x1002BB..0x1002BF).to_a, (0x1002C0..0x1002C4).to_a,
+  # ADR 0222: the minimise box and the box pressed, Chalk's then Slate's.
+  (0x1002CD..0x1002D0).to_a
 ].freeze
 
 def fail!(why)

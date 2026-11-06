@@ -118,7 +118,13 @@ bevel and the mark in the foreground. The grow cell is the window's
 bottom-right frame cell (use it in place of `frame-bottom-right`): the frame's
 right and bottom lines are the box's own edges, with a `/` hatch inside.
 `tools/fonts/draw-window-glyphs.py` is the design and `window_glyph_gate`
-holds the raster to it. U+1002C5 is the next free codepoint.
+holds the raster to it.
+
+U+1002CD–U+1002D0 are the minimise box (ADR 0222), cell geometry beside the
+pressed boxes: `chalk-minimise`, `chalk-minimise-pressed`,
+`slate-light-minimise`, `slate-light-minimise-pressed`. The mark is a short
+bar along the bottom of the box; pressed is drawn as ADR 0219's pressed
+boxes are. U+1002D1 is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph
 

@@ -397,5 +397,9 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `slate-light-zoom-pressed` | `U+1002C2` | `"\udbc0\udec2"` | cell pens | Slate set: title bar with the zoom box pressed (also hover): the box filled, a square outline in its top-left |
 | `slate-light-grow` | `U+1002C3` | `"\udbc0\udec3"` | cell pens | Slate set: the window's bottom-right corner with the grow box: the frame's right and bottom lines are its edges, a / hatch inside |
 | `slate-light-grow-pressed` | `U+1002C4` | `"\udbc0\udec4"` | cell pens | Slate set: the grow box pressed or dragged: the box filled, the hatch in the opposite colour |
+| `chalk-minimise` | `U+1002CD` | `"\udbc0\udecd"` | foreground | Chalk set: title bar with the minimise box: the square with a short bar along its bottom |
+| `chalk-minimise-pressed` | `U+1002CE` | `"\udbc0\udece"` | foreground | Chalk set: title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom |
+| `slate-light-minimise` | `U+1002CF` | `"\udbc0\udecf"` | cell pens | Slate set: title bar with the minimise box: the square with a short bar along its bottom |
+| `slate-light-minimise-pressed` | `U+1002D0` | `"\udbc0\uded0"` | cell pens | Slate set: title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

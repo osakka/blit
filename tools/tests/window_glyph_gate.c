@@ -26,6 +26,24 @@
 #define STATE_FIRST 0x1002BBU
 #define STATE_LAST 0x1002C4U
 #define STATE_SLATE 0x1002C0U
+/* ADR 0222: the minimise box, normal and pressed, four glyphs; Slate's two
+   (U+1002CF-1002D0) are drawn in pens. */
+#define MIN_FIRST 0x1002CDU
+#define MIN_LAST 0x1002D0U
+#define MIN_SLATE 0x1002CFU
+#define COUNT ((LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1) + (STATE_LAST - STATE_FIRST + 1) + \
+               (MIN_LAST - MIN_FIRST + 1))
+
+/* The n-th glyph: the window sets, the frame, the pressed states, the minimise boxes. */
+static unsigned nth(unsigned n)
+{
+    if (n <= LAST - FIRST) return FIRST + n;
+    n -= LAST - FIRST + 1;
+    if (n <= FRAME_LAST - FRAME_FIRST) return FRAME_FIRST + n;
+    n -= FRAME_LAST - FRAME_FIRST + 1;
+    if (n <= STATE_LAST - STATE_FIRST) return STATE_FIRST + n;
+    return MIN_FIRST + (n - (STATE_LAST - STATE_FIRST + 1));
+}
 
 int main(int argc, char **argv)
 {
@@ -40,15 +58,13 @@ int main(int argc, char **argv)
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], w, h);
         if (!raster) { fprintf(stderr, "WINDOW_GLYPH_FAIL no raster at %dx%d\n", w, h); return 1; }
         printf("SIZE %d %d\n", w, h);
-        for (n = 0; n < (LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1) + (STATE_LAST - STATE_FIRST + 1); ++n) {
+        for (n = 0; n < COUNT; ++n) {
             BlitRasterGlyph glyph, plane[3];
             int pen_drawn;
             int p;
-            cp = n <= LAST - FIRST ? FIRST + n : n <= LAST - FIRST + FRAME_LAST - FRAME_FIRST + 1 ?
-                FRAME_FIRST + (n - (LAST - FIRST + 1)) :
-                STATE_FIRST + (n - (LAST - FIRST + 1) - (FRAME_LAST - FRAME_FIRST + 1));
+            cp = nth(n);
             pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U ||
-                cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST);
+                cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST) || (cp >= MIN_SLATE && cp <= MIN_LAST);
             if (!blit_raster_get(raster, cp, 1, 0, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;

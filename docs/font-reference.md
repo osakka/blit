@@ -298,14 +298,36 @@ resize corner), normal and pressed.
 - At other cell sizes the box is the title bar's box (the band's square) and
   the marks and hatch keep their pixel widths.
 
+## The minimise box
+
+ADR 0222. 4 glyphs at U+1002CD–1002D0, two a set, Chalk's then Slate's: a
+**minimise** box for the title bar, beside close, shade and zoom, normal and
+pressed.
+
+| Glyph | Codepoint | Put it | Pens |
+| --- | --- | --- | --- |
+| `chalk-minimise`, `chalk-minimise-pressed` | U+1002CD, U+1002CE | in the title bar as a box; the pressed one while it is pressed or hovered | fg = the ink, bg = the bar |
+| `slate-light-minimise`, `slate-light-minimise-pressed` | U+1002CF, U+1002D0 | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
+
+- **The mark** is a short 1 px bar along the bottom of the box (the classic
+  minimise `_`): 5 px on the box's row 8 at 11 px, centred, one clear row
+  above the border. Shade's bar runs across the middle and zoom's square sits
+  top-left, so the three read apart.
+- **Pressed** is ADR 0219's pressed box: Chalk solid with the bar cleared
+  out (the same 5 px); Slate the mix pen, the bevel inverted and a 3 px bar
+  in the foreground on box row 7.
+- Put it beside the other boxes with `stripe-to-box`, `stripe-between` and
+  `stripe-from-box`, as they are.
+
 ## Controls: checkbox, switch and capsule
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002CD (the outer-edge frame, below,
+section. The next free codepoint is U+1002D1 (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
 hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
-off, U+1002C7–1002CA, and their one-column forms U+1002CB–1002CC).
+off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
+minimise box U+1002CD–1002D0).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

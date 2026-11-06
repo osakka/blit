@@ -211,6 +211,7 @@ Errors are `application/problem+json` with stable codes.
 | The hui badge is a solid teal disc with white letters (its monochrome shape unchanged: the disc with the letters cut out); a new hui mark, the H-U-i monogram in teal without a disc, two columns (`hui-mark-left` + `-right`, U+1002C5-1002C6), its monochrome shape its own outline | 0.3.51 | 0197, 0220, 0221 | Tested |
 | Two wiretap icons for Hibr's network monitor and firewall, a water tap in water blue (#2e8fe0), two columns each: on, with a drop under the spout (`wiretap-left` + `-right`, U+1002C7-1002C8), and off, without it (`wiretap-off-left` + `-right`, U+1002C9-1002CA); each monochrome shape is its own outline, and on and off differ by shape (`font_icon_shape_gate`) | 0.3.52 | 0197, 0220, 0221 | Tested |
 | The wiretap icons in one column, a bolder tap in the same water blue: on, with the drop (`wiretap-1`, U+1002CB), and off, without it (`wiretap-1-off`, U+1002CC), from one drawing whose drop is a level (clear when off, so both states sit in one box and the tap does not move); the monochrome off shape has no drop, and on and off differ by shape (`font_icon_shape_gate`) | 0.3.53 | 0220, 0221 | Tested |
+| A minimise box for the title bar, Chalk and Slate, normal and pressed (also hover): a short bar along the bottom of the box, apart from shade's bar across the middle and zoom's square (4 glyphs, U+1002CD-1002D0: `chalk-minimise`, `-pressed`, `slate-light-minimise`, `-pressed`) | 0.3.54 | 0222 | Tested |
 | `blit --version` and `blit --help` | 0.3.20 | — | Tested |
 
 ## Diagnostics

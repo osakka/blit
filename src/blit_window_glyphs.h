@@ -61,6 +61,9 @@
 #define BLIT_STATE_COUNT (2U * BLIT_STATE_SET) /* Chalk's five, then Slate's */
 #define BLIT_WINDOW_PRESS_GAP 1         /* a pressed box: clear between its border (and Slate's bevel) and the mark */
 #define BLIT_WINDOW_GROW_PERIOD 4       /* the grow box's '/' hatch: one line in every 4 px along a row */
+#define BLIT_MINIMISE_FIRST 0x1002CDU   /* the minimise box (ADR 0222): */
+#define BLIT_MINIMISE_SET 2U            /*   per set, the box and the box pressed */
+#define BLIT_MINIMISE_COUNT (2U * BLIT_MINIMISE_SET) /* Chalk's two, then Slate's */
 
 static int blit_window_glyph(uint32_t scalar)
 {
@@ -425,16 +428,37 @@ static void blit_frame_roles(uint32_t scalar, unsigned char *roles, int w, int h
    Chalk: the lines in the foreground. Slate: each a mix pen line with a
    line pen line beside it. Pressed (dragging): Chalk the inside solid with a
    clear hatch; Slate the mix pen inside with a foreground hatch. */
-enum { WS_CLOSE_PRESSED, WS_SHADE_PRESSED, WS_ZOOM_PRESSED, WS_GROW, WS_GROW_PRESSED };
+enum { WS_CLOSE_PRESSED, WS_SHADE_PRESSED, WS_ZOOM_PRESSED, WS_GROW, WS_GROW_PRESSED,
+       WS_MINIMISE, WS_MINIMISE_PRESSED };
+
+/* ADR 0222: the minimise box, normal and pressed, 2 glyphs per set from
+   BLIT_MINIMISE_FIRST, Chalk's then Slate's, drawn here as the pressed
+   boxes are. Its mark is a 1 px bar along the bottom of the mark area,
+   centred, the area's width less a quarter of it each side: the classic
+   minimise '_', apart from the shade box's bar across the middle and the
+   zoom box's square in the top-left. The unpressed box is the close box
+   (Slate: its face the line pen) with the mark in the foreground; its mark
+   area is the box less its border and BLIT_WINDOW_PRESS_GAP. Pressed, it
+   is ADR 0219's pressed box with this mark. */
+static int blit_minimise_glyph(uint32_t scalar)
+{
+    return scalar >= BLIT_MINIMISE_FIRST && scalar < BLIT_MINIMISE_FIRST + BLIT_MINIMISE_COUNT;
+}
 
 static int blit_state_glyph(uint32_t scalar)
 {
-    return scalar >= BLIT_STATE_FIRST && scalar < BLIT_STATE_FIRST + BLIT_STATE_COUNT;
+    return (scalar >= BLIT_STATE_FIRST && scalar < BLIT_STATE_FIRST + BLIT_STATE_COUNT) ||
+        blit_minimise_glyph(scalar);
 }
 
-/* Slate's five are drawn in pens, 0 to 4; Chalk's, coverage, have none: -1. */
+/* Slate's five are drawn in pens, 0 to 4, and its two minimise boxes 5 and
+   6; Chalk's, coverage, have none: -1. */
 static int blit_state_pen_index(uint32_t scalar)
 {
+    if (blit_minimise_glyph(scalar)) {
+        unsigned i = scalar - BLIT_MINIMISE_FIRST;
+        return i < BLIT_MINIMISE_SET ? -1 : (int)(BLIT_STATE_SET + i - BLIT_MINIMISE_SET);
+    }
     if (!blit_state_glyph(scalar) || scalar - BLIT_STATE_FIRST < BLIT_STATE_SET) return -1;
     return (int)(scalar - BLIT_STATE_FIRST - BLIT_STATE_SET);
 }
@@ -442,15 +466,23 @@ static int blit_state_pen_index(uint32_t scalar)
 static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h)
 {
     enum { L = BLIT_WINDOW_LINE };
-    unsigned index = (scalar - BLIT_STATE_FIRST) % BLIT_STATE_SET;
-    int slate = scalar - BLIT_STATE_FIRST >= BLIT_STATE_SET;
+    unsigned index;
+    int slate, pressed;
     int n, top, side, bx, by, x, y, i, m, lo, ly;
     WindowCell cell;
+    if (blit_minimise_glyph(scalar)) {
+        unsigned k = scalar - BLIT_MINIMISE_FIRST;
+        index = WS_MINIMISE + k % BLIT_MINIMISE_SET;
+        slate = k >= BLIT_MINIMISE_SET;
+    } else {
+        index = (scalar - BLIT_STATE_FIRST) % BLIT_STATE_SET;
+        slate = scalar - BLIT_STATE_FIRST >= BLIT_STATE_SET;
+    }
+    pressed = index != WS_GROW && index != WS_MINIMISE;
     cell.roles = roles; cell.w = w; cell.h = h;
     memset(roles, WR_NONE, (size_t)w * (size_t)h);
     blit_window_band(w, h, &n, &top, &side, &bx, &by);
     if (index == WS_GROW || index == WS_GROW_PRESSED) {
-        int pressed = index == WS_GROW_PRESSED;
         int x0 = w - side, y0 = h - side;
         /* The inside, then the hatch over it, then the four edges. */
         if (pressed) wg_fill(&cell, x0 + L, w - L, y0 + L, h - L, slate ? WR_MIX : WR_FG);
@@ -465,22 +497,29 @@ static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h
         return;
     }
     wg_bar(&cell, slate, 0, 0, w, n, top);
-    wg_fill(&cell, bx, bx + side, by, by + side, slate ? WR_MIX : WR_FG);
-    wg_outline(&cell, bx, bx + side, by, by + side, L);
-    if (slate) {
-        /* Inverted from the unpressed bevel: the foreground pen top and left,
-           the line pen bottom and right; the foreground keeps the corners. */
-        wg_fill(&cell, bx + L, bx + side - L, by + side - 2 * L, by + side - L, WR_LINE);
-        wg_fill(&cell, bx + side - 2 * L, bx + side - L, by + L, by + side - L, WR_LINE);
-        wg_fill(&cell, bx + L, bx + side - L, by + L, by + 2 * L, WR_FG);
-        wg_fill(&cell, bx + L, bx + 2 * L, by + L, by + side - L, WR_FG);
+    if (!pressed) {
+        /* The unpressed minimise box: the close box, and its mark. */
+        if (slate) wg_fill(&cell, bx, bx + side, by, by + side, WR_LINE);
+        wg_outline(&cell, bx, bx + side, by, by + side, L);
+        i = L + BLIT_WINDOW_PRESS_GAP;
+    } else {
+        wg_fill(&cell, bx, bx + side, by, by + side, slate ? WR_MIX : WR_FG);
+        wg_outline(&cell, bx, bx + side, by, by + side, L);
+        if (slate) {
+            /* Inverted from the unpressed bevel: the foreground pen top and left,
+               the line pen bottom and right; the foreground keeps the corners. */
+            wg_fill(&cell, bx + L, bx + side - L, by + side - 2 * L, by + side - L, WR_LINE);
+            wg_fill(&cell, bx + side - 2 * L, bx + side - L, by + L, by + side - L, WR_LINE);
+            wg_fill(&cell, bx + L, bx + side - L, by + L, by + 2 * L, WR_FG);
+            wg_fill(&cell, bx + L, bx + 2 * L, by + L, by + side - L, WR_FG);
+        }
+        i = (slate ? 2 * L : L) + BLIT_WINDOW_PRESS_GAP;
     }
-    i = (slate ? 2 * L : L) + BLIT_WINDOW_PRESS_GAP;
     m = side - 2 * i;
     lo = bx + i; ly = by + i;
     if (m < 1) return;
     {
-        unsigned char ink = slate ? WR_FG : WR_NONE;
+        unsigned char ink = slate || !pressed ? WR_FG : WR_NONE;
         if (index == WS_CLOSE_PRESSED) {
             for (y = 0; y < m; ++y) {
                 roles[(ly + y) * w + lo + y] = ink;
@@ -488,6 +527,8 @@ static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h
             }
         } else if (index == WS_ZOOM_PRESSED) {
             wg_outline_role(&cell, lo, lo + m - 1, ly, ly + m - 1, L, ink);
+        } else if (index == WS_MINIMISE || index == WS_MINIMISE_PRESSED) {
+            wg_fill(&cell, lo + m / 4, lo + m - m / 4, ly + m - L, ly + m, ink);
         } else {
             int centre = by + (side - 1) / 2;
             for (i = slate ? -1 : -2; i <= (slate ? 1 : 2); i += 2) {

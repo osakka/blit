@@ -18,7 +18,9 @@ draw-control-glyphs.py's.
 
 The pressed boxes and the grow box (ADR 0219), U+1002BB-1002C4, are here
 too: five glyphs a set (close, shade and zoom pressed, the grow cell and
-the grow cell dragged), Chalk's then Slate's.
+the grow cell dragged), Chalk's then Slate's. So is the minimise box
+(ADR 0222), U+1002CD-1002D0: the box and the box pressed, Chalk's then
+Slate's.
 
 The outer-edge frame (ADR 0214), U+1002AE-1002B6, is here too: ONE frame
 set (the line on the outermost edge of each frame cell, nothing else
@@ -133,6 +135,14 @@ STATES = [
     ('zoom-pressed', 'title bar with the zoom box pressed (also hover): the box filled, a square outline in its top-left'),
     ('grow', 'the window\'s bottom-right corner with the grow box: the frame\'s right and bottom lines are its edges, a / hatch inside'),
     ('grow-pressed', 'the grow box pressed or dragged: the box filled, the hatch in the opposite colour'),
+]
+
+# ADR 0222: the minimise box, normal and pressed, two glyphs a set, Chalk's
+# then Slate's, from MINIMISE_FIRST; drawn by draw_state.
+MINIMISE_FIRST = 0x1002CD
+MINIMISES = [
+    ('minimise', 'title bar with the minimise box: the square with a short bar along its bottom'),
+    ('minimise-pressed', 'title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom'),
 ]
 
 HEADER = ROOT / 'src/blit_window_glyphs.h'
@@ -388,8 +398,9 @@ def draw_frame(index, w, h):
 
 
 def draw_state(style, index, w, h):
-    """One pressed-box or grow glyph's role map (ADR 0219), index 0-4 of STATES."""
-    name = STATES[index][0]
+    """One pressed-box or grow glyph's role map (ADR 0219), index 0-4 of
+    STATES, or a minimise box's (ADR 0222), 5-6, MINIMISES'."""
+    name = (STATES + MINIMISES)[index][0]
     slate = style != 'chalk'
     L, gap = T['LINE'], T['PRESS_GAP']
     c = Cell(w, h)
@@ -420,6 +431,18 @@ def draw_state(style, index, w, h):
     c.fill(0, w, 0, L, 'K'); c.fill(0, w, h - L, h, 'K')
     if slate:
         c.fill(0, w, L, 2 * L, 'L'); c.fill(0, w, h - 2 * L, h - L, 'M')
+    if name == 'minimise':
+        # The unpressed minimise box: the close box, and its mark in the
+        # foreground, the mark area the box less its border and the gap.
+        if slate:
+            c.fill(bx, bx + side, by, by + side, 'L')
+        outline(bx, bx + side, by, by + side, 'K')
+        inset = L + gap
+        m = side - 2 * inset
+        lo, ly = bx + inset, by + inset
+        if m >= 1:
+            c.fill(lo + m // 4, lo + m - m // 4, ly + m - L, ly + m, 'K')
+        return c.rows()
     c.fill(bx, bx + side, by, by + side, 'M' if slate else 'K')
     outline(bx, bx + side, by, by + side, 'K')
     if slate:
@@ -439,6 +462,9 @@ def draw_state(style, index, w, h):
             c.px[ly + k][lo + m - 1 - k] = ink
     elif name == 'zoom-pressed':
         outline(lo, lo + m - 1, ly, ly + m - 1, ink)
+    elif name == 'minimise-pressed':
+        # A 1 px bar along the mark area's bottom, a quarter of it clear each side.
+        c.fill(lo + m // 4, lo + m - m // 4, ly + m - L, ly + m, ink)
     else:
         centre = by + (side - 1) // 2
         for k in ((-1, 1) if slate else (-2, 0, 2)):
@@ -460,6 +486,9 @@ def glyphs():
     for style, first in (('chalk', STATE_FIRST), ('slate-light', STATE_FIRST + len(STATES))):
         for index in range(len(STATES)):
             yield first + index, style, 200 + index
+    for style, first in (('chalk', MINIMISE_FIRST), ('slate-light', MINIMISE_FIRST + len(MINIMISES))):
+        for index in range(len(MINIMISES)):
+            yield first + index, style, 200 + len(STATES) + index
 
 
 def rows_of(style, index, w, h):
@@ -546,10 +575,12 @@ def state_entries():
     are the title bar's; the grow cell is a frame cell, the window's
     bottom-right corner, on the window's face."""
     entries = []
-    for style, first in (('chalk', STATE_FIRST), ('slate-light', STATE_FIRST + len(STATES))):
+    for style, first, names in (('chalk', STATE_FIRST, STATES), ('slate-light', STATE_FIRST + len(STATES), STATES),
+                                ('chalk', MINIMISE_FIRST, MINIMISES),
+                                ('slate-light', MINIMISE_FIRST + len(MINIMISES), MINIMISES)):
         set_name = {'chalk': 'Chalk', 'slate-light': 'Slate'}[style]
         slate = style != 'chalk'
-        for index, (name, shape) in enumerate(STATES):
+        for index, (name, shape) in enumerate(names):
             fields = structure(style, 'title')
             if name.startswith('grow'):
                 fields = {**fields, 'part': 'frame', 'background': 'panel', 'line': 'highlight' if slate else 'none'}
@@ -561,11 +592,13 @@ def state_entries():
 
 def owned(entry):
     """Is this catalogue entry one of this script's: a window glyph
-    (U+100231-100276), an outer-edge frame glyph (U+1002AE-1002BA) or a
-    pressed-box or grow glyph (U+1002BB-1002C4)?"""
+    (U+100231-100276), an outer-edge frame glyph (U+1002AE-1002BA), a
+    pressed-box or grow glyph (U+1002BB-1002C4) or a minimise box
+    (U+1002CD-1002D0)?"""
     cp = int(entry['codepoint'], 16)
     return (STYLES[0][1] <= cp < RETIRED[0] or FRAME_FIRST <= cp < FRAME_FIRST + len(FRAMES) or
-            STATE_FIRST <= cp < STATE_FIRST + 2 * len(STATES))
+            STATE_FIRST <= cp < STATE_FIRST + 2 * len(STATES) or
+            MINIMISE_FIRST <= cp < MINIMISE_FIRST + 2 * len(MINIMISES))
 
 
 def catalogue_entries():

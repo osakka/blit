@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR 0210, 0211, 0214, 0219: the window-chrome glyph sets, Chalk (U+100231-100253)
+# ADR 0210, 0211, 0214, 0219, 0222: the window-chrome glyph sets, Chalk (U+100231-100253)
 # and Slate (U+100254-100276); Slate dark (U+100277-100299) is retired.
 #
 # - The catalogue lists all 70 by name, as cell geometry, in two sets of
@@ -143,7 +143,7 @@ Dir.mktmpdir('blit-window-glyphs') do |work|
     end
   end
 end
-check(raster.size == 93 * SIZES.size, "the raster drew #{raster.size} of #{93 * SIZES.size}")
+check(raster.size == 97 * SIZES.size, "the raster drew #{raster.size} of #{97 * SIZES.size}")
 mismatches = []
 raster.each do |key, got|
   mismatches << format('U+%X at %dx%d', key[1], *key[0]) unless design[key] == got
@@ -912,8 +912,193 @@ end
 check(state_ids.each_with_index.all? { |_, i| SIZES.all? { |w, h| raster.fetch([[w, h], STATE_FIRST + i])[1].size == (state_ids[i].start_with?('chalk') ? w * h * 2 : w * h) } },
       'a pressed-box or grow glyph is not exactly its cell')
 
+# ADR 0222: the minimise box, normal and pressed, U+1002CD-1002D0, written out
+# here, not read from the design. Chalk's two, then Slate's.
+#
+# At the owner's 11x22: the box 11x11 on rows 5-15 as the close box (Slate:
+# its face the line pen) with a 5 px bar on box row 8, columns 3-7, in the
+# foreground; pressed, ADR 0219's pressed box with the bar cleared out of
+# Chalk's solid inside (the same pixels) and, in Slate, a 3 px foreground bar
+# on box row 7, columns 4-6, the bottom of its 5 px mark area.
+MIN_FIRST = 0x1002CD
+min_ids = %w[chalk slate-light].flat_map { |s| ["#{s}-minimise", "#{s}-minimise-pressed"] }
+minimises = geometry.select { |e| e['codepoint'].to_i(16).between?(MIN_FIRST, MIN_FIRST + 3) }
+check(minimises.map { |e| [e['id'], e['codepoint'], e['set'], e['pens'], e['colour'], e['part'], e['background']] } ==
+      min_ids.each_with_index.map { |n, i| [n, format('%06X', MIN_FIRST + i), n.start_with?('chalk') ? 'chalk' : 'slate-light',
+                                            n.start_with?('chalk') ? 'foreground' : 'cell', false, 'title-bar', 'bar'] },
+      'the catalogue does not list the four minimise boxes (U+1002CD-1002D0) in order with their sets, pens and part')
+check(minimises.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? && !e['deprecated'] },
+      'a minimise box has no shape, or is deprecated')
+check((minimises.map { |e| e['codepoint'].to_i(16) } & (icon_codes + retired)).empty?, 'a minimise box reuses an icon or retired codepoint')
+min_pixels = ->(id, w, h) { pixels(raster, w, h, MIN_FIRST + min_ids.index(id)) }
+min_roles = lambda do |id, w, h|
+  px = min_pixels.call(id, w, h)
+  (0...h).map { |y| (0...w).map { |x| a, r = px[y][x]; a.zero? ? '.' : (r || 'K') }.join }
+end
 
-puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA)+10_state(U+1002BB-1002C4) states=pressed_inverse,slate_bevel,grow_edges_are_frame_lines,hatch_4px outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
+MIN_LITERAL = {
+  'chalk-minimise' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    K.........K
+    K.........K
+    K.........K
+    K.........K
+    K.........K
+    K.........K
+    K.........K
+    K..KKKKK..K
+    K.........K
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-minimise-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKK.....KKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-minimise' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLKKKKKLLK
+    KLLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-minimise-pressed' => <<~'ROWS'.split
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKMMMMMMMLK
+    KKMMKKKMMLK
+    KKMMMMMMMLK
+    KKLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+}.freeze
+MIN_LITERAL.each do |id, want|
+  check(min_roles.call(id, 11, 22) == want, "#{id} at 11x22 is not the approved drawing")
+end
+
+# At every size: the bar outside the box; the border in the foreground; the
+# mark a 1 px bar on the mark area's bottom row, a quarter of the area clear
+# each side; the rest of the inside the close box's (unpressed) or ADR 0219's
+# pressed box's. Apart from the close, shade and zoom boxes.
+SIZES.each do |w, h|
+  bx, by, side = band.call(w, h)
+  %w[chalk slate-light].each do |style|
+    slate = style == 'slate-light'
+    plain = pixels(raster, w, h, SETS.fetch(style) + NAMES.index('title'))
+    [false, true].each do |pressed|
+      name = pressed ? 'minimise-pressed' : 'minimise'
+      got = min_pixels.call("#{style}-#{name}", w, h)
+      what = "#{style}-#{name} at #{w}x#{h}"
+      inset = pressed && slate ? 3 : 2
+      m = side - 2 * inset
+      lo_x = bx + inset
+      lo_y = by + inset
+      mark = m < 1 ? [] : (lo_x + m / 4...lo_x + m - m / 4).map { |x| [lo_y + m - 1, x] }
+      (0...h).each do |y|
+        (0...w).each do |x|
+          inside_box = y.between?(by, by + side - 1) && x.between?(bx, bx + side - 1)
+          unless inside_box
+            check(got[y][x] == plain[y][x], "#{what}: pixel #{x},#{y} outside the box is not the bar's")
+            next
+          end
+          border = !(y.between?(by + 1, by + side - 2) && x.between?(bx + 1, bx + side - 2))
+          want = if border then [255, slate ? 'K' : nil]
+                 elsif !pressed
+                   if mark.include?([y, x]) then [255, slate ? 'K' : nil]
+                   else slate ? [255, 'L'] : [0, nil]
+                   end
+                 elsif slate
+                   if mark.include?([y, x]) || y == by + 1 || x == bx + 1 then [255, 'K']
+                   elsif y == by + side - 2 || x == bx + side - 2 then [255, 'L']
+                   else [255, 'M']
+                   end
+                 else mark.include?([y, x]) ? [0, nil] : [255, nil]
+                 end
+          check(got[y][x] == want, "#{what}: pixel #{x},#{y} is #{got[y][x].inspect}, want #{want.inspect}")
+        end
+      end
+      # A mark area of 1 or 2 px (Slate pressed, boxes under 9 px) is a dot or a
+      # stub, as the other pressed marks there are: no shape to tell apart.
+      next if m < 3
+
+      check(!mark.empty? && mark.all? { |y, _| y > by + (side - 1) / 2 }, "#{what}: the mark is not below the box's middle")
+      others = if pressed
+                 %w[close-pressed shade-pressed zoom-pressed].map { |n| state_pixels.call("#{style}-#{n}", w, h) }
+               else
+                 %w[close shade zoom].map { |n| pixels(raster, w, h, SETS.fetch(style) + NAMES.index(n)) }
+               end
+      check(others.none? { |o| o == got }, "#{what} is drawn as the close, shade or zoom box")
+      check(!pressed || got != min_pixels.call("#{style}-minimise", w, h), "#{what} is the unpressed box")
+    end
+  end
+end
+check(min_ids.each_with_index.all? { |id, i| SIZES.all? { |w, h| raster.fetch([[w, h], MIN_FIRST + i])[1].size == (id.start_with?('chalk') ? w * h * 2 : w * h) } },
+      'a minimise box is not exactly its cell')
+
+
+puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA)+10_state(U+1002BB-1002C4)+4_minimise(U+1002CD-1002D0) minimise=bottom_bar,pressed_as_0219 states=pressed_inverse,slate_bevel,grow_edges_are_frame_lines,hatch_4px outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
      "slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
      "sizes=#{SIZES.map { |s| s.join('x') }.join(',')} design=pixel-exact chalk=coverage slate=pen_planes " \
      "pewter=0.3.38_except_mix(#{mix_differs}_px,#{compared}_glyphs) dialog=no_halo,line+fg_only caps=corners_clear " \
