@@ -260,8 +260,8 @@
     {"id":"wiretap-right", "codepoint":"1002C8", "source":"wiretap.svg", "columns":2, "column":1},
     {"id":"wiretap-off-left", "codepoint":"1002C9", "source":"wiretap-off.svg", "columns":2, "column":0},
     {"id":"wiretap-off-right", "codepoint":"1002CA", "source":"wiretap-off.svg", "columns":2, "column":1},
-    {"id":"wiretap-1", "codepoint":"1002CB", "source":"wiretap-1.svg"},
-    {"id":"wiretap-1-off", "codepoint":"1002CC", "source":"wiretap-1-off.svg"}
+    {"id":"wiretap-1", "codepoint":"1002CB", "source":"wiretap-1.svg", "signal_level":1},
+    {"id":"wiretap-1-off", "codepoint":"1002CC", "source":"wiretap-1.svg", "signal_level":0}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},

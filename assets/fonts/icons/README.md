@@ -48,7 +48,7 @@ codepoints, of which a non-folder kind now uses only the classic two.
 | hui-mark-left, hui-mark-right | U+1002C5, U+1002C6 | The hui mark (0.3.51): the monogram H U i in teal, no disc: a full left stem, a crossbar, the lower half joined as a U, a dot for the i; one mark, two columns. U+100231–1002C4 between are window and control glyphs (`cell_geometry`) |
 | wiretap-left, wiretap-right | U+1002C7, U+1002C8 | wiretap on (0.3.52), Hibr's network monitor and firewall: a water tap in water blue, side on: a wall stub, the body with its spout curving down, a T handle, and a drop falling from the spout; one icon, two columns |
 | wiretap-off-left, wiretap-off-right | U+1002C9, U+1002CA | wiretap off (0.3.52): the same tap with no drop; one icon, two columns |
-| wiretap-1, wiretap-1-off | U+1002CB, U+1002CC | wiretap on and off in one column (0.3.53): a bolder tap in the same water blue, the body with its spout curving down and a T handle, with a drop under the spout (on) or without it (off); `wiretap-1.svg`, `wiretap-1-off.svg` |
+| wiretap-1, wiretap-1-off | U+1002CB, U+1002CC | wiretap on and off in one column (0.3.53): a bolder tap in the same water blue, the body with its spout curving down and a T handle, with a drop under the spout (on) or without it (off); one drawing, `wiretap-1.svg`, the drop at `data-level` 1 (`signal_level` 1 on, 0 off) |
 
 The hui badge, the hui mark and the wiretap icons each span two columns as
 two codepoints, written side by side; each draws its half of the one drawing
@@ -159,9 +159,13 @@ from the upstream profile. The former keeps its runic B shape; the separate
 Bluetooth artwork does not redefine that Unicode character. Nerd glyphs and
 Unicode emoji retain their existing meanings/presentation rules.
 
-`wifi-bars.svg`, `battery.svg`, `battery-charging.svg` and `volume.svg` each
+`wifi-bars.svg`, `battery.svg`, `battery-charging.svg`, `volume.svg` and `wiretap-1.svg` each
 supply one geometry; `signal_level` determines which parts are active
-(`data-level` at or below it), avoiding divergent drawings per level. One
+(`data-level` at or below it), avoiding divergent drawings per level. An
+inactive part is drawn in its `data-inactive-fill`; `#rrggbbaa` with alpha
+00 draws it nowhere yet keeps it in the icon's box, so `wiretap-1-off` sits
+exactly where `wiretap-1` does, its drop clear (a one-column icon is fitted
+by its box). One
 icon says the whole state: the charging bolt and the mains plug are inside
 the battery, not a second glyph beside it. Colour layers are COLR v0/CPAL.
 Each icon has a monochrome shape too, for the icon pen (SGR 68, ADR 0220, 0221),
@@ -172,7 +176,7 @@ its shapes out of the rest (the charging bolt, the mains plug, the hui
 letters); `data-mono="disc"` draws a path's first subpath only, so a ring
 is its solid outer shape (the hui disc, solid in colour too since 0.3.51).
 An icon with none of these has no extra glyph: its colour coverage is its
-shape (the hui mark, the wiretap icons in two columns and in one: on and off differ by the drop,
+shape (the hui mark, the two-column wiretap icons: on and off differ by the drop,
 held apart by `font_icon_shape_gate`). The shapes live in the icon font as `<glyph>.mono`.
 Source files and the original-art MIT licence are hash-pinned in
 `../fonts.source.json`. Bluetooth trademark rights are not

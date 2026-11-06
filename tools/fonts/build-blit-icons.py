@@ -26,6 +26,10 @@ path with `data-mono` gets one more glyph, `<name>.mono`, in no cmap:
   drawn against the nonzero winding rule, so inside the ink they are holes
   and, outside it, solid (a charging bolt is a hole in the fill and solid on
   the empty part of the battery). Knockout shapes must be simple, without holes.
+An inactive path's `data-inactive-fill` may carry an alpha (#rrggbbaa): at
+00 it is drawn nowhere in colour, yet its layer still counts in the icon's
+box, so a state that hides a part (wiretap-1-off's drop) is fitted exactly
+as the state that shows it.
 An icon with neither has no `.mono` glyph: its colour glyph's coverage is its
 monochrome shape. Nothing is drawn by hand.
 """
@@ -134,7 +138,12 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
     for index, path in enumerate(paths):
         active = int(path.attrib.get('data-level', '0')) <= icon.get('signal_level', 4)
         fill = path.attrib['fill' if active else 'data-inactive-fill']
-        rgba = tuple(int(fill[i:i + 2], 16) / 255 for i in (1, 3, 5)) + (1.0,)
+        # #rrggbb, or #rrggbbaa: an inactive part may be clear (alpha 00),
+        # drawn nowhere but still part of the icon's box.
+        if not re.fullmatch(r'#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?', fill):
+            raise SystemExit(f'{icon["id"]}: a fill is #rrggbb or #rrggbbaa')
+        rgba = tuple(int(fill[i:i + 2], 16) / 255 for i in (1, 3, 5)) + \
+            ((int(fill[7:9], 16) / 255,) if len(fill) == 9 else (1.0,))
         if rgba not in palette:
             palette.append(rgba)
         pen = TTGlyphPen(None)

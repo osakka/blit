@@ -7,7 +7,9 @@
    A two-column icon (ADR 0197) is compared as its whole badge, its left and
    right columns side by side: wiretap on (a drop under the spout) against
    wiretap off (no drop). The one-column wiretap-1 pair (on, off) is
-   compared as one cell, as the battery and Wi-Fi icons are. */
+   compared as one cell, as the battery and Wi-Fi icons are; its drop is a
+   level, clear when off, so both states are fitted in one box and only the
+   drop differs. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
