@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 # ADR 0220: fonts.icon_colour through the API and the settings document. Each
-# of colour, black and white is accepted, reported, stored and re-rendered;
+# of colour, black, white and auto is accepted, reported, stored and re-rendered;
 # anything else is refused and changes nothing; the choice survives a restart;
 # and the default is colour, which is what the icons were drawn with before
 # the setting existed. The raster-level claims (byte-identical default, the
@@ -105,13 +105,13 @@ Dir.mktmpdir('blit-icon-colour') do |root|
   icons = '\\364\\200\\200\\201 \\364\\200\\200\\215 \\364\\200\\200\\230\\364\\200\\200\\231 \\364\\200\\200\\200 hui'
   code, = json('POST', '/v1/terminal-sessions',
                { 'command' => '/bin/sh',
-                 'arguments' => ['-c', "printf '\\033[?25l\\033[2J\\033[H#{icons}'; sleep 600"],
+                 'arguments' => ['-c', "printf '\\033[?25l\\033[2J\\033[H\\033[48;2;30;30;34;38;2;230;230;235m#{icons}'; sleep 600"],
                  'display_id' => 'display-1', 'surface' => { 'width' => 320, 'height' => 64 } })
   check(code.between?(200, 299), "terminal session -> #{code}")
   sleep 0.5
 
   seen = {}
-  %w[black white colour].each do |value|
+  %w[black white auto colour].each do |value|
     code, reply = json('PUT', '/v1/fonts', { 'icon_colour' => value })
     check(code == 200 && reply.is_a?(Hash) && reply.dig('active', 'icon_colour') == value,
           "icon_colour #{value} is accepted and reported, got #{code} #{reply.inspect[0, 200]}")
@@ -121,11 +121,14 @@ Dir.mktmpdir('blit-icon-colour') do |root|
           "icon_colour #{value} leaves the font, size and hinting alone")
     seen[value] = shown
   end
-  check(seen.values.uniq.length == 3,
-        'colour, black and white each re-render the display differently')
+  check(seen.values.uniq.length == 4,
+        'colour, black, white and auto each re-render the display differently')
+
+  # Auto is the cell's own foreground: on a dark-background cell it is not black.
+  # (Checked above: each of the four modes draws the display differently.)
 
   # Refusals change nothing.
-  ['Black', 'grey', 'mono', '', 1, nil, true].each do |bad|
+  ['Black', 'grey', 'mono', 'AUTO', '', 1, nil, true].each do |bad|
     code, reply = json('PUT', '/v1/fonts', { 'icon_colour' => bad })
     check(code == 400 && reply.is_a?(Hash) && reply['code'] == 'invalid_font_icon_colour',
           "icon_colour #{bad.inspect} is refused with invalid_font_icon_colour, got #{code} #{reply.inspect[0, 120]}")
@@ -157,19 +160,19 @@ Dir.mktmpdir('blit-icon-colour') do |root|
         "a settings document with a bad icon_colour is refused, got #{code} #{reply.inspect[0, 120]}")
   check(icon_colour == 'white', 'a refused settings document leaves icon_colour as it was')
 
-  replacement['font']['icon_colour'] = 'black'
+  replacement['font']['icon_colour'] = 'auto'
   code, = json('PUT', '/v1/settings', { 'document' => replacement },
                { 'If-Match' => settings.fetch('revision').to_s })
-  check(code == 200 && icon_colour == 'black', "a settings document can set icon_colour, got #{code} #{icon_colour.inspect}")
+  check(code == 200 && icon_colour == 'auto', "a settings document can set icon_colour, got #{code} #{icon_colour.inspect}")
 
   # Survives a restart.
-  json('PUT', '/v1/fonts', { 'icon_colour' => 'white' })
+  json('PUT', '/v1/fonts', { 'icon_colour' => 'auto' })
   Timeout.timeout(10) do
-    sleep 0.1 until JSON.parse(File.read(document)).dig('font', 'icon_colour') == 'white'
+    sleep 0.1 until JSON.parse(File.read(document)).dig('font', 'icon_colour') == 'auto'
   end
   stop
   start(env)
-  check(icon_colour == 'white', "icon_colour survives a restart, got #{icon_colour.inspect}")
+  check(icon_colour == 'auto', "icon_colour survives a restart, got #{icon_colour.inspect}")
   _, fonts = json('GET', '/v1/fonts')
   check(fonts.dig('active', 'id') == 'hack' && fonts.dig('active', 'size_px') == 22,
         'the font and size survive with it')

@@ -158,11 +158,14 @@ supply one geometry; `signal_level` determines which parts are active
 (`data-level` at or below it), avoiding divergent drawings per level. One
 icon says the whole state: the charging bolt and the mains plug are inside
 the battery, not a second glyph beside it. Colour layers are COLR v0/CPAL.
-A catalogue entry with `"mono": "disc-knockout"` (the hui badge) is a disc
-with marks on it: the first path's first subpath of its SVG is the disc and
-every other path is knocked out of it. The build derives a second glyph
-from that, so the `fonts.icon_colour` setting (ADR 0220) can draw the badge
-as a solid black or white disc with the marks in the opposite shade.
+Each icon has a monochrome shape too, for `fonts.icon_colour` (ADR 0220),
+decided when the font is built, from its SVG: a path whose `data-level` is
+above the icon's `signal_level` is left out (so a battery shows its bands, Wi-Fi
+and volume their active bars and waves); `data-mono="knockout"` on a path cuts
+its shapes out of the rest (the charging bolt, the mains plug, the hui
+letters); `data-mono="disc"` draws a ring path as its solid outer shape (the
+hui disc). An icon with none of these has no extra glyph: its colour coverage
+is its shape. The shapes live in the icon font as `<glyph>.mono`.
 Source files and the original-art MIT licence are hash-pinned in
 `../fonts.source.json`. Bluetooth trademark rights are not
 granted by the drawing's licence.

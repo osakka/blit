@@ -1042,14 +1042,17 @@ cache and redraws, as a size change does. Fitted icons and symbols and cell
 geometry ignore it. It is stored in `document.font.hinting`; a document
 without it means `full`.
 
-`icon_colour` (`colour`, `black` or `white`; default `colour`) sets the pen
-of Blit's colour icons, the private-use icons from U+100000 that carry
-colour (ADR 0220). `colour` draws them in their own colours, as always.
-`black` and `white` keep every pixel's coverage and give it that one colour,
-so the same glyph set serves a light or a dark bar; an icon the catalogue
-marks `mono: "disc-knockout"` (the `hui` badge) becomes a solid disc in the
-pen with its letters in the opposite shade. Window glyphs and controls, text
-and emoji ignore it. It can be sent alone or with the other controls,
+`icon_colour` (`colour`, `black`, `white` or `auto`; default `colour`) sets the
+pen of Blit's colour icons, the private-use icons from U+100000 that carry
+colour (ADR 0220). `colour` draws them in their own colours, as always. The
+other three draw the icon's monochrome shape, which the icon font carries and
+which says state by shape: a battery has as many bands as its level, a
+charging battery a bolt, mains a plug, Wi-Fi and volume only the bars and
+waves that are on. `black` is exactly black and `white` exactly white (the
+knockouts are transparent, so the bar shows through them); `auto` is drawn in
+the cell's foreground like the text beside it, so the icons follow a light or
+dark bar with no theme detection. Window glyphs and controls, text and emoji
+ignore it. It can be sent alone or with the other controls,
 `active.icon_colour` reports it, and anything else is a 400
 `invalid_font_icon_colour`. A change rebuilds the glyph cache and redraws. It
 is stored in `document.font.icon_colour`; a document without it means

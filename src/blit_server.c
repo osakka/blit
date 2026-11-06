@@ -18212,7 +18212,7 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
 }
 
 static const char *const font_hinting_names[] = {"full", "light", "none"};
-static const char *const font_icon_colour_names[] = {"colour", "black", "white"};
+static const char *const font_icon_colour_names[] = {"colour", "black", "white", "auto"};
 
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
@@ -23805,7 +23805,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         requested_icon_colour = runtime->font_icon_colour;
         if (font_icon_colour_parse(payload, &requested_icon_colour) < 0) {
             send_problem(fd, 400, "Bad Request", "invalid_font_icon_colour",
-                         "icon_colour must be one of colour, black or white.");
+                         "icon_colour must be one of colour, black, white or auto.");
             return;
         }
         if (has_font_id) {
@@ -24763,7 +24763,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                      font_hinting_parse(font_configuration, &proposed_hinting) < 0 ||
                      font_icon_colour_parse(font_configuration, &proposed_icon_colour) < 0)) {
                     send_problem(fd, 400, "Bad Request", "invalid_settings_font",
-                                 "Font sizing must select scale or integer size_px, never both, hinting must be full, light or none, and icon_colour colour, black or white.");
+                                 "Font sizing must select scale or integer size_px, never both, hinting must be full, light or none, and icon_colour colour, black, white or auto.");
                     return;
                 }
             }

@@ -237,7 +237,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0217 — Slimming the package: one copy of the documentation, font sources in their own package](0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)
 - [0218 — fonts.hinting: how text glyphs are hinted, one setting, fitted icons exempt](0218-font-hinting-setting.md)
 - [0219 — Pressed boxes and a grow box, in Chalk and Slate](0219-pressed-boxes-and-a-grow-box.md)
-- [0220 — fonts.icon_colour: Blit's colour icons in their own colours, solid black or solid white](0220-font-icon-colour-setting.md)
+- [0220 — fonts.icon_colour: Blit's colour icons in colour, or as a monochrome shape that says state](0220-font-icon-colour-setting.md)
 
 ## Status
 

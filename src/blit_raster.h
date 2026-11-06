@@ -35,11 +35,14 @@ typedef enum { BLIT_RASTER_HINTING_FULL = 0, BLIT_RASTER_HINTING_LIGHT, BLIT_RAS
 int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting);
 
 /* ADR 0220: the pen of Blit's colour icons (U+100000 and up that carry colour).
-   Colour (zero, the default) draws them in their own colours. Black and white
-   keep every pixel's coverage and give it that one pen; a disc badge (hui) is
-   a solid disc in the pen with its letters in the opposite shade. Window
-   glyphs, controls, text and emoji ignore it. */
-typedef enum { BLIT_RASTER_ICON_COLOUR = 0, BLIT_RASTER_ICON_BLACK, BLIT_RASTER_ICON_WHITE } BlitRasterIconColour;
+   Colour (zero, the default) draws them in their own colours. The other three
+   draw the icon's monochrome shape, which the icon font carries (levels below
+   the signal level left out, knockouts cut away): black is exactly black,
+   white exactly white, and auto is a coverage glyph, so the cell's foreground
+   draws it and the cell's background shows through the knockouts, as it does
+   for the text beside it. Window glyphs, controls, text and emoji ignore it. */
+typedef enum { BLIT_RASTER_ICON_COLOUR = 0, BLIT_RASTER_ICON_BLACK, BLIT_RASTER_ICON_WHITE,
+               BLIT_RASTER_ICON_AUTO } BlitRasterIconColour;
 /* Set before the first lookup: a raster's cache is never mixed. Returns 0
    for an unknown mode and leaves the raster unchanged. */
 int blit_raster_set_icon_colour(BlitRaster *raster, BlitRasterIconColour icon_colour);

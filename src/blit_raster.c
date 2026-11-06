@@ -928,7 +928,7 @@ int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting)
 
 int blit_raster_set_icon_colour(BlitRaster *raster, BlitRasterIconColour icon_colour)
 {
-    if (!raster || icon_colour < BLIT_RASTER_ICON_COLOUR || icon_colour > BLIT_RASTER_ICON_WHITE)
+    if (!raster || icon_colour < BLIT_RASTER_ICON_COLOUR || icon_colour > BLIT_RASTER_ICON_AUTO)
         return 0;
     raster->icon_colour = icon_colour;
     return 1;
@@ -1074,7 +1074,7 @@ static void fitted_origin(const BlitRaster *raster, int rule, int span, int colu
    that still does not fit is declined, for the caller's visible fallback,
    as draw_outline_face does. */
 static int draw_fitted_glyph(BlitRaster *raster, FT_Face face, int rule, FT_UInt index,
-                             RasterEntry *entry, int colour)
+                             FT_UInt measure, RasterEntry *entry, int colour)
 {
     FT_BBox box;
     FT_Vector delta;
@@ -1083,7 +1083,10 @@ static int draw_fitted_glyph(BlitRaster *raster, FT_Face face, int rule, FT_UInt
     int w = entry->glyph.width, h = entry->glyph.height, left, top, x, y, failed, span = 1;
     int column = 0, attempt, found;
     if (!face || !index) return 0;
-    found = fitted_box(face, index, colour, &box);
+    /* The glyph is placed by `measure`, which is the glyph itself unless a
+       partner (an icon's monochrome shape) must sit exactly where its
+       colour glyph does. */
+    found = fitted_box(face, measure, colour || measure != index, &box);
     if (found < 0) return -1;
     if (!found) return 0;
     bw = (double)(box.xMax - box.xMin);
@@ -1185,22 +1188,23 @@ render:
 static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scalar,
                        RasterEntry *entry, int colour)
 {
-    return face ? draw_fitted_glyph(raster, face, rule, FT_Get_Char_Index(face, scalar),
-                                    entry, colour) : 0;
+    FT_UInt index = face ? FT_Get_Char_Index(face, scalar) : 0;
+    return draw_fitted_glyph(raster, face, rule, index, index, entry, colour);
 }
 
-/* ADR 0220: Blit's colour icons in the pen the setting chooses. The icon is
-   fitted and rendered once, as ever; only its colour is replaced, so its
-   coverage is exactly the colour icon's. A disc badge (the catalogue's `mono`
-   icons) has a second glyph in the font, `<name>.mono`: a white disc, solid,
-   with black marks, both from the badge's own SVG. It is drawn instead of the
-   colour glyph, and its two shades are the two pens: white for white, and
-   inverted for black. Any other icon is one pen over its coverage. */
-static FT_UInt badge_glyph(FT_Face face, uint32_t scalar)
+/* ADR 0220: Blit's colour icons in the pen the setting chooses. In colour the
+   icon is drawn as ever. In the other pens its monochrome shape is drawn, and
+   that shape is the font's: the glyph `<name>.mono` where the icon has levels
+   or knockouts, otherwise the coverage of the colour glyph. It is placed by
+   the colour glyph's box, so a level never moves. Black and white then give
+   that coverage one pen (premultiplied: black is no colour, white is the
+   alpha); auto keeps it as coverage for the cell's own foreground. */
+static int outline_has_colour(FT_Face face, uint32_t scalar);
+
+static FT_UInt mono_glyph(FT_Face face, FT_UInt index)
 {
     char name[96];
     size_t length;
-    FT_UInt index = FT_Get_Char_Index(face, scalar);
     if (!index || !FT_HAS_GLYPH_NAMES(face) ||
         FT_Get_Glyph_Name(face, index, name, sizeof(name) - 6)) return 0;
     length = strlen(name);
@@ -1210,22 +1214,46 @@ static FT_UInt badge_glyph(FT_Face face, uint32_t scalar)
 
 static int draw_blit_icon(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 {
-    int colour = entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED;
-    int tinted = colour && raster->icon_colour != BLIT_RASTER_ICON_COLOUR;
-    FT_UInt badge = tinted ? badge_glyph(raster->icons, scalar) : 0;
-    int result = badge ? draw_fitted_glyph(raster, raster->icons, FIT_ICON, badge, entry, 1) :
-                         draw_fitted(raster, raster->icons, FIT_ICON, scalar, entry, colour);
-    int x, y;
-    if (result <= 0 || !tinted) return result;
-    for (y = 0; y < entry->glyph.height; ++y)
-        for (x = 0; x < entry->glyph.width; ++x) {
-            unsigned char *p = entry->pixels + y * entry->glyph.stride + x * 4;
-            /* Premultiplied: a pen of black is no colour at all, a pen of
-               white is the alpha. The badge's white disc is already white. */
-            unsigned char v = raster->icon_colour == BLIT_RASTER_ICON_WHITE ? (badge ? p[0] : p[3]) :
-                                                                              (badge ? p[3] - p[0] : 0);
-            p[0] = p[1] = p[2] = v;
+    int rgba = entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED;
+    FT_UInt index = FT_Get_Char_Index(raster->icons, scalar);
+    FT_UInt mono;
+    RasterEntry part;
+    unsigned char *coverage;
+    size_t cells = (size_t)entry->glyph.width * entry->glyph.height, i;
+    int result;
+    if (raster->icon_colour == BLIT_RASTER_ICON_COLOUR || !outline_has_colour(raster->icons, scalar))
+        return draw_fitted(raster, raster->icons, FIT_ICON, scalar, entry, rgba);
+    coverage = calloc(cells, 1);
+    if (!coverage) return -1;
+    part = *entry;
+    part.glyph.format = BLIT_RASTER_COVERAGE;
+    part.glyph.stride = part.glyph.width;
+    part.pixels = coverage;
+    mono = mono_glyph(raster->icons, index);
+    if (mono) result = draw_fitted_glyph(raster, raster->icons, FIT_ICON, mono, index, &part, 0);
+    else {
+        /* No levels and no knockouts: the colour glyph's own coverage. */
+        unsigned char *colour = calloc(cells, 4);
+        if (!colour) { free(coverage); return -1; }
+        part.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
+        part.glyph.stride = part.glyph.width * 4;
+        part.pixels = colour;
+        result = draw_fitted_glyph(raster, raster->icons, FIT_ICON, index, index, &part, 1);
+        for (i = 0; i < cells; ++i) coverage[i] = colour[i * 4 + 3];
+        free(colour);
+    }
+    if (result > 0) {
+        for (i = 0; i < cells; ++i) {
+            unsigned char a = coverage[i];
+            if (!rgba) entry->pixels[i] = a;
+            else {
+                unsigned char v = raster->icon_colour == BLIT_RASTER_ICON_WHITE ? a : 0;
+                entry->pixels[i * 4] = entry->pixels[i * 4 + 1] = entry->pixels[i * 4 + 2] = v;
+                entry->pixels[i * 4 + 3] = a;
+            }
         }
+    }
+    free(coverage);
     return result;
 }
 
@@ -1406,7 +1434,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         FT_Get_Char_Index(raster->colour, scalar) ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (outline_colour) next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
-    if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) ?
+    if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) &&
+        raster->icon_colour != BLIT_RASTER_ICON_AUTO ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
     /* ADR 0210, 0211: the window glyphs are coverage. Chalk is drawn in the

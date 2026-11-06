@@ -80,13 +80,16 @@ hinted: it changes how crisp text is at small sizes, and nothing about the
 cell grid. Fitted icons and symbols, emoji and cell-geometry glyphs ignore it
 (ADR 0218). Set it with `PUT /v1/fonts`; it is stored with the font.
 
-`icon_colour` (`colour`, `black`, `white`; default `colour`) is the pen of
-Blit's colour icons (U+100000 and up that carry colour): their own colours,
-or one solid pen over each icon's coverage. The `hui` badge in black is a
-black disc with white letters and in white a white disc with black letters,
-for light and dark bars. It is the same glyph set; window glyphs, controls,
-text and emoji ignore it (ADR 0220). Set it with `PUT /v1/fonts`; it is
-stored with the font.
+`icon_colour` (`colour`, `black`, `white`, `auto`; default `colour`) is the pen
+of Blit's colour icons (U+100000 and up that carry colour): their own colours,
+or their monochrome shape in black, in white, or in the cell's foreground
+(`auto`, which follows a light or dark bar like the text beside it). The shape
+is decided when the icon font is built, from the SVG: inactive levels are left
+out and paths marked `data-mono="knockout"` are cut away, so a battery's level,
+charging bolt and mains plug, and the Wi-Fi bars and volume waves that are on,
+read by shape; the `hui` badge is a solid disc with its letters cut out. Window
+glyphs, controls, text and emoji ignore it (ADR 0220). Set it with
+`PUT /v1/fonts`; it is stored with the font.
 
 ## Choose the right category
 

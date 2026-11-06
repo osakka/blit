@@ -1991,14 +1991,6 @@ components:
         text_alias: {type: string, pattern: '^[0-9A-F]{4,6}$'}
         signal_level: {type: integer, minimum: 1, maximum: 4}
         colour: {type: boolean}
-        mono:
-          type: string
-          enum: [disc-knockout]
-          description: >-
-            A badge: a disc with marks on it (ADR 0220). With fonts.icon_colour
-            black or white the disc is drawn solid in the pen and the marks
-            knocked out of it. Derived from the icon's SVG: the first path's
-            first subpath is the disc.
         columns:
           type: integer
           minimum: 2
@@ -2177,14 +2169,17 @@ components:
             rebuilds the glyph cache and redraws, as a size change does.
         icon_colour:
           type: string
-          enum: [colour, black, white]
+          enum: [colour, black, white, auto]
           description: >-
-            The pen of Blit's colour icons (ADR 0220): colour (the default)
-            draws them in their own colours; black or white keeps every
-            pixel's coverage and gives it that one pen, and a disc badge
-            (the hui badge) becomes a solid disc in the pen with its letters
-            in the opposite shade. Window glyphs, controls, text and emoji
-            ignore it. A change rebuilds the glyph cache and redraws.
+            The pen of Blit's colour icons (ADR 0220). colour (the default)
+            draws them in their own colours. black, white and auto draw the
+            icon's monochrome shape, which the icon font carries: levels below
+            the signal level are left out and knockouts (a charging bolt, a
+            plug, the hui letters) are cut away, so a state reads by shape.
+            black is exactly black, white exactly white; auto is drawn in the
+            cell's foreground, with the cell's background showing through the
+            knockouts, like the text beside it. Window glyphs, controls, text
+            and emoji ignore it. A change rebuilds the glyph cache and redraws.
       additionalProperties: false
     FontProfiles:
       type: object
@@ -2204,7 +2199,7 @@ components:
             size_px: {type: integer, minimum: 1}
             sizing: {type: string, enum: [scale, pixels]}
             hinting: {type: string, enum: [full, light, none]}
-            icon_colour: {type: string, enum: [colour, black, white]}
+            icon_colour: {type: string, enum: [colour, black, white, auto]}
             rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
             colour_glyphs: {type: boolean}
             arabic_companion:
@@ -2855,7 +2850,7 @@ components:
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
                 size_px: {type: integer, minimum: 8, maximum: 64}
                 hinting: {type: string, enum: [full, light, none]}
-                icon_colour: {type: string, enum: [colour, black, white]}
+                icon_colour: {type: string, enum: [colour, black, white, auto]}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
             effects:
               type: object

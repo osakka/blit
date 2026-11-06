@@ -15,12 +15,19 @@ and shifted left by its column. Each part's advance is the span's
 (600 per column), which is how the renderer knows it; its ink's centre
 must lie within its own column's share, which is how it knows the column.
 
-An icon the catalogue marks `"mono": "disc-knockout"` is a badge: a disc with
-marks on it (ADR 0220). From its one SVG the build derives one more glyph,
-`<name>.mono`, that is in no cmap: the first path's first subpath is the disc,
-filled solid, and every other path is knocked out of it. Its two COLR layers
-are a white disc and black marks, the badge for a dark bar; the renderer
-inverts it for a light one. Nothing is drawn by hand.
+A monochrome pen says state by shape (ADR 0220), so the shape is decided here,
+from the SVG's own structure, and the renderer only chooses the pen. An icon
+whose paths are not all drawn (a level below the signal level) or that marks a
+path with `data-mono` gets one more glyph, `<name>.mono`, in no cmap:
+- the union of the active paths, so a level is carried by what is drawn;
+- `data-mono="disc"` on a path draws only its first subpath, so a ring is a
+  solid disc;
+- `data-mono="knockout"` on a path cuts its shapes out of that: they are
+  drawn against the nonzero winding rule, so inside the ink they are holes
+  and, outside it, solid (a charging bolt is a hole in the fill and solid on
+  the empty part of the battery). Knockout shapes must be simple, without holes.
+An icon with neither has no `.mono` glyph: its colour glyph's coverage is its
+monochrome shape. Nothing is drawn by hand.
 """
 import argparse
 import copy
@@ -33,7 +40,8 @@ from pathlib import Path
 import fontTools
 from fontTools.colorLib.builder import buildCOLR, buildCPAL
 from fontTools.fontBuilder import FontBuilder
-from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.areaPen import AreaPen
+from fontTools.pens.reverseContourPen import ReverseContourPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.svgLib.path import parse_path
@@ -56,15 +64,50 @@ UPEM, ADVANCE, CAP, ASCENT, DESCENT = 1000, 600, 700, 800, -200
 order = ['.notdef']
 glyphs = {'.notdef': TTGlyphPen(None).glyph()}
 cmap = {}
-layers, mono_layers, palette = {}, {}, []
+layers, palette = {}, []
 advances = {}
-MONO = {'disc-knockout'}
+SVG = '{http://www.w3.org/2000/svg}path'
 
 
-def palette_index(rgba):
-    if rgba not in palette:
-        palette.append(rgba)
-    return palette.index(rgba)
+def subpaths(d):
+    """The subpaths of an absolute path: the text from one M to the next."""
+    parts = re.split(r'(?=M)', d.strip())
+    if parts[0] != '' or 'm' in d:
+        raise SystemExit('a mono path must use absolute M subpaths')
+    return parts[1:]
+
+
+def mono_glyph(icon, paths, transform):
+    """The monochrome shape of an icon (see the module text), or None when
+    its colour glyph's coverage already is it."""
+    level = icon.get('signal_level', 4)
+    marks = [p.attrib.get('data-mono') for p in paths]
+    if any(m not in (None, 'disc', 'knockout') for m in marks):
+        raise SystemExit(f'{icon["id"]}: data-mono is disc or knockout')
+    if all(int(p.attrib.get('data-level', '0')) <= level for p in paths) and not any(marks):
+        return None
+    pen, sign, cuts = TTGlyphPen(None), 0, []
+    for path, mark in zip(paths, marks):
+        if int(path.attrib.get('data-level', '0')) > level:
+            continue
+        if mark == 'knockout':
+            cuts += subpaths(path.attrib['d'])
+            continue
+        d = path.attrib['d']
+        if mark == 'disc':
+            d = subpaths(d)[0]
+        if not sign:
+            area = AreaPen(None)
+            parse_path(subpaths(d)[0], TransformPen(area, transform))
+            sign = 1 if area.value > 0 else -1
+        parse_path(d, TransformPen(pen, transform))
+    for cut in cuts:
+        area = AreaPen(None)
+        parse_path(cut, TransformPen(area, transform))
+        # Against the ink's winding, so it is a hole where there is ink.
+        target = pen if (area.value > 0) != (sign > 0) else ReverseContourPen(pen)
+        parse_path(cut, TransformPen(target, transform))
+    return pen.glyph()
 
 
 def store(name, glyph):
@@ -87,14 +130,17 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
     name = 'blit.' + icon['id']
     silhouette = TTGlyphPen(None)
     colour_layers = []
-    for index, path in enumerate(svg.findall('{http://www.w3.org/2000/svg}path')):
+    paths = svg.findall(SVG)
+    for index, path in enumerate(paths):
         active = int(path.attrib.get('data-level', '0')) <= icon.get('signal_level', 4)
         fill = path.attrib['fill' if active else 'data-inactive-fill']
         rgba = tuple(int(fill[i:i + 2], 16) / 255 for i in (1, 3, 5)) + (1.0,)
+        if rgba not in palette:
+            palette.append(rgba)
         pen = TTGlyphPen(None)
         parse_path(path.attrib['d'], TransformPen(pen, transform))
         store(f'{name}.layer{index}', pen.glyph())
-        colour_layers.append((f'{name}.layer{index}', palette_index(rgba)))
+        colour_layers.append((f'{name}.layer{index}', palette.index(rgba)))
         if active:
             parse_path(path.attrib['d'], TransformPen(silhouette, transform))
     glyph = silhouette.glyph()
@@ -109,36 +155,10 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
             raise SystemExit(f'{icon["id"]}: its ink is off centre for column {column}')
     if colour:
         layers[name] = colour_layers
-    if 'mono' in icon:
-        if icon['mono'] not in MONO or not colour:
-            raise SystemExit(f'{icon["id"]}: mono must be one of {sorted(MONO)}, on a colour icon')
-        paths = svg.findall('{http://www.w3.org/2000/svg}path')
-        d0 = paths[0].attrib['d'].strip()
-        # Absolute commands only: a subpath is the text from one M to the next.
-        subpaths = re.split(r'(?=M)', d0)
-        if len(paths) < 2 or subpaths[0] != '' or 'm' in d0:
-            raise SystemExit(f'{icon["id"]}: a disc-knockout icon is an absolute disc path and its marks')
-        disc_d = subpaths[1]
-        disc, ink = TTGlyphPen(None), TTGlyphPen(None)
-        parse_path(disc_d, TransformPen(disc, transform))
-        for path in paths[1:]:
-            parse_path(path.attrib['d'], TransformPen(ink, transform))
-        # The marks sit inside the disc, so the disc is the whole box: the
-        # renderer fits the badge by its box and nothing moves between modes.
-        boxes = []
-        for d in [disc_d] + [p.attrib['d'] for p in paths]:
-            pen = BoundsPen(None)
-            parse_path(d, TransformPen(pen, transform))
-            boxes.append(pen.bounds)
-        if boxes[0] != (min(b[0] for b in boxes), min(b[1] for b in boxes),
-                        max(b[2] for b in boxes), max(b[3] for b in boxes)):
-            raise SystemExit(f'{icon["id"]}: the disc must be the outermost shape')
-        store(f'{name}.mono.disc', disc.glyph())
-        store(f'{name}.mono.ink', ink.glyph())
-        store(f'{name}.mono', copy.deepcopy(glyphs[f'{name}.mono.disc']))
-        advances[f'{name}.mono'] = ADVANCE * columns
-        mono_layers[f'{name}.mono'] = [(f'{name}.mono.disc', palette_index((1.0, 1.0, 1.0, 1.0))),
-                                       (f'{name}.mono.ink', palette_index((0.0, 0.0, 0.0, 1.0)))]
+        mono = mono_glyph(icon, paths, transform)
+        if mono is not None:
+            store(name + '.mono', mono)
+            advances[name + '.mono'] = ADVANCE * columns
     cmap[cp] = name
     # The standard writing pencil stays monochrome and themed; the
     # private-use glyph is its intrinsic-colour counterpart.
@@ -163,7 +183,7 @@ builder.setupHead(created=0, modified=0)
 font = builder.font
 font['head'].created = font['head'].modified = 0
 font['OS/2'].panose.bProportion = 9  # monospaced
-font['COLR'] = buildCOLR({**layers, **mono_layers}, version=0, glyphMap=font.getReverseGlyphMap())
+font['COLR'] = buildCOLR(layers, version=0, glyphMap=font.getReverseGlyphMap())
 font['CPAL'] = buildCPAL([palette])
 font.save(args.output, reorderTables=True)
 print(f'BLIT_ICONS_BUILD_PASS glyphs={len(cmap)} colour={len(layers)} '
