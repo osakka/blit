@@ -7,10 +7,10 @@
   "icons": [
     {"id":"blit", "codepoint":"100000", "source":"blit.svg"},
     {"id":"hibr-pen", "codepoint":"100001", "source":"hibr-pen.svg", "text_alias":"270E"},
-    {"id":"wifi-1", "codepoint":"100002", "source":"wifi-bars.svg", "signal_level":1},
-    {"id":"wifi-2", "codepoint":"100003", "source":"wifi-bars.svg", "signal_level":2},
-    {"id":"wifi-3", "codepoint":"100004", "source":"wifi-bars.svg", "signal_level":3},
-    {"id":"wifi-4", "codepoint":"100005", "source":"wifi-bars.svg", "signal_level":4},
+    {"id":"wifi-1", "codepoint":"100002", "source":"wifi-bars.svg", "signal_level":1, "deprecated":true, "replaced_by":["cellular-1"]},
+    {"id":"wifi-2", "codepoint":"100003", "source":"wifi-bars.svg", "signal_level":2, "deprecated":true, "replaced_by":["cellular-2"]},
+    {"id":"wifi-3", "codepoint":"100004", "source":"wifi-bars.svg", "signal_level":3, "deprecated":true, "replaced_by":["cellular-3"]},
+    {"id":"wifi-4", "codepoint":"100005", "source":"wifi-bars.svg", "signal_level":4, "deprecated":true, "replaced_by":["cellular-4"]},
     {"id":"bluetooth", "codepoint":"100006", "source":"bluetooth.svg"},
     {"id":"battery-0", "codepoint":"100009", "source":"battery.svg", "signal_level":0},
     {"id":"battery-1", "codepoint":"10000A", "source":"battery.svg", "signal_level":1},
@@ -261,7 +261,16 @@
     {"id":"wiretap-off-left", "codepoint":"1002C9", "source":"wiretap-off.svg", "columns":2, "column":0},
     {"id":"wiretap-off-right", "codepoint":"1002CA", "source":"wiretap-off.svg", "columns":2, "column":1},
     {"id":"wiretap-1", "codepoint":"1002CB", "source":"wiretap-1.svg", "signal_level":1},
-    {"id":"wiretap-1-off", "codepoint":"1002CC", "source":"wiretap-1.svg", "signal_level":0}
+    {"id":"wiretap-1-off", "codepoint":"1002CC", "source":"wiretap-1.svg", "signal_level":0},
+    {"id":"wifi-signal-1", "codepoint":"1002D1", "source":"wifi-signal.svg", "signal_level":1},
+    {"id":"wifi-signal-2", "codepoint":"1002D2", "source":"wifi-signal.svg", "signal_level":2},
+    {"id":"wifi-signal-3", "codepoint":"1002D3", "source":"wifi-signal.svg", "signal_level":3},
+    {"id":"wifi-signal-4", "codepoint":"1002D4", "source":"wifi-signal.svg", "signal_level":4},
+    {"id":"wifi-off", "codepoint":"1002D5", "source":"wifi-off.svg", "signal_level":0},
+    {"id":"cellular-1", "codepoint":"1002D6", "source":"wifi-bars.svg", "signal_level":1},
+    {"id":"cellular-2", "codepoint":"1002D7", "source":"wifi-bars.svg", "signal_level":2},
+    {"id":"cellular-3", "codepoint":"1002D8", "source":"wifi-bars.svg", "signal_level":3},
+    {"id":"cellular-4", "codepoint":"1002D9", "source":"wifi-bars.svg", "signal_level":4}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},

@@ -70,7 +70,7 @@
     "icons": {
       "file": "BlitIcons-Regular.ttf",
       "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
-      "sha256": "a2eb38aebe0d72e81fc47dcfe8db15366714805b2835d4d6ffdd651783e9ea42",
+      "sha256": "6effc42003e4812027a0851a7b707d88c1d8c89552ce5d414bab01d3960cb98b",
       "license_file": "icons/LICENSE.txt"
     },
     "nerd": {
@@ -152,7 +152,7 @@
     "catalogue": "icons/catalogue.json",
     "format": "COLR v0 / CPAL; original SVG paths; monochrome U+270E pen alias",
     "sources": {
-      "icons/catalogue.json": "8d66b0353819ddb3eb9044665547ad9772cab574ee1362b2c6e64c00482a3ea7",
+      "icons/catalogue.json": "74e21c350c589e12513cce4aea6de432ee277f6b291aa3b883a5a354010b3ec0",
       "icons/berkanan.svg": "f16019c94cf20f1a9dc42b7127e04ed68b0303260e6a8935ede1110bc1abdd5f",
       "icons/wired.svg": "6a5207758fb6ef13dbda9d5392fb32aeb9e6c9beea33280ecf46bd64fe2200b1",
       "icons/LICENSE.txt": "a1f68010aa91a710d0b41857f158f3fb1316778a0dc13321577f86cb82a9badb",
@@ -170,6 +170,8 @@
       "icons/wiretap.svg": "5e1805716fc740dd5db21f1a86d42a4dcfdf1581499787c3112cda79ae7844ca",
       "icons/wiretap-off.svg": "ca9d0007d10cca9a8791f3ee53600e802ed7590eb69b2c315a23d5425d317a47",
       "icons/wiretap-1.svg": "3742d04ff7d1e38c2bcf58810f0ee4dfe852a7e237944bfc7a2b336b8e043eef",
+      "icons/wifi-signal.svg": "837327dff6819c52bbfb1da6dc2f551bd4520fefbe211db8714ae861330ecc64",
+      "icons/wifi-off.svg": "09cbe3772a8de15d1044ed17cad5663413d7768e8117c2c85ce0d872c979487d",
       "icons/power.svg": "8a0d66ef8b858d08ba0d83968e1d9a152cde00e62ce2825af0a391a2be3da3b1",
       "icons/phone-off.svg": "064bd36d1d327241d8691e2f6efa0ed52d9a1b1c20504a0192ff0e2356c5ac95",
       "icons/phone-wait.svg": "89b806c4ba9badf8a51dc4836388dda312d086aa2d08c34dde85ad91a78ae5d1",

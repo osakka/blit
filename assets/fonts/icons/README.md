@@ -15,10 +15,10 @@ itself.
 | --- | --- | --- |
 | blit | U+100000 | Cyan split beam / golden bolt |
 | hibr-pen | U+100001 | Golden nib, turquoise body, blue cap |
-| wifi-1 | U+100002 | One active signal bar |
-| wifi-2 | U+100003 | Two active signal bars |
-| wifi-3 | U+100004 | Three active signal bars |
-| wifi-4 | U+100005 | Four active signal bars |
+| wifi-1 | U+100002 | One active signal bar. **Deprecated (0.3.54):** the bars are the mobile signal; use `cellular-1` |
+| wifi-2 | U+100003 | Two active signal bars. **Deprecated (0.3.54):** the bars are the mobile signal; use `cellular-2` |
+| wifi-3 | U+100004 | Three active signal bars. **Deprecated (0.3.54):** the bars are the mobile signal; use `cellular-3` |
+| wifi-4 | U+100005 | Four active signal bars. **Deprecated (0.3.54):** the bars are the mobile signal; use `cellular-4` |
 | bluetooth | U+100006 | Blue Bluetooth symbol |
 | battery-0 … battery-4 | U+100009–U+10000D | Upright battery, 0–4 teal segments: on battery |
 | battery-0-charging … battery-4-charging | U+10000E–U+100012 | The same, green segments and a yellow bolt: charging |
@@ -49,6 +49,9 @@ codepoints, of which a non-folder kind now uses only the classic two.
 | wiretap-left, wiretap-right | U+1002C7, U+1002C8 | wiretap on (0.3.52), Hibr's network monitor and firewall: a water tap in water blue, side on: a wall stub, the body with its spout curving down, a T handle, and a drop falling from the spout; one icon, two columns |
 | wiretap-off-left, wiretap-off-right | U+1002C9, U+1002CA | wiretap off (0.3.52): the same tap with no drop; one icon, two columns |
 | wiretap-1, wiretap-1-off | U+1002CB, U+1002CC | wiretap on and off in one column (0.3.53): a bolder tap in the same water blue, the body with its spout curving down and a T handle, with a drop under the spout (on) or without it (off); one drawing, `wiretap-1.svg`, the drop at `data-level` 1 (`signal_level` 1 on, 0 off) |
+| wifi-signal-1 … wifi-signal-4 | U+1002D1–U+1002D4 | Wi-Fi (0.3.54): a dot and three concentric arcs in a 90-degree fan opening upward, teal (#41d6bf) up to the level, the rest in the bars' inactive slate (#3e526b): 1 the dot, 2 with the inner arc, 3 with the middle arc, 4 all; one drawing, `wifi-signal.svg` |
+| wifi-off | U+1002D5 | Wi-Fi off (0.3.54): the fan all inactive and a red (#f56565) cross at the lower right; `wifi-off.svg`, the same fan. Its monochrome shape is the cross alone |
+| cellular-1 … cellular-4 | U+1002D6–U+1002D9 | The mobile signal (0.3.54): 1–4 active bars, `wifi-bars.svg`, the drawing `wifi-1`…`wifi-4` show; the new names of those deprecated ids |
 
 The hui badge, the hui mark and the wiretap icons each span two columns as
 two codepoints, written side by side; each draws its half of the one drawing
@@ -159,13 +162,15 @@ from the upstream profile. The former keeps its runic B shape; the separate
 Bluetooth artwork does not redefine that Unicode character. Nerd glyphs and
 Unicode emoji retain their existing meanings/presentation rules.
 
-`wifi-bars.svg`, `battery.svg`, `battery-charging.svg`, `volume.svg` and `wiretap-1.svg` each
+`wifi-bars.svg`, `wifi-signal.svg`, `battery.svg`, `battery-charging.svg`, `volume.svg` and `wiretap-1.svg` each
 supply one geometry; `signal_level` determines which parts are active
 (`data-level` at or below it), avoiding divergent drawings per level. An
 inactive part is drawn in its `data-inactive-fill`; `#rrggbbaa` with alpha
 00 draws it nowhere yet keeps it in the icon's box, so `wiretap-1-off` sits
 exactly where `wiretap-1` does, its drop clear (a one-column icon is fitted
-by its box). One
+by its box). `wifi-signal.svg` carries `wifi-off`'s cross the same way, at
+`data-level` 5 (never lit) and `#f5656500`, so the fan sits in one box in all
+five states. One
 icon says the whole state: the charging bolt and the mains plug are inside
 the battery, not a second glyph beside it. Colour layers are COLR v0/CPAL.
 Each icon has a monochrome shape too, for the icon pen (SGR 68, ADR 0220, 0221),

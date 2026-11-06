@@ -1999,6 +1999,22 @@ components:
           type: integer
           minimum: 0
           description: This entry's place in the span, from 0.
+        deprecated:
+          type: boolean
+          const: true
+          description: >-
+            Present, and true, on an icon whose id a later one replaces (ADR
+            0214's mechanism; 0.3.54: `wifi-1`..`wifi-4`, the bars, are the
+            cellular signal, `cellular-1`..`cellular-4`). Blit still draws it,
+            unchanged, until a release retires it; an application moves to
+            `replaced_by`.
+        replaced_by:
+          type: array
+          minItems: 1
+          items: {type: string}
+          description: >-
+            The ids that replace a deprecated icon, each the id of an icon that
+            is not itself deprecated. Present exactly when `deprecated` is.
       additionalProperties: false
     RetiredRange:
       type: object

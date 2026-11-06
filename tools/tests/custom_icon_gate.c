@@ -47,8 +47,8 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        /* Indexed by codepoint - U+100000: the icons run to U+1002CC (wiretap-1 off). */
-        unsigned hashes[0x2CD];
+        /* Indexed by codepoint - U+100000: the icons run to U+1002D9 (cellular-4). */
+        unsigned hashes[0x2DA];
         int partial_icons = 0;
         int seam[2][96], reach[2], tall[2];
         int index;
@@ -149,11 +149,15 @@ int main(int argc, char **argv)
         }
         /* Each level is its own raster: Wi-Fi 1-4, battery 0-4, charging
            0-4 and on mains, volume muted and 1-3, and the four telephone
-           states in each style. */
+           states in each style; Wi-Fi signal 1-4 and off, and cellular 1-4. */
         {
-            static const int groups[][2] = {{2, 6}, {9, 20}, {0x14, 0x18}, {0x1b, 0x1f}, {0x1f, 0x23}};
+            static const int groups[][2] = {{2, 6}, {9, 20}, {0x14, 0x18}, {0x1b, 0x1f}, {0x1f, 0x23}, {0x2d1, 0x2d6}, {0x2d6, 0x2da}};
             int group;
-            for (group = 0; group < 5; ++group)
+            /* cellular-N is deprecated wifi-N's new name (one drawing, same
+               level), so the two draw the same pixels. */
+            for (index = 0; index < 4; ++index)
+                CHECK(hashes[2 + index] == hashes[0x2d6 + index]);
+            for (group = 0; group < 7; ++group)
                 for (index = groups[group][0]; index < groups[group][1]; ++index) {
                     int other;
                     for (other = index + 1; other < groups[group][1]; ++other)

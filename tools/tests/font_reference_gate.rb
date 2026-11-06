@@ -43,6 +43,11 @@ deprecated.each do |g|
   row = special.lines.find { |l| l.start_with?("| `#{g['id']}` |") }
   raise "special.md does not mark #{g['id']} deprecated" unless row.include?('Deprecated') && g['replaced_by'].all? { |r| row.include?("`#{r}`") }
 end
+# 0.3.54: the renamed bars, wifi-1..4, say so and name cellular-1..4.
+icons.fetch('icons').select { |i| i['deprecated'] }.each do |i|
+  row = special.lines.find { |l| l.start_with?("| `#{i['id']}` |") }
+  raise "special.md does not mark #{i['id']} deprecated" unless row.include?('Deprecated') && i['replaced_by'].all? { |r| row.include?("`#{r}`") }
+end
 reference_text = File.read(File.join(root, 'docs/font-reference.md'))
 raise 'docs/font-reference.md does not document the outer-edge frame' unless
   (frame_ids - %w[chalk-title-end-right slate-light-title-end-right chalk-title-end-plain-right slate-light-title-end-plain-right]).all? { |id| reference_text.include?("`#{id}`") } &&

@@ -8,10 +8,10 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | --- | --- | --- | --- |
 | `blit` | `U+100000` | `"\udbc0\udc00"` | — |
 | `hibr-pen` | `U+100001` | `"\udbc0\udc01"` | — |
-| `wifi-1` | `U+100002` | `"\udbc0\udc02"` | 1 |
-| `wifi-2` | `U+100003` | `"\udbc0\udc03"` | 2 |
-| `wifi-3` | `U+100004` | `"\udbc0\udc04"` | 3 |
-| `wifi-4` | `U+100005` | `"\udbc0\udc05"` | 4 |
+| `wifi-1` | `U+100002` | `"\udbc0\udc02"` | 1 **Deprecated (0.3.54):** the bars are the cellular signal; use `cellular-1`. |
+| `wifi-2` | `U+100003` | `"\udbc0\udc03"` | 2 **Deprecated (0.3.54):** the bars are the cellular signal; use `cellular-2`. |
+| `wifi-3` | `U+100004` | `"\udbc0\udc04"` | 3 **Deprecated (0.3.54):** the bars are the cellular signal; use `cellular-3`. |
+| `wifi-4` | `U+100005` | `"\udbc0\udc05"` | 4 **Deprecated (0.3.54):** the bars are the cellular signal; use `cellular-4`. |
 | `bluetooth` | `U+100006` | `"\udbc0\udc06"` | — |
 | `battery-0` | `U+100009` | `"\udbc0\udc09"` | 0 |
 | `battery-1` | `U+10000A` | `"\udbc0\udc0a"` | 1 |
@@ -263,6 +263,15 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `wiretap-off-right` | `U+1002CA` | `"\udbc0\udeca"` | — |
 | `wiretap-1` | `U+1002CB` | `"\udbc0\udecb"` | — |
 | `wiretap-1-off` | `U+1002CC` | `"\udbc0\udecc"` | — |
+| `wifi-signal-1` | `U+1002D1` | `"\udbc0\uded1"` | 1 |
+| `wifi-signal-2` | `U+1002D2` | `"\udbc0\uded2"` | 2 |
+| `wifi-signal-3` | `U+1002D3` | `"\udbc0\uded3"` | 3 |
+| `wifi-signal-4` | `U+1002D4` | `"\udbc0\uded4"` | 4 |
+| `wifi-off` | `U+1002D5` | `"\udbc0\uded5"` | 0 |
+| `cellular-1` | `U+1002D6` | `"\udbc0\uded6"` | 1 |
+| `cellular-2` | `U+1002D7` | `"\udbc0\uded7"` | 2 |
+| `cellular-3` | `U+1002D8` | `"\udbc0\uded8"` | 3 |
+| `cellular-4` | `U+1002D9` | `"\udbc0\uded9"` | 4 |
 
 ## Themed text additions
 

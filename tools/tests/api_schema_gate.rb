@@ -71,6 +71,11 @@ raise 'the frame set or the deprecation of a replaced glyph is not typed' unless
   glyph.dig('properties','deprecated','type') == 'boolean' && glyph.dig('properties','deprecated','const') == true &&
   glyph.dig('properties','replaced_by','type') == 'array' && glyph.dig('properties','replaced_by','items','type') == 'string' &&
   glyph.dig('properties','replaced_by','minItems') == 1 && !glyph.fetch('required').include?('deprecated')
+# 0.3.54: an icon can be deprecated the same way (wifi-1..4 -> cellular-1..4).
+icon = schema.dig('components','schemas','FontIcon')
+raise 'the deprecation of a renamed icon is not typed' unless
+  icon.dig('properties','deprecated','const') == true && icon.dig('properties','replaced_by','items','type') == 'string' &&
+  icon.dig('properties','replaced_by','minItems') == 1 && !icon.fetch('required').include?('deprecated')
 raise 'docs/api.md does not describe deprecated and replaced_by' unless
   File.read(File.expand_path('../../docs/api.md', __dir__)).then { |t| t.include?('`deprecated: true`') && t.include?('`replaced_by`') }
 icons_get = paths.dig('/v1/fonts/icons','get')
