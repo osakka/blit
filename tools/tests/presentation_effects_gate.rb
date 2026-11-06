@@ -393,14 +393,22 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     check(later.last > band.last || later.last < band.first, "the band did not move down: #{band.last} -> #{later.last}")
     # The clock: frames at the configured rate, nothing redrawn, no glow work.
     fx = -> { get('/v1/diagnostics').dig('render', 'outputs', 0) }
+    # The rate is judged over the time that really passed between the two
+    # reads, not the sum of the sleeps (issue #151): the requests in between
+    # take time of their own, and a failure must say what it measured.
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     first = fx.call
     check(first.dig('effects', 'animation_hz') == 30, "animation_hz #{first.dig('effects', 'animation_hz')}")
     drawn = []
     10.times { sleep 0.2; drawn << fx.call.dig('kms_phases', 'drawn_cells') }
     last = fx.call
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     ticks = last.dig('effects', 'animation_frames') - first.dig('effects', 'animation_frames')
-    elapsed = 2.0
-    check(ticks >= 30 && ticks <= 75, "#{ticks} animation frames in about #{elapsed} s at 30 Hz")
+    rate = ticks / elapsed
+    runtime = get('/v1/diagnostics/runtime').to_s[/"frame_rate_missed_deadlines":\s*\d+/] || 'missed deadlines not reported'
+    check(rate >= 15.0 && rate <= 37.5,
+          format('%d animation frames in %.2f s, %.1f/s at 30 Hz (wanted 15 to 37.5/s; %s)',
+                 ticks, elapsed, rate, runtime))
     check(drawn.all?(&:zero?), "animation frames redrew cells: #{drawn}")
     check(last.dig('effects', 'glow_rebuilds') == first.dig('effects', 'glow_rebuilds'), 'animation rebuilt glow')
     # An animation frame is due when its tick says so: the gap since the
@@ -419,10 +427,13 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     saved!(output => { '1' => { 'glowing_line' => { 'intensity' => 100 }, 'curvature' => { 'amount' => 10 } } })
     run('pane-display-1-2', "printf '\\033[?25l'; i=0; while :; do i=$((i + 1)); printf '\\033[1;1H%d' $i; sleep 0.004; done")
     sleep 0.8
+    # Per second of the time that really passed between the reads (issue #151).
     rate = lambda do
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       a0 = fx.call; sleep 2; a1 = fx.call
-      [(a1['present_calls'] - a0['present_calls']) / 2.0,
-       (a1.dig('effects', 'animation_frames') - a0.dig('effects', 'animation_frames')) / 2.0]
+      seconds = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+      [((a1['present_calls'] - a0['present_calls']) / seconds).round(1),
+       ((a1.dig('effects', 'animation_frames') - a0.dig('effects', 'animation_frames')) / seconds).round(1)]
     end
     with_line, gap_ticks = rate.call
     saved!(output => { '1' => { 'curvature' => { 'amount' => 10 } } })
