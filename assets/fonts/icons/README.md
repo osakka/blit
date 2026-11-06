@@ -25,7 +25,7 @@ itself.
 | battery-ac | U+100013 | Full teal battery with a dark plug: on mains, not charging |
 | volume-0 | U+100014 | Speaker with a red cross: muted |
 | volume-1 … volume-3 | U+100015–U+100017 | Speaker with 1–3 active waves |
-| hui-left, hui-right | U+100018, U+100019 | The letters "hui" in a teal ring: one badge, two columns |
+| hui-left, hui-right | U+100018, U+100019 | The letters "hui" in white on a solid teal disc: one badge, two columns (0.3.51; a ring before) |
 | power | U+10001A | The power symbol: a teal open ring and a light bar |
 | phone-off | U+10001B | Telephone handset, grey outline: the line is off |
 | phone-wait | U+10001C | Telephone handset, amber dashed outline: connecting |
@@ -45,10 +45,12 @@ codepoints, of which a non-folder kind now uses only the classic two.
 | file-<kind>-<colour>-left, -right | U+10009B–U+1000F2 | Eleven more kinds, eight codepoints each in this order: boxer (a Boxer game without its cover: two boxing gloves), markdown, spreadsheet, diagram, presentation, font, web, terminal, settings, bundle (a Hibr bundle), link |
 | file-image-jpg/png/gif-left, -right | U+10022B–U+100230 | The picture with its format on a label (JPG orange, PNG blue, GIF violet); one look each (0.3.8) |
 | file-<kind>-<colour>-left, -right | U+1000F3–U+10022A | Thirty-nine more, eight codepoints each in this order: special folders with a badge (folder-git, -config, -local, -system, -desktop, -downloads, -documents, -music, -pictures, -videos, -apps, -games), then rc, history, service, key, network, cron, readme, license, log, kernel, boot, c, asm, makefile, patch, json, vector, rom, ebook, exe, disc, package, library, lock, database, usb, share |
+| hui-mark-left, hui-mark-right | U+1002C5, U+1002C6 | The hui mark (0.3.51): the monogram H U i in teal, no disc: a full left stem, a crossbar, the lower half joined as a U, a dot for the i; one mark, two columns. U+100231–1002C4 between are window and control glyphs (`cell_geometry`) |
 
-The hui badge spans two columns as two codepoints, written side by side;
-each draws its half of the one drawing in `hui.svg` (ADR 0197). Neither
-is a wide character, so no width table changes.
+The hui badge and the hui mark each span two columns as two codepoints,
+written side by side; each draws its half of the one drawing in `hui.svg`
+or `hui-mark.svg` (ADR 0197). Neither is a wide character, so no width
+table changes.
 
 U+100007 and U+100008 are the bar corners, drawn as cell geometry (see
 `cell_geometry` in the catalogue).
@@ -163,9 +165,10 @@ decided when the font is built, from its SVG: a path whose `data-level` is
 above the icon's `signal_level` is left out (so a battery shows its bands, Wi-Fi
 and volume their active bars and waves); `data-mono="knockout"` on a path cuts
 its shapes out of the rest (the charging bolt, the mains plug, the hui
-letters); `data-mono="disc"` draws a ring path as its solid outer shape (the
-hui disc). An icon with none of these has no extra glyph: its colour coverage
-is its shape. The shapes live in the icon font as `<glyph>.mono`.
+letters); `data-mono="disc"` draws a path's first subpath only, so a ring
+is its solid outer shape (the hui disc, solid in colour too since 0.3.51).
+An icon with none of these has no extra glyph: its colour coverage is its
+shape (the hui mark). The shapes live in the icon font as `<glyph>.mono`.
 Source files and the original-art MIT licence are hash-pinned in
 `../fonts.source.json`. Bluetooth trademark rights are not
 granted by the drawing's licence.

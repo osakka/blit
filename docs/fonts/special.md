@@ -255,6 +255,8 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `file-image-png-right` | `U+10022E` | `"\udbc0\ude2e"` | — |
 | `file-image-gif-left` | `U+10022F` | `"\udbc0\ude2f"` | — |
 | `file-image-gif-right` | `U+100230` | `"\udbc0\ude30"` | — |
+| `hui-mark-left` | `U+1002C5` | `"\udbc0\udec5"` | — |
+| `hui-mark-right` | `U+1002C6` | `"\udbc0\udec6"` | — |
 
 ## Themed text additions
 
