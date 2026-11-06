@@ -47,8 +47,8 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        /* Indexed by codepoint - U+100000: the icons run to U+1002CA (wiretap off). */
-        unsigned hashes[0x2CB];
+        /* Indexed by codepoint - U+100000: the icons run to U+1002CC (wiretap-1 off). */
+        unsigned hashes[0x2CD];
         int partial_icons = 0;
         int seam[2][96], reach[2], tall[2];
         int index;

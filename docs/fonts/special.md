@@ -261,6 +261,8 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `wiretap-right` | `U+1002C8` | `"\udbc0\udec8"` | — |
 | `wiretap-off-left` | `U+1002C9` | `"\udbc0\udec9"` | — |
 | `wiretap-off-right` | `U+1002CA` | `"\udbc0\udeca"` | — |
+| `wiretap-1` | `U+1002CB` | `"\udbc0\udecb"` | — |
+| `wiretap-1-off` | `U+1002CC` | `"\udbc0\udecc"` | — |
 
 ## Themed text additions
 

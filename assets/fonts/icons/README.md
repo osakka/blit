@@ -48,11 +48,13 @@ codepoints, of which a non-folder kind now uses only the classic two.
 | hui-mark-left, hui-mark-right | U+1002C5, U+1002C6 | The hui mark (0.3.51): the monogram H U i in teal, no disc: a full left stem, a crossbar, the lower half joined as a U, a dot for the i; one mark, two columns. U+100231–1002C4 between are window and control glyphs (`cell_geometry`) |
 | wiretap-left, wiretap-right | U+1002C7, U+1002C8 | wiretap on (0.3.52), Hibr's network monitor and firewall: a water tap in water blue, side on: a wall stub, the body with its spout curving down, a T handle, and a drop falling from the spout; one icon, two columns |
 | wiretap-off-left, wiretap-off-right | U+1002C9, U+1002CA | wiretap off (0.3.52): the same tap with no drop; one icon, two columns |
+| wiretap-1, wiretap-1-off | U+1002CB, U+1002CC | wiretap on and off in one column (0.3.53): a bolder tap in the same water blue, the body with its spout curving down and a T handle, with a drop under the spout (on) or without it (off); `wiretap-1.svg`, `wiretap-1-off.svg` |
 
 The hui badge, the hui mark and the wiretap icons each span two columns as
 two codepoints, written side by side; each draws its half of the one drawing
 in `hui.svg`, `hui-mark.svg`, `wiretap.svg` or `wiretap-off.svg` (ADR 0197).
-None is a wide character, so no width table changes.
+None is a wide character, so no width table changes. `wiretap-1` and
+`wiretap-1-off` are one column each, like the battery and phone icons.
 
 U+100007 and U+100008 are the bar corners, drawn as cell geometry (see
 `cell_geometry` in the catalogue).
@@ -170,7 +172,7 @@ its shapes out of the rest (the charging bolt, the mains plug, the hui
 letters); `data-mono="disc"` draws a path's first subpath only, so a ring
 is its solid outer shape (the hui disc, solid in colour too since 0.3.51).
 An icon with none of these has no extra glyph: its colour coverage is its
-shape (the hui mark, the wiretap icons: on and off differ by the drop,
+shape (the hui mark, the wiretap icons in two columns and in one: on and off differ by the drop,
 held apart by `font_icon_shape_gate`). The shapes live in the icon font as `<glyph>.mono`.
 Source files and the original-art MIT licence are hash-pinned in
 `../fonts.source.json`. Bluetooth trademark rights are not

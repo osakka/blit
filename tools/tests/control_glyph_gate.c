@@ -7,8 +7,8 @@
        their pen planes: K (FG), L (LINE), M (MIX), '.' none.
    It also requires, at every size, that a pen-drawn glyph's planes are
    disjoint and together equal its one-colour lookup, that Chalk has no
-   planes, and that the codepoints just beyond the set (U+1002CB and on; U+1002AE-1002C4 are the frame's, ADR 0214, and the pressed states', ADR 0219,
-   U+1002C5-1002C6 the hui mark and U+1002C7-1002CA the wiretap icons, colour icons)
+   planes, and that the codepoints just beyond the set (U+1002CD and on; U+1002AE-1002C4 are the frame's, ADR 0214, and the pressed states', ADR 0219,
+   U+1002C5-1002C6 the hui mark and U+1002C7-1002CC the wiretap icons, colour icons)
    draw nothing of their own. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
@@ -18,9 +18,9 @@
 #define FIRST 0x10029AU
 #define LAST 0x1002ADU
 /* ADR 0214's outer-edge frame is U+1002AE-1002BA and ADR 0219's pressed states U+1002BB-1002C4; window_glyph_gate holds them.
-   U+1002C5-1002C6 are the hui mark and U+1002C7-1002CA the wiretap icons (on, off),
-   two-column colour icons. */
-#define NEXT_FREE 0x1002CBU
+   U+1002C5-1002C6 are the hui mark and U+1002C7-1002CC the wiretap icons (on, off; two columns, then one),
+   colour icons. */
+#define NEXT_FREE 0x1002CDU
 
 /* Pens are used by Slate's checkbox (the 4th to 6th glyph) and from the
    Slate switch on (the 11th): written out here, not read from the header. */

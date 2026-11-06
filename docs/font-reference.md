@@ -126,7 +126,8 @@ icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), `hui-left` +
 `hui-right` (the badge: white letters on a teal disc) and `hui-mark-left` +
 `hui-mark-right` (the H-U-i monogram, no disc), and `wiretap-left` + `wiretap-right`
 (a water tap with a drop: wiretap on) and `wiretap-off-left` + `wiretap-off-right`
-(the tap, no drop: off). Resolve those IDs from the catalogue
+(the tap, no drop: off), and their one-column forms `wiretap-1` (on) and
+`wiretap-1-off` (off). Resolve those IDs from the catalogue
 instead of maintaining an independently numbered table in every application.
 
 **One icon says the whole state.** The charging bolt and the mains plug are
@@ -301,10 +302,10 @@ resize corner), normal and pressed.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002CB (the outer-edge frame, below,
+section. The next free codepoint is U+1002CD (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
-hui mark, a colour icon, U+1002C5–1002C6, and the wiretap icons, on and
-off, U+1002C7–1002CA).
+hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
+off, U+1002C7–1002CA, and their one-column forms U+1002CB–1002CC).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

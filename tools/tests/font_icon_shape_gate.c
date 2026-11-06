@@ -6,7 +6,8 @@
    10% at 16 px (8x16). The table is printed, so the margin is visible.
    A two-column icon (ADR 0197) is compared as its whole badge, its left and
    right columns side by side: wiretap on (a drop under the spout) against
-   wiretap off (no drop). */
+   wiretap off (no drop). The one-column wiretap-1 pair (on, off) is
+   compared as one cell, as the battery and Wi-Fi icons are. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
@@ -26,10 +27,11 @@ static const Icon kIcons[] = {
     {"volume-3", 0x100017},
     {"wifi-1", 0x100002}, {"wifi-2", 0x100003}, {"wifi-3", 0x100004}, {"wifi-4", 0x100005},
     {"wiretap", 0x1002c7}, {"wiretap-off", 0x1002c9},
+    {"wiretap-1", 0x1002cb}, {"wiretap-1-off", 0x1002cc},
 };
 #define NICONS ((int)(sizeof(kIcons) / sizeof(kIcons[0])))
 /* A two-column icon's entry is its left codepoint; its right is the next. */
-enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19 };
+enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19, TAP1 = 21 };
 
 typedef struct { int w, h; unsigned char *m; } Mask;
 
@@ -89,7 +91,7 @@ int main(int argc, char **argv)
         double min = kSizes[s] == 22 ? MIN22 : MIN16;
         Mask m[NICONS];
         for (i = 0; i < NICONS; ++i)
-            if (!mask_of(&font, argv[2], argv[3], kSizes[s], kIcons[i].cp, i >= TAP ? 2 : 1, &m[i])) {
+            if (!mask_of(&font, argv[2], argv[3], kSizes[s], kIcons[i].cp, i == TAP || i == TAP + 1 ? 2 : 1, &m[i])) {
                 fprintf(stderr, "FAIL: %s did not render\n", kIcons[i].name);
                 return 1;
             }
@@ -101,6 +103,7 @@ int main(int argc, char **argv)
         for (i = W1; i < W1 + 4; ++i) for (j = i + 1; j < W1 + 4; ++j) pair(m, i, j, min, "wifi");
         for (i = V0; i < V0 + 4; ++i) for (j = i + 1; j < V0 + 4; ++j) pair(m, i, j, min, "volume");
         pair(m, TAP, TAP + 1, min, "wiretap");
+        pair(m, TAP1, TAP1 + 1, min, "wiretap-1");
         for (i = 0; i < NICONS; ++i) free(m[i].m);
     }
     if (failures) {
