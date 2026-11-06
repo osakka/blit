@@ -77,11 +77,14 @@ static int blit_control_pen_index(uint32_t scalar)
    raster keeps one plane cache: Slate's window glyphs first, then the
    controls, then Slate's two title-end cells (ADR 0214). */
 #define BLIT_FRAME_PENS 4U
-#define BLIT_CHROME_PENS (BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS)
+/* ... and Slate's five pressed-box and grow glyphs (ADR 0219). */
+#define BLIT_STATE_PENS 5U
+#define BLIT_CHROME_PENS (BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS + BLIT_STATE_PENS)
 
 static int blit_chrome_glyph(uint32_t scalar)
 {
-    return blit_window_glyph(scalar) || blit_control_glyph(scalar) || blit_frame_glyph(scalar);
+    return blit_window_glyph(scalar) || blit_control_glyph(scalar) || blit_frame_glyph(scalar) ||
+        blit_state_glyph(scalar);
 }
 
 static int blit_chrome_pen_index(uint32_t scalar)
@@ -90,6 +93,8 @@ static int blit_chrome_pen_index(uint32_t scalar)
     if (blit_window_colour(scalar)) return (int)(scalar - (BLIT_WINDOW_FIRST + BLIT_WINDOW_SET));
     pen = blit_frame_pen_index(scalar);
     if (pen >= 0) return (int)(BLIT_WINDOW_SET + BLIT_CONTROL_PENS) + pen;
+    pen = blit_state_pen_index(scalar);
+    if (pen >= 0) return (int)(BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS) + pen;
     pen = blit_control_pen_index(scalar);
     return pen < 0 ? -1 : (int)BLIT_WINDOW_SET + pen;
 }
@@ -272,9 +277,10 @@ static int blit_chrome_draw(uint32_t scalar, int plane, unsigned char *pixels, i
     unsigned char roles[128 * 128];
     int x, y;
     if (blit_window_glyph(scalar)) return blit_window_draw(scalar, plane, pixels, stride, w, h);
-    if (!blit_control_glyph(scalar) && !blit_frame_glyph(scalar)) return 0;
+    if (!blit_control_glyph(scalar) && !blit_frame_glyph(scalar) && !blit_state_glyph(scalar)) return 0;
     if (w <= 0 || h <= 0 || w > 128 || h > 128) return 0;
     if (blit_frame_glyph(scalar)) blit_frame_roles(scalar, roles, w, h);
+    else if (blit_state_glyph(scalar)) blit_state_roles(scalar, roles, w, h);
     else blit_control_roles(scalar, roles, w, h);
     for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {
         unsigned char role = roles[y * w + x];

@@ -1,5 +1,21 @@
 # Verification status
 
+## 2026-11-06: pressed title-bar boxes and a grow box (ADR 0219, 0.3.47)
+
+- **Ten glyphs**, U+1002BB-1002C4 (next free U+1002C5), five a set, Chalk's then
+  Slate's: `close-pressed`, `shade-pressed`, `zoom-pressed`, `grow`,
+  `grow-pressed` (ids `chalk-...` and `slate-light-...`). Hover draws the pressed
+  glyph. The grow cell is the window's bottom-right frame cell, its right and
+  bottom lines the box's own edges, a `/` hatch with a 4 px period inside.
+- **Checks:** `window_glyph_gate` holds all ten pixel for pixel to the design
+  script at twelve cell sizes, to written-out drawings at 11x22, and by rule at
+  every size (pressed Chalk is the solid box with its mark cleared; pressed
+  Slate uses only the three role pens; the grow box's edges are the frame's
+  line pixels). `window_style_gate` draws them through the compositor;
+  `glyph_edge_sweep_gate`, `icon_clip_gate`, `control_glyph_gate` and
+  `catalogue_fields_gate` cover edges, clipping, the next free codepoint and the
+  catalogue fields. Not a release: no version bump or receipt here.
+
 ## 2026-11-05: 0.3.46 XTGETTCAP answers the SGR extension names
 
 - **`DCS + q` now answers `sgr-framed`, `sgr-framed-bar` and `sgr-shadow`**

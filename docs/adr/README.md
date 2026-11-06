@@ -236,6 +236,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0216 — A gate runner that is measured, bounded and parallel](0216-a-gate-runner-that-is-measured-bounded-and-parallel.md)
 - [0217 — Slimming the package: one copy of the documentation, font sources in their own package](0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)
 - [0218 — fonts.hinting: how text glyphs are hinted, one setting, fitted icons exempt](0218-font-hinting-setting.md)
+- [0219 — Pressed boxes and a grow box, in Chalk and Slate](0219-pressed-boxes-and-a-grow-box.md)
 
 ## Status
 

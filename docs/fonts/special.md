@@ -379,5 +379,15 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `chalk-title-end-plain-right` | `U+1002B8` | `"\udbc0\udeb8"` | foreground | Chalk set: inactive title bar, right end cell: the outer line, the bar's top line and rule, no stripes |
 | `slate-light-title-end-plain-left` | `U+1002B9` | `"\udbc0\udeb9"` | cell pens | Slate set: inactive title bar, left end cell: the outer line, the bar's bevel, no stripes |
 | `slate-light-title-end-plain-right` | `U+1002BA` | `"\udbc0\udeba"` | cell pens | Slate set: inactive title bar, right end cell: the outer line, the bar's bevel, no stripes |
+| `chalk-close-pressed` | `U+1002BB` | `"\udbc0\udebb"` | foreground | Chalk set: title bar with the close box pressed (also hover): the box filled, an X in it |
+| `chalk-shade-pressed` | `U+1002BC` | `"\udbc0\udebc"` | foreground | Chalk set: title bar with the window-shade box pressed (also hover): the box filled, bars in it |
+| `chalk-zoom-pressed` | `U+1002BD` | `"\udbc0\udebd"` | foreground | Chalk set: title bar with the zoom box pressed (also hover): the box filled, a square outline in its top-left |
+| `chalk-grow` | `U+1002BE` | `"\udbc0\udebe"` | foreground | Chalk set: the window's bottom-right corner with the grow box: the frame's right and bottom lines are its edges, a / hatch inside |
+| `chalk-grow-pressed` | `U+1002BF` | `"\udbc0\udebf"` | foreground | Chalk set: the grow box pressed or dragged: the box filled, the hatch in the opposite colour |
+| `slate-light-close-pressed` | `U+1002C0` | `"\udbc0\udec0"` | cell pens | Slate set: title bar with the close box pressed (also hover): the box filled, an X in it |
+| `slate-light-shade-pressed` | `U+1002C1` | `"\udbc0\udec1"` | cell pens | Slate set: title bar with the window-shade box pressed (also hover): the box filled, bars in it |
+| `slate-light-zoom-pressed` | `U+1002C2` | `"\udbc0\udec2"` | cell pens | Slate set: title bar with the zoom box pressed (also hover): the box filled, a square outline in its top-left |
+| `slate-light-grow` | `U+1002C3` | `"\udbc0\udec3"` | cell pens | Slate set: the window's bottom-right corner with the grow box: the frame's right and bottom lines are its edges, a / hatch inside |
+| `slate-light-grow-pressed` | `U+1002C4` | `"\udbc0\udec4"` | cell pens | Slate set: the grow box pressed or dragged: the box filled, the hatch in the opposite colour |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

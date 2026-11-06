@@ -68,6 +68,10 @@ end
   0x250C => 0, 0xE0B0 => 15, 0xE0B2 => 15, 0xE0B1 => 15, 0xE0B3 => 15,
   0x2580 => 7, 0x2584 => 11, 0x258C => 13, 0x2590 => 14 }.each { |cp, mask| spec << ['cell', cp, 1, mask, format('U%X', cp)] }
 (0x10023A..0x10023C).to_a.concat((0x10025D..0x10025F).to_a).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+# ADR 0219: the pressed boxes reach all four edges as the boxes do; a grow cell its right,
+# top and bottom (the frame's lines), and its left only where the box is the cell's width.
+[0x1002BB, 0x1002BC, 0x1002BD, 0x1002C0, 0x1002C1, 0x1002C2].each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+[0x1002BE, 0x1002BF, 0x1002C3, 0x1002C4].each { |cp| spec << ['cell', cp, 1, 14, format('chrome-%X', cp)] }
 cells = ([[11, 22]] + (8..64).flat_map { |s| [[(s + 1) / 2, s], [s / 2, s]] }).uniq
 stride = ENV.fetch('BLIT_ICON_CLIP_STRIDE', '48').to_i
 freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")

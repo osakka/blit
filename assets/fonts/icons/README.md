@@ -100,8 +100,19 @@ foreground the ink, SGR 58 the highlight). A drop shadow (SGR 66) goes in
 the cells beyond the frame cells, with inset 0. `tools/fonts/draw-window-glyphs.py`
 is the design and writes their entries; `window_glyph_gate` holds the raster
 to it. The old frame glyphs and `stripe-first`/`stripe-last` of the window
-sets are deprecated by these (see `deprecated` below) and still drawn. U+1002BB
-is the next free codepoint.
+sets are deprecated by these (see `deprecated` below) and still drawn.
+
+U+1002BB–U+1002C4 are the pressed boxes and the grow box (ADR 0219), also
+cell geometry, ten glyphs, five a set, Chalk's then Slate's: the title bar's
+`close`, `shade` and `zoom` boxes pressed (`chalk-close-pressed`, ...,
+`slate-light-zoom-pressed`) and the window's resize corner, `grow` and
+`grow-pressed`. Hover draws the pressed glyph. A pressed Chalk box is solid
+with its mark cleared out; a pressed Slate box is the mix pen with an inverted
+bevel and the mark in the foreground. The grow cell is the window's
+bottom-right frame cell (use it in place of `frame-bottom-right`): the frame's
+right and bottom lines are the box's own edges, with a `/` hatch inside.
+`tools/fonts/draw-window-glyphs.py` is the design and `window_glyph_gate`
+holds the raster to it. U+1002C5 is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph
 
