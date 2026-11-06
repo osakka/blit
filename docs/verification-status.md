@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-11-06: 0.3.52 the wiretap tap, on and off
+
+- **Two new two-cell icons** for wiretap (the Hibr network monitor): a water
+  tap in #2e8fe0. `wiretap-left` U+1002C7 and `wiretap-right` U+1002C8 is on
+  (a drop under the spout); `wiretap-off-left` U+1002C9 and `wiretap-off-right`
+  U+1002CA is off (no drop). Next free is U+1002CB. Sources
+  `assets/fonts/icons/wiretap.svg` and `wiretap-off.svg`.
+- **On and off differ by shape**, so the black, white and auto pens tell them
+  apart: 15.4% of pixels at 22 px and 13.3% at 16 px
+  (`font_icon_shape_gate`, minimums 15% and 10%; the drop was enlarged only as
+  far as that needed). Shown to and approved by the owner from real-server
+  renders on light and dark bars at 22 and 16 px.
+- **Icon font** grows 1,108 bytes; it was rebuilt byte-for-byte first and no
+  existing glyph changed.
+- **Suites, glyph-only set** (no `src/` change since 0.3.51; owner-approved
+  2026-11-06): `font` and `schema` 56 pass, 0 fail; GLES `renderer` 81 pass,
+  1 skip, 0 fail; `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.51 the hui badge as a solid disc, and a new hui mark
 
 - **hui badge** (`hui-left`, `hui-right`, same ids and codepoints): a solid teal
