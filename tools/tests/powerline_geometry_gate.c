@@ -20,12 +20,12 @@ int main(int argc, char **argv)
             unsigned long count;
             int partial=0,previous=-1;
             cp=0xe0b0+kind;
-            CHECK(blit_raster_get(r,cp,span,&right));
+            CHECK(blit_raster_get(r,cp,span,0,&right));
             CHECK(right.format==BLIT_RASTER_COVERAGE&&!right.fallback);
             CHECK(right.width==((size+1)/2)*span&&right.height==size);
             memcpy(saved,right.pixels,right.stride*right.height);
             right.pixels=saved;
-            CHECK(blit_raster_get(r,cp+2,span,&left));
+            CHECK(blit_raster_get(r,cp+2,span,0,&left));
             CHECK(left.format==BLIT_RASTER_COVERAGE&&!left.fallback);
             for(y=0;y<size;++y) {
                 int row_ink=0;
@@ -49,7 +49,7 @@ int main(int argc, char **argv)
             CHECK(saved[(size/2)*right.stride+right.width-1]>0);
             if(kind) CHECK(!saved[(size/2)*right.stride]);
             count=blit_raster_render_count(r);
-            CHECK(blit_raster_get(r,cp,span,&again));
+            CHECK(blit_raster_get(r,cp,span,0,&again));
             CHECK(blit_raster_render_count(r)==count);
             CHECK(!memcmp(saved,again.pixels,again.stride*again.height));
             CHECK(blit_raster_cached_bytes(r)<=4U*1024U*1024U);

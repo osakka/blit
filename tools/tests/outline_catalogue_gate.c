@@ -26,7 +26,7 @@ int main(int argc, char **argv)
         for (i = 0; i < count; ++i) {
             BlitRasterGlyph glyph;
             int x, y, ink = 0;
-            int ok = blit_raster_get(raster, scalars[i], 1, &glyph);
+            int ok = blit_raster_get(raster, scalars[i], 1, 0, &glyph);
             if (ok) {
                 for (y = 0; y < glyph.height; ++y)
                     for (x = 0; x < glyph.width; ++x)

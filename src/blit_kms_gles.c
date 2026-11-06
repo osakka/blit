@@ -26,6 +26,9 @@ typedef struct {
     /* ADR 0211: a Slate window glyph's pen plane (WR_FG, WR_LINE, WR_MIX),
        or 0 for the cell's glyphs as draw_cell_glyphs draws them. */
     int plane;
+    /* ADR 0221: the cell's icon pen, for a Blit icon only (kms_sprite_pen);
+       0 for every other glyph, so their sprites never fragment. */
+    int pen;
     const void *font, *font_data, *raster, *wide, *wide_data;
     /* The ink's place in the atlas (empty ink has w == 0), its offset from
        the cell's top-left, and how it blends. */
@@ -118,6 +121,7 @@ static unsigned kms_sprite_hash(const KmsSprite *key)
 #define KMS_MIX(v) do { h ^= (uint32_t)(v); h *= 16777619U; } while (0)
     KMS_MIX(key->cp); KMS_MIX(key->count); KMS_MIX(key->width);
     KMS_MIX(key->height); KMS_MIX(key->lean); KMS_MIX(key->bold); KMS_MIX(key->plane);
+    KMS_MIX(key->pen);
     KMS_MIX((uintptr_t)key->font); KMS_MIX((uintptr_t)key->font_data);
     KMS_MIX((uintptr_t)key->raster); KMS_MIX((uintptr_t)key->wide);
     for (i = 0; i < key->count; ++i) KMS_MIX(key->marks[i]);
@@ -129,7 +133,7 @@ static int kms_sprite_same(const KmsSprite *a, const KmsSprite *b)
 {
     return a->cp == b->cp && a->count == b->count && a->width == b->width &&
         a->height == b->height && a->lean == b->lean && a->bold == b->bold &&
-        a->plane == b->plane &&
+        a->plane == b->plane && a->pen == b->pen &&
         a->font == b->font && a->font_data == b->font_data &&
         a->raster == b->raster && a->wide == b->wide &&
         a->wide_data == b->wide_data &&
@@ -175,14 +179,14 @@ static void kms_sprite_draw(KmsOutput *scratch, const BlitFont *font, const Blit
         return;
     }
     draw_cell_glyphs(scratch, font, wide, cp, key->count ? key->marks : NULL, key->count,
-                     x, y, width, height, 0xffffffU, lean, bold);
+                     x, y, width, height, 0xffffffU, lean, bold, key->pen);
 }
 
 static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
                                    const BlitFont *font, const BlitFont *wide,
                                    uint32_t cp, const uint32_t *marks,
                                    unsigned count, int width, int height,
-                                   int lean, int bold, int plane)
+                                   int lean, int bold, int plane, int pen)
 {
     KmsSprite key;
     KmsSprite *slot;
@@ -208,6 +212,7 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
     if (marks != NULL && key.count) memcpy(key.marks, marks, sizeof(uint32_t) * key.count);
     key.width = width; key.height = height; key.lean = lean; key.bold = bold;
     key.plane = plane;
+    key.pen = pen;
     key.font = font; key.font_data = font ? font->data : NULL;
     key.raster = font ? font->raster_state : NULL;
     key.wide = wide; key.wide_data = wide ? wide->data : NULL;
@@ -436,6 +441,16 @@ static void kms_gles_images(BlitKms *kms, KmsGlesResources *r,
     }
 }
 
+/* ADR 0221: the icon pen a cell's sprite is keyed by. The raster looks at
+   the pen only for a lone Blit icon (plane 16), so only those carry it here:
+   a text cell with pen bits shares the text sprite. */
+static int kms_sprite_pen(const BlitKmsSurfaceView *view, int index)
+{
+    uint32_t cp = view->codepoints[index];
+    if (cp < 0x100000U || (view->combining_count && view->combining_count[index])) return 0;
+    return KMS_ICON_PEN(view->attributes[index]);
+}
+
 static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
                            const BlitKmsSurfaceView *view, int index,
                            int x, int y, int width, int ch, uint32_t fg,
@@ -447,7 +462,7 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
         view->codepoints[index] ? view->codepoints[index] : ' ',
         view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
         view->combining_count ? view->combining_count[index] : 0,
-        width, ch, lean, bold, 0);
+        width, ch, lean, bold, 0, kms_sprite_pen(view, index));
     if (sprite == NULL || sprite->w == 0) return;
     blit_gles_quad(kms->gles, sprite->mode, r->atlas, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE,
                    sprite->atlas_x, sprite->atlas_y, sprite->w, sprite->h,
@@ -462,7 +477,7 @@ static void kms_gles_window_glyph(BlitKms *kms, KmsGlesResources *r, uint32_t cp
     int i;
     for (i = 0; i < 3; ++i) {
         const KmsSprite *sprite = kms_sprite(kms, r, kms->font, NULL, cp, NULL, 0,
-                                             width, ch, 0, 0, planes[i]);
+                                             width, ch, 0, 0, planes[i], 0);
         if (sprite == NULL || sprite->w == 0) continue;
         blit_gles_quad(kms->gles, sprite->mode, r->atlas, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE,
                        sprite->atlas_x, sprite->atlas_y, sprite->w, sprite->h,

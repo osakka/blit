@@ -49,7 +49,7 @@ int main(int argc, char **argv)
                 STATE_FIRST + (n - (LAST - FIRST + 1) - (FRAME_LAST - FRAME_FIRST + 1));
             pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U ||
                 cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST);
-            if (!blit_raster_get(raster, cp, 1, &glyph)) {
+            if (!blit_raster_get(raster, cp, 1, 0, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;
             }
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
         /* Retired: nothing of the window glyphs' own; at most the fallback. */
         for (cp = 0x100277U; cp <= 0x100299U; ++cp) {
             BlitRasterGlyph glyph;
-            if (blit_raster_get(raster, cp, 1, &glyph) && !glyph.fallback) {
+            if (blit_raster_get(raster, cp, 1, 0, &glyph) && !glyph.fallback) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL retired U+%X still draws at %dx%d\n", cp, w, h);
                 return 1;
             }

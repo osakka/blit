@@ -38,7 +38,7 @@ int main(int argc,char **argv)
             cp=points[i];
             if(types[i]) {
                 CHECK(blit_emoji_default(cp));
-                CHECK(blit_raster_get(raster,cp,span,&glyph));
+                CHECK(blit_raster_get(raster,cp,span,0,&glyph));
                 CHECK(glyph.format==BLIT_RASTER_RGBA_PREMULTIPLIED&&!glyph.fallback&&ink(&glyph));
             } else {
                 CHECK(blit_emoji_variation(cp));
@@ -57,7 +57,7 @@ int main(int argc,char **argv)
                 CHECK(blit_raster_get_cluster(raster,&key,&glyph));
                 CHECK(!memcmp(saved,glyph.pixels,glyph.stride*glyph.height));
                 if(!blit_emoji_default(cp)) {
-                    CHECK(blit_raster_get(raster,cp,span,&glyph));
+                    CHECK(blit_raster_get(raster,cp,span,0,&glyph));
                     CHECK(glyph.format==BLIT_RASTER_COVERAGE&&!glyph.fallback&&ink(&glyph));
                 }
             }

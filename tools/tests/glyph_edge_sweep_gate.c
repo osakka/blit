@@ -21,7 +21,7 @@ int main(int argc, char **argv)
     while (scanf("%x", &cp) == 1) {
         BlitRasterGlyph glyph;
         int x, y;
-        if (!blit_raster_get(raster, cp, 1, &glyph) || glyph.format != BLIT_RASTER_COVERAGE ||
+        if (!blit_raster_get(raster, cp, 1, 0, &glyph) || glyph.format != BLIT_RASTER_COVERAGE ||
             glyph.width != w || glyph.height != h) { printf("%X none\n", cp); continue; }
         printf("%X ", cp);
         for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) printf("%02x", glyph.pixels[y * glyph.stride + x]);

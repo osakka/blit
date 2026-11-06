@@ -21,7 +21,7 @@ int main(int argc, char **argv)
     if (blit_font_load_path(&fallback, argv[1])) return 1;
     raster = blit_raster_open(&fallback, argv[2], argv[3], (height + 1) / 2, height);
     if (!raster) { blit_font_free(&fallback); return 1; }
-    if (!blit_raster_get(raster, (uint32_t)scalar, columns, &glyph)) {
+    if (!blit_raster_get(raster, (uint32_t)scalar, columns, 0, &glyph)) {
         blit_raster_close(raster); blit_font_free(&fallback); return 1;
     }
     left = glyph.width; top = glyph.height;

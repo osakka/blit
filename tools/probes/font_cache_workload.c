@@ -38,14 +38,14 @@ int main(int argc, char **argv)
     r = blit_raster_open(&font, argv[2], argv[3], 11, 22);
     if (!r || !blit_raster_set_arabic(r, argv[4])) return 2;
     for (i = 0; i < n; ++i) {
-        if (!blit_raster_get(r, keys[i], 1, &g)) return 3;
+        if (!blit_raster_get(r, keys[i], 1, 0, &g)) return 3;
         expected[i] = signature(&g);
     }
     before = blit_raster_render_count(r);
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     for (pass = 0; pass < count; ++pass)
         for (i = 0; i < n; ++i) {
-            if (!blit_raster_get(r, keys[i], 1, &g) ||
+            if (!blit_raster_get(r, keys[i], 1, 0, &g) ||
                 expected[i] != signature(&g)) return 4;
         }
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &stop);

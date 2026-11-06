@@ -43,7 +43,7 @@ int main(int argc, char **argv)
         for (cp = FIRST; cp <= LAST; ++cp) {
             BlitRasterGlyph glyph, plane[3];
             int p;
-            if (!blit_raster_get(raster, cp, 1, &glyph)) {
+            if (!blit_raster_get(raster, cp, 1, 0, &glyph)) {
                 fprintf(stderr, "CONTROL_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;
             }
@@ -101,7 +101,7 @@ int main(int argc, char **argv)
         /* Beyond the set: nothing of their own. */
         for (cp = NEXT_FREE; cp <= NEXT_FREE + 3; ++cp) {
             BlitRasterGlyph glyph;
-            if ((blit_raster_get(raster, cp, 1, &glyph) && !glyph.fallback) ||
+            if ((blit_raster_get(raster, cp, 1, 0, &glyph) && !glyph.fallback) ||
                 blit_raster_get_window_plane(raster, cp, 1, &glyph)) {
                 fprintf(stderr, "CONTROL_GLYPH_FAIL U+%X, past the set, draws at %dx%d\n", cp, w, h);
                 return 1;

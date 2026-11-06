@@ -582,7 +582,7 @@ const BlitFont *blit_font_cell_source(const BlitFont *font,
     BlitRasterGlyph glyph;
     if (!wide || !blit_font_has_glyph(wide, codepoint)) return font;
     if (font && font->raster_get &&
-        font->raster_get(font->raster_state, codepoint, 2, &glyph) &&
+        font->raster_get(font->raster_state, codepoint, 2, 0, &glyph) &&
         !glyph.fallback) return font;
     return wide;
 }

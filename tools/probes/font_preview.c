@@ -24,7 +24,7 @@ static void paint(const BlitRasterGlyph *g, int x, int y, unsigned fg)
 static void glyph(BlitRaster *r, unsigned cp, int columns, int x, int y, unsigned fg)
 {
     BlitRasterGlyph g;
-    if (!blit_raster_get(r, cp, columns, &g)) exit(1);
+    if (!blit_raster_get(r, cp, columns, 0, &g)) exit(1);
     paint(&g, x, y, fg);
 }
 

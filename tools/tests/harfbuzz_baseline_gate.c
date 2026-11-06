@@ -24,8 +24,8 @@ int main(int argc, char **argv)
     CHECK(plain && outline && queries == 0);
     CHECK(!blit_raster_open(&font, argv[2], argv[3], 8, 16));
     CHECK(queries == 1);
-    CHECK(blit_raster_get(plain, 'A', 1, &glyph));
-    CHECK(blit_raster_get(outline, 'A', 1, &glyph));
+    CHECK(blit_raster_get(plain, 'A', 1, 0, &glyph));
+    CHECK(blit_raster_get(outline, 'A', 1, 0, &glyph));
     blit_raster_close(outline); blit_raster_close(plain); blit_font_free(&font);
     puts("HARFBUZZ_BASELINE_PASS injected_old_runtime=colour_rejected existing_contexts=preserved");
     return 0;

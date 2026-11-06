@@ -220,6 +220,14 @@ static const char *const blit_framed_names[5] = {
 static const char *const blit_shadow_names[6] = {
     "none", "right", "right-start", "under", "under-start", "corner"
 };
+/* ADR 0221: the icon pen, SGR 68:v, ended by SGR 69. Two bits, in
+   BlitRasterIconPen's values: 0 colour (the icon's own colours), 1 auto (its
+   monochrome shape in the cell's foreground), 2 black, 3 white. Only Blit's
+   colour icons look at it; it changes nothing else a cell draws. */
+#define BLIT_ATTR_ICON_PEN_SHIFT 21
+#define BLIT_ATTR_ICON_PEN_ALL (3U << BLIT_ATTR_ICON_PEN_SHIFT)
+#define BLIT_ICON_PEN(attributes) (((attributes) >> BLIT_ATTR_ICON_PEN_SHIFT) & 3U)
+static const char *const blit_icon_pen_names[4] = { "colour", "auto", "black", "white" };
 
 typedef struct {
     int x, y, w, h;
@@ -1414,8 +1422,6 @@ typedef struct {
     int font_size_px;
     /* ADR 0218: BlitRasterHinting of text glyphs; zero is full, the default. */
     int font_hinting;
-    /* ADR 0220: BlitRasterIconColour of the colour icons; zero is colour. */
-    int font_icon_colour;
     int pointer_valid;
     /* The appearance the settings API chose. What is drawn is
        pointer_shown_art: the same palette, size and shadow, with the shape a
@@ -3909,7 +3915,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"runtime-diagnostics\",\"observation-snapshot\","
              "\"lifecycle-control\","
              "\"effects\",\"overlays\",\"font-selection\","
-             "\"sgr-framed\",\"sgr-framed-bar\",\"sgr-shadow\"],\"display_count\":%d,"
+             "\"sgr-framed\",\"sgr-framed-bar\",\"sgr-shadow\",\"sgr-icon-pen\"],\"display_count\":%d,"
              "\"display_backend\":{\"name\":\"%s\",\"ready\":%s,"
              "\"error\":\"%s\"},\"resources\":{"
              "\"graphics\":\"/v1/graphics\",\"displays\":\"/v1/displays\","
@@ -7682,7 +7688,7 @@ static int surface_snapshot_json(const BlitSurface *surface,
                     "\"dim\":%s,\"italic\":%s,\"underline\":%s,"
                     "\"blink\":%s,\"inverse\":%s,\"strike\":%s,"
                     "\"concealed\":%s,\"framed\":\"%s\",\"shadow\":\"%s\","
-                    "\"underline_color\":\"#%06x\"}",
+                    "\"icon_pen\":\"%s\",\"underline_color\":\"#%06x\"}",
                     (unsigned int)foreground, (unsigned int)background,
                     attributes & BLIT_ATTR_BOLD ? "true" : "false",
                     attributes & BLIT_ATTR_DIM ? "true" : "false",
@@ -7693,6 +7699,7 @@ static int surface_snapshot_json(const BlitSurface *surface,
                     attributes & BLIT_ATTR_STRIKE ? "true" : "false",
                     attributes & BLIT_ATTR_CONCEAL ? "true" : "false",
                     framed_name(attributes), shadow,
+                    blit_icon_pen_names[BLIT_ICON_PEN(attributes)],
                     (unsigned int)(surface->underline_color[y][x] ?
                         surface->underline_color[y][x] - 1 : 0)))
                     return 0;
@@ -7962,7 +7969,7 @@ static const char *cell_misplaced_style_key(const char *cell_json)
     static const char *const style_keys[] = {
         "foreground", "background", "underline_color", "bold", "dim",
         "italic", "underline", "blink", "inverse", "strike", "concealed",
-        "framed", "shadow"
+        "framed", "shadow", "icon_pen"
     };
     size_t i;
 
@@ -8897,6 +8904,13 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
             if (json_string(cell_json, "shadow", color_text, sizeof(color_text)) &&
                 !shadow_parse(color_text, &attributes))
                 style_valid = 0;
+            if (json_string(cell_json, "icon_pen", color_text, sizeof(color_text))) {
+                unsigned pen;
+                for (pen = 0; pen < 4 && strcmp(color_text, blit_icon_pen_names[pen]) != 0; ++pen)
+                    ;
+                if (pen < 4) attributes |= (uint32_t)pen << BLIT_ATTR_ICON_PEN_SHIFT;
+                else style_valid = 0;
+            }
             if (json_string(cell_json, "underline_color", color_text,
                             sizeof(color_text))) {
                 underline_color_set = parse_color(color_text, &underline_color);
@@ -12573,7 +12587,8 @@ static const char *terminal_termcap_value(const BlitSession *session,
     }
     if (strcmp(name, "sgr-framed") == 0 ||
         strcmp(name, "sgr-framed-bar") == 0 ||
-        strcmp(name, "sgr-shadow") == 0) {
+        strcmp(name, "sgr-shadow") == 0 ||
+        strcmp(name, "sgr-icon-pen") == 0) {
         /* Blit's own SGR extensions, under the names GET /v1/server lists in
            `capabilities`, so a client that holds the terminal and not the HTTP
            API can ask the terminal itself (hibr#476). Booleans: present or
@@ -12820,6 +12835,9 @@ static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
                                  BLIT_SHADOW_KIND(session->terminal_attributes),
                                  (session->terminal_attributes & BLIT_ATTR_SHADOW_THICK) ? 2 : 1,
                                  (session->terminal_attributes & BLIT_ATTR_SHADOW_FLUSH) ? ":0" : "");
+            if (BLIT_ICON_PEN(session->terminal_attributes))
+                used += snprintf(reply + used, sizeof(reply) - (size_t)used, ";68:%u",
+                                 BLIT_ICON_PEN(session->terminal_attributes));
             if (session->terminal_foreground_set)
                 used += snprintf(reply + used, sizeof(reply) - (size_t)used,
                                  ";38:2::%u:%u:%u",
@@ -13081,6 +13099,20 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
             }
         } else if (value == 67) {
             session->terminal_attributes &= (uint32_t)~BLIT_ATTR_SHADOW_ALL;
+        } else if (value == 68) {
+            /* ADR 0221: the icon pen of Blit's colour icons, 68:v (1 auto,
+               2 black, 3 white). Only the colon form, as 66. 68 with no value,
+               or 68:0, is colour, as 69 is; an unknown value leaves the pen
+               alone. */
+            int pen = param->subs > 0 ? param->sub[0] : 0;
+            if (pen <= 0)
+                session->terminal_attributes &= (uint32_t)~BLIT_ATTR_ICON_PEN_ALL;
+            else if (pen <= 3) {
+                session->terminal_attributes &= (uint32_t)~BLIT_ATTR_ICON_PEN_ALL;
+                session->terminal_attributes |= (uint32_t)pen << BLIT_ATTR_ICON_PEN_SHIFT;
+            }
+        } else if (value == 69) {
+            session->terminal_attributes &= (uint32_t)~BLIT_ATTR_ICON_PEN_ALL;
         } else if (value == 39) {
             session->terminal_foreground_set = 0;
         } else if (value == 49) {
@@ -18212,7 +18244,6 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
 }
 
 static const char *const font_hinting_names[] = {"full", "light", "none"};
-static const char *const font_icon_colour_names[] = {"colour", "black", "white", "auto"};
 
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
@@ -18235,7 +18266,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
     json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
     used += (size_t)snprintf(body + used, capacity - used,
         "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
-        "\"scale\":%.4f,\"size_px\":%d,\"sizing\":\"%s\",\"hinting\":\"%s\",\"icon_colour\":\"%s\","
+        "\"scale\":%.4f,\"size_px\":%d,\"sizing\":\"%s\",\"hinting\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         /* The loaded font's own identity.  Without it nothing can tell that a
            run picked up a different artifact under the same name, which is
@@ -18249,7 +18280,6 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         runtime_terminal_cell_height(runtime),
         runtime->font_size_px > 0 ? "pixels" : "scale",
         font_hinting_names[runtime->font_hinting],
-        font_icon_colour_names[runtime->font_icon_colour],
         runtime_terminal_cell_width(runtime),
         runtime_terminal_cell_height(runtime),
         (unsigned long)runtime->font.glyph_count,
@@ -18406,7 +18436,7 @@ static int font_sizing_parse(const char *configuration, int *scale, int *pixels)
 
 /* One parser for the font settings that are a word from a short list, serving
    live requests and stored settings alike. An absent key leaves *choice
-   alone; -4 is a value that is not one of the words (ADR 0218, 0220). */
+   alone; -4 is a value that is not one of the words (ADR 0218). */
 static int font_word_parse(const char *configuration, const char *key,
                            const char *const *words, unsigned count, int *choice)
 {
@@ -18425,16 +18455,8 @@ static int font_hinting_parse(const char *configuration, int *hinting)
                            sizeof(font_hinting_names) / sizeof(font_hinting_names[0]), hinting);
 }
 
-static int font_icon_colour_parse(const char *configuration, int *icon_colour)
-{
-    return font_word_parse(configuration, "icon_colour", font_icon_colour_names,
-                           sizeof(font_icon_colour_names) / sizeof(font_icon_colour_names[0]),
-                           icon_colour);
-}
-
 static int prepare_font_raster(BlitFont *font, const char *path,
-                                int scale, int pixels, int hinting, int icon_colour,
-                                BlitRaster **result)
+                                int scale, int pixels, int hinting, BlitRaster **result)
 {
     char colour[1024];
     const char *arabic;
@@ -18453,8 +18475,7 @@ static int prepare_font_raster(BlitFont *font, const char *path,
     /* Without the stack a pixel font still draws everything it has, as it
        always did; only an outline font cannot draw at all. */
     if (!*result) return !blit_font_is_outline(path);
-    if (*result && (!blit_raster_set_hinting(*result, (BlitRasterHinting)hinting) ||
-                    !blit_raster_set_icon_colour(*result, (BlitRasterIconColour)icon_colour))) {
+    if (*result && !blit_raster_set_hinting(*result, (BlitRasterHinting)hinting)) {
         blit_raster_close(*result);
         *result = NULL;
         return 0;
@@ -18469,8 +18490,7 @@ static int prepare_font_raster(BlitFont *font, const char *path,
 }
 
 static int apply_font_configuration(BlitRuntime *runtime, const char *path,
-                                    int scale_tenths, int size_px, int hinting,
-                                    int icon_colour)
+                                    int scale_tenths, int size_px, int hinting)
 {
     BlitFont candidate;
     BlitRaster *raster = NULL;
@@ -18507,10 +18527,10 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     /* Already the active font: nothing to rasterise, reflow or redraw. */
     if (candidate.data == NULL && runtime->font.data != NULL &&
         scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px &&
-        hinting == runtime->font_hinting && icon_colour == runtime->font_icon_colour)
+        hinting == runtime->font_hinting)
         return 1;
     if (!prepare_font_raster(candidate.data ? &candidate : &runtime->font,
-                             path, scale_tenths, size_px, hinting, icon_colour, &raster)) {
+                             path, scale_tenths, size_px, hinting, &raster)) {
         blit_font_free(&candidate); return 0;
     }
     if (candidate.data != NULL) {
@@ -18521,7 +18541,6 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     runtime->font_scale_tenths = scale_tenths;
     runtime->font_size_px = size_px;
     runtime->font_hinting = hinting;
-    runtime->font_icon_colour = icon_colour;
     discover_panes(runtime);
     /* A font change alters every cell's physical rectangle. Rebuilding the
        atlas and reflowing surfaces is not enough: the next presentation must
@@ -22342,9 +22361,8 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
             json_appendf(out, capacity, &used, "\"size_px\":%d", runtime->font_size_px);
         else
             json_appendf(out, capacity, &used, "\"scale\":%.1f", font_scale_value(runtime));
-        json_appendf(out, capacity, &used, ",\"hinting\":\"%s\",\"icon_colour\":\"%s\"",
-                     font_hinting_names[runtime->font_hinting],
-                     font_icon_colour_names[runtime->font_icon_colour]);
+        json_appendf(out, capacity, &used, ",\"hinting\":\"%s\"",
+                     font_hinting_names[runtime->font_hinting]);
         first = 0;
     }
     json_appendf(out, capacity, &used, "},\"server\":{");
@@ -22818,7 +22836,6 @@ static void settings_apply_font(BlitRuntime *runtime)
     int scale_tenths;
     int size_px;
     int hinting;
-    int icon_colour;
 
     runtime->font_configured = 0;
     if (runtime->settings_enabled && runtime->settings_document[0] != '\0' &&
@@ -22831,14 +22848,11 @@ static void settings_apply_font(BlitRuntime *runtime)
             scale_tenths = runtime->font_scale_tenths;
             size_px = runtime->font_size_px;
             hinting = 0;
-            icon_colour = 0;
             if (font_sizing_parse(configuration, &scale_tenths, &size_px) < 0)
                 fprintf(stderr, "blit: stored font size policy is invalid\n");
             else if (font_hinting_parse(configuration, &hinting) < 0)
                 fprintf(stderr, "blit: stored font hinting is invalid\n");
-            else if (font_icon_colour_parse(configuration, &icon_colour) < 0)
-                fprintf(stderr, "blit: stored font icon colour is invalid\n");
-            else if (!apply_font_configuration(runtime, path, scale_tenths, size_px, hinting, icon_colour))
+            else if (!apply_font_configuration(runtime, path, scale_tenths, size_px, hinting))
                 fprintf(stderr, "blit: stored font selection could not be applied\n");
             else {
                 runtime->font_configured = 1;
@@ -22847,7 +22861,7 @@ static void settings_apply_font(BlitRuntime *runtime)
         }
     }
     apply_font_configuration(runtime, runtime->boot_font_path,
-                             runtime->boot_font_scale_tenths, 0, 0, 0);
+                             runtime->boot_font_scale_tenths, 0, 0);
 }
 
 static void settings_apply_audio_device(BlitRuntime *runtime,
@@ -23772,17 +23786,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int requested_size_px;
         int sizing_result;
         int requested_hinting;
-        int requested_icon_colour;
         int has_hinting = json_key_cursor(payload, "hinting") != NULL;
-        int has_icon_colour = json_key_cursor(payload, "icon_colour") != NULL;
         int has_scale = json_key_cursor(payload, "scale") != NULL;
         int has_pixels = json_key_cursor(payload, "size_px") != NULL;
         int has_font_id = json_string(payload, "font_id", font_id,
                                       sizeof(font_id));
-        if (!has_scale && !has_pixels && !has_font_id && !has_hinting &&
-            !has_icon_colour) {
+        if (!has_scale && !has_pixels && !has_font_id && !has_hinting) {
             send_problem(fd, 400, "Bad Request", "font_configuration_empty",
-                         "font_id, scale, size_px, hinting or icon_colour is required.");
+                         "font_id, scale, size_px or hinting is required.");
             return;
         }
         requested_scale_tenths = runtime->font_scale_tenths;
@@ -23802,12 +23813,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "hinting must be one of full, light or none.");
             return;
         }
-        requested_icon_colour = runtime->font_icon_colour;
-        if (font_icon_colour_parse(payload, &requested_icon_colour) < 0) {
-            send_problem(fd, 400, "Bad Request", "invalid_font_icon_colour",
-                         "icon_colour must be one of colour, black, white or auto.");
-            return;
-        }
         if (has_font_id) {
             if (!font_path_for_id(font_id, font_path, sizeof(font_path))) {
                 send_problem(fd, 404, "Not Found", "invalid_font_profile",
@@ -23824,7 +23829,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         if (!apply_font_configuration(runtime, font_path,
                                       requested_scale_tenths, requested_size_px,
-                                      requested_hinting, requested_icon_colour)) {
+                                      requested_hinting)) {
             send_problem(fd, 422, "Unprocessable Entity", "font_apply_failed",
                          "The font could not be loaded or applied to all sessions.");
             return;
@@ -24756,14 +24761,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 int proposed_scale = runtime->font_scale_tenths;
                 int proposed_pixels = runtime->font_size_px;
                 int proposed_hinting = 0;
-                int proposed_icon_colour = 0;
                 if (font_cursor != NULL &&
                     (!json_object_slice(font_cursor, font_configuration, sizeof(font_configuration)) ||
                      font_sizing_parse(font_configuration, &proposed_scale, &proposed_pixels) < 0 ||
-                     font_hinting_parse(font_configuration, &proposed_hinting) < 0 ||
-                     font_icon_colour_parse(font_configuration, &proposed_icon_colour) < 0)) {
+                     font_hinting_parse(font_configuration, &proposed_hinting) < 0)) {
                     send_problem(fd, 400, "Bad Request", "invalid_settings_font",
-                                 "Font sizing must select scale or integer size_px, never both, hinting must be full, light or none, and icon_colour colour, black, white or auto.");
+                                 "Font sizing must select scale or integer size_px, never both, and hinting must be full, light or none.");
                     return;
                 }
             }
@@ -30810,7 +30813,7 @@ int main(int argc, char **argv)
     {
         BlitRaster *raster;
         if (!prepare_font_raster(&runtime.font, runtime.font.path,
-                                 runtime.font_scale_tenths, 0, 0, 0, &raster)) {
+                                 runtime.font_scale_tenths, 0, 0, &raster)) {
             fprintf(stderr, "blit: requested native font could not be initialized\n");
             blit_font_free(&runtime.font); blit_font_free(&runtime.wide_font);
             return 1;

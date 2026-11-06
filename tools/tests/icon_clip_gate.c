@@ -80,7 +80,7 @@ static int sweep(BlitRaster *r, const Item *it, int w, int h)
     int ok, bad = 0, seam = 0;
     long l, rr, t, b;
     memset(&probe, 0, sizeof probe);
-    ok = blit_raster_get(r, it->cp, 1, &g);
+    ok = blit_raster_get(r, it->cp, 1, 0, &g);
     if (!strcmp(it->kind, "cell")) {
         /* A full-cell glyph (block, box line, powerline, window chrome) is
            exact geometry, not fitted: it must reach the edges it should (bit 1

@@ -35,8 +35,7 @@ static int mask_of(const BlitFont *font, const char *outline, const char *colour
     BlitRasterGlyph g;
     int x, y;
     if (!raster) return 0;
-    if (!blit_raster_set_icon_colour(raster, BLIT_RASTER_ICON_BLACK)) return 0;
-    if (!blit_raster_get(raster, cp, 1, &g) || g.format != BLIT_RASTER_RGBA_PREMULTIPLIED) return 0;
+    if (!blit_raster_get(raster, cp, 1, BLIT_RASTER_ICON_BLACK, &g) || g.format != BLIT_RASTER_RGBA_PREMULTIPLIED) return 0;
     out->w = g.width; out->h = g.height;
     out->m = calloc((size_t)g.width, (size_t)g.height);
     if (!out->m) return 0;

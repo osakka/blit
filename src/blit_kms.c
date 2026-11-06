@@ -54,6 +54,8 @@
 #define KMS_ATTR_SHADOW (7U << KMS_ATTR_SHADOW_SHIFT)
 #define KMS_ATTR_SHADOW_THICK (1U << 19)
 #define KMS_ATTR_SHADOW_FLUSH (1U << 20)
+/* ADR 0221: the server's icon pen field (SGR 68), BlitRasterIconPen's values. */
+#define KMS_ICON_PEN(attr) ((int)(((attr) >> 21) & 3U))
 
 typedef struct {
     uint32_t fb;
@@ -961,7 +963,7 @@ static void draw_cell_raster(KmsOutput *output, const BlitFont *font,
 
 static void draw_glyph(KmsOutput *output, const BlitFont *font,
                        uint32_t codepoint, int x, int y, int cw, int ch,
-                       uint32_t color, int lean, int trim)
+                       uint32_t color, int lean, int trim, int pen)
 {
     int glyph_row;
     int glyph_column;
@@ -971,7 +973,7 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     if (font && font->raster_get && font->raster_blend) {
         BlitRasterGlyph raster;
         int columns = cw > font->raster_cell_width ? 2 : 1;
-        if (font->raster_get(font->raster_state, codepoint, columns, &raster)) {
+        if (font->raster_get(font->raster_state, codepoint, columns, pen, &raster)) {
             draw_cell_raster(output, font, &raster, x, y, cw, ch, color, lean, trim);
             return;
         }
@@ -1038,7 +1040,7 @@ static void draw_window_cell(KmsOutput *output, const BlitFont *font, uint32_t c
     BlitRasterGlyph raster;
     int i;
     if (!font || !font->raster_plane_get || !font->raster_blend) {
-        draw_glyph(output, font, cp, x, y, cw, ch, pens->fg, 0, 0);
+        draw_glyph(output, font, cp, x, y, cw, ch, pens->fg, 0, 0, 0);
         return;
     }
     for (i = 0; i < 3; ++i)
@@ -1077,7 +1079,7 @@ static void draw_cell_glyphs(KmsOutput *output, const BlitFont *font,
                               const BlitFont *wide_font, uint32_t cp,
                               const uint32_t *marks, unsigned count,
                               int x, int y, int cw, int ch, uint32_t fg,
-                              int lean, int bold)
+                              int lean, int bold, int pen)
 {
     const BlitFont *glyph_font = blit_font_cell_source(font, wide_font, cp);
     BlitCellCluster key;
@@ -1091,10 +1093,10 @@ static void draw_cell_glyphs(KmsOutput *output, const BlitFont *font,
         if (bold) draw_cell_raster(output, font, &raster, x + 1, y, cw, ch, fg, lean, 1);
         return;
     }
-    draw_glyph(output, glyph_font, cp, x, y, cw, ch, fg, lean, 0);
-    if (bold) draw_glyph(output, glyph_font, cp, x + 1, y, cw, ch, fg, lean, 1);
+    draw_glyph(output, glyph_font, cp, x, y, cw, ch, fg, lean, 0, pen);
+    if (bold) draw_glyph(output, glyph_font, cp, x + 1, y, cw, ch, fg, lean, 1, pen);
     if (marks) for (i = 0; i < count && i < BLIT_MAX_COMBINING; ++i)
-        draw_glyph(output, font, marks[i], x, y, cw, ch, fg, lean, 0);
+        draw_glyph(output, font, marks[i], x, y, cw, ch, fg, lean, 0, 0);
 }
 
 #define KMS_GRAPHICS_Z_UNDER_BACKGROUND (-1073741824)
@@ -1468,7 +1470,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL,
                     cp, view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
                     view->combining_count ? view->combining_count[index] : 0,
-                    x, y, glyph_width, ch, fg, lean, (attr & 1) != 0);
+                    x, y, glyph_width, ch, fg, lean, (attr & 1) != 0, KMS_ICON_PEN(attr));
             }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
                 if (y + ch - 1 >= clip_y0 && y + ch - 1 < clip_y1) {
@@ -1568,7 +1570,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                             view->combining_count?view->combining_count[at]:0,
                             view->origin_x+sx*cw,view->origin_y+sy*ch,
                             (a & KMS_ATTR_WIDE)?cw*2:cw,ch,cursor_bg,
-                            (a & KMS_ATTR_ITALIC)?italic_lean:0,(a & 1)!=0);
+                            (a & KMS_ATTR_ITALIC)?italic_lean:0,(a & 1)!=0,KMS_ICON_PEN(a));
                     }
                 output->glyph_clip_active = 0;
             }
@@ -1581,7 +1583,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                     cursor_cp, view->combining ? &view->combining[cursor_index * BLIT_MAX_COMBINING] : NULL,
                     view->combining_count ? view->combining_count[cursor_index] : 0,
                     cursor_x, cursor_y, cw * cursor_cells, ch, cursor_bg,
-                    (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0, (cursor_attr & 1) != 0);
+                    (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0, (cursor_attr & 1) != 0,
+                    KMS_ICON_PEN(cursor_attr));
         }
     }
 effects:

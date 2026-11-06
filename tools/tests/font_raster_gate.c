@@ -36,7 +36,7 @@ int main(int argc, char **argv)
         BlitRaster *raster = blit_raster_open(&fallback, argv[2], argv[3], 11, 22);
         BlitRasterGlyph bell;
         int x, y, top = 22, bottom = -1;
-        CHECK(raster && blit_raster_get(raster, 0x1f514, 2, &bell));
+        CHECK(raster && blit_raster_get(raster, 0x1f514, 2, 0, &bell));
         CHECK(bell.width == 22 && bell.height == 22 && !bell.fallback);
         for (y = 0; y < bell.height; ++y)
             for (x = 0; x < bell.width; ++x)
@@ -63,15 +63,15 @@ int main(int argc, char **argv)
             BlitRasterGlyph g;
             int light = (width + 5) / 10 > 0 ? (width + 5) / 10 : 1;
             int line = size / 2 - light / 2;
-            CHECK(blit_raster_get(raster, 0x2500, 1, &g));
+            CHECK(blit_raster_get(raster, 0x2500, 1, 0, &g));
             for (y = 0; y < size; ++y) for (x = 0; x < width; ++x)
                 CHECK(g.pixels[y * g.stride + x] == (y >= line && y < line + light ? 255 : 0));
             /* Preserve complete half-block rows, including odd cell sizes. */
-            CHECK(blit_raster_get(raster, 0x2580, 1, &g));
+            CHECK(blit_raster_get(raster, 0x2580, 1, 0, &g));
             for (y = 0; y < size; ++y) for (x = 0; x < width; ++x)
                 CHECK(g.pixels[y * g.stride + x] == (y * 16 / size < 8 ? 255 : 0));
         }
-        CHECK(blit_raster_get(raster, 'A', 1, &a));
+        CHECK(blit_raster_get(raster, 'A', 1, 0, &a));
         CHECK(a.width == width && a.height == size && a.stride == width);
         CHECK(a.format == BLIT_RASTER_COVERAGE && !a.fallback);
         CHECK(a.baseline > 0 && a.baseline <= size);
@@ -80,7 +80,7 @@ int main(int argc, char **argv)
                 if (a.pixels[y * a.stride + x] > 0 && a.pixels[y * a.stride + x] < 255) ++partial;
         CHECK(partial > 0);
         count = blit_raster_render_count(raster);
-        CHECK(blit_raster_get(raster, 'A', 1, &again));
+        CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
         CHECK(a.pixels == again.pixels && blit_raster_render_count(raster) == count);
         {
             unsigned char saved[64 * 64];
@@ -89,35 +89,35 @@ int main(int argc, char **argv)
             CHECK(blit_cell_cluster_init(&colliding, 'A' + 128, NULL, 0, 1));
             CHECK(blit_cell_cluster_hash(&first) % 128 == blit_cell_cluster_hash(&colliding) % 128);
             memcpy(saved, a.pixels, a.stride * a.height);
-            CHECK(blit_raster_get(raster, 'A' + 128, 1, &again));
+            CHECK(blit_raster_get(raster, 'A' + 128, 1, 0, &again));
             CHECK(blit_raster_render_count(raster) == count + 1);
-            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
             CHECK(blit_raster_render_count(raster) == count + 1);
             CHECK(!memcmp(saved, again.pixels, again.stride * again.height));
             /* Fill the remaining ways, touch A, then force an LRU eviction.
                All five keys collide; the recently touched A must survive. */
-            CHECK(blit_raster_get(raster, 'A' + 256, 1, &again));
-            CHECK(blit_raster_get(raster, 'A' + 384, 1, &again));
-            CHECK(blit_raster_get(raster, 'A', 1, &again));
-            CHECK(blit_raster_get(raster, 'A' + 512, 1, &again));
+            CHECK(blit_raster_get(raster, 'A' + 256, 1, 0, &again));
+            CHECK(blit_raster_get(raster, 'A' + 384, 1, 0, &again));
+            CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
+            CHECK(blit_raster_get(raster, 'A' + 512, 1, 0, &again));
             count = blit_raster_render_count(raster);
-            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
             CHECK(blit_raster_render_count(raster) == count);
             CHECK(!memcmp(saved, again.pixels, again.stride * again.height));
-            CHECK(blit_raster_get(raster, 'A' + 128, 1, &again));
+            CHECK(blit_raster_get(raster, 'A' + 128, 1, 0, &again));
             CHECK(blit_raster_render_count(raster) == count + 1);
-            CHECK(blit_raster_get(raster, 'A', 2, &again));
+            CHECK(blit_raster_get(raster, 'A', 2, 0, &again));
             CHECK(again.width == width * 2);
-            CHECK(blit_raster_get(raster, 'A', 1, &again));
+            CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
             CHECK(again.width == width && !memcmp(saved, again.pixels, again.stride * again.height));
         }
         /* ADR 0191: Block Elements are the raster's own cell geometry, not
            the PSF fallback; the full block still fills the cell exactly. */
-        CHECK(blit_raster_get(raster, 0x2588, 1, &block));
+        CHECK(blit_raster_get(raster, 0x2588, 1, 0, &block));
         CHECK(!block.fallback && block.format == BLIT_RASTER_COVERAGE);
         for (y = 0; y < size; ++y)
             for (x = 0; x < width; ++x) CHECK(block.pixels[y * block.stride + x] == 255);
-        CHECK(blit_raster_get(raster, 0x1f600, 2, &emoji));
+        CHECK(blit_raster_get(raster, 0x1f600, 2, 0, &emoji));
         CHECK(emoji.width == width * 2 && emoji.height == size);
         CHECK(emoji.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !emoji.fallback);
         for (y = 0; y < size; ++y)
@@ -131,35 +131,35 @@ int main(int argc, char **argv)
             uint32_t invisible[] = {0x200c, 0x200d, 0xfe0e, 0xfe0f, 0xe0100};
             int mark, byte;
             for (mark = 0; mark < 5; ++mark) {
-                CHECK(blit_raster_get(raster, invisible[mark], 1, &again));
+                CHECK(blit_raster_get(raster, invisible[mark], 1, 0, &again));
                 CHECK(again.format == BLIT_RASTER_COVERAGE && !again.fallback);
                 for (byte = 0; byte < again.stride * again.height; ++byte)
                     CHECK(again.pixels[byte] == 0);
             }
         }
-        CHECK(!blit_raster_get(raster, 0xd800, 1, &again));
-        CHECK(!blit_raster_get(raster, 0x110000, 1, &again));
-        CHECK(!blit_raster_get(raster, 'A', 3, &again));
+        CHECK(!blit_raster_get(raster, 0xd800, 1, 0, &again));
+        CHECK(!blit_raster_get(raster, 0x110000, 1, 0, &again));
+        CHECK(!blit_raster_get(raster, 'A', 3, 0, &again));
         CHECK(!blit_raster_open(&fallback, "/no/such/font.ttf", NULL, width, size));
-        CHECK(blit_raster_get(raster, 'A', 1, &again));
+        CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
         /* Pressure all cache buckets, then verify bounded memory and recovery. */
-        for (x = 32; x < 1024; ++x) CHECK(blit_raster_get(raster, (uint32_t)x, 1, &again));
+        for (x = 32; x < 1024; ++x) CHECK(blit_raster_get(raster, (uint32_t)x, 1, 0, &again));
         CHECK(blit_raster_cached_bytes(raster) <= 4U * 1024U * 1024U);
-        CHECK(blit_raster_get(raster, 'A', 1, &again) && !again.fallback);
+        CHECK(blit_raster_get(raster, 'A', 1, 0, &again) && !again.fallback);
         if (size == 64) {
             unsigned char saved_colour[128 * 64 * 4];
             int pass, saved_bytes;
-            CHECK(blit_raster_get(raster, 0x1f600, 2, &again));
+            CHECK(blit_raster_get(raster, 0x1f600, 2, 0, &again));
             saved_bytes = again.stride * again.height;
             memcpy(saved_colour, again.pixels, saved_bytes);
             /* More resident colour pixels than the byte budget can hold.
                Successful glyphs must evict, never fail because it is full. */
             for (pass = 0; pass < 2; ++pass)
                 for (x = 0x1f300; x < 0x1f500; ++x) {
-                    CHECK(blit_raster_get(raster, (uint32_t)x, 2, &again));
+                    CHECK(blit_raster_get(raster, (uint32_t)x, 2, 0, &again));
                     CHECK(blit_raster_cached_bytes(raster) <= 4U * 1024U * 1024U);
                 }
-            CHECK(blit_raster_get(raster, 0x1f600, 2, &again));
+            CHECK(blit_raster_get(raster, 0x1f600, 2, 0, &again));
             CHECK(saved_bytes == again.stride * again.height);
             CHECK(!memcmp(saved_colour, again.pixels, saved_bytes));
         }
@@ -170,7 +170,7 @@ int main(int argc, char **argv)
     {
         BlitRaster *retro = blit_raster_open(&fallback, NULL, NULL, 12, 23);
         BlitRasterGlyph glyph;
-        CHECK(retro && blit_raster_get(retro, 'A', 1, &glyph));
+        CHECK(retro && blit_raster_get(retro, 'A', 1, 0, &glyph));
         CHECK(glyph.fallback && glyph.format == BLIT_RASTER_COVERAGE);
         for (i = 0; i < glyph.stride * glyph.height; ++i)
             CHECK(glyph.pixels[i] == 0 || glyph.pixels[i] == 255);

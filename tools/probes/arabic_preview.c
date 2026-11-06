@@ -45,7 +45,7 @@ int main(int argc, char **argv)
         if(!r||!label||!blit_raster_set_arabic(r,argv[p+4])) return 2;
         for(i=0;title[i];++i) {
             BlitRasterGlyph g;
-            if(!blit_raster_get(label,(unsigned char)title[i],1,&g)) return 2;
+            if(!blit_raster_get(label,(unsigned char)title[i],1,0,&g)) return 2;
             paint(&g,40+i*12,p*560+20,fg);
         }
         for(line=0;line<6;++line) {

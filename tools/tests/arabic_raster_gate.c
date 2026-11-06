@@ -27,7 +27,7 @@ int main(int argc, char **argv)
         if (!r || !blit_raster_set_arabic(r, argv[3])) return 2;
         {
             BlitRasterGlyph latin, arabic;
-            if (!blit_raster_get(r,'A',1,&latin) || !blit_raster_get(r,0xfea3,1,&arabic) ||
+            if (!blit_raster_get(r,'A',1,0,&latin) || !blit_raster_get(r,0xfea3,1,0,&arabic) ||
                 latin.baseline+latin.ink_offset_y != arabic.baseline+arabic.ink_offset_y)
                 return 2;
         }
@@ -39,7 +39,7 @@ int main(int argc, char **argv)
                   (cp >= 0x0660 && cp <= 0x0669) ||
                   (cp >= 0xfe80 && cp <= 0xfefc))) continue;
             ++cases;
-            if (!blit_raster_get(r, cp, 1, &g) || g.fallback) {
+            if (!blit_raster_get(r, cp, 1, 0, &g) || g.fallback) {
                 if (failures++ < 30) fprintf(stderr, "ARABIC_FAIL height=%d cp=%04X\n", height, cp);
                 continue;
             }
@@ -58,7 +58,7 @@ int main(int argc, char **argv)
                     BlitRasterGlyph g, plain;
                     unsigned char saved[256*256];
                     int different = 0, x, y;
-                    if (!blit_raster_get(r, bases[b], 1, &plain) ||
+                    if (!blit_raster_get(r, bases[b], 1, 0, &plain) ||
                         plain.stride*plain.height > (int)sizeof(saved)) return 2;
                     memcpy(saved, plain.pixels, plain.stride*plain.height);
                     plain.pixels = saved;
@@ -110,7 +110,7 @@ int main(int argc, char **argv)
                 memcmp(&unchanged, &saved, sizeof(saved)) ||
                 blit_raster_render_count(r)!=renders || blit_raster_cached_bytes(r)!=bytes)
                 return 2;
-            if (!blit_raster_get(r,0x08ff,1,&unchanged) || !unchanged.fallback) return 2;
+            if (!blit_raster_get(r,0x08ff,1,0,&unchanged) || !unchanged.fallback) return 2;
         }
         if (blit_raster_set_arabic(r, argv[3])) return 2;
         blit_raster_close(r);

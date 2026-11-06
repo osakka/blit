@@ -58,7 +58,7 @@ int main(int argc, char **argv)
             for (span = 1; span <= 2; ++span) {
                 BlitRasterGlyph g;
                 int x, y, ink = 0;
-                CHECK(blit_raster_get(r, cp, span, &g));
+                CHECK(blit_raster_get(r, cp, span, 0, &g));
                 CHECK(!g.fallback || blit_font_has_glyph(&font, cp));
                 for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
                     ink += g.pixels[y * g.stride + x * (int)g.format +
@@ -71,7 +71,7 @@ int main(int argc, char **argv)
             BlitRasterGlyph g;
             int x, y, ink = 0, span = scripts[index] >= 0x3000 ? 2 : 1;
             cp = scripts[index];
-            CHECK(blit_raster_get(r, cp, span, &g));
+            CHECK(blit_raster_get(r, cp, span, 0, &g));
             CHECK(!g.fallback);
             for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
                 ink += g.pixels[y * g.stride + x * (int)g.format +
@@ -86,7 +86,7 @@ int main(int argc, char **argv)
         for (at = 0; at < retired_count; ++at) {
             BlitRasterGlyph g;
             cp = retired[at];
-            CHECK(!blit_raster_get(r, cp, 1, &g) || g.fallback);
+            CHECK(!blit_raster_get(r, cp, 1, 0, &g) || g.fallback);
         }
         for (at = 0; at < live_count; ++at) {
             BlitRasterGlyph g, again;
@@ -94,7 +94,7 @@ int main(int argc, char **argv)
             int x, y, ink = 0, colour = 0, partial = 0;
             unsigned long renders;
             cp = live[at];
-            CHECK(blit_raster_get(r, cp, 1, &g));
+            CHECK(blit_raster_get(r, cp, 1, 0, &g));
             CHECK(!g.fallback && g.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
             CHECK(g.width == (size + 1) / 2 && g.height == size);
             for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x) {
@@ -141,7 +141,7 @@ int main(int argc, char **argv)
                 }
             }
             renders = blit_raster_render_count(r);
-            CHECK(blit_raster_get(r, cp, 1, &again));
+            CHECK(blit_raster_get(r, cp, 1, 0, &again));
             CHECK(renders == blit_raster_render_count(r));
             ++samples;
         }
@@ -195,11 +195,11 @@ int main(int argc, char **argv)
         {
             BlitRasterGlyph g;
             cp = 0x270e;
-            CHECK(blit_raster_get(r, cp, 1, &g));
+            CHECK(blit_raster_get(r, cp, 1, 0, &g));
             CHECK(!g.fallback && g.format == BLIT_RASTER_COVERAGE);
             for (index = 0; index < 2; ++index) {
                 cp = index ? 0x21cc : 0x16d2;
-                CHECK(blit_raster_get(r, cp, 1, &g));
+                CHECK(blit_raster_get(r, cp, 1, 0, &g));
                 CHECK(!g.fallback && g.format == BLIT_RASTER_COVERAGE);
             }
         }

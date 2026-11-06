@@ -46,8 +46,6 @@ struct BlitRaster {
     char arabic_path[1024];
     /* ADR 0218: how text glyphs are hinted. Zero is full, what text always did. */
     BlitRasterHinting hinting;
-    /* ADR 0220: the pen of Blit's colour icons. Zero is their own colours. */
-    BlitRasterIconColour icon_colour;
     int text_em[2];
     hb_font_t *colour_font;
     hb_buffer_t *shape_buffer;
@@ -926,14 +924,6 @@ int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting)
     return 1;
 }
 
-int blit_raster_set_icon_colour(BlitRaster *raster, BlitRasterIconColour icon_colour)
-{
-    if (!raster || icon_colour < BLIT_RASTER_ICON_COLOUR || icon_colour > BLIT_RASTER_ICON_AUTO)
-        return 0;
-    raster->icon_colour = icon_colour;
-    return 1;
-}
-
 /* Text glyphs follow the hinting setting; draw_fitted keeps its own rules. */
 static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, RasterEntry *entry,
                              BlitRasterHinting hinting)
@@ -1192,7 +1182,7 @@ static int draw_fitted(BlitRaster *raster, FT_Face face, int rule, uint32_t scal
     return draw_fitted_glyph(raster, face, rule, index, index, entry, colour);
 }
 
-/* ADR 0220: Blit's colour icons in the pen the setting chooses. In colour the
+/* ADR 0220, 0221: Blit's colour icons in the cell's icon pen. In colour the
    icon is drawn as ever. In the other pens its monochrome shape is drawn, and
    that shape is the font's: the glyph `<name>.mono` where the icon has levels
    or knockouts, otherwise the coverage of the colour glyph. It is placed by
@@ -1212,7 +1202,8 @@ static FT_UInt mono_glyph(FT_Face face, FT_UInt index)
     return FT_Get_Name_Index(face, name);
 }
 
-static int draw_blit_icon(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
+static int draw_blit_icon(BlitRaster *raster, uint32_t scalar, BlitRasterIconPen pen,
+                          RasterEntry *entry)
 {
     int rgba = entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED;
     FT_UInt index = FT_Get_Char_Index(raster->icons, scalar);
@@ -1221,7 +1212,7 @@ static int draw_blit_icon(BlitRaster *raster, uint32_t scalar, RasterEntry *entr
     unsigned char *coverage;
     size_t cells = (size_t)entry->glyph.width * entry->glyph.height, i;
     int result;
-    if (raster->icon_colour == BLIT_RASTER_ICON_COLOUR || !outline_has_colour(raster->icons, scalar))
+    if (pen == BLIT_RASTER_ICON_COLOUR)
         return draw_fitted(raster, raster->icons, FIT_ICON, scalar, entry, rgba);
     coverage = calloc(cells, 1);
     if (!coverage) return -1;
@@ -1247,7 +1238,7 @@ static int draw_blit_icon(BlitRaster *raster, uint32_t scalar, RasterEntry *entr
             unsigned char a = coverage[i];
             if (!rgba) entry->pixels[i] = a;
             else {
-                unsigned char v = raster->icon_colour == BLIT_RASTER_ICON_WHITE ? a : 0;
+                unsigned char v = pen == BLIT_RASTER_ICON_WHITE ? a : 0;
                 entry->pixels[i * 4] = entry->pixels[i * 4 + 1] = entry->pixels[i * 4 + 2] = v;
                 entry->pixels[i * 4 + 3] = a;
             }
@@ -1373,10 +1364,18 @@ static unsigned colour_cluster_glyph(BlitRaster *raster, const BlitCellCluster *
     return count == 1 && info ? info[0].codepoint : 0;
 }
 
-static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
-                          BlitRasterGlyph *glyph)
+/* ADR 0221: a cache key above every scalar (U+10FFFF needs 21 bits) holds
+   the icon pen, OR'd into the first scalar, so a colour icon has at most four
+   entries. Only a Blit colour icon is keyed by its pen; for every other
+   glyph the pen is not looked at, so text, chrome and emoji never fragment. */
+#define RASTER_PEN_SHIFT 21
+
+static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
+                          BlitRasterIconPen pen, BlitRasterGlyph *glyph)
 {
     RasterEntry next, *entry;
+    BlitCellCluster pen_key;
+    const BlitCellCluster *key = lookup;
     size_t bytes, old_bytes;
     unsigned slot, way, chosen = 0, colour_index = 0;
     RasterEntry *set;
@@ -1392,6 +1391,8 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         FT_Get_Char_Index(raster->icons, scalar);
     int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
+    BlitRasterIconPen icon_pen = blit_icon && pen != BLIT_RASTER_ICON_COLOUR &&
+        outline_has_colour(raster->icons, scalar) ? pen : BLIT_RASTER_ICON_COLOUR;
     int result = 0, x, y;
     /* ADR 0199: a pixel font draws every glyph it has itself, on its own
        path and at its own pixels; the stack is only for what it lacks.
@@ -1399,6 +1400,11 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
     if (raster->pixel && key->length == 1 && !blit_icon &&
         blit_font_has_glyph(&raster->fallback, scalar))
         return 0;
+    if (icon_pen != BLIT_RASTER_ICON_COLOUR) {
+        pen_key = *lookup;
+        pen_key.scalars[0] |= (uint32_t)icon_pen << RASTER_PEN_SHIFT;
+        key = &pen_key;
+    }
     slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS);
     set = &raster->cache[slot * RASTER_WAYS];
     /* Four bounded full-key comparisons; collisions may coexist. Ages are
@@ -1435,7 +1441,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (outline_colour) next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
     if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) &&
-        raster->icon_colour != BLIT_RASTER_ICON_AUTO ?
+        icon_pen != BLIT_RASTER_ICON_AUTO ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
     if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
     /* ADR 0210, 0211: the window glyphs are coverage. Chalk is drawn in the
@@ -1477,7 +1483,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *key,
         result = 1;
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (blit_icon)
-        result = draw_blit_icon(raster, scalar, &next);
+        result = draw_blit_icon(raster, scalar, icon_pen, &next);
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);
     else if (!protected_geometry(scalar)) {
@@ -1553,7 +1559,7 @@ int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
         cluster->length > BLIT_CLUSTER_MAX_SCALARS ||
         !blit_cell_cluster_init(&key, cluster->scalars[0], cluster->scalars + 1,
                                 cluster->length - 1, cluster->columns)) return 0;
-    return raster_get_key(raster, &key, glyph);
+    return raster_get_key(raster, &key, BLIT_RASTER_ICON_COLOUR, glyph);
 }
 
 /* ADR 0211: one pen's plane of a Slate glyph -- WR_FG, WR_LINE or WR_MIX --
@@ -1588,11 +1594,12 @@ int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
 }
 
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
-                    BlitRasterGlyph *glyph)
+                    BlitRasterIconPen pen, BlitRasterGlyph *glyph)
 {
     BlitCellCluster key;
-    if (!raster || !glyph || !blit_cell_cluster_init(&key, scalar, NULL, 0, columns)) return 0;
-    return raster_get_key(raster, &key, glyph);
+    if (!raster || !glyph || pen < BLIT_RASTER_ICON_COLOUR || pen > BLIT_RASTER_ICON_WHITE ||
+        !blit_cell_cluster_init(&key, scalar, NULL, 0, columns)) return 0;
+    return raster_get_key(raster, &key, pen, glyph);
 }
 
 size_t blit_raster_cached_bytes(const BlitRaster *raster)
@@ -1612,9 +1619,9 @@ int blit_raster_baseline(const BlitRaster *raster)
 unsigned long blit_raster_render_count(const BlitRaster *raster)
 { return raster ? raster->renders : 0; }
 
-static int attached_get(void *state, uint32_t scalar, int columns,
+static int attached_get(void *state, uint32_t scalar, int columns, int pen,
                          BlitRasterGlyph *glyph)
-{ return blit_raster_get((BlitRaster *)state, scalar, columns, glyph); }
+{ return blit_raster_get((BlitRaster *)state, scalar, columns, (BlitRasterIconPen)pen, glyph); }
 static int attached_plane_get(void *state, uint32_t scalar, int plane,
                               BlitRasterGlyph *glyph)
 { return blit_raster_get_window_plane((BlitRaster *)state, scalar, plane, glyph); }

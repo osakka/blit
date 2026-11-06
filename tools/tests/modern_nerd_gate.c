@@ -23,7 +23,7 @@ int main(int argc, char **argv)
             BlitRasterGlyph glyph;
             int x, y, ink = 0;
             scalar = scalars[i];
-            CHECK(blit_raster_get(raster, scalar, 1, &glyph));
+            CHECK(blit_raster_get(raster, scalar, 1, 0, &glyph));
             CHECK(!glyph.fallback && glyph.format == BLIT_RASTER_COVERAGE);
             CHECK(glyph.width == width && glyph.height == size);
             for (y = 0; y < size; ++y)

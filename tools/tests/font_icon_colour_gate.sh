@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-# ADR 0220 module gate: the raster's icon colour, with the default pinned to
-# the pre-setting output. Inputs are explicit, as for font_raster_gate.sh.
+# ADR 0220, 0221 module gate: the raster's icon pen, with pen 0 pinned to the
+# output from before ADR 0220. Inputs are explicit, as for font_raster_gate.sh.
 if [ "$#" -ne 3 ]; then
     echo "usage: sh font_icon_colour_gate.sh PSF OUTLINE_TTF COLOUR_TTF" >&2
     exit 2

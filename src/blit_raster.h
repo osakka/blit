@@ -34,18 +34,19 @@ typedef enum { BLIT_RASTER_HINTING_FULL = 0, BLIT_RASTER_HINTING_LIGHT, BLIT_RAS
    for an unknown mode and leaves the raster unchanged. */
 int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting);
 
-/* ADR 0220: the pen of Blit's colour icons (U+100000 and up that carry colour).
-   Colour (zero, the default) draws them in their own colours. The other three
-   draw the icon's monochrome shape, which the icon font carries (levels below
-   the signal level left out, knockouts cut away): black is exactly black,
-   white exactly white, and auto is a coverage glyph, so the cell's foreground
-   draws it and the cell's background shows through the knockouts, as it does
-   for the text beside it. Window glyphs, controls, text and emoji ignore it. */
-typedef enum { BLIT_RASTER_ICON_COLOUR = 0, BLIT_RASTER_ICON_BLACK, BLIT_RASTER_ICON_WHITE,
-               BLIT_RASTER_ICON_AUTO } BlitRasterIconColour;
-/* Set before the first lookup: a raster's cache is never mixed. Returns 0
-   for an unknown mode and leaves the raster unchanged. */
-int blit_raster_set_icon_colour(BlitRaster *raster, BlitRasterIconColour icon_colour);
+/* ADR 0220, 0221: the icon pen of a cell, the pen Blit's colour icons
+   (U+100000 and up that carry colour) are drawn in. It is a per-lookup
+   argument, not a raster setting: the terminal's cells carry it (SGR 68), and
+   the values are the cell attribute's field. Colour (zero) draws the icon in
+   its own colours. The other three draw its monochrome shape, which the icon
+   font carries (levels below the signal level left out, knockouts cut away):
+   auto is a coverage glyph, so the cell's foreground draws it and the cell's
+   background shows through the knockouts, as it does for the text beside it;
+   black is exactly black and white exactly white. Every other glyph (window
+   glyphs, controls, text, emoji, an icon with no colour) ignores the pen and
+   is cached once. */
+typedef enum { BLIT_RASTER_ICON_COLOUR = 0, BLIT_RASTER_ICON_AUTO, BLIT_RASTER_ICON_BLACK,
+               BLIT_RASTER_ICON_WHITE } BlitRasterIconPen;
 
 /* NULL outline selects deliberate pixel-art PSF rendering. A requested face
    that cannot load is an error, not a silently substituted configuration.
@@ -67,8 +68,9 @@ int blit_raster_set_arabic(BlitRaster *raster, const char *path);
 const char *blit_raster_arabic_path(const BlitRaster *raster);
 const char *blit_raster_arabic_family(const BlitRaster *raster);
 int blit_raster_baseline(const BlitRaster *raster);
+/* pen: the cell's icon pen (above); an unknown pen returns 0. */
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
-                    BlitRasterGlyph *glyph);
+                    BlitRasterIconPen pen, BlitRasterGlyph *glyph);
 /* ADR 0211, 0212: a pen-drawn glyph's plane for one pen (1 FG, 2 LINE, 3 MIX,
    as blit_window_glyphs.h numbers them), coverage, one cell: a Slate window
    glyph, or a Slate or capsule control. */

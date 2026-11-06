@@ -22,12 +22,12 @@ int main(int argc, char **argv)
         unsigned long count;
         int partial = 0, radius = cw < size ? cw : size;
         CHECK(r);
-        CHECK(blit_raster_get(r, 0x100007, 1, &left));
+        CHECK(blit_raster_get(r, 0x100007, 1, 0, &left));
         CHECK(left.format == BLIT_RASTER_COVERAGE && !left.fallback);
         CHECK(left.width == cw && left.height == size);
         CHECK(left.ink_offset_x == 0 && left.ink_offset_y == 0);
         memcpy(saved, left.pixels, (size_t)left.stride * left.height);
-        CHECK(blit_raster_get(r, 0x100008, 1, &right));
+        CHECK(blit_raster_get(r, 0x100008, 1, 0, &right));
         CHECK(right.format == BLIT_RASTER_COVERAGE && !right.fallback);
         for (y = 0; y < size; ++y)
             for (x = 0; x < cw; ++x) {
@@ -51,7 +51,7 @@ int main(int argc, char **argv)
         /* A narrow cell's arc reaches its far edge only at the top row. */
         CHECK(saved[(radius - 1) * left.stride] > 0);
         count = blit_raster_render_count(r);
-        CHECK(blit_raster_get(r, 0x100007, 1, &again));
+        CHECK(blit_raster_get(r, 0x100007, 1, 0, &again));
         CHECK(blit_raster_render_count(r) == count);
         CHECK(!memcmp(saved, again.pixels, (size_t)again.stride * again.height));
         blit_raster_close(r);

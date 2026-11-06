@@ -39,22 +39,22 @@ int main(int argc, char **argv)
         BlitRasterGlyph g;
         CHECK(r);
         /* The font's own glyphs stay its own, letters and lines alike. */
-        cp = 'A'; CHECK(blit_font_has_glyph(&font, cp) && !blit_raster_get(r, cp, 1, &g));
-        cp = 0x250c; CHECK(blit_font_has_glyph(&font, cp) && !blit_raster_get(r, cp, 1, &g));
+        cp = 'A'; CHECK(blit_font_has_glyph(&font, cp) && !blit_raster_get(r, cp, 1, 0, &g));
+        cp = 0x250c; CHECK(blit_font_has_glyph(&font, cp) && !blit_raster_get(r, cp, 1, 0, &g));
         /* Wide characters stay with Blit's wide pixel font. */
-        cp = 0x6f22; CHECK(!blit_raster_get(r, cp, 2, &g));
+        cp = 0x6f22; CHECK(!blit_raster_get(r, cp, 2, 0, &g));
         /* Nothing has it: the font's own replacement. */
-        cp = 0x10fffd; CHECK(!blit_raster_get(r, cp, 1, &g));
+        cp = 0x10fffd; CHECK(!blit_raster_get(r, cp, 1, 0, &g));
         for (i = 0; i < (int)(sizeof(borrowed) / sizeof(borrowed[0])); ++i) {
             int columns;
             cp = borrowed[i];
             columns = cp == 0x1f600 ? 2 : 1;
             /* Spleen draws its own Powerline arrow; then it keeps it. */
             if (blit_font_has_glyph(&font, cp) && cp < 0x100000) {
-                CHECK(!blit_raster_get(r, cp, columns, &g));
+                CHECK(!blit_raster_get(r, cp, columns, 0, &g));
                 continue;
             }
-            CHECK(blit_raster_get(r, cp, columns, &g) && !g.fallback && inked(&g));
+            CHECK(blit_raster_get(r, cp, columns, 0, &g) && !g.fallback && inked(&g));
             CHECK(g.width == ((size + 1) / 2) * columns && g.height == size);
             if (cp >= 0x100000 || cp == 0x1f600)
                 CHECK(g.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
@@ -64,10 +64,10 @@ int main(int argc, char **argv)
         for (i = 0; i < count; ++i) {
             cp = required[i];
             if (blit_font_has_glyph(&font, cp)) {
-                CHECK(!blit_raster_get(r, cp, 1, &g));
+                CHECK(!blit_raster_get(r, cp, 1, 0, &g));
                 if (size == 16) ++ui_kept;
             } else {
-                CHECK(blit_raster_get(r, cp, 1, &g) && !g.fallback && inked(&g));
+                CHECK(blit_raster_get(r, cp, 1, 0, &g) && !g.fallback && inked(&g));
                 if (size == 16) ++ui_drawn;
             }
         }

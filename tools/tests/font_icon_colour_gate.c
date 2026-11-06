@@ -1,11 +1,14 @@
-/* ADR 0220: fonts.icon_colour at the raster. The default is what Blit's
-   colour icons always were, byte for byte (for the icons whose artwork the
-   setting did not touch). Black, white and auto draw the icon's monochrome
-   shape: black and white are exactly black and white, auto is coverage for the
-   cell's own foreground, and all three have the same shape. An icon with no
-   levels and no knockouts keeps exactly its colour coverage. The hui badge is
-   a solid disc with its letters cut out. Window glyphs, text and emoji do not
-   follow the setting. The state families' shapes are font_icon_shape_gate.c's. */
+/* ADR 0220, 0221: the icon pen at the raster, an argument of each lookup.
+   Pen colour is what Blit's colour icons always were, byte for byte (for the
+   icons whose artwork ADR 0220 did not touch). Black, white and auto draw the
+   icon's monochrome shape: black and white are exactly black and white, auto
+   is coverage for the cell's own foreground, and all three have the same
+   shape. An icon with no levels and no knockouts keeps exactly its colour
+   coverage. The hui badge is a solid disc with its letters cut out. Window
+   glyphs, text and emoji ignore the pen, and are cached once whatever pen
+   asks for them. One raster serves the four pens of an icon from four cache
+   entries, alternately, without drawing any of them again. The state
+   families' shapes are font_icon_shape_gate.c's. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
@@ -41,19 +44,21 @@ static unsigned long long fnv(unsigned long long h, const BlitRasterGlyph *g)
     return h;
 }
 
-/* mode < 0: the raster as opened, never told. A copy of the glyph goes to
-   *out when it is asked for. */
+/* A fresh raster's glyph in one pen. A copy of the glyph goes to *out when it
+   is asked for. */
 static int render(const BlitFont *font, const char *outline, const char *colour,
-                  int size, int mode, uint32_t scalar, unsigned long long *hash,
+                  int size, int pen, uint32_t scalar, unsigned long long *hash,
                   BlitRasterGlyph *out)
 {
     BlitRaster *raster = blit_raster_open(font, outline, colour, (size + 1) / 2, size);
     BlitRasterGlyph glyph;
     if (!raster) return 0;
-#ifndef BASELINE
-    if (mode >= 0 && !blit_raster_set_icon_colour(raster, (BlitRasterIconColour)mode)) return 0;
-#endif
+#ifdef BASELINE
+    (void)pen;
     if (!blit_raster_get(raster, scalar, 1, &glyph)) return 0;
+#else
+    if (!blit_raster_get(raster, scalar, 1, (BlitRasterIconPen)pen, &glyph)) return 0;
+#endif
     *hash = fnv(*hash, &glyph);
     if (out) {
         size_t bytes = (size_t)glyph.stride * glyph.height;
@@ -90,45 +95,87 @@ int main(int argc, char **argv)
 #ifndef BASELINE
     unsigned long long colour = FNV_BASIS, other[4];
     int m;
+    static const int kPens[4] = { BLIT_RASTER_ICON_COLOUR, BLIT_RASTER_ICON_AUTO,
+                                  BLIT_RASTER_ICON_BLACK, BLIT_RASTER_ICON_WHITE };
 #endif
     CHECK(argc == 4);
     memset(&font, 0, sizeof(font));
     CHECK(blit_font_load_path(&font, argv[1]) == 0);
     for (s = 0; s < NSIZES; ++s)
         for (i = 0; i < LEN(kPlain); ++i)
-            CHECK(render(&font, argv[2], argv[3], kSizes[s], -1, kPlain[i], &def, NULL));
+            CHECK(render(&font, argv[2], argv[3], kSizes[s], 0, kPlain[i], &def, NULL));
     for (s = 0; s < NSIZES; ++s)
         for (i = 0; i < LEN(kHui); ++i)
-            CHECK(render(&font, argv[2], argv[3], kSizes[s], -1, kHui[i], &def, NULL));
+            CHECK(render(&font, argv[2], argv[3], kSizes[s], 0, kHui[i], &def, NULL));
     printf("default icon hash 0x%llxULL\n", def);
 #ifdef BASELINE
     return 0;
 #else
-    CHECK(def == DEFAULT_ICON_HASH);   /* byte-identical to before the setting */
+    CHECK(def == DEFAULT_ICON_HASH);   /* pen 0: byte-identical to before ADR 0220 */
     for (s = 0; s < NSIZES; ++s)
         for (i = 0; i < LEN(kPlain); ++i)
             CHECK(render(&font, argv[2], argv[3], kSizes[s], BLIT_RASTER_ICON_COLOUR, kPlain[i], &colour, NULL));
     for (s = 0; s < NSIZES; ++s)
         for (i = 0; i < LEN(kHui); ++i)
             CHECK(render(&font, argv[2], argv[3], kSizes[s], BLIT_RASTER_ICON_COLOUR, kHui[i], &colour, NULL));
-    CHECK(colour == def);              /* colour is the default, not a neighbour */
+    CHECK(colour == def);              /* colour is pen 0, not a neighbour */
     {
         BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], 6, 12);
-        CHECK(raster && !blit_raster_set_icon_colour(raster, (BlitRasterIconColour)4));
-        CHECK(!blit_raster_set_icon_colour(raster, (BlitRasterIconColour)-1));
-        CHECK(blit_raster_set_icon_colour(raster, BLIT_RASTER_ICON_AUTO));
+        BlitRasterGlyph g;
+        CHECK(raster);
+        CHECK(!blit_raster_get(raster, kPlain[0], 1, (BlitRasterIconPen)4, &g));
+        CHECK(!blit_raster_get(raster, kPlain[0], 1, (BlitRasterIconPen)-1, &g));
+        CHECK(blit_raster_get(raster, kPlain[0], 1, BLIT_RASTER_ICON_AUTO, &g));
         blit_raster_close(raster);
-        CHECK(!blit_raster_set_icon_colour(NULL, BLIT_RASTER_ICON_BLACK));
+        CHECK(!blit_raster_get(NULL, kPlain[0], 1, BLIT_RASTER_ICON_BLACK, &g));
     }
-    /* Chrome, text and emoji: the four modes draw the same. */
+    /* Chrome, text and emoji: the four pens draw the same. */
     for (m = 0; m < 4; ++m) {
         other[m] = FNV_BASIS;
         for (s = 0; s < NSIZES; ++s)
             for (i = 0; i < LEN(kOther); ++i)
-                CHECK(render(&font, argv[2], argv[3], kSizes[s], m, kOther[i], &other[m], NULL));
+                CHECK(render(&font, argv[2], argv[3], kSizes[s], kPens[m], kOther[i], &other[m], NULL));
     }
     CHECK(other[0] == other[1] && other[1] == other[2] && other[2] == other[3]);
-    printf("others 0x%llx in every mode\n", other[0]);
+    printf("others 0x%llx in every pen\n", other[0]);
+    /* One raster, the pens alternating: an icon is drawn once per pen (four
+       renders, four distinct glyphs) and every later lookup in any pen is a
+       hit that answers the same bytes; chrome, text and emoji are drawn once
+       whatever the pen. */
+    {
+        BlitRaster *raster = blit_raster_open(&font, argv[2], argv[3], 11, 22);
+        unsigned long long first[4], again, hits, misses, hits0;
+        unsigned long before;
+        BlitRasterGlyph g;
+        int round;
+        CHECK(raster);
+        before = blit_raster_render_count(raster);
+        for (m = 0; m < 4; ++m) {
+            CHECK(blit_raster_get(raster, kState[3], 1, (BlitRasterIconPen)kPens[m], &g));
+            first[m] = fnv(FNV_BASIS, &g);
+        }
+        CHECK(blit_raster_render_count(raster) - before == 4);
+        CHECK(first[0] != first[1] && first[0] != first[2] && first[0] != first[3] &&
+              first[1] != first[2] && first[1] != first[3] && first[2] != first[3]);
+        blit_raster_cache_counts(raster, &hits0, &misses);
+        for (round = 0; round < 3; ++round)
+            for (m = 3; m >= 0; --m) {
+                CHECK(blit_raster_get(raster, kState[3], 1, (BlitRasterIconPen)kPens[m], &g));
+                again = fnv(FNV_BASIS, &g);
+                CHECK(again == first[m]);
+            }
+        blit_raster_cache_counts(raster, &hits, &misses);
+        CHECK(hits - hits0 == 12);
+        CHECK(blit_raster_render_count(raster) - before == 4);
+        before = blit_raster_render_count(raster);
+        for (i = 0; i < LEN(kOther); ++i)
+            for (m = 0; m < 4; ++m)
+                CHECK(blit_raster_get(raster, kOther[i], 1, (BlitRasterIconPen)kPens[m], &g));
+        CHECK(blit_raster_render_count(raster) - before == (unsigned long)LEN(kOther));
+        printf("one raster: 4 renders for an icon's 4 pens, then hits; %d other glyphs drawn once each\n",
+               LEN(kOther));
+        blit_raster_close(raster);
+    }
     /* Every icon: one shape in black, white and auto; exactly black, exactly
        white, and coverage for the cell's own pen. A plain icon's shape is its
        colour coverage, exactly. */
@@ -141,10 +188,10 @@ int main(int argc, char **argv)
                 BlitRasterGlyph c, b, w, a;
                 unsigned long long h = 0;
                 int x, y;
-                CHECK(render(&font, argv[2], argv[3], kSizes[s], 0, lists[l][i], &h, &c));
-                CHECK(render(&font, argv[2], argv[3], kSizes[s], 1, lists[l][i], &h, &b));
-                CHECK(render(&font, argv[2], argv[3], kSizes[s], 2, lists[l][i], &h, &w));
-                CHECK(render(&font, argv[2], argv[3], kSizes[s], 3, lists[l][i], &h, &a));
+                CHECK(render(&font, argv[2], argv[3], kSizes[s], BLIT_RASTER_ICON_COLOUR, lists[l][i], &h, &c));
+                CHECK(render(&font, argv[2], argv[3], kSizes[s], BLIT_RASTER_ICON_BLACK, lists[l][i], &h, &b));
+                CHECK(render(&font, argv[2], argv[3], kSizes[s], BLIT_RASTER_ICON_WHITE, lists[l][i], &h, &w));
+                CHECK(render(&font, argv[2], argv[3], kSizes[s], BLIT_RASTER_ICON_AUTO, lists[l][i], &h, &a));
                 CHECK(c.format == BLIT_RASTER_RGBA_PREMULTIPLIED && b.format == c.format && w.format == c.format);
                 CHECK(a.format == BLIT_RASTER_COVERAGE);
                 CHECK(c.width == b.width && c.height == b.height && c.baseline == b.baseline);
@@ -164,8 +211,8 @@ int main(int argc, char **argv)
         BlitRasterGlyph c, b;
         unsigned long long h = 0;
         int x, y, covered_c = 0, covered_b = 0;
-        CHECK(render(&font, argv[2], argv[3], 44, 0, 0x100003, &h, &c));
-        CHECK(render(&font, argv[2], argv[3], 44, 1, 0x100003, &h, &b));
+        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_COLOUR, 0x100003, &h, &c));
+        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_BLACK, 0x100003, &h, &b));
         for (y = 0; y < c.height; ++y)
             for (x = 0; x < c.width; ++x) {
                 covered_c += alpha(&c, x, y) >= 128;
@@ -180,8 +227,8 @@ int main(int argc, char **argv)
         BlitRasterGlyph c, b;
         unsigned long long h = 0;
         int x, y, covered_c = 0, covered_b = 0, holes = 0;
-        CHECK(render(&font, argv[2], argv[3], 44, 0, kHui[0], &h, &c));
-        CHECK(render(&font, argv[2], argv[3], 44, 1, kHui[0], &h, &b));
+        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_COLOUR, kHui[0], &h, &c));
+        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_BLACK, kHui[0], &h, &b));
         for (y = 0; y < c.height; ++y)
             for (x = 0; x < c.width; ++x) {
                 covered_c += alpha(&c, x, y) == 255;

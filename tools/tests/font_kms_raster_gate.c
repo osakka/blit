@@ -36,7 +36,7 @@ static int attachment_layout_gate(BlitFont *font, KmsOutput *output,
             for (col = 0; col < 4; ++col)
                 for (mark = 0; mark < counts[row * 6 + col]; ++mark)
                     draw_glyph(&reference, font, marks[(row * 6 + col) * 16 + mark],
-                        8 + col * width, 8 + row * size, width, size, 0xabcdef, 0, 0);
+                        8 + col * width, 8 + row * size, width, size, 0xabcdef, 0, 0, 0);
         if (memcmp(pixels, expected, sizeof(expected))) {
             fprintf(stderr, "KMS_ATTACHMENT_LAYOUT_FAIL size=%d count=%d stride=16\n",
                 size, cases[scenario]);
@@ -118,13 +118,13 @@ int main(int argc, char **argv)
             int columns = scalars[index] == 0x1f600 || scalars[index] == 0x1f514 || scalars[index] == 0x2615 ? 2 : 1;
             int powerline = scalars[index] >= 0xe0b0 && scalars[index] <= 0xe0b3;
             int x, y;
-            CHECK(font.raster_get(font.raster_state, scalars[index], columns, &glyph));
+            CHECK(font.raster_get(font.raster_state, scalars[index], columns, 0, &glyph));
             for (x = 0; x < 160 * 96; ++x) pixels[x] = 0x123456;
             draw_cell_glyphs(&output, &font, columns == 2 ? &wide : NULL,
                        scalars[index], NULL, 0, 8, 8, glyph.width,
-                       glyph.height, 0xabcdef, 0, 0);
+                       glyph.height, 0xabcdef, 0, 0, 0);
             if (powerline) draw_glyph(&output, &font, scalars[index], 9, 8,
-                glyph.width, glyph.height, 0xabcdef, 0, 1);
+                glyph.width, glyph.height, 0xabcdef, 0, 1, 0);
             for (y = 0; y < 96; ++y)
                 for (x = 0; x < 160; ++x) {
                     uint32_t expected = x >= 8 && y >= 8 && x < 8 + glyph.width && y < 8 + glyph.height ?

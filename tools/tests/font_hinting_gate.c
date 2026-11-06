@@ -39,7 +39,7 @@ static int render(const BlitFont *font, const char *outline, const char *colour,
 #ifndef BASELINE
     if (mode >= 0 && !blit_raster_set_hinting(raster, (BlitRasterHinting)mode)) return 0;
 #endif
-    if (!blit_raster_get(raster, scalar, 1, &glyph) || glyph.format != BLIT_RASTER_COVERAGE) return 0;
+    if (!blit_raster_get(raster, scalar, 1, 0, &glyph) || glyph.format != BLIT_RASTER_COVERAGE) return 0;
     *hash = fnv(*hash, &glyph);
     blit_raster_close(raster);
     return 1;

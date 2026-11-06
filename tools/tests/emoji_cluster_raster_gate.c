@@ -131,7 +131,7 @@ int main(int argc, char **argv)
                 CHECK(blit_cell_cluster_init(&key, 0x1f469, tail, 3, 2));
                 span = 2; check_glyph(raster, &key, 1);
                 CHECK(blit_raster_render_count(raster) == renders + 1);
-                CHECK(blit_raster_get(raster, 'A', 1, &glyph));
+                CHECK(blit_raster_get(raster, 'A', 1, 0, &glyph));
                 CHECK(glyph.format == BLIT_RASTER_COVERAGE && !glyph.fallback);
             }
         }

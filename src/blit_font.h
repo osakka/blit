@@ -27,7 +27,8 @@ typedef struct BlitFont {
     /* Optional shared native-size rasterizer. Function pointers keep the PSF
        loader and standalone legacy KMS gates independent of FreeType. */
     void *raster_state;
-    int (*raster_get)(void *, uint32_t, int, struct BlitRasterGlyph *);
+    /* scalar, columns, the cell's icon pen (ADR 0221: BlitRasterIconPen), glyph. */
+    int (*raster_get)(void *, uint32_t, int, int, struct BlitRasterGlyph *);
     int (*raster_cluster_get)(void *, const BlitCellCluster *, struct BlitRasterGlyph *);
     /* ADR 0211: one pen's plane of a Slate window glyph. */
     int (*raster_plane_get)(void *, uint32_t, int, struct BlitRasterGlyph *);
