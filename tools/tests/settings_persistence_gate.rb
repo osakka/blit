@@ -292,7 +292,10 @@ Dir.mktmpdir('blit-settings') do |root|
       Timeout.timeout(10) do
         loop do
           _, settings = request('GET', '/v1/settings')
-          break if settings.to_h.fetch('revision', 0).to_i > before_revision
+          # The revision moves with the content (issue #150); that it is on
+          # disk is storage.state, so wait for both.
+          break if settings.to_h.fetch('revision', 0).to_i > before_revision &&
+                   settings.to_h.dig('storage', 'state') == 'clean'
 
           sleep 0.1
         end

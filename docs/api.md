@@ -1131,7 +1131,10 @@ font selection.
 `GET /v1/settings` is the authoritative view of persisted presentation
 settings. The response has three relevant parts: `document` is the sparse
 stored document, `effective` is what this process is using now, and
-`revision` is the optimistic-concurrency value for replacement. The document
+`revision` is the optimistic-concurrency value for replacement. It moves when
+the document's content changes, live or by request, and not when the writer
+later puts it on disk (that is `storage.saved_revision` catching up), so an
+`If-Match` fails only when there is something new to read (issue #150). The document
 holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,

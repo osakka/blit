@@ -22445,11 +22445,17 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     return used;
 }
 
+/* Issue #150: the revision a client sees moves when the document's content
+   does, here, and not when the writer later puts it on disk. Bumping it at
+   the write meant a change made before a client's GET was saved a moment
+   after it, the revision moved under the client with nothing new to see,
+   and its If-Match failed with a 409 it could not explain. */
 static void settings_mark_dirty(BlitRuntime *runtime)
 {
     if (runtime == NULL || !runtime->settings_enabled)
         return;
     ++runtime->settings_generation;
+    ++runtime->settings_revision;
     if (!runtime->settings_dirty)
         runtime->settings_dirty_us = monotonic_us();
     runtime->settings_dirty = 1;
@@ -22576,7 +22582,7 @@ static int settings_writer_hand(BlitRuntime *runtime, int kind)
     char *text = NULL;
     if (kind == 1) {
         length = settings_build(runtime, document, sizeof(document),
-                                runtime->settings_revision + 1);
+                                runtime->settings_revision);
         if (length == 0 || length + 1 >= sizeof(document)) {
             runtime->settings_write_reported = 1;
             return 0;
@@ -22590,7 +22596,7 @@ static int settings_writer_hand(BlitRuntime *runtime, int kind)
     runtime->settings_job_text = text;
     runtime->settings_job_length = length;
     runtime->settings_job_generation = runtime->settings_generation;
-    runtime->settings_job_revision = runtime->settings_revision + 1;
+    runtime->settings_job_revision = runtime->settings_revision;
     runtime->settings_job_busy = 1;
     pthread_cond_signal(&runtime->settings_writer_wake);
     pthread_mutex_unlock(&runtime->settings_writer_lock);
@@ -22627,7 +22633,6 @@ static void settings_service(BlitRuntime *runtime)
     pthread_mutex_unlock(&runtime->settings_writer_lock);
     if (ready && kind == 1) {
         if (ok) {
-            runtime->settings_revision = revision;
             runtime->settings_saved_revision = revision;
             runtime->settings_durable_generation = generation;
             runtime->settings_write_reported = 0;
@@ -22693,7 +22698,7 @@ static void settings_flush(BlitRuntime *runtime, int force)
             (uint64_t)BLIT_SETTINGS_FLUSH_US)
         return;
     length = settings_build(runtime, document, sizeof(document),
-                            runtime->settings_revision + 1);
+                            runtime->settings_revision);
     if (length == 0 || length + 1 >= sizeof(document)) {
         runtime->settings_write_reported = 1;
         return;
@@ -22701,7 +22706,6 @@ static void settings_flush(BlitRuntime *runtime, int force)
     if (settings_write(runtime->settings_path, document, length)) {
         snprintf(runtime->settings_document,
                  sizeof(runtime->settings_document), "%s", document);
-        ++runtime->settings_revision;
         runtime->settings_saved_revision = runtime->settings_revision;
         runtime->settings_durable_generation = runtime->settings_generation;
         runtime->settings_dirty = 0;
