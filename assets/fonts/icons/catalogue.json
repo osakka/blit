@@ -253,7 +253,9 @@
     {"id":"file-image-png-left", "codepoint":"10022D", "source":"file-image-png.svg", "columns":2, "column":0},
     {"id":"file-image-png-right", "codepoint":"10022E", "source":"file-image-png.svg", "columns":2, "column":1},
     {"id":"file-image-gif-left", "codepoint":"10022F", "source":"file-image-gif.svg", "columns":2, "column":0},
-    {"id":"file-image-gif-right", "codepoint":"100230", "source":"file-image-gif.svg", "columns":2, "column":1}
+    {"id":"file-image-gif-right", "codepoint":"100230", "source":"file-image-gif.svg", "columns":2, "column":1},
+    {"id":"hui-mark-left", "codepoint":"1002C5", "source":"hui-mark.svg", "columns":2, "column":0},
+    {"id":"hui-mark-right", "codepoint":"1002C6", "source":"hui-mark.svg", "columns":2, "column":1}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},

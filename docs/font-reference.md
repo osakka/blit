@@ -122,8 +122,9 @@ JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-1` through
 `volume-0` (muted) through `volume-3`, `power`, `phone-off`, `phone-wait`,
 `phone-on`, `phone-ring`, their classic counterparts `phone-classic-off`
 through `phone-classic-ring`, the file
-icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), and `hui-left` +
-`hui-right`. Resolve those IDs from the catalogue
+icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), `hui-left` +
+`hui-right` (the badge: white letters on a teal disc) and `hui-mark-left` +
+`hui-mark-right` (the H-U-i monogram, no disc). Resolve those IDs from the catalogue
 instead of maintaining an independently numbered table in every application.
 
 **One icon says the whole state.** The charging bolt and the mains plug are
@@ -131,8 +132,8 @@ drawn inside the battery, so a status bar shows one glyph per state, never a
 mark beside a level.
 
 **A badge two columns wide is two codepoints.** Write `hui-left` then
-`hui-right` side by side: each is one column, and each draws its half of
-one badge (ADR 0197).
+`hui-right` side by side (or `hui-mark-left` then `hui-mark-right`): each is
+one column, and each draws its half of one badge (ADR 0197).
 
 Icons and symbols are fitted to the cell at every size from 8 to 64 px
 without trimming (ADR 0215): a colour icon is fitted by the layers it draws
@@ -298,8 +299,9 @@ resize corner), normal and pressed.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002C5 (the outer-edge frame, below,
-is U+1002AE–1002BA, and the pressed boxes and grow box U+1002BB–1002C4).
+section. The next free codepoint is U+1002C7 (the outer-edge frame, below,
+is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, and the
+hui mark, a colour icon, U+1002C5–1002C6).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

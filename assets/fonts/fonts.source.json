@@ -70,7 +70,7 @@
     "icons": {
       "file": "BlitIcons-Regular.ttf",
       "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
-      "sha256": "a7d4048e8cba1b9df19da8019494e121f2d21204a7ceed9e326ca1e69ecbb879",
+      "sha256": "a9f9e40376d8f3ac5fafd4bebde00a8cfa4d1775533ed06166c39216e67aca32",
       "license_file": "icons/LICENSE.txt"
     },
     "nerd": {
@@ -152,7 +152,7 @@
     "catalogue": "icons/catalogue.json",
     "format": "COLR v0 / CPAL; original SVG paths; monochrome U+270E pen alias",
     "sources": {
-      "icons/catalogue.json": "158568c889635fb9178cd129d4f2320deaa870db7e6876eef13c21911b0746a5",
+      "icons/catalogue.json": "6f458ac53d1829257de2455cf39393f45aa1cabd421151653de3f9aaffb6995e",
       "icons/berkanan.svg": "f16019c94cf20f1a9dc42b7127e04ed68b0303260e6a8935ede1110bc1abdd5f",
       "icons/wired.svg": "6a5207758fb6ef13dbda9d5392fb32aeb9e6c9beea33280ecf46bd64fe2200b1",
       "icons/LICENSE.txt": "a1f68010aa91a710d0b41857f158f3fb1316778a0dc13321577f86cb82a9badb",
@@ -165,7 +165,8 @@
       "icons/battery-ac.svg": "323d9b4a35b814dac3847a4229765ce00cb796b3e943043a9d62b902c25739c5",
       "icons/volume.svg": "6e7509b916436969724a559445637e37aa114ff228da317a544147d484aa6806",
       "icons/volume-muted.svg": "f71aecbd791a9b86c7559f95628817df3cbae0ac598ef8472573c8e085dc76fa",
-      "icons/hui.svg": "86f6b7960091d491a92c5a19d8dae1801fdc491e640d6d676482779c771ec4bf",
+      "icons/hui.svg": "241ae2f5838673529391ca91d5f010b9db9e8307bcc8fc4860bf2edccaaaf1cb",
+      "icons/hui-mark.svg": "9d6cc1d8044fe1ed7609e34728ec6d2c832e8844aad2df4aa6e13f1f15dcbd72",
       "icons/power.svg": "8a0d66ef8b858d08ba0d83968e1d9a152cde00e62ce2825af0a391a2be3da3b1",
       "icons/phone-off.svg": "064bd36d1d327241d8691e2f6efa0ed52d9a1b1c20504a0192ff0e2356c5ac95",
       "icons/phone-wait.svg": "89b806c4ba9badf8a51dc4836388dda312d086aa2d08c34dde85ad91a78ae5d1",

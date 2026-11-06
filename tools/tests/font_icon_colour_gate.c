@@ -17,13 +17,15 @@
 #define CHECK(test) do { if (!(test)) { fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); return 1; } } while (0)
 
 #define FNV_BASIS 14695981039346656037ULL
-/* The hash of the default rasters of kPlain at kSizes, recorded from the
-   raster and icon font as they were before the setting existed. */
-#define DEFAULT_ICON_HASH 0xb7481b6c085ee233ULL
+/* The hash of the default rasters of kPlain then kHui at kSizes, recorded
+   from the raster and icon font as they were before the setting existed;
+   re-recorded in 0.3.51 for the hui badge's new artwork alone (a solid disc,
+   white letters): every other glyph and layer in the font is unchanged. */
+#define DEFAULT_ICON_HASH 0x124bfb84454ae910ULL
 /* Icons whose artwork is untouched and which have no levels and no knockouts:
    hibr-pen, blit, bluetooth, power, phone-on, volume-3. */
 static const uint32_t kPlain[] = { 0x100001, 0x100000, 0x100006, 0x10001a, 0x10001d, 0x100017 };
-/* Untouched artwork with a monochrome glyph: the hui badge, two columns. */
+/* A monochrome glyph from a disc and knockouts: the hui badge, two columns. */
 static const uint32_t kHui[] = { 0x100018, 0x100019 };
 /* Edited or with levels: battery-2, battery-3-charging, battery-ac, wifi-2, volume-1. */
 static const uint32_t kState[] = { 0x10000b, 0x100011, 0x100013, 0x100003, 0x100015 };
@@ -221,8 +223,10 @@ int main(int argc, char **argv)
         CHECK(covered_b < covered_c);      /* the two inactive bars are left out */
         release(&c); release(&b);
     }
-    /* The badge is a solid disc with the letters cut out: more covered
-       pixels than the colour ring, and transparent pixels inside it. */
+    /* The badge is a solid disc with the letters cut out. In colour the
+       disc is solid and the letters white on it (0.3.51), so the mono shape
+       covers fewer pixels than the colour badge, by the letters, which are
+       transparent pixels inside it. */
     {
         BlitRasterGlyph c, b;
         unsigned long long h = 0;
@@ -243,7 +247,7 @@ int main(int argc, char **argv)
             }
         printf("hui-left 44px: colour covers %d, mono covers %d, %d letter pixels cut out\n",
                covered_c, covered_b, holes);
-        CHECK(covered_b > covered_c);
+        CHECK(covered_b < covered_c);
         CHECK(holes > 0);
         release(&c); release(&b);
     }
