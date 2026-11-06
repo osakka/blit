@@ -1,5 +1,36 @@
 # Verification status
 
+## 2026-11-06: 0.3.49 the icon pen is a cell attribute (SGR 68:v, 69)
+
+- **Per cell, not global** (ADR 0221; replaces the run-time half of ADR 0220):
+  `ESC[68:v m` sets the pen for Blit's colour icons in that cell (1 auto, 2
+  black, 3 white; 68:0 or a bare 68 is colour), SGR 69 or SGR 0 ends it. The
+  owner wants the menu bar in monochrome and the desktop and file manager in
+  colour at once; a global setting cannot do that. `fonts.icon_colour` is
+  removed. A saved settings document that still carries `font.icon_colour`
+  loads as before, the key ignored by the existing reader and dropped on the
+  next write (`font_icon_colour_settings_gate`; it fails five checks on 0.3.48).
+- **No per-frame cost.** The pen is two attribute bits and part of the glyph
+  cache key for Blit icons only; a flip of N icon cells damages exactly those N
+  cells, with no reflow and no raster rebuild (`icon_pen_gate`, both
+  compositors). Timing suite, 0.3.48 against this build on the same machine:
+  `frame_rate_gate` 62.485 Hz against 62.556 Hz; `terminal_soak_gate` 14160
+  against 14112 snapshots over 120 s. Run-to-run noise.
+- **GLES fix found on the way:** the GLES sprite cache keyed on the scalar only,
+  so a black icon would have reused the colour sprite; and it guessed a sprite's
+  format from two test renders, which takes premultiplied white for coverage.
+  The pen is now in the sprite key, and the sprite asks the raster for its
+  format, as the CPU compositor does.
+- **Protocol:** capability `sgr-icon-pen` in `GET /v1/server`, XTGETTCAP
+  `sgr-icon-pen`, DECRQSS, and `style.icon_pen` in the cells API. A display
+  that is not Blit strips it, which draws colour.
+- **Suites:** `all` 181 pass, 10 skip, 0 fail (JOBS=2). GLES `renderer`: one run
+  failed `graphics_blink_gate` ("no blink counted"); the rerun passed 81, skip
+  1, fail 0. That gate failed the same way on 0.3.46 and 0.3.47 builds, and
+  passed 15 of 15 runs alone, so it is not this change. Its cause is not known
+  and is ticketed as issue #149. My earlier ledger note called it
+  load-sensitive; that was not shown. `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.48 Blit icons in colour, black, white or auto, drawn so a state shows by shape
 
 - **`fonts.icon_colour`** (`colour`, `black`, `white`, `auto`; ADR 0220) draws
