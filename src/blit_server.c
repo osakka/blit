@@ -1412,6 +1412,8 @@ typedef struct {
     int font_scale_tenths;
     /* Exactly one size policy: positive pixels imply scale_tenths == 0. */
     int font_size_px;
+    /* ADR 0218: BlitRasterHinting of text glyphs; zero is full, the default. */
+    int font_hinting;
     int pointer_valid;
     /* The appearance the settings API chose. What is drawn is
        pointer_shown_art: the same palette, size and shadow, with the shape a
@@ -18207,6 +18209,8 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
     return 1;
 }
 
+static const char *const font_hinting_names[] = {"full", "light", "none"};
+
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_path[512];
@@ -18228,7 +18232,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
     json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
     used += (size_t)snprintf(body + used, capacity - used,
         "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
-        "\"scale\":%.4f,\"size_px\":%d,\"sizing\":\"%s\","
+        "\"scale\":%.4f,\"size_px\":%d,\"sizing\":\"%s\",\"hinting\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         /* The loaded font's own identity.  Without it nothing can tell that a
            run picked up a different artifact under the same name, which is
@@ -18241,6 +18245,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         active_id, escaped_path, font_scale_value(runtime),
         runtime_terminal_cell_height(runtime),
         runtime->font_size_px > 0 ? "pixels" : "scale",
+        font_hinting_names[runtime->font_hinting],
         runtime_terminal_cell_width(runtime),
         runtime_terminal_cell_height(runtime),
         (unsigned long)runtime->font.glyph_count,
@@ -18395,8 +18400,21 @@ static int font_sizing_parse(const char *configuration, int *scale, int *pixels)
     return 1;
 }
 
+/* The same hinting parser serves live requests and stored settings. An absent
+   key leaves *hinting alone; -4 is a value that is not full, light or none. */
+static int font_hinting_parse(const char *configuration, int *hinting)
+{
+    char value[64];
+    unsigned i;
+    if (json_key_cursor(configuration, "hinting") == NULL) return 1;
+    if (!json_string(configuration, "hinting", value, sizeof(value))) return -4;
+    for (i = 0; i < sizeof(font_hinting_names) / sizeof(font_hinting_names[0]); ++i)
+        if (strcmp(value, font_hinting_names[i]) == 0) { *hinting = (int)i; return 1; }
+    return -4;
+}
+
 static int prepare_font_raster(BlitFont *font, const char *path,
-                                int scale, int pixels, BlitRaster **result)
+                                int scale, int pixels, int hinting, BlitRaster **result)
 {
     char colour[1024];
     const char *arabic;
@@ -18415,6 +18433,11 @@ static int prepare_font_raster(BlitFont *font, const char *path,
     /* Without the stack a pixel font still draws everything it has, as it
        always did; only an outline font cannot draw at all. */
     if (!*result) return !blit_font_is_outline(path);
+    if (*result && !blit_raster_set_hinting(*result, (BlitRasterHinting)hinting)) {
+        blit_raster_close(*result);
+        *result = NULL;
+        return 0;
+    }
     arabic = blit_font_is_outline(path) ? blit_font_arabic_path(path) : NULL;
     if (arabic && !blit_raster_set_arabic(*result, arabic)) {
         blit_raster_close(*result);
@@ -18425,7 +18448,7 @@ static int prepare_font_raster(BlitFont *font, const char *path,
 }
 
 static int apply_font_configuration(BlitRuntime *runtime, const char *path,
-                                    int scale_tenths, int size_px)
+                                    int scale_tenths, int size_px, int hinting)
 {
     BlitFont candidate;
     BlitRaster *raster = NULL;
@@ -18461,10 +18484,11 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     }
     /* Already the active font: nothing to rasterise, reflow or redraw. */
     if (candidate.data == NULL && runtime->font.data != NULL &&
-        scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px)
+        scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px &&
+        hinting == runtime->font_hinting)
         return 1;
     if (!prepare_font_raster(candidate.data ? &candidate : &runtime->font,
-                             path, scale_tenths, size_px, &raster)) {
+                             path, scale_tenths, size_px, hinting, &raster)) {
         blit_font_free(&candidate); return 0;
     }
     if (candidate.data != NULL) {
@@ -18474,6 +18498,7 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     blit_raster_attach(&runtime->font, raster);
     runtime->font_scale_tenths = scale_tenths;
     runtime->font_size_px = size_px;
+    runtime->font_hinting = hinting;
     discover_panes(runtime);
     /* A font change alters every cell's physical rectangle. Rebuilding the
        atlas and reflowing surfaces is not enough: the next presentation must
@@ -22294,6 +22319,8 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
             json_appendf(out, capacity, &used, "\"size_px\":%d", runtime->font_size_px);
         else
             json_appendf(out, capacity, &used, "\"scale\":%.1f", font_scale_value(runtime));
+        json_appendf(out, capacity, &used, ",\"hinting\":\"%s\"",
+                     font_hinting_names[runtime->font_hinting]);
         first = 0;
     }
     json_appendf(out, capacity, &used, "},\"server\":{");
@@ -22766,6 +22793,7 @@ static void settings_apply_font(BlitRuntime *runtime)
     char path[512];
     int scale_tenths;
     int size_px;
+    int hinting;
 
     runtime->font_configured = 0;
     if (runtime->settings_enabled && runtime->settings_document[0] != '\0' &&
@@ -22777,9 +22805,12 @@ static void settings_apply_font(BlitRuntime *runtime)
         } else {
             scale_tenths = runtime->font_scale_tenths;
             size_px = runtime->font_size_px;
+            hinting = 0;
             if (font_sizing_parse(configuration, &scale_tenths, &size_px) < 0)
                 fprintf(stderr, "blit: stored font size policy is invalid\n");
-            else if (!apply_font_configuration(runtime, path, scale_tenths, size_px))
+            else if (font_hinting_parse(configuration, &hinting) < 0)
+                fprintf(stderr, "blit: stored font hinting is invalid\n");
+            else if (!apply_font_configuration(runtime, path, scale_tenths, size_px, hinting))
                 fprintf(stderr, "blit: stored font selection could not be applied\n");
             else {
                 runtime->font_configured = 1;
@@ -22788,7 +22819,7 @@ static void settings_apply_font(BlitRuntime *runtime)
         }
     }
     apply_font_configuration(runtime, runtime->boot_font_path,
-                             runtime->boot_font_scale_tenths, 0);
+                             runtime->boot_font_scale_tenths, 0, 0);
 }
 
 static void settings_apply_audio_device(BlitRuntime *runtime,
@@ -23712,13 +23743,15 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int requested_scale_tenths;
         int requested_size_px;
         int sizing_result;
+        int requested_hinting;
+        int has_hinting = json_key_cursor(payload, "hinting") != NULL;
         int has_scale = json_key_cursor(payload, "scale") != NULL;
         int has_pixels = json_key_cursor(payload, "size_px") != NULL;
         int has_font_id = json_string(payload, "font_id", font_id,
                                       sizeof(font_id));
-        if (!has_scale && !has_pixels && !has_font_id) {
+        if (!has_scale && !has_pixels && !has_font_id && !has_hinting) {
             send_problem(fd, 400, "Bad Request", "font_configuration_empty",
-                         "font_id, scale or size_px is required.");
+                         "font_id, scale, size_px or hinting is required.");
             return;
         }
         requested_scale_tenths = runtime->font_scale_tenths;
@@ -23730,6 +23763,12 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          sizing_result == -1 ? "invalid_font_scale" :
                          sizing_result == -2 ? "invalid_font_size" : "ambiguous_font_size",
                          "Use scale (1.0..3.0 in 0.1 steps) or size_px (8..64 integer), not both or duplicate size controls.");
+            return;
+        }
+        requested_hinting = runtime->font_hinting;
+        if (font_hinting_parse(payload, &requested_hinting) < 0) {
+            send_problem(fd, 400, "Bad Request", "invalid_font_hinting",
+                         "hinting must be one of full, light or none.");
             return;
         }
         if (has_font_id) {
@@ -23747,7 +23786,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
             snprintf(font_path, sizeof(font_path), "%s", runtime->font.path);
         }
         if (!apply_font_configuration(runtime, font_path,
-                                      requested_scale_tenths, requested_size_px)) {
+                                      requested_scale_tenths, requested_size_px,
+                                      requested_hinting)) {
             send_problem(fd, 422, "Unprocessable Entity", "font_apply_failed",
                          "The font could not be loaded or applied to all sessions.");
             return;
@@ -24678,11 +24718,13 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 char font_configuration[512];
                 int proposed_scale = runtime->font_scale_tenths;
                 int proposed_pixels = runtime->font_size_px;
+                int proposed_hinting = 0;
                 if (font_cursor != NULL &&
                     (!json_object_slice(font_cursor, font_configuration, sizeof(font_configuration)) ||
-                     font_sizing_parse(font_configuration, &proposed_scale, &proposed_pixels) < 0)) {
+                     font_sizing_parse(font_configuration, &proposed_scale, &proposed_pixels) < 0 ||
+                     font_hinting_parse(font_configuration, &proposed_hinting) < 0)) {
                     send_problem(fd, 400, "Bad Request", "invalid_settings_font",
-                                 "Font sizing must select scale or integer size_px, never both.");
+                                 "Font sizing must select scale or integer size_px, never both, and hinting must be full, light or none.");
                     return;
                 }
             }
@@ -30729,7 +30771,7 @@ int main(int argc, char **argv)
     {
         BlitRaster *raster;
         if (!prepare_font_raster(&runtime.font, runtime.font.path,
-                                 runtime.font_scale_tenths, 0, &raster)) {
+                                 runtime.font_scale_tenths, 0, 0, &raster)) {
             fprintf(stderr, "blit: requested native font could not be initialized\n");
             blit_font_free(&runtime.font); blit_font_free(&runtime.wide_font);
             return 1;

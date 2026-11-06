@@ -44,6 +44,8 @@ struct BlitRaster {
     hb_buffer_t *arabic_buffer;
     int arabic_baseline;
     char arabic_path[1024];
+    /* ADR 0218: how text glyphs are hinted. Zero is full, what text always did. */
+    BlitRasterHinting hinting;
     int text_em[2];
     hb_font_t *colour_font;
     hb_buffer_t *shape_buffer;
@@ -907,7 +909,24 @@ static unsigned char fallback_coverage(const BlitFont *font, size_t index, uint3
     return blit_font_glyph_pixel(font, index, scalar, sy, sx) ? 255 : 0;
 }
 
-static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, RasterEntry *entry)
+static int hinting_load_flags(BlitRasterHinting hinting)
+{
+    return hinting == BLIT_RASTER_HINTING_NONE ? FT_LOAD_NO_HINTING :
+           hinting == BLIT_RASTER_HINTING_LIGHT ? FT_LOAD_TARGET_LIGHT :
+           FT_LOAD_TARGET_NORMAL;
+}
+
+int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting)
+{
+    if (!raster || hinting < BLIT_RASTER_HINTING_FULL || hinting > BLIT_RASTER_HINTING_NONE)
+        return 0;
+    raster->hinting = hinting;
+    return 1;
+}
+
+/* Text glyphs follow the hinting setting; draw_fitted keeps its own rules. */
+static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, RasterEntry *entry,
+                             BlitRasterHinting hinting)
 {
     FT_Bitmap *bitmap;
     FT_Fixed advance;
@@ -924,7 +943,7 @@ static int draw_outline_face(FT_Face face, int baseline, uint32_t scalar, Raster
     left = origin >= 0 ? origin / 64 : -((-origin + 63) / 64);
     delta.x = origin - left * 64; delta.y = 0;
     FT_Set_Transform(face, NULL, &delta);
-    failed = FT_Load_Glyph(face, index, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL |
+    failed = FT_Load_Glyph(face, index, FT_LOAD_RENDER | hinting_load_flags(hinting) |
         (entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? FT_LOAD_COLOR : 0));
     FT_Set_Transform(face, NULL, NULL);
     if (failed) return -1;
@@ -1159,7 +1178,7 @@ render:
    the PSF's '?'. */
 static int draw_outline(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 {
-    int result = draw_outline_face(raster->outline, raster->baseline, scalar, entry);
+    int result = draw_outline_face(raster->outline, raster->baseline, scalar, entry, raster->hinting);
     if (result == 0 && raster->outline && FT_Get_Char_Index(raster->outline, scalar)) {
         result = draw_fitted(raster, raster->outline, FIT_SYMBOL, scalar, entry,
                              entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
@@ -1192,7 +1211,7 @@ static int draw_text_emoji(BlitRaster *raster, uint32_t scalar, RasterEntry *ent
         ascent = ceil_26_6(raster->text_emoji->size->metrics.ascender);
         descent = ceil_26_6(-raster->text_emoji->size->metrics.descender);
         baseline = (raster->height - ascent - descent) / 2 + ascent;
-        result = draw_outline_face(raster->text_emoji, baseline, scalar, entry);
+        result = draw_outline_face(raster->text_emoji, baseline, scalar, entry, raster->hinting);
         if (result < 0) return result;
         if (result > 0) { entry->glyph.baseline = baseline; return result; }
     }

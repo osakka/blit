@@ -26,6 +26,14 @@ typedef struct BlitRasterGlyph {
 
 typedef struct BlitRaster BlitRaster;
 
+/* ADR 0218: the FreeType hinting of text glyphs. Full (zero, the default) is
+   FT_LOAD_TARGET_NORMAL, light is FT_LOAD_TARGET_LIGHT, none is
+   FT_LOAD_NO_HINTING. Fitted icons and symbols ignore it. */
+typedef enum { BLIT_RASTER_HINTING_FULL = 0, BLIT_RASTER_HINTING_LIGHT, BLIT_RASTER_HINTING_NONE } BlitRasterHinting;
+/* Set before the first lookup: a raster's cache is never mixed. Returns 0
+   for an unknown mode and leaves the raster unchanged. */
+int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting);
+
 /* NULL outline selects deliberate pixel-art PSF rendering. A requested face
    that cannot load is an error, not a silently substituted configuration.
    Open a replacement first, then swap: failed changes leave the old one alive. */

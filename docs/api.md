@@ -1033,6 +1033,15 @@ have and take the rest from the glyph stack, so both kinds report
 `colour_glyphs: true` (ADR 0199). Select smooth text, for example, with
 `{"font_id":"hack","size_px":23}`.
 
+`hinting` (`full`, `light` or `none`; default `full`) sets how FreeType
+hints text glyphs (ADR 0218): `full` is the target-normal hinting text has
+always used, `light` the light autohinter target, `none` no hinting. It can
+be sent alone or with the other controls, `active.hinting` reports it, and
+anything else is a 400 `invalid_font_hinting`. A change rebuilds the glyph
+cache and redraws, as a size change does. Fitted icons and symbols and cell
+geometry ignore it. It is stored in `document.font.hinting`; a document
+without it means `full`.
+
 Fonts are discovered (ADR 0195):
 
 - **What `GET /v1/fonts` lists:** every regular, monospaced TTF or OTF in
@@ -1116,7 +1125,7 @@ font selection.
 settings. The response has three relevant parts: `document` is the sparse
 stored document, `effective` is what this process is using now, and
 `revision` is the optimistic-concurrency value for replacement. The document
-holds `font` (`font_id` with `scale` or `size_px`) and `server` values:
+holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
 `effects_animation_hz`, `restart_after_update`, `expect_desktop` and

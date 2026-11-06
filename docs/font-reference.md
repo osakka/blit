@@ -75,6 +75,11 @@ and attached PTYs. Do not change the user's font just to display one icon.
 Original icons are fitted to text metrics, not stretched to fill every pixel
 of a cell. Their ink bounds and terminal advance are different concepts.
 
+`hinting` (`full`, `light`, `none`; default `full`) sets how outline text is
+hinted: it changes how crisp text is at small sizes, and nothing about the
+cell grid. Fitted icons and symbols, emoji and cell-geometry glyphs ignore it
+(ADR 0218). Set it with `PUT /v1/fonts`; it is stored with the font.
+
 ## Choose the right category
 
 | Need | Reference | Rendering/integration rule |

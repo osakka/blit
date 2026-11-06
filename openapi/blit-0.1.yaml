@@ -2159,6 +2159,14 @@ components:
           minimum: 8
           maximum: 64
           description: Exact terminal cell height; width follows the font aspect ratio rounded to the nearest pixel.
+        hinting:
+          type: string
+          enum: [full, light, none]
+          description: >-
+            FreeType hinting of text glyphs (ADR 0218): full (the default,
+            FT_LOAD_TARGET_NORMAL), light (FT_LOAD_TARGET_LIGHT) or none
+            (FT_LOAD_NO_HINTING). Fitted icons and symbols ignore it. A change
+            rebuilds the glyph cache and redraws, as a size change does.
       additionalProperties: false
     FontProfiles:
       type: object
@@ -2167,7 +2175,7 @@ components:
         revision: {$ref: '#/components/schemas/Revision'}
         active:
           type: object
-          required: [id, path, scale, size_px, sizing, cell_pixels, glyphs, mappings]
+          required: [id, path, scale, size_px, sizing, hinting, cell_pixels, glyphs, mappings]
           properties:
             id: {$ref: '#/components/schemas/ResourceId'}
             path: {type: string}
@@ -2177,6 +2185,7 @@ components:
               description: Resolved size relative to the source font; not a second mutable size setting.
             size_px: {type: integer, minimum: 1}
             sizing: {type: string, enum: [scale, pixels]}
+            hinting: {type: string, enum: [full, light, none]}
             rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
             colour_glyphs: {type: boolean}
             arabic_companion:
@@ -2826,6 +2835,7 @@ components:
                 font_id: {type: string}
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
                 size_px: {type: integer, minimum: 8, maximum: 64}
+                hinting: {type: string, enum: [full, light, none]}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
             effects:
               type: object
