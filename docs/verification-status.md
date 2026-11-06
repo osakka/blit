@@ -1,5 +1,33 @@
 # Verification status
 
+## 2026-11-06: 0.3.55 Wi-Fi as a fan; the bars become cellular
+
+- **Wi-Fi fan**, one column: `wifi-signal-1` to `-4` (U+1002D1-1002D4), a dot
+  and three arcs lit in teal up to the level, the rest in the bars' inactive
+  colour; `wifi-off` (U+1002D5), the fan unlit with a red cross. One source,
+  `wifi-signal.svg`, so all five states share one box; the cross is a part
+  that is never lit in the fan states. Mono shows the lit parts only, and
+  `wifi-off` in mono is the cross. The dot is a true circle on the fan's axis
+  (within 0.2 px at 22 px; the owner caught it off-centre in the mock-up).
+- **The bars are the mobile signal:** `cellular-1` to `-4` (U+1002D6-1002D9)
+  draw them. `wifi-1` to `-4` keep their codepoints and pictures, marked
+  `deprecated` with `replaced_by` the cellular ids (ADR 0214's fields, now in
+  the `FontIcon` schema too); they are drawn until a release retires them.
+  `custom_icon_gate` checks `cellular-N` is pixel-identical to `wifi-N`.
+- **Levels differ by shape:** 45.8% to 100% of pixels at 22 px between any two
+  states (`font_icon_shape_gate`, minimum 15%). Shown to and approved by the
+  owner from real-server renders; the owner kept it one column for now: about
+  9 px tall at 22 px, a smudge in colour at 16 px. A two-column form is to be
+  looked at later if needed.
+- **Icon font** 303,760 to 309,348 bytes; rebuilt byte-for-byte first, no
+  existing glyph changed.
+- **Suites, glyph-only set** (no `src/` change since 0.3.54): `font` and
+  `schema` 56 pass, 0 fail. GLES `renderer` 80 pass, 1 skip, 1 fail:
+  `presentation_effects_gate` counted 26 animation ticks where it wants 30 in
+  what it assumes is 2.0 s, at load about 4.2 with other sessions running; it
+  passed 3 of 3 alone straight after. It measures no elapsed time, so the
+  failure cannot say why: issue #151. `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.54 a minimise box, Flat and Embossed
 
 - **Four window glyphs** (ADR 0222): `chalk-minimise` U+1002CD,
