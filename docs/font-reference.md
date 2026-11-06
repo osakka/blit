@@ -80,6 +80,14 @@ hinted: it changes how crisp text is at small sizes, and nothing about the
 cell grid. Fitted icons and symbols, emoji and cell-geometry glyphs ignore it
 (ADR 0218). Set it with `PUT /v1/fonts`; it is stored with the font.
 
+`icon_colour` (`colour`, `black`, `white`; default `colour`) is the pen of
+Blit's colour icons (U+100000 and up that carry colour): their own colours,
+or one solid pen over each icon's coverage. The `hui` badge in black is a
+black disc with white letters and in white a white disc with black letters,
+for light and dark bars. It is the same glyph set; window glyphs, controls,
+text and emoji ignore it (ADR 0220). Set it with `PUT /v1/fonts`; it is
+stored with the font.
+
 ## Choose the right category
 
 | Need | Reference | Rendering/integration rule |

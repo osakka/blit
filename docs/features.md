@@ -206,6 +206,7 @@ Errors are `application/problem+json` with stable codes.
 | One copy of the documentation, and FreeMono's source in its own small package `blit-font-sources` (suggested, not installed by default): the package is 17.2 MB, down from 24.6 MB | 0.3.45 | 0217 | Tested |
 | The terminal answers XTGETTCAP for `sgr-framed`, `sgr-framed-bar` and `sgr-shadow` (booleans), so a client that holds only the terminal can detect Blit's SGR extensions | 0.3.46 | - | Tested |
 | `fonts.hinting` (`full`, `light`, `none`; default `full`) sets the FreeType hinting of text glyphs through `PUT /v1/fonts` and the settings document; fitted icons ignore it | 0.3.47 | 0218 | Tested |
+| `fonts.icon_colour` (`colour`, `black`, `white`; default `colour`) draws Blit's colour icons in their own colours or in one solid pen, and the `hui` badge as a black disc with white letters or the reverse, through `PUT /v1/fonts` and the settings document | 0.3.48 | 0220 | Tested |
 | `blit --version` and `blit --help` | 0.3.20 | — | Tested |
 
 ## Diagnostics

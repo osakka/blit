@@ -456,6 +456,10 @@ suite_font() {
         "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/text/Hack-Regular.ttf}" \
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
     run_gate font_hinting_api_gate.rb ruby tools/tests/font_hinting_api_gate.rb
+    run_gate font_icon_colour_gate.sh sh tools/tests/font_icon_colour_gate.sh \
+        "$FONT" "${BLIT_GATE_OUTLINE:-$ROOT/assets/fonts/text/Hack-Regular.ttf}" \
+        "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
+    run_gate font_icon_colour_api_gate.rb ruby tools/tests/font_icon_colour_api_gate.rb
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh
     run_gate retro_outline_raster sh tools/tests/font_raster_gate.sh \
         "$FONT" "$ROOT/assets/fonts/text/3270-Regular.ttf" \

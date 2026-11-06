@@ -1042,6 +1042,19 @@ cache and redraws, as a size change does. Fitted icons and symbols and cell
 geometry ignore it. It is stored in `document.font.hinting`; a document
 without it means `full`.
 
+`icon_colour` (`colour`, `black` or `white`; default `colour`) sets the pen
+of Blit's colour icons, the private-use icons from U+100000 that carry
+colour (ADR 0220). `colour` draws them in their own colours, as always.
+`black` and `white` keep every pixel's coverage and give it that one colour,
+so the same glyph set serves a light or a dark bar; an icon the catalogue
+marks `mono: "disc-knockout"` (the `hui` badge) becomes a solid disc in the
+pen with its letters in the opposite shade. Window glyphs and controls, text
+and emoji ignore it. It can be sent alone or with the other controls,
+`active.icon_colour` reports it, and anything else is a 400
+`invalid_font_icon_colour`. A change rebuilds the glyph cache and redraws. It
+is stored in `document.font.icon_colour`; a document without it means
+`colour`.
+
 Fonts are discovered (ADR 0195):
 
 - **What `GET /v1/fonts` lists:** every regular, monospaced TTF or OTF in
@@ -1125,7 +1138,7 @@ font selection.
 settings. The response has three relevant parts: `document` is the sparse
 stored document, `effective` is what this process is using now, and
 `revision` is the optimistic-concurrency value for replacement. The document
-holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
+holds `font` (`font_id` with `scale` or `size_px`, `hinting` and `icon_colour`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
 `effects_animation_hz`, `restart_after_update`, `expect_desktop` and

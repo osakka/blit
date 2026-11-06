@@ -34,6 +34,16 @@ typedef enum { BLIT_RASTER_HINTING_FULL = 0, BLIT_RASTER_HINTING_LIGHT, BLIT_RAS
    for an unknown mode and leaves the raster unchanged. */
 int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting);
 
+/* ADR 0220: the pen of Blit's colour icons (U+100000 and up that carry colour).
+   Colour (zero, the default) draws them in their own colours. Black and white
+   keep every pixel's coverage and give it that one pen; a disc badge (hui) is
+   a solid disc in the pen with its letters in the opposite shade. Window
+   glyphs, controls, text and emoji ignore it. */
+typedef enum { BLIT_RASTER_ICON_COLOUR = 0, BLIT_RASTER_ICON_BLACK, BLIT_RASTER_ICON_WHITE } BlitRasterIconColour;
+/* Set before the first lookup: a raster's cache is never mixed. Returns 0
+   for an unknown mode and leaves the raster unchanged. */
+int blit_raster_set_icon_colour(BlitRaster *raster, BlitRasterIconColour icon_colour);
+
 /* NULL outline selects deliberate pixel-art PSF rendering. A requested face
    that cannot load is an error, not a silently substituted configuration.
    Open a replacement first, then swap: failed changes leave the old one alive. */
