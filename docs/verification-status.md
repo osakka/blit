@@ -1,5 +1,23 @@
 # Verification status
 
+## 2026-11-06: 0.3.51 the hui badge as a solid disc, and a new hui mark
+
+- **hui badge** (`hui-left`, `hui-right`, same ids and codepoints): a solid teal
+  disc with white letters in place of the thin ring with near-white letters,
+  which the owner found hard to read on a light bar. Its monochrome shape is
+  unchanged (the disc with the letters knocked out).
+- **hui mark**, new: `hui-mark-left` U+1002C5 and `hui-mark-right` U+1002C6, a
+  two-cell H-U-i monogram (an H whose lower half is a U, a dot for the right
+  stem's top), for Hibr's Menu Mark choice. Next free is U+1002C7.
+- **Shown to and approved by the owner** from real-server renders on light and
+  dark bars at 22 and 16 px, in colour and the auto, black and white pens. At
+  16 px the badge's letters blur and the mark's crossbar merges into the U;
+  both are clear at 22 px.
+- **Icon font** grows 400 bytes (301,628 to 302,028). It was first rebuilt
+  byte-for-byte from the committed sources, and only the hui glyphs changed.
+- **Suites:** `all` 181 pass, 10 skip, 0 fail (JOBS=2); GLES `renderer` 81 pass,
+  1 skip, 0 fail; `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.50 the settings revision moves with the content (issue #150)
 
 - **A false 409 on `PUT /v1/settings`, fixed.** The revision was raised when
