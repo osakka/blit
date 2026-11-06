@@ -131,5 +131,9 @@ ignored, and it is not written back. `PUT /v1/fonts` with only
   `GET /v1/fonts` or `GET /v1/settings`, draws the icon as on a document
   without it, and is dropped when the document is next written. On 0.3.48
   this gate fails five checks.
-- The `timing` suite on 0.3.48 and on this change, same machine, is in the
-  verification ledger.
+- The `timing` suite on 0.3.48 and on this change, back to back on one
+  machine (CPU compositor): `frame_rate_gate` 62.485 Hz and 62.556 Hz;
+  `terminal_soak_gate` (120 s, 4 sessions) 14160 and 14112 snapshots, 1288
+  and 1283 resizes; `performance_baseline_gate` and
+  `pointer_cadence_observation_gate` pass on both. The differences are run
+  to run noise.
