@@ -157,13 +157,17 @@ latency against ADR 0206). (2) The Hibr desktop app, once Hibr's key phases
 (#485), its dmabuf relay and the console's app-facing frame socket exist.
 Steamer's launch instructions follow phase 2.
 
-**The mouse: absolute by default, captured on request.** gamescope's stream
-has no cursor and nothing outside gamescope knows when a game grabs the
-mouse, so the bridge starts in absolute mode (Blit's own cursor over the
-picture, right for Steam's menus) and captures the mouse (pointer lock,
-relative motion) on a click in the pane or the toggle `Ctrl+Alt+M`; it lets
-go on the same toggle, on focus loss (`CSI O`) and when the game exits. This
-is the convention of virtual machines and remote desktops.
+**The mouse: absolute by default, captured on a click, released by the one
+release key.** gamescope's stream has no cursor and nothing outside gamescope
+knows when a game grabs the mouse, so the bridge starts in absolute mode
+(Blit's own cursor over the picture, right for Steam's menus) and captures
+the mouse (pointer lock, relative motion) on a click in the pane, as Boxer
+does. It has no key of its own: ADR 0198 gives one release key, the
+desktop's Release Pointer shortcut (Hibr's, `ctrl-f10` by default,
+rebindable), and Blit also ends a lock on focus change, exit or reset. The
+bridge treats Blit's `CSI ? 7701 ; 2 $ y` notice and a focus-out (`CSI O`) as
+the end of capture: back to absolute, held keys and buttons released to EIS.
+It gives the lock back itself only when the game exits.
 
 **Why a desktop app, not a program in a Terminal window.** One source of
 truth for each stream. Frames: ADR 0202 made Hibr's console (`cn_image`) the
