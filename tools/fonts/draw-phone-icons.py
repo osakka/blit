@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parents[2] / 'assets/fonts/icons'
-GREY, TEAL, AMBER, GOLD = '#c9d1d9', '#41d6bf', '#f2c14e', '#ffd23f'
+GREY, TEAL, AMBER, GOLD = '#7d8796', '#41d6bf', '#f2c14e', '#ffd23f'
 
 
 def f(v):
