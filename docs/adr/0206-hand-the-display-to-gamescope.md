@@ -27,7 +27,9 @@ nothing a game is sent also reaches the hidden desktop. Nothing starts
 another program on its own VT and returns when it ends.
 
 Measured on the owner's mini PC (Debian 13, Radeon): `steam-installer`
-and `seatd`/`libseat1` are available from apt; `gamescope` is not.
+and `seatd`/`libseat1` are available from apt. (Corrected 2026-11-07:
+`gamescope` 3.16.22 is in trixie-backports and is installed there, at
+`/usr/games/gamescope`; see [ADR 0225](0225-games-in-a-window-through-gamescope.md).)
 
 ## Options considered
 
@@ -76,7 +78,7 @@ Option 1.
 - **gamescope** comes from a package the project builds (hibr-apt) or from
   Debian once it is there; Blit does not vendor it.
 
-**Steam in a window is a follow-up, not part of this decision.** It is
+**Steam in a window is [ADR 0225](0225-games-in-a-window-through-gamescope.md).** It is
 option 3: gamescope's headless backend, its frames imported by Blit as
 dma-bufs and composed in a pane, input forwarded from Blit to gamescope. It
 gets its own ADR together with Blit's zero-copy dma-buf import, after this

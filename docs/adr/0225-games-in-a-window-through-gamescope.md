@@ -1,0 +1,171 @@
+# ADR 0225: Steam and games in a window, through a headless gamescope
+
+- Status: proposed
+- Date: 2026-11-07
+- Scope: a new producer program for the frame channel (`blit-gamescope`),
+  input forwarding from a Blit session to a nested compositor, gamepad
+  ownership, packaging
+- Depends on: [ADR 0223](0223-frames-by-dmabuf.md) (frames by dmabuf),
+  [ADR 0202](0202-local-frames-by-descriptor.md) (the frame channel),
+  [ADR 0198](0198-pointer-lock.md) (pointer lock),
+  [ADR 0206](0206-hand-the-display-to-gamescope.md) (full screen by hand-over)
+
+## Context
+
+The owner wants Steam and its games under Hibr, both full screen and in a
+window, and has put Blit in charge of making it work end to end; the Steamer
+app (a Hibr app that launches Steam URLs and reads manifests) follows. Full
+screen is ADR 0206: hand the display to gamescope on its own VT. This record
+is the window.
+
+**Blit draws cells and pictures; anything that needs a window system is a
+producer behind the frame channel.** That rule already holds for video and
+the Browser (ADR 0202) and is what keeps Blit free of a desktop stack. The
+Steam client is a CEF program and games are X11 or Wayland clients (Proton
+through Xwayland), so a Wayland/X server has to exist somewhere. The
+question is whether Blit writes one or reuses one.
+
+What was established on 2026-11-07:
+
+- **gamescope 3.16.22** is in Debian 13 through trixie-backports
+  (`3.16.22+ds-1~bpo13+1`, built with PipeWire and libei, OpenVR off) and is
+  installed on the owner's mini PC at `/usr/games`. ADR 0206's "gamescope is
+  not in Debian" is out of date.
+- **Its headless backend** (`--backend headless`) composites with Vulkan on
+  the GPU, takes no DRM master and no seat, and needs only a render node the
+  user can open (`src/Backends/HeadlessBackend.cpp`: not session based,
+  `Present` is a no-op, a timer at `-r`).
+- **It exports frames** as a PipeWire `Video/Source` named `gamescope`: BGRx
+  (DRM `XR24`) with modifier LINEAR, as dmabufs when the consumer asks for a
+  modifier, else memfd; whole frames, at most one per refresh, dropped when
+  no buffer is free (`src/pipewire.cpp`). It waits on the CPU for its GPU
+  work before handing a buffer over, so a buffer is complete when it arrives
+  (no acquire fence). The cursor is not in the stream.
+- **It takes input** through an EIS server (libei) on a per-user socket
+  `$XDG_RUNTIME_DIR/<display>-ei`: keyboard (evdev codes), relative and
+  absolute pointer, buttons, scroll; no touch, no gamepad; no root needed.
+- **Smoke test on the mini PC** (Radeon, RADV): `gamescope --backend headless
+  -W 640 -H 480 -r 60 -- vkcube`, with a small PipeWire consumer built for the
+  purpose: "Successfully initialized libei for input emulation!", a stream on
+  node 50, 30 of 30 frames non-blank about 16.7 ms apart, the last one the
+  vkcube image; asked for DMA-BUF with LINEAR it delivered dmabufs (`XR24`,
+  stride 2560, rotating four buffers). Gamescope issue #1984 (headless stream
+  empty or pointer-only) did not occur here. Blit 0.3.60 advertises `XR24/0`,
+  so the stream matches FRM3 with no copy.
+- **Input today:** Blit never grabs evdev (`EVIOCGRAB` is nowhere), so any
+  process that can open `/dev/input/event*` sees the same events. On the mini
+  PC the user is in `input`. Headless gamescope does not read evdev; Steam
+  Input and SDL in games open gamepads directly.
+
+## Options considered
+
+1. **Build a Wayland compositor into Blit.** Blit would host xdg-shell,
+   linux-dmabuf, seats, pointer constraints and Xwayland. Rejected: it makes
+   Blit a desktop compositor, the weight it exists to avoid, and would
+   reproduce years of Steam-specific behaviour (overlay, focus by appid, Big
+   Picture) badly.
+2. **A Hibr module that is a compositor.** The same mistake one layer up:
+   Hibr is a shell in terminal cells.
+3. **Reuse gamescope headless behind a small bridge** (this decision). It is
+   Valve's, in Debian, already on the target machine, Steam-aware, and its
+   output and input interfaces are standard protocols (PipeWire, EIS) that
+   match Blit's frame channel and the bridge's needs.
+4. **A wlroots compositor (sway headless, or a small one of our own).**
+   Exports dmabufs (wlr-screencopy) and takes virtual keyboard/pointer, but
+   is not Steam-aware. Kept as the fallback if gamescope's headless path
+   regresses (see "Independence").
+
+## Decision (proposed)
+
+Option 3: **`blit-gamescope`**, a small program shipped by Blit as its own
+package (Suggested by `blit`, like `blit-font-sources`), run in a Blit
+session (a Hibr pane), which:
+
+1. **Starts gamescope** as the session's user:
+   `gamescope --backend headless -W <w> -H <h> -r <refresh> [-e] -- <command>`
+   with `PATH` including `/usr/games` and the user's `XDG_RUNTIME_DIR`.
+   `<w>x<h>` is the pane's size in pixels; `<refresh>` the pane's display
+   refresh. `-e` (Steam integration) when the command is Steam.
+2. **Carries frames** from gamescope's PipeWire node to Blit: connects as a
+   consumer asking for `BGRx` with modifier LINEAR as DMA-BUF, and forwards
+   each buffer's fd as an FRM3 frame (`XR24`, modifier 0, one plane, the
+   chunk's stride, no fence: the buffer is complete on arrival). It holds
+   each PipeWire buffer until Blit's `RELEASE <id> <seq>`, and also on any
+   `ERROR`, before giving it back to the stream; it asks gamescope for five
+   or six buffers (gamescope keeps one, Blit may hold a shown and a pending
+   one). The picture is placed in the pane with Kitty escapes (`a=p`) as
+   every frame-channel picture is. No copy anywhere; if Blit answers
+   `dmabuf=0` (CPU compositor) the bridge asks PipeWire for memfd buffers and
+   sends version-1 frames instead.
+3. **Carries input** from the pane to gamescope's EIS socket: Kitty keyboard
+   protocol press/release → `ei_device_keyboard_key`; SGR-Pixels mouse
+   (mode 1016) → absolute pointer, scaled from pane pixels to `<w>x<h>`;
+   buttons and wheel → EIS buttons and scroll. When the game captures the
+   mouse, the bridge turns on pointer lock (`?7701`, ADR 0198) and forwards
+   its raw deltas as relative motion, which is what first-person games need.
+   Input reaches the game only while the pane has focus.
+4. **Resizes** with the pane: asks the stream for the new size
+   (`SPA_FORMAT_VIDEO_requested_size`), restarting gamescope with new
+   `-W/-H` only if that is refused.
+5. **Ends** with its child: when gamescope exits, the bridge deletes the
+   picture (`a=d`) and exits with gamescope's status.
+
+**Full screen** stays ADR 0206 (the display handed to gamescope on its own
+VT): one tool, two modes, the same gamescope. Going from a window to full
+screen is ending one and starting the other; a seamless switch is not part
+of this decision.
+
+**Blit's own work items**, needed by the bridge and useful beyond it:
+
+- **Physical key codes to a session.** Kitty's flag 8 reports layout
+  codepoints, and the bridge would have to guess evdev codes back (lossy on
+  non-US layouts). Blit reads evdev itself, so it adds the base-layout key to
+  its Kitty keyboard reports (flag 4, alternate keys) so the bridge maps keys
+  exactly.
+- **Gamepads: Steam owns them while a game runs.** EIS has no gamepad and
+  uinput needs root, so the pads are not forwarded. Steam Input and SDL read
+  them directly. While a `blit-gamescope` session runs, Blit stops routing
+  gamepads to sessions (through the existing input routes) so a pad does not
+  drive the desktop and the game at once, and restores the routes when it
+  ends.
+- **The cursor.** gamescope's stream has no cursor, so Blit's own pointer is
+  shown over the picture; Steam's hover cursor shapes are not reproduced.
+
+**Independence.** The bridge talks only PipeWire (frames in) and EIS (input
+out); the two gamescope-specific details (finding the node by name, asking
+for an appid's window) live in one file. If gamescope's headless path
+regresses, a wlroots compositor fits behind the same bridge.
+
+## Consequences
+
+- Steam and games run in a Hibr pane at the GPU's speed with no copy between
+  gamescope and the screen; one extra GPU composite (gamescope's) and about
+  one refresh of latency more than the full-screen hand-over.
+- Blit gains no window-system code. The new package carries a PipeWire and a
+  libei dependency that `blit` itself does not.
+- Steamer launches `blit-gamescope -- steam ...` (window) or the hand-over
+  API (full screen); it does not talk to gamescope.
+- Keyboard and mouse can reach a game only through Blit; a game that opened
+  keyboard event nodes itself would also see keys meant for the desktop.
+  That is not done by X11/Proton games, which take input from Xwayland.
+
+## Open questions, to settle before this is accepted
+
+- Steam itself under headless gamescope (`-e -- steam -gamepadui`), not only
+  vkcube: the overlay, Big Picture, and a Proton game, on the mini PC.
+- Prerequisites on the target: `steam-installer` and i386 multiarch,
+  `xwayland`, `libei1`; which the `blit-gamescope` package depends on and
+  which the user installs.
+- Latency measured end to end (key press to pixel) against ADR 0206.
+- Whether gamescope honours `requested_size` for live resizes.
+
+## Evidence (planned)
+
+- A gate for the bridge with a stand-in producer: a PipeWire video source
+  that emits known dmabuf frames into the bridge, checking that Blit draws
+  them, that buffers come back only after `RELEASE` or `ERROR`, the memfd
+  fallback under the CPU compositor, and the input mapping (keys, absolute,
+  relative, buttons, scroll) against an EIS stand-in.
+- On the mini PC, with the owner's OK: vkcube, then Steam's Big Picture, then
+  one Proton game in a pane: frame rate, latency and the frame channel
+  counters (`graphics.frames.dmabuf`: accepted, released, no uploads).
