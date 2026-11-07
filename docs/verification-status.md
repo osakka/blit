@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-07: 0.3.59 Full Screen and Sticky boxes, Flat and Embossed
+
+- **Ten window glyphs** (ADR 0224), asked for by the owner through Hibr #484:
+  `chalk-fullscreen` U+10030A, `-pressed` U+10030B; `slate-light-fullscreen`
+  U+10030C, `-pressed` U+10030D; `chalk-sticky` U+10030E, `-pressed` U+10030F,
+  `-on` U+100310; `slate-light-sticky` U+100311, `-pressed` U+100312, `-on`
+  U+100313. Next free is U+100314.
+- **The marks**, chosen by the owner from real-server renders of two
+  candidates: Full Screen is four corner brackets, Sticky a pin (a 3x3 head on
+  a 2 px stem). Pressed forms follow ADR 0219; sticky-on is the unpressed box
+  with the mark drawn bold.
+- **Gates:** `window_glyph_gate` (literal drawings and per-size rules, failing
+  on the other candidate's geometry), `window_style_gate`,
+  `glyph_edge_sweep_gate` (CPU and GLES), `icon_clip_gate`,
+  `control_glyph_gate`, `catalogue_fields_gate`.
+- **Suites, full set** (this changes `src/blit_window_glyphs.h`): `all` 181
+  pass, 10 skip, 0 fail (JOBS=2). GLES `renderer` 80 pass, 1 skip, 1 fail:
+  `presentation_effects_gate` measured 30 animation frames in 2.13 s, 14.1/s
+  against its floor of 15/s at 30 Hz, on the software GPU of the test machine
+  at load 3.3; it passed 3 of 3 alone straight after, and this release changes
+  only window-glyph tables. The owner's machine holds the rate with headroom
+  (issue #152). `package_artifact_gate` passes.
+
 ## 2026-11-07: 0.3.58 the battery lying in two columns
 
 - **Horizontal two-column battery**, alongside the upright one-column ones
