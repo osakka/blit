@@ -955,6 +955,9 @@ typedef struct {
     int version;  /* the hello's, 1, 2 or 3 */
     unsigned long long serial;  /* which connection, for a dmabuf's RELEASE */
     int hud_on;   /* the last HUD1 sent, to a version 2 client */
+    /* ADR 0225: this channel's input route to a compositor's EIS socket,
+       NULL until `INPUT eis` is accepted (blit_frames_input.h). */
+    struct BlitFrameInput *input;
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64
@@ -1100,6 +1103,10 @@ typedef struct {
     unsigned long dmabuf_refused_unavailable, dmabuf_refused_format;
     unsigned long dmabuf_refused_import, dmabuf_refused_invalid;
     char frames_last_error[32];
+    /* ADR 0225: events this session's input routes sent to EIS, and the
+       last thing that went wrong with one (kept after the route ends). */
+    unsigned long frame_input_events;
+    char frame_input_error[32];
     int frame_connections;
     BlitPendingPlacement frame_pending[BLIT_FRAME_PENDING];
     /* ADR 0203: the latest STA1 from a frame client, for the panel. */
@@ -1809,6 +1816,10 @@ typedef struct {
     int auxiliary_worker_binding;
     uint64_t auxiliary_worker_deadline_us;
     uint64_t console_input_since_us;
+    /* Physical input handed to another VT (service_native_console), also
+       under BLIT_TEST_VT_SIGNALS, where no VT is owned: an input route to
+       EIS is live only while Blit holds the console (ADR 0225). */
+    int console_away;
     /* ADR 0202: the frame socket and its clients. */
     int frame_fd;
     char frame_name[64];
@@ -1981,6 +1992,16 @@ static void recent_note_present(BlitRuntime *runtime, int output,
 static void recent_tick(BlitRuntime *runtime, uint64_t now);
 static void recent_json(const BlitRuntime *runtime, int output, char *out, size_t capacity);
 static void frame_hud_notify(BlitRuntime *runtime);
+/* ADR 0225: physical input to a compositor's EIS socket (blit_frames_input.h). */
+static int frame_input_routes;
+static void frame_input_key(BlitRuntime *runtime, unsigned int code, int pressed);
+static void frame_input_button(BlitRuntime *runtime, int button, int pressed);
+static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int direction);
+static void frame_input_pointer(BlitRuntime *runtime);
+static void frame_input_relative(BlitRuntime *runtime, int dx, int dy);
+static void frame_input_reconcile(BlitRuntime *runtime);
+static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
+                               char *out, size_t capacity);
 /* ADR 0205: restart after an update, at a safe moment. */
 static void update_json(const BlitRuntime *runtime, char *out, size_t capacity);
 static const char *pane_surface_id(const BlitRuntime *runtime,
@@ -16365,12 +16386,17 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         "\"superseded\":%lu,\"last_error\":\"%s\","
         /* ADR 0223: those that came as dmabufs. */
         "\"dmabuf\":{\"accepted\":%lu,\"released\":%lu,\"refused\":{"
-        "\"unavailable\":%lu,\"format\":%lu,\"import\":%lu,\"invalid\":%lu}}}",
+        "\"unavailable\":%lu,\"format\":%lu,\"import\":%lu,\"invalid\":%lu}}",
         session->frames_accepted, session->frames_refused, session->frames_stale,
         session->frames_superseded, session->frames_last_error,
         session->dmabuf_accepted, session->dmabuf_released,
         session->dmabuf_refused_unavailable, session->dmabuf_refused_format,
         session->dmabuf_refused_import, session->dmabuf_refused_invalid);
+    /* ADR 0225: its input route to a compositor's EIS socket. */
+    if (used < capacity)
+        used += frame_input_json(runtime, session, body + used, capacity - used);
+    if (used < capacity)
+        used += (size_t)snprintf(body + used, capacity - used, "}");
     /* ADR 0203: the latest STA1 lines from its frame client, while they are
        younger than the five seconds the panel shows them for. */
     {
@@ -25266,6 +25292,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 int emitted;
                 direction = (inject_device != NULL &&
                              inject_device->natural_scroll) ? -delta : delta;
+                if (frame_input_routes)
+                    frame_input_scroll(runtime, 0, direction > 0 ? 1 : -1);
                 /* scroll_step is how many reports one notch produces, which
                    is the difference between a usable and an unusable
                    high-resolution wheel (issue #67). */
@@ -28085,6 +28113,9 @@ static void flush_mouse_motion(BlitRuntime *runtime)
         snprintf(report, sizeof(report), "\033[<%d;%d;%dM",
                  active_mouse_button(runtime) + mouse_modifier_bits(runtime) + 32,
                  runtime->pointer_lock_dx, runtime->pointer_lock_dy);
+        /* ADR 0225: the same raw sum, as relative motion, to a live route. */
+        if (frame_input_routes)
+            frame_input_relative(runtime, runtime->pointer_lock_dx, runtime->pointer_lock_dy);
         runtime->pointer_lock_dx = 0;
         runtime->pointer_lock_dy = 0;
         runtime->motion_sent_us = monotonic_us();
@@ -28471,6 +28502,9 @@ static void update_pointer_position(BlitRuntime *runtime,
     mark_pointer_dirty_outputs(runtime, runtime->previous_pointer_output,
                                runtime->pointer_output);
     runtime->render_pending = 1;
+    /* ADR 0225: over a routed picture, its position to the compositor. */
+    if (frame_input_routes)
+        frame_input_pointer(runtime);
     {
         char input_event[512];
         int target_col = 0;
@@ -28597,6 +28631,8 @@ static void dispatch_pointer_button_raw(BlitRuntime *runtime, int button,
     input_target = target;
     if (button < 0 || button > 2)
         return;
+    if (frame_input_routes)
+        frame_input_button(runtime, button, pressed);
     snprintf(detail, sizeof(detail),
              "button=%d pressed=%d device=%s x=%.1f y=%.1f "
              "column=%d row=%d target_session=%llu input_session=%llu routing=%s",
@@ -28867,6 +28903,9 @@ static void evdev_emit_wheel(BlitRuntime *runtime,
         button = direction > 0 ? 66 : 67;
     else
         button = direction > 0 ? 64 : 65;
+    /* ADR 0225: one notch to a live EIS route, whatever the step. */
+    if (frame_input_routes)
+        frame_input_scroll(runtime, horizontal, direction);
     for (emitted = 0; emitted < scroll_step; ++emitted) {
         broadcast_evdev_pointer(runtime, "pointer_wheel", button, 1, value,
                                 "evdev-pointer");
@@ -29840,6 +29879,10 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
         blit_running = 0;
         return;
     }
+    /* ADR 0225: the physical key, press and release, to a live EIS route
+       (the compositor makes its own repeats). The session still gets it. */
+    if (frame_input_routes && event->value != 2)
+        frame_input_key(runtime, event->code, event->value != 0);
     /* Issue #66. The remap decides what this code *is*, and takes precedence
        over what the code would otherwise mean: a CapsLock remapped to Control
        must not also toggle CapsLock. A code with a role never reaches the
@@ -30098,8 +30141,10 @@ static void service_native_console(BlitRuntime *runtime)
                 if (runtime->evdev_mouse_buttons[i] & (1U << button))
                     dispatch_evdev_mouse_button(runtime, i, button, 0);
         /* After the releases, so a program sees its keys come up before it
-           is told it lost focus. */
+           is told it lost focus. An EIS route ends here too (ADR 0225). */
         console_focus_report(runtime, 0);
+        runtime->console_away = 1;
+        frame_input_reconcile(runtime);
         if (console && (blit_kms_suspend(runtime->kms) < 0 ||
                         blit_vt_acknowledge(0) < 0)) {
             diagnostic_log(runtime, "error", "console_release_failed", strerror(errno));
@@ -30117,6 +30162,8 @@ static void service_native_console(BlitRuntime *runtime)
         runtime->console_input_since_us = monotonic_us();
         evdev_sync_modifiers(runtime);
         console_focus_report(runtime, 1);
+        runtime->console_away = 0;
+        frame_input_reconcile(runtime);
         runtime->render_pending = 1;
         reset_render_schedule(runtime, monotonic_us());
         diagnostic_log(runtime, "info", "console_acquired", "DRM reacquired; full repaint requested.");
@@ -31597,6 +31644,7 @@ int main(int argc, char **argv)
             frame_service(&runtime, &readable);
         frame_expire_placements(&runtime, monotonic_us());
         frame_dmabuf_reconcile(&runtime);
+        frame_input_reconcile(&runtime);
         if (ready > 0) {
             for (i = 0; i < runtime.evdev_mouse_count; ++i)
                 if (runtime.evdev_mouse_fds[i] >= 0 &&

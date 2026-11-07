@@ -35,6 +35,14 @@
    their newlines. Anything longer arrives truncated, and is refused. */
 #define BLIT_FRAME_STATUS_BYTES (8 + BLIT_HUD_STATUS_LINES * (BLIT_HUD_STATUS_BYTES + 1))
 
+/* ADR 0225: the INPUT request and its route (blit_frames_input.h). */
+struct BlitFrameInput;
+static void frame_input_close(BlitRuntime *runtime, BlitFrameClient *client);
+static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
+                                const unsigned char *message, ssize_t length);
+static void frame_input_select(const BlitRuntime *runtime, fd_set *readable, int *max_fd);
+static void frame_input_service(BlitRuntime *runtime, const fd_set *readable);
+
 /* One line on the client's socket; nothing for an accepted frame. */
 static void frame_reply(int fd, const char *line)
 {
@@ -46,6 +54,9 @@ static void frame_reply(int fd, const char *line)
 static void frame_client_close(BlitRuntime *runtime, int index)
 {
     if (runtime->frame_clients[index].used) {
+        /* The route ends with the channel: its keys and buttons released
+           first (ADR 0225). */
+        frame_input_close(runtime, &runtime->frame_clients[index]);
         if (runtime->frame_clients[index].authenticated) {
             BlitSession *session = find_session_id(runtime, runtime->frame_clients[index].session_id);
             if (session != NULL && session->frame_connections > 0)
@@ -858,6 +869,15 @@ static void frame_client_service(BlitRuntime *runtime, int index)
                 frame_reply(client->fd, "ERROR 0 EINVAL\n");
             continue;
         }
+        if (got >= 6 && memcmp(message, "INPUT ", 6) == 0) {
+            /* ADR 0225: a line, no descriptor. */
+            for (j = 0; j < fd_count; ++j) close(fds[j]);
+            if (fd_count != 0 || (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC)))
+                frame_input_request(runtime, client, (const unsigned char *)"", 0);
+            else
+                frame_input_request(runtime, client, message, got);
+            continue;
+        }
         if (got >= 4 && memcmp(message, "FRM3", 4) == 0) {
             /* ADR 0223: a version 3 client's dmabuf frame, 72 bytes, one
                descriptor per plane and optionally a fence after them. */
@@ -998,6 +1018,7 @@ static void frame_select(const BlitRuntime *runtime, fd_set *readable, int *max_
             FD_SET(runtime->frame_clients[i].fd, readable);
             if (runtime->frame_clients[i].fd > *max_fd) *max_fd = runtime->frame_clients[i].fd;
         }
+    frame_input_select(runtime, readable, max_fd);
 }
 
 static void frame_service(BlitRuntime *runtime, const fd_set *readable)
@@ -1022,4 +1043,7 @@ static void frame_service(BlitRuntime *runtime, const fd_set *readable)
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i)
         if (runtime->frame_clients[i].used && FD_ISSET(runtime->frame_clients[i].fd, readable))
             frame_client_service(runtime, i);
+    frame_input_service(runtime, readable);
 }
+
+#include "blit_frames_input.h"
