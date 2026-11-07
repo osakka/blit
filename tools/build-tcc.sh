@@ -68,8 +68,27 @@ case "$target" in
             -I"$hibr_root/include" -I"$hibr_root/mods" \
             -o "$output" "$ROOT/hibr/console-blit.c"
         ;;
+    gamescope)
+        # ADR 0225: blit-gamescope. The PipeWire/SPA headers need GNU C, so
+        # this target is built by cc, not tcc; linked by SONAME.
+        pw_include=${BLIT_PIPEWIRE_INCLUDE:-/usr/include/pipewire-0.3}
+        spa_include=${BLIT_SPA_INCLUDE:-/usr/include/spa-0.2}
+        if [ ! -f "$pw_include/pipewire/pipewire.h" ] || [ ! -f "$spa_include/spa/pod/builder.h" ]; then
+            echo "blit: PipeWire headers not found (set BLIT_PIPEWIRE_INCLUDE and BLIT_SPA_INCLUDE)" >&2
+            exit 1
+        fi
+        ${CC:-cc} -O2 -g -std=gnu99 -Wall -Wno-unused-function \
+            "-DBLIT_BUILD_VERSION=\"$version\"" \
+            -I"$ROOT/src" -I"$pw_include" -I"$spa_include" \
+            "$ROOT/src/blit_gamescope.c" \
+            "${BLIT_PIPEWIRE_LIBRARY:-/lib/x86_64-linux-gnu/libpipewire-0.3.so.0}" \
+            -o "$output"
+        chmod 0755 "$output"
+        echo "built $output target=$target version $version with ${CC:-cc}"
+        exit 0
+        ;;
     *)
-        echo "blit: unknown TCC target '$target' (use server, helper, or adapter)" >&2
+        echo "blit: unknown TCC target '$target' (use server, helper, adapter, or gamescope)" >&2
         exit 1
         ;;
 esac

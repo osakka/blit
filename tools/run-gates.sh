@@ -573,6 +573,7 @@ suite_hibr() {
     run_gate font_resize_views_gate.rb ruby tools/tests/font_resize_views_gate.rb
     run_gate frame_descriptor_gate.sh sh "$ROOT"/tools/tests/frame_descriptor_gate.sh
     run_gate frame_dmabuf_gate.sh sh "$ROOT"/tools/tests/frame_dmabuf_gate.sh
+    run_gate gamescope_bridge_gate.sh sh "$ROOT"/tools/tests/gamescope_bridge_gate.sh
     # ADR 0223: import, drawing and RELEASE need a GPU that imports dmabufs,
     # so they run against a named live host, never implied by a local run.
     if [ -n "$LIVE_DMABUF" ]; then
