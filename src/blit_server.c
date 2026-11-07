@@ -3650,8 +3650,9 @@ static void graphics_ledger_json(const BlitRuntime *runtime, char *body,
 static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
                                      size_t capacity)
 {
-    /* /v1/diagnostics whole: an entry per output and the panels' lines. */
-    static char snapshot[BLIT_MAX_DISPLAYS * 5120 + 16384];
+    /* /v1/diagnostics whole: an entry per output and the panels' lines,
+       and the dmabuf frames' formats and counts per session (ADR 0223). */
+    static char snapshot[BLIT_MAX_DISPLAYS * 5120 + 16384 + 1600 + BLIT_MAX_SESSIONS * 192];
     size_t used;
     int count;
     int first;

@@ -40,6 +40,8 @@ TOKEN = os.environ.get('BLIT_AUTH_TOKEN', '')
 USER = os.environ.get('BLIT_GATE_LIVE_USER', os.environ.get('USER', ''))
 REMOTE = '/tmp/blit-dmabuf'
 LAST = (0x20, 0xc0, 0x60)
+# Every session this gate starts, so it deletes them on every way out.
+STARTED = []
 
 
 def fail(why):
@@ -70,7 +72,9 @@ def session(command, display=None, width=80, height=10):
             'surface': {'width': width, 'height': height}}
     if display:
         body['display_id'] = display
-    return api('POST', '/v1/terminal-sessions', body)['id']
+    sid = api('POST', '/v1/terminal-sessions', body)['id']
+    STARTED.append(sid)
+    return sid
 
 
 def screen_text(sid):
@@ -168,7 +172,6 @@ def uploaded_bytes():
 
 
 def main():
-    sessions = []
     diagnostics = api('GET', '/v1/diagnostics')
     dmabuf = diagnostics['graphics']['frames']['dmabuf']
     check(dmabuf['advertised'] and any(f.split('/')[0] == 'XR24' and '0' in f.split('/')[1:]
@@ -176,16 +179,14 @@ def main():
           'the host does not offer XR24/LINEAR dmabuf import: %s' % dmabuf)
     display = DISPLAY or output_of(diagnostics, None).get('display_id')
     try:
-        sessions.append(send_file(PRODUCER, REMOTE + '/producer'))
+        send_file(PRODUCER, REMOTE + '/producer')
         probe = session('%s/producer probe; sleep 1' % REMOTE, width=200, height=4)
-        sessions.append(probe)
         ended(probe, 20)
         text = screen_text(probe)
         check('verdict=PROBE gbm=ok' in text.replace('\n', ''), 'GBM probe on the host: %s' % text)
         before = uploaded_bytes()
         producer = session('%s/producer run 90 12; sleep 30' % REMOTE, display=display,
                            width=120, height=40)
-        sessions.append(producer)
         text = wait_text(producer, 'DMABUF_HOLDING', 60)
         check('DMABUF_HOLDING' in text, 'the producer did not reach its hold: %s' % text)
         # The display shows the producer's pane once it has a frame of it.
@@ -200,12 +201,15 @@ def main():
         result = ' '.join(l for l in text.replace('\n', '').split('DMABUF_RESULT')[1:]) if 'DMABUF_RESULT' in text else text
         frames = api('GET', '/v1/terminal-sessions/%s' % producer)['frames']
         uploaded = during - before if during is not None and before is not None else 'unknown'
-        print('FRAME_DMABUF_LIVE host=%s display=%s covered_px=%d of %d upload_bytes_delta=%s '
+        print('FRAME_DMABUF_LIVE host=%s display=%s covered_px=%d image_px_at_1x=%d upload_bytes_delta=%s '
               'session_frames=%s result=%s' % (BASE, display, covered, 256 * 128, uploaded,
                                                json.dumps(frames['dmabuf']), result.strip()))
         check('verdict=PASS' in result, 'the producer reported %s' % result)
-        check(covered >= 256 * 128 * 9 // 10,
-              'the last frame is not on screen: %d pixels of its colour' % covered)
+        # The display's scale (HiDPI) enlarges the image by scale_x x scale_y.
+        out = output_of(api('GET', '/v1/diagnostics'), display)
+        area = int(256 * 128 * out.get('scale_x', 1) * out.get('scale_y', 1))
+        check(covered >= area * 9 // 10,
+              'the last frame is not on screen: %d pixels of its colour, %d expected' % (covered, area))
         check(frames['dmabuf']['accepted'] >= 90 and frames['dmabuf']['released'] >= 90 and
               frames['dmabuf']['refused']['format'] >= 1, 'session counts %s' % frames)
         print('FRAME_DMABUF_LIVE_PASS')
@@ -213,7 +217,7 @@ def main():
         cleanup = session('rm -rf %s && echo CLEAN_OK' % REMOTE)
         ended(cleanup, 15)
         print('FRAME_DMABUF_LIVE_CLEANUP %s' % ('removed' if 'CLEAN_OK' in screen_text(cleanup) else 'NOT removed'))
-        for sid in sessions + [cleanup]:
+        for sid in STARTED:
             try:
                 api('DELETE', '/v1/terminal-sessions/%s' % sid)
             except Exception as error:  # report, do not hide
