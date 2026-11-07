@@ -1,16 +1,24 @@
 /* blit-gamescope: a game or Steam in a Blit pane, through a headless
    gamescope (ADR 0225, phase 1).
 
-     blit-gamescope [-W w -H h] [-r hz] [--steam] [--log path] -- command...
+     blit-gamescope [-W w -H h] [-r hz] [--steam] [--no-place] [--log path] -- command...
 
    It starts `gamescope --backend headless -W -H -r [-e] -- command` in a
    process group of its own, takes gamescope's PipeWire video stream (BGRx,
    LINEAR) and hands each frame to Blit on the session's frame channel
    (BLIT_FRAME_SOCKET, BLIT_FRAME_TOKEN): as FRM3 dmabufs when Blit imports
    them, else as FRM1 memfds. It places the picture with one Kitty `a=p` on
-   its own terminal and deletes it at exit. Input does not pass through the
-   bridge: it names gamescope's EIS socket to Blit with the INPUT request and
-   Blit sends the pane's keys and mouse there itself. The bridge never
+   its own terminal and deletes it at exit; with --no-place it writes
+   neither (only through GsPlacement, blit_gamescope_frames.h), and whoever
+   relays the picture places it (a desktop app, ADR 0225 phase 2). With -W
+   and -H it does not ask the pane's size (CSI 14 t) at start; --no-place
+   needs them, and then does not ask on SIGWINCH either. What it still
+   writes is its terminal set-up and its undoing at exit.
+
+   Input does not pass through the bridge: it names gamescope's EIS socket
+   to Blit with `INPUT eis <path> <image id>`, turns the route on with
+   `INPUT on <image id>` once Blit answers `OK input <image id>`, and Blit
+   sends the pane's keys and mouse there itself. The bridge never
    captures the mouse (the desktop does, ADR 0225). The terminal is read
    only for the pane's pixel size, focus and the end of a desktop's pointer
    lock (blit_gamescope_tty.h).
@@ -63,6 +71,7 @@
 struct bridge {
     /* options */
     int width, height, refresh, steam, sized_by_option;
+    GsPlacement placement;       /* --no-place: never a=p or a=d */
     char **command;
     const char *log_path;
     FILE *log;
@@ -84,7 +93,6 @@ struct bridge {
     int eis_ready;               /* "Successfully initialized libei" seen */
     /* frames */
     GsFrames frames;
-    int placed;
     unsigned long frames_in, frames_dropped;
     uint32_t stream_w, stream_h;
     int stream_dmabuf;           /* the negotiated buffers are dmabufs */
@@ -148,7 +156,7 @@ static void place_picture(struct bridge *b)
     char seq[128];
     int n;
     int cols = b->cols, rows = b->rows;
-    if (cols <= 0 || rows <= 0) return;
+    if (b->placement.no_place || cols <= 0 || rows <= 0) return;
     /* The picture keeps its aspect: the largest whole-cell box of the
        stream's shape inside the pane. Blit scales it; the bridge never
        resamples. */
@@ -160,9 +168,8 @@ static void place_picture(struct bridge *b)
         if (c >= 1 && c <= cols) cols = c;
         if (r >= 1 && r <= rows) rows = r;
     }
-    n = gs_frames_place(seq, sizeof(seq), GS_IMAGE_ID, cols, rows);
+    n = gs_placement_place(&b->placement, seq, sizeof(seq), GS_IMAGE_ID, cols, rows);
     if (n > 0) tty_write(seq, (size_t)n);
-    b->placed = 1;
 }
 
 /* ---------------------------------------------------------------- terminal */
@@ -187,11 +194,8 @@ static void tty_restore(struct bridge *b)
 {
     char seq[64];
     int n;
-    if (b->placed) {
-        n = gs_frames_delete(seq, sizeof(seq), GS_IMAGE_ID);
-        if (n > 0) tty_write(seq, (size_t)n);
-        b->placed = 0;
-    }
+    n = gs_placement_delete(&b->placement, seq, sizeof(seq), GS_IMAGE_ID);
+    if (n > 0) tty_write(seq, (size_t)n);
     tty_puts("\033[?1004l\033[?25h");
     if (b->stdin_flags >= 0) fcntl(STDIN_FILENO, F_SETFL, b->stdin_flags);
     if (b->termios_saved) {
@@ -452,7 +456,7 @@ static void on_process(void *data)
                                       d->chunk->offset,
                                       d->chunk->stride ? (uint32_t)d->chunk->stride : b->stream_w * 4,
                                       newest) == 0) {
-                if (!b->placed) place_picture(b); /* once, after the first frame */
+                if (!b->placement.placed) place_picture(b); /* once, after the first frame */
                 return; /* held until RELEASE or ERROR */
             }
         } else {
@@ -463,7 +467,7 @@ static void on_process(void *data)
                               b->stream_w, b->stream_h,
                               d->chunk->stride ? (uint32_t)d->chunk->stride : b->stream_w * 4);
     }
-    if (!b->placed && b->frames.sequence > 0) place_picture(b);
+    if (!b->placement.placed && b->frames.sequence > 0) place_picture(b);
     pw_stream_queue_buffer(b->stream, newest);
 }
 
@@ -481,7 +485,7 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
     b->stream_w = info.size.width;
     b->stream_h = info.size.height;
     b->stream_dmabuf = spa_pod_find_prop(param, NULL, SPA_FORMAT_VIDEO_modifier) != NULL;
-    if (b->placed) place_picture(b); /* a new size keeps its aspect in the pane */
+    if (b->placement.placed) place_picture(b); /* a new size keeps its aspect in the pane */
     logf_(b, "stream format %ux%u %s", b->stream_w, b->stream_h,
           b->stream_dmabuf ? "dmabuf LINEAR" : "memfd");
     types = b->stream_dmabuf ? (1 << SPA_DATA_DmaBuf) : ((1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr));
@@ -594,7 +598,7 @@ static const struct pw_core_events core_events = {
 static void pane_resized(struct bridge *b)
 {
     read_winsize(b);
-    if (b->placed) place_picture(b);
+    if (b->placement.placed) place_picture(b);
     logf_(b, "resize: pane %dx%d, stream stays %ux%u; Blit scales the picture",
           b->pane_w, b->pane_h, b->stream_w, b->stream_h);
 }
@@ -630,8 +634,8 @@ static void on_frame_socket(void *data, int fd, uint32_t mask)
     }
     if (input != b->frames.input_state) {
         if (b->frames.input_state == GS_INPUT_OK)
-            logf_(b, "OK input: Blit sends the pane's input to %s (INPUT on %s)", b->eis_path,
-                  b->frames.input_on ? "sent" : "not sent");
+            logf_(b, "OK input %u: Blit sends the pane's input to %s (INPUT on %s)",
+                  b->frames.image_id, b->eis_path, b->frames.input_on ? "sent" : "not sent");
         else if (b->frames.input_was_ok && strcmp(b->frames.input_error, "ENOENT") == 0)
             /* Blit ended a live route (docs/api.md, "Picture frames by
                descriptor"): the compositor refused late or went away. */
@@ -660,9 +664,11 @@ static void on_signal(void *data, int signal_number)
         }
         break;
     case SIGWINCH:
+        /* The size only places the picture: nothing to ask with --no-place. */
+        if (b->placement.no_place) break;
         tty_puts("\033[14t"); /* the answer arrives on stdin and resizes */
         read_winsize(b);
-        if (b->placed) place_picture(b);
+        if (b->placement.placed) place_picture(b);
         break;
     default:
         logf_(b, "signal %d", signal_number);
@@ -681,7 +687,7 @@ static void on_tick(void *data, uint64_t expirations)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: blit-gamescope [-W width -H height] [-r hz] [--steam] [--log path] -- command...\n");
+    fprintf(stderr, "usage: blit-gamescope [-W width -H height] [-r hz] [--steam] [--no-place] [--log path] -- command...\n");
 }
 
 int main(int argc, char **argv)
@@ -705,11 +711,18 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "-H") && i + 1 < argc) b->height = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-r") && i + 1 < argc) b->refresh = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--steam")) b->steam = 1;
+        else if (!strcmp(argv[i], "--no-place")) b->placement.no_place = 1;
         else if (!strcmp(argv[i], "--log") && i + 1 < argc) b->log_path = argv[++i];
         else if (!strcmp(argv[i], "--version")) { printf("blit-gamescope %s\n", BLIT_BUILD_VERSION); return 0; }
         else { usage(); return 2; }
     }
     if (!b->command || !b->command[0] || b->refresh <= 0) { usage(); return 2; }
+    /* With --no-place nothing but the log is written, so the size cannot be
+       asked: it is given. */
+    if (b->placement.no_place && (b->width <= 0 || b->height <= 0)) {
+        fprintf(stderr, "blit-gamescope: --no-place needs -W and -H\n");
+        return 2;
+    }
     if (!socket_name || !token) {
         fprintf(stderr, "blit-gamescope: no BLIT_FRAME_SOCKET: run it in a local Blit session\n");
         return 2;

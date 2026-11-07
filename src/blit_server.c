@@ -946,6 +946,10 @@ typedef struct {
     int opacity;
 } BlitOverlay;
 
+/* Input routes on one frame channel: one per image, and a session holds at
+   most BLIT_GRAPHICS_MAX_IMAGES at once. */
+#define BLIT_FRAME_INPUT_ROUTES BLIT_GRAPHICS_MAX_IMAGES
+
 typedef struct {
     int used;
     int fd;
@@ -955,9 +959,11 @@ typedef struct {
     int version;  /* the hello's, 1, 2 or 3 */
     unsigned long long serial;  /* which connection, for a dmabuf's RELEASE */
     int hud_on;   /* the last HUD1 sent, to a version 2 client */
-    /* ADR 0225: this channel's input route to a compositor's EIS socket,
-       NULL until `INPUT eis` is accepted (blit_frames_input.h). */
-    struct BlitFrameInput *input;
+    /* ADR 0225: this channel's input routes to compositors' EIS sockets,
+       one per image it named in an accepted `INPUT eis`, the rest NULL
+       (blit_frames_input.h). A desktop multiplexes its windows' pictures
+       over one channel, so each picture has its own. */
+    struct BlitFrameInput *inputs[BLIT_FRAME_INPUT_ROUTES];
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64

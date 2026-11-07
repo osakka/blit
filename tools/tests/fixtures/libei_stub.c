@@ -7,10 +7,14 @@
    poll, so a route through it is accepted and stays without devices. The
    request's answers and the route's on/off/live state are checked this way.
 
-   Recording (EI_STUB_LOG=<file>): it plays a compositor that offers one seat
+   Recording (EI_STUB_LOG=1): it plays a compositor that offers one seat
    and makes one device of what Blit binds, with one region of
-   EI_STUB_REGION (WxH), and writes what Blit sends to the file in the same
-   canonical lines as tools/tests/eis_receiver.c; when the peer closes the
+   EI_STUB_REGION (WxH), and writes what Blit sends through each context to
+   `<the socket's path>.log` (the path the connected socket's peer is bound
+   to), so each route has its own log as each tools/tests/eis_receiver.c
+   has, in the same canonical lines, and, with EI_STUB_ORDER=<file>, every
+   context's lines to that one file as `<socket name> <line>`, in the order
+   Blit sent them across routes; when the peer closes the
    socket Blit connected, it reports a disconnect, as libei does when a
    compositor drops its client. So the gate's behaviour
    cases run on a host with no libeis. It proves Blit's side (which events,
@@ -22,6 +26,7 @@
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -40,6 +45,8 @@ struct ei_device { struct ei *ei; };
 struct ei_region { uint32_t width, height; };
 struct ei_event { int type; struct ei *ei; };
 struct ei {
+    FILE *out;         /* the recording, or NULL */
+    char name[64];     /* the socket's file name, for EI_STUB_ORDER */
     int fd;
     int wake[2];
     int poll;          /* epoll over the wake pipe and the socket, as libei's */
@@ -52,29 +59,46 @@ struct ei {
     struct ei_region region;
 };
 
-static FILE *record(void)
+/* The context's log, `<path>.log` for the socket it was handed, while
+   recording. */
+static FILE *record(struct ei *ei, int fd)
 {
-    static FILE *out;
-    const char *path = getenv("EI_STUB_LOG");
-    if (out == NULL && path != NULL && path[0] != '\0') {
-        out = fopen(path, "a");
-        if (out != NULL) {
-            setvbuf(out, NULL, _IOLBF, 0);
-            fprintf(out, "# names=stub\n");
-        }
+    struct sockaddr_un peer;
+    socklen_t length = sizeof(peer);
+    char path[sizeof(peer.sun_path) + 8];
+    const char *on = getenv("EI_STUB_LOG");
+    FILE *out;
+    if (on == NULL || strcmp(on, "1") != 0) return NULL;
+    memset(&peer, 0, sizeof(peer));
+    if (getpeername(fd, (struct sockaddr *)&peer, &length) != 0 || peer.sun_path[0] != '/')
+        return NULL;
+    snprintf(path, sizeof(path), "%.*s.log", (int)sizeof(peer.sun_path), peer.sun_path);
+    snprintf(ei->name, sizeof(ei->name), "%s", strrchr(peer.sun_path, '/') + 1);
+    out = fopen(path, "a");
+    if (out != NULL) {
+        setvbuf(out, NULL, _IOLBF, 0);
+        fprintf(out, "# names=stub\n");
     }
     return out;
 }
 
-static void say(const char *format, ...)
+static void say(struct ei *ei, const char *format, ...)
 {
-    FILE *out = record();
+    const char *order = getenv("EI_STUB_ORDER");
+    char line[256];
     va_list args;
-    if (out == NULL) return;
+    if (ei->out == NULL) return;
     va_start(args, format);
-    vfprintf(out, format, args);
+    vsnprintf(line, sizeof(line), format, args);
     va_end(args);
-    fputc('\n', out);
+    fprintf(ei->out, "%s\n", line);
+    if (order != NULL && order[0] != '\0') {
+        FILE *all = fopen(order, "a");
+        if (all != NULL) {
+            fprintf(all, "%s %s\n", ei->name, line);
+            fclose(all);
+        }
+    }
 }
 
 static void post(struct ei *ei, int type)
@@ -101,7 +125,7 @@ int ei_setup_backend_fd(struct ei *ei, int fd)
 {
     const char *region = getenv("EI_STUB_REGION");
     ei->fd = fd;
-    if (record() == NULL) return 0;
+    if ((ei->out = record(ei, fd)) == NULL) return 0;
     if (pipe2(ei->wake, O_NONBLOCK | O_CLOEXEC) != 0) return -1;
     ei->poll = epoll_create1(EPOLL_CLOEXEC);
     {
@@ -114,7 +138,7 @@ int ei_setup_backend_fd(struct ei *ei, int fd)
     }
     if (region == NULL || sscanf(region, "%ux%u", &ei->region.width, &ei->region.height) != 2)
         ei->region.width = ei->region.height = 0;
-    say("connect");
+    say(ei, "connect");
     post(ei, CONNECT);
     post(ei, SEAT_ADDED);
     return 0;
@@ -148,10 +172,11 @@ struct ei *ei_unref(struct ei *ei)
 {
     if (ei == NULL) return NULL;
     if (ei->wake[0] >= 0) {
-        say("disconnect");
+        say(ei, "disconnect");
         close(ei->wake[0]);
         close(ei->wake[1]);
     }
+    if (ei->out != NULL) fclose(ei->out);
     if (ei->poll >= 0) close(ei->poll);
     if (ei->fd >= 0) close(ei->fd);
     free(ei);
@@ -182,7 +207,7 @@ void ei_seat_bind_capabilities(struct ei_seat *seat, ...)
             strcat(bound, bound[0] ? "," : "");
             strcat(bound, order[i].name);
         }
-    say("bind %s", bound);
+    say(ei, "bind %s", bound);
     post(ei, DEVICE_ADDED);
     post(ei, DEVICE_RESUMED);
 }
@@ -200,23 +225,20 @@ uint32_t ei_region_get_x(struct ei_region *region) { (void)region; return 0; }
 uint32_t ei_region_get_y(struct ei_region *region) { (void)region; return 0; }
 uint32_t ei_region_get_width(struct ei_region *region) { return region->width; }
 uint32_t ei_region_get_height(struct ei_region *region) { return region->height; }
-void ei_device_start_emulating(struct ei_device *device, uint32_t sequence) { (void)device; (void)sequence; say("start"); }
-void ei_device_stop_emulating(struct ei_device *device) { (void)device; say("stop"); }
-void ei_device_frame(struct ei_device *device, uint64_t time) { (void)device; (void)time; say("# frame"); }
+void ei_device_start_emulating(struct ei_device *device, uint32_t sequence) { (void)sequence; say(device->ei, "start"); }
+void ei_device_stop_emulating(struct ei_device *device) { say(device->ei, "stop"); }
+void ei_device_frame(struct ei_device *device, uint64_t time) { (void)time; say(device->ei, "# frame"); }
 void ei_device_keyboard_key(struct ei_device *device, uint32_t keycode, bool is_press)
 {
-    (void)device;
-    say("key %u %s", keycode, is_press ? "press" : "release");
+    say(device->ei, "key %u %s", keycode, is_press ? "press" : "release");
 }
-void ei_device_pointer_motion(struct ei_device *device, double x, double y) { (void)device; say("rel %.0f %.0f", x, y); }
+void ei_device_pointer_motion(struct ei_device *device, double x, double y) { say(device->ei, "rel %.0f %.0f", x, y); }
 void ei_device_pointer_motion_absolute(struct ei_device *device, double x, double y)
 {
-    (void)device;
-    say("abs %.2f %.2f", x, y);
+    say(device->ei, "abs %.2f %.2f", x, y);
 }
 void ei_device_button_button(struct ei_device *device, uint32_t button, bool is_press)
 {
-    (void)device;
-    say("button %u %s", button, is_press ? "press" : "release");
+    say(device->ei, "button %u %s", button, is_press ? "press" : "release");
 }
-void ei_device_scroll_discrete(struct ei_device *device, int32_t x, int32_t y) { (void)device; say("scroll %d %d", x, y); }
+void ei_device_scroll_discrete(struct ei_device *device, int32_t x, int32_t y) { say(device->ei, "scroll %d %d", x, y); }

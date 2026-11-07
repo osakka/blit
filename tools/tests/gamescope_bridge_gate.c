@@ -4,8 +4,10 @@
          The frame channel client against a fake Blit on a socketpair (hello
          parsing, FRM3 bytes and descriptor, buffers held until RELEASE or
          ERROR and then requeued, stale releases, the memfd fallback after
-         ENOTSUP, the INPUT request and its OK / ERROR / pre-INPUT answers,
-         a late ERROR INPUT ENOENT ending a live route) and the terminal
+         ENOTSUP, the INPUT request and its per-image OK / ERROR / pre-INPUT
+         answers, another image's answers ignored, a late
+         ERROR INPUT <id> ENOENT ending a live route), the placement (a=p and
+         a=d, and neither with --no-place) and the terminal
          reader (size report, the ?7701;2$y notice, focus out and in; clicks,
          the wheel, deltas and keys skipped with no event, since the bridge
          never captures; sequences split across reads).
@@ -202,8 +204,8 @@ static void unit_channel(void)
         CHECK(requeued_count == 3, "an ERROR for a memfd frame requeued a held dmabuf");
     }
 
-    /* INPUT (docs/api.md): the exact line, then each answer; OK input is
-       followed by INPUT on. */
+    /* INPUT (docs/api.md): the exact line, then each answer, each naming the
+       image; OK input is followed by INPUT on. */
     CHECK(gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei") == 0, "INPUT not sent");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
@@ -211,26 +213,33 @@ static void unit_channel(void)
           "INPUT message is %s", msg);
     CHECK(f.input_state == GS_INPUT_SENT, "INPUT not pending");
     CHECK(gs_frames_send_input_focus(&f, 1) != 0, "INPUT on sent before OK input");
+    /* Another picture's answers on a shared channel are not this one's;
+       the old unnumbered forms are not answers at all. */
+    fake_reply(sv[1], "OK input 2\n");
+    fake_reply(sv[1], "ERROR INPUT 2 EBUSY\n");
     fake_reply(sv[1], "OK input\n");
     gs_frames_read(&f);
-    CHECK(f.input_state == GS_INPUT_OK && f.input_on, "OK input not taken");
+    CHECK(f.input_state == GS_INPUT_SENT && !f.input_on, "another image's or an unnumbered answer was taken");
+    fake_reply(sv[1], "OK input 1\n");
+    gs_frames_read(&f);
+    CHECK(f.input_state == GS_INPUT_OK && f.input_on, "OK input 1 not taken");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(strcmp((char *)msg, "INPUT on\n") == 0 && nfds == 0, "after OK input came %s", msg);
+    CHECK(strcmp((char *)msg, "INPUT on 1\n") == 0 && nfds == 0, "after OK input came %s", msg);
     CHECK(gs_frames_send_input_focus(&f, 0) == 0 && !f.input_on, "INPUT off not sent");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(strcmp((char *)msg, "INPUT off\n") == 0, "INPUT off message is %s", msg);
+    CHECK(strcmp((char *)msg, "INPUT off 1\n") == 0, "INPUT off message is %s", msg);
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "ERROR INPUT ENOTSUP\n");
+    fake_reply(sv[1], "ERROR INPUT 1 ENOTSUP\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_UNSUPPORTED && !f.input_on, "ERROR INPUT ENOTSUP not taken as unsupported");
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
     {
         int before = requeued_count;
-        fake_reply(sv[1], "ERROR INPUT EACCES\n");
+        fake_reply(sv[1], "ERROR INPUT 1 EACCES\n");
         gs_frames_read(&f);
         CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EACCES") == 0 &&
               requeued_count == before, "ERROR INPUT EACCES");
@@ -253,11 +262,15 @@ static void unit_channel(void)
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
     CHECK(!f.input_was_ok, "a new INPUT request kept input_was_ok");
-    fake_reply(sv[1], "OK input\n");
+    fake_reply(sv[1], "OK input 1\n");
     gs_frames_read(&f);
-    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds); /* INPUT on */
+    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds); /* INPUT on 1 */
     CHECK(f.input_state == GS_INPUT_OK && f.input_was_ok && f.input_on, "OK input before the late ENOENT");
-    fake_reply(sv[1], "ERROR INPUT ENOENT\n");
+    /* Another picture's route ending leaves this one up. */
+    fake_reply(sv[1], "ERROR INPUT 3 ENOENT\n");
+    gs_frames_read(&f);
+    CHECK(f.input_state == GS_INPUT_OK && f.input_on, "another image's late ENOENT ended this route");
+    fake_reply(sv[1], "ERROR INPUT 1 ENOENT\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_REFUSED && f.input_was_ok && !f.input_on &&
           strcmp(f.input_error, "ENOENT") == 0,
@@ -266,10 +279,17 @@ static void unit_channel(void)
     /* ENOENT before any OK input is a refusal, as before. */
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "ERROR INPUT ENOENT\n");
+    fake_reply(sv[1], "ERROR INPUT 1 ENOENT\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_REFUSED && !f.input_was_ok && strcmp(f.input_error, "ENOENT") == 0,
           "early ERROR INPUT ENOENT taken as a live route ending");
+    /* A line Blit could not read is answered with image 0: still ours. */
+    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
+    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
+    fake_reply(sv[1], "ERROR INPUT 0 EINVAL\n");
+    gs_frames_read(&f);
+    CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EINVAL") == 0,
+          "ERROR INPUT 0 EINVAL not taken");
 
     /* Blit closing the channel gives every held buffer back. */
     close(sv[1]);
@@ -339,6 +359,7 @@ static int run_session(const char *result_path)
 {
     FILE *out = fopen(result_path, "w");
     GsFrames f;
+    GsPlacement placement = { 0, 0 };
     GsTty t;
     struct termios raw, saved;
     int cookie, memfd, i, cols = 10, rows = 4;
@@ -409,7 +430,7 @@ static int run_session(const char *result_path)
         usleep(100000);
         gs_frames_read(&f);
         /* Placed once, after the first frame, as the bridge does. */
-        if (i == 0 && gs_frames_place(seq, sizeof(seq), 1, cols, rows) > 0) {
+        if (i == 0 && gs_placement_place(&placement, seq, sizeof(seq), 1, cols, rows) > 0) {
             fputs(seq, stdout);
             fflush(stdout);
         }
@@ -433,17 +454,42 @@ static int run_session(const char *result_path)
     return 0;
 }
 
+/* a=p after the first frame and a=d at exit; with --no-place neither, ever,
+   whatever the bridge asks. */
+static void unit_placement(void)
+{
+    GsPlacement normal, none;
+    char out[128];
+    int n;
+    memset(&normal, 0, sizeof(normal));
+    memset(&none, 0, sizeof(none));
+    none.no_place = 1;
+    CHECK(gs_placement_delete(&normal, out, sizeof(out), 1) == 0, "a=d before any a=p");
+    n = gs_placement_place(&normal, out, sizeof(out), 1, 10, 4);
+    CHECK(n > 0 && strcmp(out, "\033[H\033_Ga=p,i=1,q=2,C=1,c=10,r=4\033\\") == 0 && normal.placed,
+          "the placement is %s", out);
+    n = gs_placement_delete(&normal, out, sizeof(out), 1);
+    CHECK(n > 0 && strcmp(out, "\033_Ga=d,d=I,i=1,q=2\033\\") == 0 && !normal.placed, "the delete is %s", out);
+    CHECK(gs_placement_delete(&normal, out, sizeof(out), 1) == 0, "a=d twice");
+    CHECK(gs_placement_place(&none, out, sizeof(out), 1, 10, 4) == 0 && !none.placed, "--no-place wrote a=p");
+    CHECK(gs_placement_place(&none, out, sizeof(out), 1, 20, 8) == 0 && !none.placed, "--no-place wrote a=p on a resize");
+    none.placed = 1; /* even if it were somehow marked placed */
+    CHECK(gs_placement_delete(&none, out, sizeof(out), 1) == 0, "--no-place wrote a=d");
+}
+
 int main(int argc, char **argv)
 {
     if (argc >= 2 && strcmp(argv[1], "unit") == 0) {
         unit_hello();
         unit_channel();
+        unit_placement();
         unit_tty();
         if (failures) {
             fprintf(stderr, "GAMESCOPE_BRIDGE_UNIT_FAIL %d\n", failures);
             return 1;
         }
-        printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+fallback+memfd+input+late-enoent+tty-no-capture\n");
+        printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+fallback+memfd+input-per-image+late-enoent+"
+               "placement+no-place+tty-no-capture\n");
         return 0;
     }
     if (argc >= 3 && strcmp(argv[1], "session") == 0)

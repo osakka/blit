@@ -11,12 +11,18 @@
    by descriptor"; ADR 0225), each one SOCK_SEQPACKET message, no descriptor:
 
        INPUT eis <absolute socket path> <image id>\n
-           answered `OK input\n` or `ERROR INPUT <code>\n`; an
-           `ERROR INPUT ENOENT\n` after `OK input` means the compositor
-           went and Blit ended the route
-       INPUT on\n   INPUT off\n
-           whether the client's window has the keyboard; a route starts off.
-           In phase 1 the bridge sends `INPUT on` right after `OK input`.
+           answered `OK input <image id>\n` or
+           `ERROR INPUT <image id> <code>\n`; an `ERROR INPUT <id> ENOENT\n`
+           after `OK input <id>` means the compositor went and Blit ended
+           that route
+       INPUT on <image id>\n   INPUT off <image id>\n
+           whether that picture's window has the keyboard; a route starts
+           off. In phase 1 the bridge sends `INPUT on <id>` right after
+           `OK input <id>`.
+
+   Answers are per image because one channel may carry several pictures'
+   routes (a desktop's); the bridge has one picture, and an answer naming
+   another image is not its own.
 
    A Blit from before INPUT (0.3.60) treats the request as a malformed frame
    and answers `ERROR <u32 of bytes 4..7> EINVAL\n` -- "T ei" read
@@ -334,12 +340,13 @@ static int gs_frames_send_input(GsFrames *f, const char *path)
     return 0;
 }
 
-/* `INPUT on` / `INPUT off`: whether the window has the keyboard. */
+/* `INPUT on <id>` / `INPUT off <id>`: whether the window has the keyboard. */
 static int gs_frames_send_input_focus(GsFrames *f, int on)
 {
-    const char *line = on ? "INPUT on\n" : "INPUT off\n";
+    char line[32];
+    int n = snprintf(line, sizeof(line), "INPUT %s %u\n", on ? "on" : "off", f->image_id);
     if (f->fd < 0 || f->input_state != GS_INPUT_OK) return -1;
-    if (gs_frames_sendmsg(f->fd, line, strlen(line), -1) != 0) return -1;
+    if (gs_frames_sendmsg(f->fd, line, (size_t)n, -1) != 0) return -1;
     f->input_on = on;
     return 0;
 }
@@ -365,7 +372,8 @@ static void gs_frames_requeue_all(GsFrames *f)
 static int gs_frames_handle_line(GsFrames *f, const char *line)
 {
     unsigned long long id, seq;
-    char code[32];
+    unsigned int image;
+    char code[32], tail;
     int i;
     if (sscanf(line, "RELEASE %llu %llu", &id, &seq) == 2) {
         ++f->released;
@@ -377,13 +385,16 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
         ++f->stale_releases;
         return 1;
     }
-    if (strcmp(line, "OK input") == 0) {
+    if (sscanf(line, "OK input %u%c", &image, &tail) == 1) {
+        if (image != f->image_id) return 1; /* another picture's route */
         f->input_state = GS_INPUT_OK;
         f->input_was_ok = 1;
         gs_frames_send_input_focus(f, 1); /* phase 1: the pane is the window */
         return 1;
     }
-    if (sscanf(line, "ERROR INPUT %31s", code) == 1) {
+    if (sscanf(line, "ERROR INPUT %u %31s", &image, code) == 2) {
+        /* 0 answers a line Blit could not read, which is this one's. */
+        if (image != f->image_id && image != 0) return 1;
         /* After OK input this is the route ending (ENOENT: the compositor
            refused the handshake late or went away); input_was_ok stays. */
         snprintf(f->input_error, sizeof(f->input_error), "%s", code);
@@ -449,7 +460,8 @@ static int gs_frames_read(GsFrames *f)
 }
 
 /* The Kitty placement of the picture: once, at the pane's top-left, sized in
-   cells to fill it, the cursor not moved (C=1). */
+   cells to fill it, the cursor not moved (C=1). The bridge writes these
+   only through GsPlacement, below. */
 static int gs_frames_place(char *out, size_t cap, uint32_t id, int cols, int rows)
 {
     return snprintf(out, cap, "\033[H\033_Ga=p,i=%u,q=2,C=1,c=%d,r=%d\033\\", id, cols, rows);
@@ -458,6 +470,34 @@ static int gs_frames_place(char *out, size_t cap, uint32_t id, int cols, int row
 static int gs_frames_delete(char *out, size_t cap, uint32_t id)
 {
     return snprintf(out, cap, "\033_Ga=d,d=I,i=%u,q=2\033\\", id);
+}
+
+/* Whether the bridge places its picture on its own terminal: `a=p` after
+   the first frame and on a resize, `a=d` at exit if placed. With
+   --no-place it writes neither, ever (a desktop that relays the picture
+   places it, ADR 0225 phase 2): both return 0 bytes. */
+typedef struct {
+    int no_place;
+    int placed;
+} GsPlacement;
+
+static int gs_placement_place(GsPlacement *p, char *out, size_t cap, uint32_t id, int cols, int rows)
+{
+    int n;
+    if (p->no_place) return 0;
+    n = gs_frames_place(out, cap, id, cols, rows);
+    if (n <= 0 || (size_t)n >= cap) return 0;
+    p->placed = 1;
+    return n;
+}
+
+static int gs_placement_delete(GsPlacement *p, char *out, size_t cap, uint32_t id)
+{
+    int n;
+    if (p->no_place || !p->placed) return 0;
+    p->placed = 0;
+    n = gs_frames_delete(out, cap, id);
+    return n > 0 && (size_t)n < cap ? n : 0;
 }
 
 #endif

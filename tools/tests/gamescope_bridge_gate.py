@@ -5,8 +5,8 @@ The gate binary runs as a session's command, as blit-gamescope does: it reads
 the pane's size with CSI 14 t, says hello on the frame channel (version 3,
 answered dmabuf=0 here), sends one FRM3 that is refused ENOTSUP (its buffer
 must come back and FRM3 stop), then fake BGRx gamescope buffers as sealed
-memfd FRM1 frames placed with a=p, and the INPUT request, which a Blit
-without INPUT answers as a malformed frame (counted as ENOTSUP: frames
+memfd FRM1 frames placed with a=p, and the INPUT request, which this Blit,
+with no libei on the gate host, answers `ERROR INPUT 1 ENOTSUP` (frames
 only). This script checks what it wrote and that the picture is on screen.
 """
 import json

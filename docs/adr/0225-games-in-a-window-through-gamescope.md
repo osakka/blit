@@ -111,7 +111,8 @@ desktop app** (a module and a window, the shape Boxer has), which:
    show the picture (Hibr's `hold`), the relay sends the producer one
    `RELEASE` per frame, after the last view has let it go.
 3. **Asks Blit for input, carrying none itself:** once gamescope's EIS
-   socket exists, it sends `INPUT eis <path> <image-id>` and `INPUT on` on its
+   socket exists, it sends `INPUT eis <path> <image-id>`, and
+   `INPUT on <image-id>` once Blit answers `OK input <image-id>`, on its
    frame channel, and Blit sends the physical keyboard and mouse to that
    socket (see "Input: Blit feeds gamescope's EIS directly" below; the wire is
    in `docs/api.md`). The bridge has no input parser and never captures the
@@ -162,7 +163,7 @@ translations (evdev, Kitty text, the PTY, `hold`, Hibr's decode and
 re-encode, the bridge's parse) to rebuild what evdev already has: press,
 repeat and release, physical keys, relative motion. So the bridge asks Blit,
 on its authenticated frame channel, to route input to gamescope's EIS socket
-(`INPUT eis <path> <image-id>` after the hello, then `INPUT on`/`INPUT off`
+(`INPUT eis <path> <image-id>` after the hello, then `INPUT on <image-id>`/`INPUT off <image-id>`
 as its window gains and loses the keyboard; wire text in `docs/api.md`; the name comes from an
 authenticated, uid-checked peer, never from the terminal stream, so ADR 0066
 holds). While the route is on and the bridge's session has Blit's focus (inside
@@ -189,6 +190,33 @@ it with a frame socket served by the console (relayed through `cn_image`,
 `hold` and Blit), and the app turns its focus callback into `INPUT on`/`off`.
 One wire format per
 stream in both places, and no second code path in the bridge.
+
+**Routes per image, not per connection (decided 2026-11-07, 0.3.64).** Hibr
+multiplexes every picture of a desktop over one frame connection per
+display (the console is the one writer of pictures, ADR 0202), so a route
+per connection would make a second game window `EBUSY` (Hibr #486). Each
+INPUT line therefore names its image (`INPUT on <image-id>`,
+`INPUT off <image-id>`) and each answer carries it (`OK input <image-id>`,
+`ERROR INPUT <image-id> <code>`); one connection holds a route per image,
+each with its own libei context, devices and held keys and buttons, and
+`EBUSY` means only the same image twice on one connection. A route ends
+with its image or its connection, and a late `ENOENT` ends only its own.
+**At most one route is on per session**, across all of its connections:
+`INPUT on <image-id>` turns the others off, releasing what they held first,
+so two windows never both get the keys even if an `off` is lost; the
+pointer and relative motion go to the live route only. `frames.input`
+lists the session's routes (`image`, `state`, `region`) beside its
+`events` and `last_error`. There is no older form: the unnumbered `OK input`,
+`ERROR INPUT <code>` and bare `INPUT on`/`off` are gone.
+
+**`--no-place` for phase 2.** In a Hibr desktop app the desktop places the
+picture (it is the one writer of pictures), and the bridge's standard
+output is for its log, not for pictures. `blit-gamescope --no-place` (with `-W`/`-H`,
+since it then asks the pane nothing) never writes Kitty `a=p` or `a=d`; with
+`-W`/`-H` the bridge already sends no `CSI 14 t` at start, and with
+`--no-place` none on `SIGWINCH` either. It still writes its terminal set-up
+(cursor hidden, the screen cleared, focus reports on) and its undoing at
+exit.
 
 **Phases.** (1) The bridge standalone in a plain Blit session on the owner's
 machine: Steam playable in a pane, every Blit-side piece proven and measured
@@ -335,6 +363,23 @@ regresses, a wlroots compositor fits behind the same bridge.
   after `OK input` is logged as the compositor gone, not as a Blit without
   input. `gamescope_bridge_gate` covers clicks and the wheel giving no event
   and no `?7701h`, no mouse modes, and the late ENOENT.
+
+- **Routes per image, 2026-11-07** (0.3.64, `src/blit_frames_input.h`,
+  `frame_input_gate`, `gamescope_bridge_gate`): on any host, against the
+  stand-in libei, which now records each route to its own socket's log and,
+  for order across routes, to one shared file: two images on one connection
+  get a route each and the same image twice is `EBUSY`; `INPUT on B`
+  releases the key and button held through A and stops A before B starts;
+  a late `ERROR INPUT <A> ENOENT` leaves B working; deleting one image
+  releases, stops and ends only its route (`INPUT on` for it is then
+  `EINVAL`); a second connection of the same session turning its route on
+  turns the first's off, releasing first, and back. Unreadable lines are
+  answered with image 0, readable ones with their id. The bridge parses the
+  numbered answers, ignores another image's, and with `--no-place` writes
+  no placement or delete (its placement goes only through `GsPlacement`,
+  checked in the gate); run with `-W`/`-H` in a Blit session it wrote no
+  `CSI 14 t` (it found no gamescope on the build host, so no frame and no
+  `a=p` could have been reached either way). Against libeis, still not run.
 
 ## Evidence (planned)
 

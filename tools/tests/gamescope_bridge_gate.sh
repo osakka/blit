@@ -11,6 +11,12 @@ if grep -n '7701h\|?1000h\|?1006h\|requested_size' src/blit_gamescope.c src/blit
     echo "GAMESCOPE_BRIDGE_FAIL the bridge captures, asks for mouse reports or resizes its stream" >&2
     exit 1
 fi
+# --no-place: the bridge writes Kitty placements and deletes only through
+# GsPlacement (which writes neither with --no-place), never directly.
+if grep -n 'gs_frames_place\|gs_frames_delete\|_Ga=' src/blit_gamescope.c; then
+    echo "GAMESCOPE_BRIDGE_FAIL the bridge writes a placement or delete around GsPlacement" >&2
+    exit 1
+fi
 mkdir -p build/tests
 tcc -Wall tools/tests/gamescope_bridge_gate.c -o build/tests/gamescope_bridge_gate
 build/tests/gamescope_bridge_gate unit

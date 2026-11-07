@@ -4,17 +4,24 @@ channel's `INPUT` request (docs/api.md, "Picture frames by descriptor").
 
 Two modes, each run by its own shell gate on the mock display:
 
+Every request names its image and every answer carries it
+(`OK input <id>`, `ERROR INPUT <id> <code>`, 0 for a line with no readable
+id); one channel carries one route per image.
+
 local (frame_input_gate.sh): what needs no libeis, on any host.
-  - `ERROR INPUT ENOTSUP` where libei.so.1 cannot be loaded (skipped, and
+  - `ERROR INPUT 7 ENOTSUP` where libei.so.1 cannot be loaded (skipped, and
     said so, where the system has libei);
   - against a stand-in libei (tools/tests/fixtures/libei_stub.c, which
     takes the connection and reports nothing): `EINVAL` for a malformed
-    request, a version 2 channel, `INPUT on` without a route, an image
-    deleted, a Kitty image or id 0; `ENOENT` for a missing path, a file that is
-    not a socket, a link to a socket and a socket nobody listens on;
-    `EACCES` for a socket another user owns (where one exists and the gate
-    is not root); `OK input`, then `EBUSY` for a second route; `frames.input`
-    going off, on, live and back with INPUT on/off and focus, and to none
+    request (id 0), a version 2 channel, the old bare `INPUT on`/`off`,
+    `INPUT on <id>` for an image with no route, an image deleted, a Kitty
+    image or id 0; `ENOENT` for a missing path, a file that is not a
+    socket, a link to a socket and a socket nobody listens on; `EACCES` for
+    a socket another user owns (where one exists and the gate is not
+    root); `OK input 7`, then `EBUSY` for the same image again and
+    `OK input 12` for a second image on the same channel; `frames.input`
+    routes going off, on, live and back with INPUT on/off and focus; one
+    route on per session, on one channel and across two; and none left
     when the channel closes.
 
 eis (frame_input_eis_gate.sh): what reaches a compositor, against
@@ -32,9 +39,14 @@ eis (frame_input_eis_gate.sh): what reaches a compositor, against
     compositor's region (880x440, larger than the 320x160 frames), at two
     placements and after the placement is resized, the picture's far corner
     reaching the region's, and nothing outside it;
-  - the compositor dropping the connection: `ERROR INPUT ENOENT` on the
-    channel at once, the route ended (`INPUT on` is then EINVAL);
-  - relative motion, summed exactly, while the session holds ?7701.
+  - the compositor dropping the connection: `ERROR INPUT 10 ENOENT` on the
+    channel at once, the route ended (`INPUT on 10` is then EINVAL);
+  - relative motion, summed exactly, while the session holds ?7701;
+  - several routes, a compositor each: two images on one channel each get
+    a route; `INPUT on B` releases what A held and stops A before B starts
+    (checked in the stand-in's cross-route order, EI_STUB_ORDER); a late
+    ENOENT on one route leaves the other working; deleting one image ends
+    only its route; two channels of one session keep one route on.
 """
 import ctypes
 import fcntl
@@ -83,7 +95,7 @@ def wait_for(predicate, why, seconds=8.0):
         if value:
             return value
         time.sleep(0.05)
-    fail(why)
+    fail(why() if callable(why) else why)
 
 
 class Server:
@@ -230,6 +242,19 @@ def place(session, image_id, row, column, columns, rows):
                   % (row, column, image_id, columns, rows))
 
 
+def route(info, image):
+    """frames.input's route for an image, or None."""
+    for r in info['routes']:
+        if r['image'] == image:
+            return r
+    return None
+
+
+def state(server, session, image):
+    r = route(server.input(session), image)
+    return r['state'] if r else 'none'
+
+
 def local():
     work = tempfile.mkdtemp(prefix='blit-input-gate-')
     results = []
@@ -248,9 +273,9 @@ def local():
             ch = Channel(a)
             check(ch.hello.startswith(b'OK dmabuf='), 'version 3 hello answered %r' % ch.hello)
             got = ch.ask('INPUT eis %s 7\n' % own)
-            check(got == b'ERROR INPUT ENOTSUP\n', 'INPUT without libei was answered %r' % got)
+            check(got == b'ERROR INPUT 7 ENOTSUP\n', 'INPUT without libei was answered %r' % got)
             info = server.input(a.id)
-            check(info['state'] == 'none' and info['last_error'] == 'ENOTSUP', 'frames.input %s' % info)
+            check(info['routes'] == [] and info['last_error'] == 'ENOTSUP', 'frames.input %s' % info)
             results.append('enotsup=ENOTSUP')
         finally:
             server.stop()
@@ -266,23 +291,26 @@ def local():
         # A version 2 channel may not ask.
         v2 = Channel(a, 2)
         check(v2.hello == b'OK\n', 'version 2 hello %r' % v2.hello)
-        check(v2.ask('INPUT eis %s 7\n' % own) == b'ERROR INPUT EINVAL\n', 'a version 2 INPUT was not EINVAL')
+        check(v2.ask('INPUT eis %s 7\n' % own) == b'ERROR INPUT 0 EINVAL\n', 'a version 2 INPUT was not EINVAL')
         v2.close()
 
+        # No readable id: answered with 0. A readable one is carried back.
         malformed = [
-            'INPUT eis relative/eis 7\n', 'INPUT eis %s\n' % own, 'INPUT eis %s 0\n' % own,
-            'INPUT eis %s 7 8\n' % own, 'INPUT eis %s -7\n' % own, 'INPUT eis %s 07\n' % own,
-            'INPUT eis %s 99999999999\n' % own, 'INPUT eis  %s 7\n' % own, 'INPUT eis %s 7\r\n' % own,
-            'INPUT eis %s 7\n\n' % own, 'INPUT foo\n', 'INPUT on\n', 'INPUT off\n',
-            'INPUT eis /%s 7\n' % ('x' * 120),
+            ('INPUT eis %s\n' % own, 0), ('INPUT eis %s 0\n' % own, 0),
+            ('INPUT eis %s 7 8\n' % own, 0), ('INPUT eis %s -7\n' % own, 0), ('INPUT eis %s 07\n' % own, 0),
+            ('INPUT eis %s 99999999999\n' % own, 0), ('INPUT eis  %s 7\n' % own, 0),
+            ('INPUT eis %s 7\r\n' % own, 0), ('INPUT eis %s 7\n\n' % own, 0), ('INPUT foo\n', 0),
+            ('INPUT on\n', 0), ('INPUT off\n', 0), ('INPUT on 0\n', 0), ('INPUT on 7 7\n', 0),
+            ('INPUT eis relative/eis 7\n', 7), ('INPUT eis /%s 7\n' % ('x' * 120), 7),
+            ('INPUT on 7\n', 7), ('INPUT off 7', 7),
         ]
-        for text in malformed:
+        for text, image in malformed:
             got = ch.ask(text)
-            check(got == b'ERROR INPUT EINVAL\n', '%r was answered %r' % (text, got))
+            check(got == b'ERROR INPUT %d EINVAL\n' % image, '%r was answered %r' % (text, got))
         fd = os.memfd_create('blit-input-gate-fd')
         got = ch.ask('INPUT eis %s 7\n' % own, [fd])
         os.close(fd)
-        check(got == b'ERROR INPUT EINVAL\n', 'INPUT with a descriptor was answered %r' % got)
+        check(got == b'ERROR INPUT 0 EINVAL\n', 'INPUT with a descriptor was answered %r' % got)
 
         # Unknown images: one deleted, and a Kitty image of the session.
         ch.frame(9, 1)
@@ -292,11 +320,11 @@ def local():
         a.write('\033_Ga=d,d=I,i=9,q=2\033\\')
         wait_for(lambda: a.graphics(9) is None, 'image 9 was not deleted')
         got = ch.ask('INPUT eis %s 9\n' % own)
-        check(got == b'ERROR INPUT EINVAL\n', 'a deleted image was answered %r' % got)
+        check(got == b'ERROR INPUT 9 EINVAL\n', 'a deleted image was answered %r' % got)
         a.write('\033_Ga=T,i=11,f=24,s=1,v=1,q=2;AAAA\033\\')
         wait_for(lambda: a.graphics(11), 'Kitty image 11 did not land')
         got = ch.ask('INPUT eis %s 11\n' % own)
-        check(got == b'ERROR INPUT EINVAL\n', 'a Kitty image was answered %r' % got)
+        check(got == b'ERROR INPUT 11 EINVAL\n', 'a Kitty image was answered %r' % got)
 
         # No such socket.
         regular = os.path.join(work, 'regular')
@@ -308,7 +336,7 @@ def local():
         for path, why in ((os.path.join(work, 'missing'), 'missing'), (regular, 'a regular file'),
                           (link, 'a link to a socket'), (dead, 'a socket nobody listens on')):
             got = ch.ask('INPUT eis %s 7\n' % path)
-            check(got == b'ERROR INPUT ENOENT\n', '%s was answered %r' % (why, got))
+            check(got == b'ERROR INPUT 7 ENOENT\n', '%s was answered %r' % (why, got))
         results.append('einval=%d enoent=4' % (len(malformed) + 4))
 
         # Another user's socket: refused before Blit connects.
@@ -320,35 +348,57 @@ def local():
             results.append('eacces=SKIPPED(no_socket_of_another_user)')
         else:
             got = ch.ask('INPUT eis %s 7\n' % others[0])
-            check(got == b'ERROR INPUT EACCES\n', "another user's socket %s was answered %r" % (others[0], got))
+            check(got == b'ERROR INPUT 7 EACCES\n', "another user's socket %s was answered %r" % (others[0], got))
             check(server.input(a.id)['last_error'] == 'EACCES', 'EACCES not reported')
             results.append('eacces=EACCES(%s)' % others[0])
 
         # Accepted: an image whose frame has not come yet may be named, as a
-        # placement may come first. Then a second route is EBUSY.
+        # placement may come first. The same image again is EBUSY; another
+        # image on the same channel gets its own route.
         got = ch.ask('INPUT eis %s 7\n' % own)
-        check(got == b'OK input\n', 'a well-formed INPUT was answered %r' % got)
+        check(got == b'OK input 7\n', 'a well-formed INPUT was answered %r' % got)
         info = server.input(a.id)
-        check(info['state'] == 'off' and info['image'] == 7 and info['last_error'] == '',
+        check(info['routes'] == [{'image': 7, 'state': 'off', 'region': ''}] and info['last_error'] == '',
               'frames.input after OK %s' % info)
         got = ch.ask('INPUT eis %s 7\n' % own)
-        check(got == b'ERROR INPUT EBUSY\n', 'a second route was answered %r' % got)
+        check(got == b'ERROR INPUT 7 EBUSY\n', 'the same image twice was answered %r' % got)
+        got = ch.ask('INPUT eis %s 12\n' % own)
+        check(got == b'OK input 12\n', 'a second image on the channel was answered %r' % got)
+        check(sorted(r['image'] for r in server.input(a.id)['routes']) == [7, 12],
+              'two routes on one channel: %s' % server.input(a.id))
 
         # on/off are not answered; live needs the focus.
         server.focus(b.id)
-        ch.line('INPUT on\n')
+        ch.line('INPUT on 7\n')
         check(ch.reply(0.3) == b'', 'INPUT on was answered')
-        wait_for(lambda: server.input(a.id)['state'] == 'on', 'an unfocused route on is not "on"')
+        wait_for(lambda: state(server, a.id, 7) == 'on', 'an unfocused route on is not "on"')
         server.focus(a.id)
-        wait_for(lambda: server.input(a.id)['state'] == 'live', 'the focused route on is not live')
-        ch.line('INPUT off')   # the newline is optional
-        wait_for(lambda: server.input(a.id)['state'] == 'off', 'INPUT off did not end it')
-        ch.line('INPUT on\n')
-        wait_for(lambda: server.input(a.id)['state'] == 'live', 'INPUT on again did not make it live')
+        wait_for(lambda: state(server, a.id, 7) == 'live', 'the focused route on is not live')
+        ch.line('INPUT off 7')   # the newline is optional
+        wait_for(lambda: state(server, a.id, 7) == 'off', 'INPUT off did not end it')
+        ch.line('INPUT on 7\n')
+        wait_for(lambda: state(server, a.id, 7) == 'live', 'INPUT on again did not make it live')
+        # One route on per session: 12 on turns 7 off ...
+        ch.line('INPUT on 12\n')
+        wait_for(lambda: state(server, a.id, 12) == 'live' and state(server, a.id, 7) == 'off',
+                 lambda: 'INPUT on 12 did not turn 7 off: %s' % server.input(a.id))
+        # ... and across the session's channels.
+        ch2 = Channel(a)
+        check(ch2.ask('INPUT eis %s 13\n' % own) == b'OK input 13\n', 'a second channel was refused')
+        ch2.line('INPUT on 13\n')
+        wait_for(lambda: state(server, a.id, 13) == 'live' and state(server, a.id, 12) == 'off',
+                 lambda: 'the second channel did not turn the first off: %s' % server.input(a.id))
+        ch.line('INPUT on 7\n')
+        wait_for(lambda: state(server, a.id, 7) == 'live' and state(server, a.id, 13) == 'off',
+                 lambda: 'the first channel did not turn the second off: %s' % server.input(a.id))
         check(server.input(a.id)['events'] == 0, 'the stand-in libei was sent events')
+        ch2.close()
+        wait_for(lambda: state(server, a.id, 13) == 'none' and state(server, a.id, 7) == 'live',
+                 lambda: 'closing the second channel touched the first: %s' % server.input(a.id))
         ch.close()
-        wait_for(lambda: server.input(a.id)['state'] == 'none', 'the route outlived its channel')
-        results.append('ok=OK ebusy=EBUSY states=off,on,live,off,live,none')
+        wait_for(lambda: server.input(a.id)['routes'] == [], 'the routes outlived their channel')
+        results.append('ok=OK ebusy=same_image two_images=two_routes states=off,on,live,off,live,none '
+                       'one_on=channel+session')
     finally:
         server.stop()
         for s in keep:
@@ -359,11 +409,12 @@ def local():
 class Receiver:
     """The compositor's side: tools/tests/eis_receiver.c on libeis, or, with
     `stub`, the recording stand-in libei, which writes the same lines from
-    inside Blit (Blit then connects to a plain socket the gate holds)."""
+    inside Blit (Blit then connects to a plain socket the gate holds) to
+    `<socket>.log`, one log per socket as one per receiver."""
 
-    def __init__(self, work, stub=False):
-        self.path = os.path.join(work, 'eis-0')
-        self.log = os.path.join(work, 'eis.log')
+    def __init__(self, work, stub=False, name='eis-0'):
+        self.path = os.path.join(work, name)
+        self.log = self.path + '.log'
         self.seen = 0
         if stub:
             self.process = None
@@ -408,10 +459,136 @@ class Receiver:
     def stop(self):
         if self.process is None:
             self.held.close()
-        else:
+        elif self.process.poll() is None:
             self.process.terminate()
             self.process.wait(5)
-        return open(self.log).read()
+        return open(self.log).read() if os.path.exists(self.log) else ''
+
+
+def multi(server, a, work, stub):
+    """Several routes, a compositor each, as a desktop has one per window's
+    picture over one channel. Returns what the PASS line says of it."""
+    ra, rb, rc, rd = (Receiver(work, stub, name) for name in ('eis-a', 'eis-b', 'eis-c', 'eis-d'))
+    receivers = (ra, rb, rc, rd)
+    order = os.path.join(work, 'order.log')
+
+    def key(code, *values):
+        for v in values:
+            server.inject({'kind': 'key', 'code': code, 'value': v})
+
+    def ordered(wanted, why):
+        """In the stand-in, Blit's lines across routes in the order sent."""
+        if not stub:
+            return
+        lines = [l.rstrip('\n') for l in open(order) if not l.split(' ', 1)[1].startswith('#')]
+        at = [i for i in range(len(lines) - len(wanted) + 1) if lines[i:i + len(wanted)] == wanted]
+        check(at, '%s: %s not in order in %s' % (why, wanted, lines[-12:]))
+
+    try:
+        server.focus(a.id)
+        ch = Channel(a)
+        for image, column in ((20, 1), (21, 21)):
+            ch.frame(image, 1)
+            wait_for(lambda: a.graphics(image), 'image %d did not land' % image)
+            place(a, image, 1, column, 16, 4)
+        # Two images on one channel: a route each, no EBUSY.
+        check(ch.ask('INPUT eis %s 20\n' % ra.path) == b'OK input 20\n', 'route 20 was refused')
+        check(ch.ask('INPUT eis %s 21\n' % rb.path) == b'OK input 21\n', 'route 21 on the same channel was refused')
+        ra.expect(['connect', BIND], 'route 20 bound its seat')
+        rb.expect(['connect', BIND], 'route 21 bound its seat')
+        # The same image twice on one channel is EBUSY.
+        check(ch.ask('INPUT eis %s 20\n' % rb.path) == b'ERROR INPUT 20 EBUSY\n', 'image 20 twice was not EBUSY')
+        rb.nothing('an EBUSY request')
+        ch.line('INPUT on 20\n')
+        ra.expect(['start'], 'INPUT on 20')
+        rb.nothing('route 21 while 20 is on')
+
+        # INPUT on 21: 20 releases what it held and stops before 21 starts.
+        key(30, 1)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+        ra.expect(['key 30 press', 'button 272 press'], 'held through route 20')
+        rb.nothing('keys while 20 is on')
+        ch.line('INPUT on 21\n')
+        ra.expect(['key 30 release', 'button 272 release', 'stop'], 'release-all on another route on')
+        rb.expect(['start'], 'INPUT on 21')
+        ordered(['eis-a key 30 release', 'eis-a button 272 release', 'eis-a stop', 'eis-b start'],
+                'route 20 released before route 21 started')
+        key(30, 0)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+        key(31, 1, 0)
+        rb.expect(['key 31 press', 'key 31 release'], 'keys to route 21 only')
+        ra.nothing('the releases of what 20 already released, and keys after 21 on')
+        info = server.input(a.id)
+        check(route(info, 20)['state'] == 'off' and route(info, 21)['state'] == 'live',
+              'frames.input after INPUT on 21 %s' % info)
+
+        # A late ENOENT on route 20 leaves 21 working.
+        ra.drop()
+        got = ch.reply(5.0)
+        check(got == b'ERROR INPUT 20 ENOENT\n', 'a dropped compositor on route 20 was answered %r' % got)
+        wait_for(lambda: route(server.input(a.id), 20) is None, 'route 20 outlived its compositor')
+        key(32, 1, 0)
+        rb.expect(['key 32 press', 'key 32 release'], 'route 21 after route 20 was dropped')
+        check(state(server, a.id, 21) == 'live', 'route 21 after the drop %s' % server.input(a.id))
+        check(ch.ask('INPUT on 20\n') == b'ERROR INPUT 20 EINVAL\n', 'INPUT on 20 after its end was not EINVAL')
+
+        # Deleting one image ends only its route: 22 live and holding a key,
+        # its image deleted; 21 still works.
+        ch.frame(22, 1)
+        wait_for(lambda: a.graphics(22), 'image 22 did not land')
+        place(a, 22, 6, 1, 16, 4)
+        check(ch.ask('INPUT eis %s 22\n' % rc.path) == b'OK input 22\n', 'route 22 was refused')
+        rc.expect(['connect', BIND], 'route 22 bound its seat')
+        ch.line('INPUT on 22\n')
+        rb.expect(['stop'], 'route 21 off for 22')
+        rc.expect(['start'], 'INPUT on 22')
+        key(33, 1)
+        rc.expect(['key 33 press'], 'held through route 22')
+        a.write('\033_Ga=d,d=I,i=22,q=2\033\\')
+        rc.expect(['key 33 release', 'stop', 'disconnect'], 'release-all and end on image 22 deleted')
+        key(33, 0)
+        wait_for(lambda: route(server.input(a.id), 22) is None, 'route 22 outlived its image')
+        check(state(server, a.id, 21) == 'off', 'route 21 after image 22 went %s' % server.input(a.id))
+        check(ch.ask('INPUT on 22\n') == b'ERROR INPUT 22 EINVAL\n', 'INPUT on 22 after its image went was not EINVAL')
+        ch.line('INPUT on 21\n')
+        rb.expect(['start'], 'route 21 on again')
+        key(34, 1, 0)
+        rb.expect(['key 34 press', 'key 34 release'], 'route 21 after image 22 was deleted')
+        rb.nothing('route 21 after image 22 was deleted')
+
+        # Two channels of the session: one route on between them.
+        ch2 = Channel(a)
+        ch2.frame(23, 1)
+        wait_for(lambda: a.graphics(23), 'image 23 did not land')
+        check(ch2.ask('INPUT eis %s 23\n' % rd.path) == b'OK input 23\n', 'route 23 on a second channel was refused')
+        rd.expect(['connect', BIND], 'route 23 bound its seat')
+        key(35, 1)
+        rb.expect(['key 35 press'], 'held through route 21')
+        ch2.line('INPUT on 23\n')
+        rb.expect(['key 35 release', 'stop'], 'release-all when the other channel turns its route on')
+        rd.expect(['start'], 'INPUT on 23')
+        ordered(['eis-b key 35 release', 'eis-b stop', 'eis-d start'],
+                'route 21 released before route 23 on another channel started')
+        key(35, 0)
+        key(36, 1, 0)
+        rd.expect(['key 36 press', 'key 36 release'], 'keys to the second channel only')
+        rb.nothing('keys to the first channel while the second is on')
+        ch.line('INPUT on 21\n')
+        rd.expect(['stop'], 'route 23 off for 21')
+        rb.expect(['start'], 'route 21 on again from the first channel')
+        info = server.input(a.id)
+        check(route(info, 21)['state'] == 'live' and route(info, 23)['state'] == 'off',
+              'frames.input across two channels %s' % info)
+        ch2.close()
+        rd.expect(['disconnect'], 'the second channel closed')
+        ch.close()
+        rb.expect(['stop', 'disconnect'], 'the first channel closed, its live route stopped')
+        wait_for(lambda: server.input(a.id)['routes'] == [], 'routes outlived their channels')
+    finally:
+        for r in receivers:
+            r.stop()
+    return ('routes=two_per_channel ebusy=same_image on_releases_other=%s late_enoent=one_route '
+            'delete=one_route one_on=two_channels' % ('ordered' if stub else 'per_route'))
 
 
 def eis(stub=False):
@@ -420,7 +597,8 @@ def eis(stub=False):
     extra = {}
     if stub:
         extra = {'LD_LIBRARY_PATH': os.path.join(ROOT, 'build/tests/libei-stub'),
-                 'EI_STUB_LOG': receiver.log, 'EI_STUB_REGION': '%dx%d' % (REGION_W, REGION_H)}
+                 'EI_STUB_LOG': '1', 'EI_STUB_ORDER': os.path.join(work, 'order.log'),
+                 'EI_STUB_REGION': '%dx%d' % (REGION_W, REGION_H)}
     server = Server((19836 if stub else 19835) + OFFSET, work, extra)
     try:
         a = Session(server, work, 'a')
@@ -431,12 +609,12 @@ def eis(stub=False):
         wait_for(lambda: a.graphics(7), 'image 7 did not land')
         place(a, 7, 3, 5, 20, 5)
         got = ch.ask('INPUT eis %s 7\n' % receiver.path)
-        check(got == b'OK input\n', 'INPUT was answered %r' % got)
+        check(got == b'OK input 7\n', 'INPUT was answered %r' % got)
         receiver.expect(['connect', BIND], 'the route bound its seat')
         receiver.nothing('a route that starts off')
-        ch.line('INPUT on\n')
+        ch.line('INPUT on 7\n')
         receiver.expect(['start'], 'INPUT on')
-        check(server.input(a.id)['state'] == 'live', 'frames.input %s' % server.input(a.id))
+        check(state(server, a.id, 7) == 'live', 'frames.input %s' % server.input(a.id))
 
         def key(code, *values):
             for v in values:
@@ -452,11 +630,11 @@ def eis(stub=False):
         receiver.expect(['key 48 press', 'key 46 press', 'key 48 release', 'key 46 release'], 'overlapping keys')
 
         # Nothing while off, nor while another session has focus.
-        ch.line('INPUT off\n')
+        ch.line('INPUT off 7\n')
         receiver.expect(['stop'], 'INPUT off')
         key(31, 1, 0)
         receiver.nothing('keys while off')
-        ch.line('INPUT on\n')
+        ch.line('INPUT on 7\n')
         receiver.expect(['start'], 'INPUT on again')
         server.focus(b.id)
         receiver.expect(['stop'], 'focus to another session')
@@ -471,12 +649,12 @@ def eis(stub=False):
         key(32, 1)
         server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
         receiver.expect(['key 32 press', 'button 272 press'], 'a key and a button held')
-        ch.line('INPUT off\n')
+        ch.line('INPUT off 7\n')
         receiver.expect(['key 32 release', 'button 272 release', 'stop'], 'release-all on INPUT off')
         key(32, 0)
         server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
         receiver.nothing('the physical releases after INPUT off')
-        ch.line('INPUT on\n')
+        ch.line('INPUT on 7\n')
         receiver.expect(['start'], 'on after the off case')
         # ... a focus change ...
         key(33, 1)
@@ -495,7 +673,7 @@ def eis(stub=False):
         receiver.expect(['key 34 release', 'stop'], 'release-all on console release')
         key(31, 1, 0)
         receiver.nothing('keys while the console is away')
-        check(server.input(a.id)['state'] == 'on', 'frames.input while away %s' % server.input(a.id))
+        check(state(server, a.id, 7) == 'on', 'frames.input while away %s' % server.input(a.id))
         server.process.send_signal(signal.SIGUSR2)
         receiver.expect(['start'], 'the console back')
         key(34, 0)
@@ -577,7 +755,7 @@ def eis(stub=False):
         events = server.input(a.id)['events']
         ch.close()
         receiver.expect(['key 36 release', 'stop', 'disconnect'], 'release-all on channel close')
-        wait_for(lambda: server.input(a.id)['state'] == 'none', 'the route outlived its channel')
+        wait_for(lambda: server.input(a.id)['routes'] == [], 'the route outlived its channel')
         key(36, 0)
 
         # The image deleted, on a new channel and image.
@@ -588,20 +766,20 @@ def eis(stub=False):
         # As the bridge does: INPUT on as soon as OK input is read, before
         # the compositor has offered a seat; emulation starts when its
         # device is resumed.
-        check(ch.ask('INPUT eis %s 8\n' % receiver.path) == b'OK input\n', 'the second route was refused')
-        ch.line('INPUT on\n')
+        check(ch.ask('INPUT eis %s 8\n' % receiver.path) == b'OK input 8\n', 'the second route was refused')
+        ch.line('INPUT on 8\n')
         receiver.expect(['connect', BIND, 'start'], 'INPUT on before the seat was bound')
         key(35, 1)
         receiver.expect(['key 35 press'], 'held before the image goes')
+        # The route ends with its image: released, stopped, disconnected.
         a.write('\033_Ga=d,d=I,i=8,q=2\033\\')
-        receiver.expect(['key 35 release', 'stop'], 'release-all on image delete')
+        receiver.expect(['key 35 release', 'stop', 'disconnect'], 'release-all and end on image delete')
         key(35, 0, 1, 0)
         receiver.nothing('keys after the image was deleted')
         info = server.input(a.id)
-        check(info['state'] == 'on' and info['image'] == 8 and info['events'] > events,
-              'frames.input after the delete %s' % info)
+        check(info['routes'] == [] and info['events'] > events, 'frames.input after the delete %s' % info)
+        check(ch.ask('INPUT on 8\n') == b'ERROR INPUT 8 EINVAL\n', 'INPUT on after the image went was not EINVAL')
         ch.close()
-        receiver.expect(['disconnect'], 'the second channel closed')
 
         # The compositor goes away under a live route: the client is told
         # ERROR INPUT ENOENT at once, and the route ends.
@@ -609,18 +787,20 @@ def eis(stub=False):
         ch.frame(10, 1)
         wait_for(lambda: a.graphics(10), 'image 10 did not land')
         place(a, 10, 1, 1, 8, 2)
-        check(ch.ask('INPUT eis %s 10\n' % receiver.path) == b'OK input\n', 'the third route was refused')
-        ch.line('INPUT on\n')
+        check(ch.ask('INPUT eis %s 10\n' % receiver.path) == b'OK input 10\n', 'the third route was refused')
+        ch.line('INPUT on 10\n')
         receiver.expect(['connect', BIND, 'start'], 'the third route on')
         check(ch.reply(0.3) == b'', 'a live route was answered')
         receiver.drop()
         got = ch.reply(5.0)
-        check(got == b'ERROR INPUT ENOENT\n', 'a dropped compositor was answered %r' % got)
-        info = wait_for(lambda: (lambda i: i if i['state'] == 'none' else None)(server.input(a.id)),
+        check(got == b'ERROR INPUT 10 ENOENT\n', 'a dropped compositor was answered %r' % got)
+        info = wait_for(lambda: (lambda i: i if i['routes'] == [] else None)(server.input(a.id)),
                         'the route outlived its compositor')
         check(info['last_error'] == 'eis-disconnected', 'frames.input after the drop %s' % info)
-        check(ch.ask('INPUT on\n') == b'ERROR INPUT EINVAL\n', 'INPUT on after the route ended was not EINVAL')
+        check(ch.ask('INPUT on 10\n') == b'ERROR INPUT 10 EINVAL\n', 'INPUT on after the route ended was not EINVAL')
         ch.close()
+
+        several = multi(server, a, work, stub)
     finally:
         server.stop()
         log = receiver.stop()
@@ -631,9 +811,9 @@ def eis(stub=False):
     check('# libeis names' not in log, 'event numbers disagree with libeis: %s' % log)
     print('%s_PASS keys=ordered repeats=dropped off+unfocused+console=silent '
           'release_all=off,focus,console,close,delete scroll=discrete region=%dx%d absolute=%s '
-          'far_corner=region_far_corner outside=silent dropped=ERROR_INPUT_ENOENT '
-          'relative=70,-30_in_%d events=%d frames=%d names=%s'
-          % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), sent, frames, names))
+          'far_corner=region_far_corner outside=silent dropped=ERROR_INPUT_10_ENOENT '
+          'relative=70,-30_in_%d events=%d frames=%d names=%s %s'
+          % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), sent, frames, names, several))
 
 
 if __name__ == '__main__':

@@ -35,7 +35,7 @@
    their newlines. Anything longer arrives truncated, and is refused. */
 #define BLIT_FRAME_STATUS_BYTES (8 + BLIT_HUD_STATUS_LINES * (BLIT_HUD_STATUS_BYTES + 1))
 
-/* ADR 0225: the INPUT request and its route (blit_frames_input.h). */
+/* ADR 0225: the INPUT requests and their routes, one per image (blit_frames_input.h). */
 struct BlitFrameInput;
 static void frame_input_close(BlitRuntime *runtime, BlitFrameClient *client);
 static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
