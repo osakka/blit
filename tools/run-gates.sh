@@ -574,6 +574,11 @@ suite_hibr() {
     run_gate frame_descriptor_gate.sh sh "$ROOT"/tools/tests/frame_descriptor_gate.sh
     run_gate frame_dmabuf_gate.sh sh "$ROOT"/tools/tests/frame_dmabuf_gate.sh
     run_gate gamescope_bridge_gate.sh sh "$ROOT"/tools/tests/gamescope_bridge_gate.sh
+    # ADR 0225: the INPUT route to EIS. The first runs anywhere (stand-in
+    # libei); the second needs libei.so.1 and libeis.so.1 and skips (77)
+    # without them.
+    run_gate frame_input_gate.sh sh "$ROOT"/tools/tests/frame_input_gate.sh
+    run_gate frame_input_eis_gate.sh sh "$ROOT"/tools/tests/frame_input_eis_gate.sh
     # ADR 0223: import, drawing and RELEASE need a GPU that imports dmabufs,
     # so they run against a named live host, never implied by a local run.
     if [ -n "$LIVE_DMABUF" ]; then

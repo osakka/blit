@@ -287,6 +287,27 @@ regresses, a wlroots compositor fits behind the same bridge.
   bytes, release order, the `ENOTSUP` fallback to memfd, the INPUT answers
   and the terminal reader, and draws memfd frames in a real Blit session.
   Not yet: what the frames show on a placed pane, any input, a Proton game.
+- **Blit's input route, 2026-11-07** (`src/blit_frames_input.h`, 0.3.62,
+  `frame_input_gate`): the `INPUT` request as `docs/api.md` defines it.
+  On a host with no libei: `ENOTSUP`; against a stand-in libei, `EINVAL`
+  for 18 malformed or unknown-image requests, `ENOENT` for a missing path,
+  a regular file, a link to a socket and a socket nobody listens on,
+  `EACCES` for the system D-Bus socket (another user's), `OK input`, then
+  `EBUSY`, and `frames.input` going off, on, live, off, live and none with
+  INPUT on/off, focus and the channel's close. Against a recording stand-in
+  libei that plays a compositor (one seat, one device, a 320x160 region):
+  keys pressed and released in order, the kernel's repeats not sent,
+  nothing while off, unfocused or with the console given up
+  (`BLIT_TEST_VT_SIGNALS`), every key and button released and emulation
+  stopped on `INPUT off`, a focus change, the console given up, the channel
+  closed and the image deleted; wheel notches as discrete scroll; the
+  absolute pointer scaled exactly at a 160x80 and a 320x160 placement and
+  after resizing to 64x32, nothing outside the picture; relative motion
+  under `?7701` summed exactly (70,-30). The same cases against libeis
+  (`tools/tests/eis_receiver.c`, `frame_input_eis_gate`) need libei1 and
+  libeis1 and are not run yet: they are for the Debian 13 test host.
+  The bridge's half (`INPUT eis` after the hello, `INPUT on` on `OK input`)
+  is in `gamescope_bridge_gate`.
 
 ## Evidence (planned)
 
@@ -294,7 +315,9 @@ regresses, a wlroots compositor fits behind the same bridge.
   that emits known dmabuf frames into the bridge, checking that Blit draws
   them, that buffers come back only after `RELEASE` or `ERROR`, the memfd
   fallback under the CPU compositor, and the input mapping (keys, absolute,
-  relative, buttons, scroll) against an EIS stand-in.
+  relative, buttons, scroll) against an EIS stand-in -- done on Blit's side
+  (`frame_input_gate`, `frame_input_eis_gate`, above), the bridge's PipeWire
+  half not yet.
 - On the mini PC, with the owner's OK: vkcube, then Steam's Big Picture, then
   one Proton game in a pane: frame rate, latency and the frame channel
   counters (`graphics.frames.dmabuf`: accepted, released, no uploads).

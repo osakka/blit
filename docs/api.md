@@ -1772,7 +1772,12 @@ compositor expects it rather than as terminal escapes
 - When the route stops being live (`INPUT off`, the session losing focus,
   Blit giving up the console, the image deleted, the channel closed) Blit
   first releases every key and button it pressed there. Each session
-  reports `frames.input`: the route's state, events sent and the last error.
+  reports `frames.input`: the route's `state` (`none`, `off`, `on` while
+  on but not live, `live`, or `closed` once the compositor has gone), its
+  `image`, the `events` sent (keys, buttons, scroll notches and motions,
+  all routes of the session), the `last_error` (an INPUT code, or
+  `eis-refused`/`eis-disconnected`) and the compositor's absolute
+  `region` (`WxH+X+Y`, empty until it offers one).
 
 ## Diagnostics and screenshots
 
