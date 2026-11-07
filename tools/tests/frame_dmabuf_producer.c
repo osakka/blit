@@ -24,6 +24,12 @@
    Usage: frame_dmabuf_producer [probe | run FRAMES HOLD_SECONDS]  */
 
 #define _GNU_SOURCE
+#define EGL_EGL_PROTOTYPES 0
+#define GL_GLES_PROTOTYPES 0
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -125,6 +131,49 @@ static int fill(struct gbm_bo *bo, uint32_t xrgb)
     return 1;
 }
 
+/* One FRM3: the bo's single plane, and the acquire fence if `fence` >= 0
+   (closed here once sent). */
+static int send_frame_ex(int sock, struct gbm_bo *bo, unsigned int image_id, uint32_t fourcc,
+                         unsigned long long sequence, uint64_t modifier, int fence)
+{
+    unsigned char header[72];
+    struct msghdr message;
+    struct iovec vector;
+    union { struct cmsghdr h; char space[CMSG_SPACE(sizeof(int) * 2)]; } control;
+    struct cmsghdr *cmsg;
+    int fds[2], fd = p_bo_get_fd(bo), ok, n = fence >= 0 ? 2 : 1;
+    if (fd < 0) return 0;
+    fds[0] = fd;
+    fds[1] = fence;
+    memset(header, 0, sizeof(header));
+    memcpy(header, "FRM3", 4);
+    put32(header + 4, image_id);
+    put64(header + 8, sequence);
+    put32(header + 16, WIDTH);
+    put32(header + 20, HEIGHT);
+    put32(header + 24, fourcc);
+    put32(header + 28, 1);
+    put64(header + 32, modifier);
+    put32(header + 40, 0);
+    put32(header + 44, p_bo_get_stride(bo));
+    memset(&message, 0, sizeof(message));
+    vector.iov_base = header;
+    vector.iov_len = sizeof(header);
+    message.msg_iov = &vector;
+    message.msg_iovlen = 1;
+    message.msg_control = control.space;
+    message.msg_controllen = CMSG_SPACE(sizeof(int) * n);
+    cmsg = CMSG_FIRSTHDR(&message);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * n);
+    memcpy(CMSG_DATA(cmsg), fds, sizeof(int) * n);
+    ok = sendmsg(sock, &message, MSG_NOSIGNAL) == (ssize_t)sizeof(header);
+    close(fd);
+    if (fence >= 0) close(fence);
+    return ok;
+}
+
 static int send_frame(int sock, struct gbm_bo *bo, unsigned long long sequence, uint64_t modifier)
 {
     unsigned char header[72];
@@ -203,6 +252,190 @@ static void read_replies(int sock, double wait)
     }
 }
 
+/* `alpha HOLD`: an opaque XR24 picture (blue) and, over it at a higher z, an
+   AR24 one whose every pixel is premultiplied red at alpha 0x80 (A=0x80,
+   R=0x80). Blit draws AR24 as premultiplied, so the screen shows
+   R=0x80, B=0xff*(1-0x80/0xff)=0x7f; a straight-alpha reading would show
+   R=0x40. */
+static int run_alpha(int sock, struct gbm_device *device, int hold)
+{
+    struct gbm_bo *bg = p_bo_create(device, WIDTH, HEIGHT, FOURCC('X', 'R', '2', '4'),
+                                    GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
+    struct gbm_bo *fg = p_bo_create(device, WIDTH, HEIGHT, FOURCC('A', 'R', '2', '4'),
+                                    GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
+    if (bg == NULL || fg == NULL || !fill(bg, 0x000000ff) || !fill(fg, 0x80800000)) {
+        note(result, sizeof(result), &result_at, "alpha_buffers=failed");
+        finish("FAIL");
+        return 1;
+    }
+    send_frame_ex(sock, bg, 4300, FOURCC('X', 'R', '2', '4'), 1, p_bo_get_modifier(bg), -1);
+    send_frame_ex(sock, fg, 4301, FOURCC('A', 'R', '2', '4'), 1, p_bo_get_modifier(fg), -1);
+    read_replies(sock, 0.3);
+    printf("\033[2;2H\033_Ga=p,i=4300,q=2,z=1,C=1\033\\\033[2;2H\033_Ga=p,i=4301,q=2,z=2,C=1\033\\");
+    printf("\033[1;1HDMABUF_ALPHA_HOLDING\n");
+    fflush(stdout);
+    read_replies(sock, (double)hold);
+    printf("\033_Ga=d,d=I,i=4301,q=2\033\\\033_Ga=d,d=I,i=4300,q=2\033\\");
+    fflush(stdout);
+    read_replies(sock, 1.0);
+    {
+        char text[64];
+        snprintf(text, sizeof(text), "alpha_released=%d", released_count);
+        note(result, sizeof(result), &result_at, text);
+    }
+    finish(errors_at == 0 && released_count == 2 ? "PASS" : "FAIL");
+    return 0;
+}
+
+/* `fence HOLD`: the frame is drawn by this host's GPU with EGL/GLES into
+   the GBM buffer (left half one colour, right half another, two clears),
+   and sent with an EGL_ANDROID_native_fence_sync fd as its acquire fence,
+   without waiting for the GPU to finish. */
+static int render_with_fence(struct gbm_device *device, struct gbm_bo *bo, int *fence)
+{
+    void *egl = dlopen("libEGL.so.1", RTLD_NOW), *gl = dlopen("libGLESv2.so.2", RTLD_NOW);
+    PFNEGLGETPROCADDRESSPROC gpa;
+    EGLDisplay (*get_display)(EGLenum, void *, const EGLAttrib *);
+    EGLBoolean (*initialize)(EGLDisplay, EGLint *, EGLint *);
+    EGLBoolean (*bind_api)(EGLenum);
+    EGLContext (*create_context)(EGLDisplay, EGLConfig, EGLContext, const EGLint *);
+    EGLBoolean (*make_current)(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
+    const char *(*query)(EGLDisplay, EGLint);
+    PFNEGLCREATEIMAGEKHRPROC create_image;
+    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_target;
+    PFNEGLCREATESYNCKHRPROC create_sync;
+    PFNEGLDESTROYSYNCKHRPROC destroy_sync;
+    PFNEGLDUPNATIVEFENCEFDANDROIDPROC dup_fence;
+    void (*gen_textures)(GLsizei, GLuint *), (*bind_texture)(GLenum, GLuint);
+    void (*gen_framebuffers)(GLsizei, GLuint *), (*bind_framebuffer)(GLenum, GLuint);
+    void (*framebuffer_texture)(GLenum, GLenum, GLenum, GLuint, GLint);
+    GLenum (*framebuffer_status)(GLenum);
+    void (*viewport)(GLint, GLint, GLsizei, GLsizei), (*clear_color)(GLfloat, GLfloat, GLfloat, GLfloat);
+    void (*clear)(GLbitfield), (*enable)(GLenum), (*disable)(GLenum), (*flush)(void);
+    void (*scissor)(GLint, GLint, GLsizei, GLsizei);
+    static const EGLint context_attributes[] = { EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE };
+    EGLint image_attributes[16], sync_attributes[] = {
+        EGL_SYNC_NATIVE_FENCE_FD_ANDROID, EGL_NO_NATIVE_FENCE_FD_ANDROID, EGL_NONE };
+    EGLDisplay display;
+    EGLContext context;
+    EGLImageKHR image;
+    EGLSyncKHR sync;
+    GLuint texture = 0, framebuffer = 0;
+    const char *extensions;
+    int plane, n = 0;
+    char text[96];
+
+#define WHY(s) do { note(result, sizeof(result), &result_at, "fence_render=" s); return 0; } while (0)
+    if (egl == NULL || gl == NULL) WHY("no_libEGL_or_libGLESv2");
+    gpa = (PFNEGLGETPROCADDRESSPROC)dlsym(egl, "eglGetProcAddress");
+    get_display = (EGLDisplay (*)(EGLenum, void *, const EGLAttrib *))dlsym(egl, "eglGetPlatformDisplay");
+    initialize = (EGLBoolean (*)(EGLDisplay, EGLint *, EGLint *))dlsym(egl, "eglInitialize");
+    bind_api = (EGLBoolean (*)(EGLenum))dlsym(egl, "eglBindAPI");
+    create_context = (EGLContext (*)(EGLDisplay, EGLConfig, EGLContext, const EGLint *))
+        dlsym(egl, "eglCreateContext");
+    make_current = (EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, EGLContext))
+        dlsym(egl, "eglMakeCurrent");
+    query = (const char *(*)(EGLDisplay, EGLint))dlsym(egl, "eglQueryString");
+    if (!gpa || !get_display || !initialize || !bind_api || !create_context || !make_current || !query)
+        WHY("egl_entry_points");
+    create_image = (PFNEGLCREATEIMAGEKHRPROC)gpa("eglCreateImageKHR");
+    image_target = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)gpa("glEGLImageTargetTexture2DOES");
+    create_sync = (PFNEGLCREATESYNCKHRPROC)gpa("eglCreateSyncKHR");
+    destroy_sync = (PFNEGLDESTROYSYNCKHRPROC)gpa("eglDestroySyncKHR");
+    dup_fence = (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)gpa("eglDupNativeFenceFDANDROID");
+    gen_textures = (void (*)(GLsizei, GLuint *))dlsym(gl, "glGenTextures");
+    bind_texture = (void (*)(GLenum, GLuint))dlsym(gl, "glBindTexture");
+    gen_framebuffers = (void (*)(GLsizei, GLuint *))dlsym(gl, "glGenFramebuffers");
+    bind_framebuffer = (void (*)(GLenum, GLuint))dlsym(gl, "glBindFramebuffer");
+    framebuffer_texture = (void (*)(GLenum, GLenum, GLenum, GLuint, GLint))
+        dlsym(gl, "glFramebufferTexture2D");
+    framebuffer_status = (GLenum (*)(GLenum))dlsym(gl, "glCheckFramebufferStatus");
+    viewport = (void (*)(GLint, GLint, GLsizei, GLsizei))dlsym(gl, "glViewport");
+    clear_color = (void (*)(GLfloat, GLfloat, GLfloat, GLfloat))dlsym(gl, "glClearColor");
+    clear = (void (*)(GLbitfield))dlsym(gl, "glClear");
+    enable = (void (*)(GLenum))dlsym(gl, "glEnable");
+    disable = (void (*)(GLenum))dlsym(gl, "glDisable");
+    flush = (void (*)(void))dlsym(gl, "glFlush");
+    scissor = (void (*)(GLint, GLint, GLsizei, GLsizei))dlsym(gl, "glScissor");
+    if (!create_image || !image_target || !create_sync || !destroy_sync || !dup_fence ||
+        !gen_textures || !bind_texture || !gen_framebuffers || !bind_framebuffer ||
+        !framebuffer_texture || !framebuffer_status || !viewport || !clear_color || !clear ||
+        !enable || !disable || !flush || !scissor)
+        WHY("gl_entry_points");
+    display = get_display(EGL_PLATFORM_GBM_KHR, device, NULL);
+    if (display == EGL_NO_DISPLAY || !initialize(display, NULL, NULL)) WHY("egl_initialize");
+    extensions = query(display, EGL_EXTENSIONS);
+    if (extensions == NULL || strstr(extensions, "EGL_ANDROID_native_fence_sync") == NULL)
+        WHY("no_EGL_ANDROID_native_fence_sync");
+    if (strstr(extensions, "EGL_KHR_no_config_context") == NULL ||
+        strstr(extensions, "EGL_KHR_surfaceless_context") == NULL)
+        WHY("no_configless_surfaceless_context");
+    bind_api(EGL_OPENGL_ES_API);
+    context = create_context(display, (EGLConfig)0, EGL_NO_CONTEXT, context_attributes);
+    if (context == EGL_NO_CONTEXT || !make_current(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context))
+        WHY("egl_context");
+    plane = p_bo_get_fd(bo);
+    image_attributes[n++] = EGL_WIDTH; image_attributes[n++] = WIDTH;
+    image_attributes[n++] = EGL_HEIGHT; image_attributes[n++] = HEIGHT;
+    image_attributes[n++] = EGL_LINUX_DRM_FOURCC_EXT;
+    image_attributes[n++] = (EGLint)FOURCC('X', 'R', '2', '4');
+    image_attributes[n++] = EGL_DMA_BUF_PLANE0_FD_EXT; image_attributes[n++] = plane;
+    image_attributes[n++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT; image_attributes[n++] = 0;
+    image_attributes[n++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
+    image_attributes[n++] = (EGLint)p_bo_get_stride(bo);
+    image_attributes[n] = EGL_NONE;
+    image = create_image(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, (EGLClientBuffer)NULL,
+                         image_attributes);
+    close(plane);
+    if (image == EGL_NO_IMAGE_KHR) WHY("import_own_buffer");
+    gen_textures(1, &texture);
+    bind_texture(GL_TEXTURE_2D, texture);
+    image_target(GL_TEXTURE_2D, (GLeglImageOES)image);
+    gen_framebuffers(1, &framebuffer);
+    bind_framebuffer(GL_FRAMEBUFFER, framebuffer);
+    framebuffer_texture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    if (framebuffer_status(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) WHY("framebuffer_incomplete");
+    viewport(0, 0, WIDTH, HEIGHT);
+    clear_color(0x30 / 255.0f, 0x60 / 255.0f, 0xc0 / 255.0f, 1.0f);
+    clear(GL_COLOR_BUFFER_BIT);
+    enable(GL_SCISSOR_TEST);
+    scissor(WIDTH / 2, 0, WIDTH / 2, HEIGHT);
+    clear_color(0xc0 / 255.0f, 0x40 / 255.0f, 0x30 / 255.0f, 1.0f);
+    clear(GL_COLOR_BUFFER_BIT);
+    disable(GL_SCISSOR_TEST);
+    sync = create_sync(display, EGL_SYNC_NATIVE_FENCE_ANDROID, sync_attributes);
+    if (sync == EGL_NO_SYNC_KHR) WHY("create_sync");
+    flush();
+    *fence = dup_fence(display, sync);
+    destroy_sync(display, sync);
+    if (*fence < 0) WHY("dup_fence");
+    snprintf(text, sizeof(text), "fence_render=ok fence_fd=%d", *fence);
+    note(result, sizeof(result), &result_at, text);
+    return 1;
+#undef WHY
+}
+
+static int run_fence(int sock, struct gbm_device *device, int hold)
+{
+    int fence = -1;
+    struct gbm_bo *bo = p_bo_create(device, WIDTH, HEIGHT, FOURCC('X', 'R', '2', '4'),
+                                    GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
+    if (bo == NULL || !render_with_fence(device, bo, &fence)) {
+        finish("FAIL");
+        return 1;
+    }
+    send_frame_ex(sock, bo, 4400, FOURCC('X', 'R', '2', '4'), 1, p_bo_get_modifier(bo), fence);
+    read_replies(sock, 0.3);
+    printf("\033[2;2H\033_Ga=p,i=4400,q=2,C=1\033\\\033[1;1HDMABUF_FENCE_HOLDING\n");
+    fflush(stdout);
+    read_replies(sock, (double)hold);
+    printf("\033_Ga=d,d=I,i=4400,q=2\033\\");
+    fflush(stdout);
+    read_replies(sock, 1.0);
+    finish(errors_at == 0 && released_count == 1 ? "PASS" : "FAIL");
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     const char *name = getenv("BLIT_FRAME_SOCKET"), *token = getenv("BLIT_FRAME_TOKEN");
@@ -275,6 +508,10 @@ int main(int argc, char **argv)
         finish("FAIL");
         return 1;
     }
+    if (argc > 2 && strcmp(argv[1], "alpha") == 0)
+        return run_alpha(sock, device, atoi(argv[2]));
+    if (argc > 2 && strcmp(argv[1], "fence") == 0)
+        return run_fence(sock, device, atoi(argv[2]));
 
     /* Frames: a free buffer from the pool, filled, sent. The first is
        placed once it has landed. */

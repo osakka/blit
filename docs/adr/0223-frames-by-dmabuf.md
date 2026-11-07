@@ -111,7 +111,9 @@ Option 3, as wire format version 3 of the frame channel.
 - **The CPU compositor.** It does not advertise `dmabuf=1`. If the
   compositor falls back from GPU to CPU while dmabuf images are live, Blit
   answers their next frames `ENOTSUP`, and producers resend those images by
-  memfd. Blit does not read dmabufs back on the CPU.
+  memfd. Blit does not read dmabufs back on the CPU. All or nothing: with
+  several outputs, one composed by the CPU is enough to withdraw the offer,
+  since a picture on it would be accepted and never shown.
 - **Security.** Unchanged from ADR 0202: no names are opened, created or
   unlinked; only authenticated sessions can send; a dmabuf is a descriptor,
   passed as a memfd is. The GPU importing a buffer it does not own is the
@@ -129,8 +131,10 @@ version 3 adds one frame message and one reply. Little-endian, fixed
 offsets, one message per `recvmsg` (`SOCK_SEQPACKET`).
 
 - **Hello**: as ADR 0202's, with version `3`. Answered, when the GPU
-  compositor composes at least one output and EGL has
-  `EGL_EXT_image_dma_buf_import` (and GL `GL_OES_EGL_image`):
+  compositor composes every output (none has fallen back to the CPU, and
+  none is zoomed on a GPU without the highp the zoom needs, which would
+  hand its frames to the CPU) and EGL has `EGL_EXT_image_dma_buf_import`
+  (and GL `GL_OES_EGL_image`):
 
   `OK dmabuf=1 fence=<0|1> formats=<list>\n`
 
@@ -162,6 +166,12 @@ offsets, one message per `recvmsg` (`SOCK_SEQPACKET`).
   optionally one more, the acquire fence (a `sync_file`): plane count or
   plane count + 1 descriptors. A frame is always whole; there are no
   rectangle edits.
+- **Alpha.** `AR24` and `AB24` are premultiplied: each colour channel is
+  already multiplied by alpha (the DRM and Wayland convention), and Blit
+  composes the pixel as `src + dst·(1 − α)`. A producer whose alpha is
+  straight premultiplies before sending, or sends that picture by memfd
+  (Kitty's straight RGBA). `XR24` and `XB24` are opaque, whatever the
+  padding byte holds, and are the ones to use for games and video.
 - **Checks, in order.** Malformed -- wrong length, a version 1 or 2 sender,
   a descriptor count that fits neither rule, image id 0, width or height
   0, plane count outside 1–4, a plane field set past the count -- is
@@ -180,11 +190,11 @@ offsets, one message per `recvmsg` (`SOCK_SEQPACKET`).
   closed when it cannot be, the dmabuf's implicit synchronisation then
   ordering the producer's writes.
 - **Drawing.** The texture is drawn as any picture (placement, z-order,
-  clipping and effects of the GPU compositor unchanged). Its colour is
-  taken as premultiplied by alpha, the DRM and Wayland convention; the X
-  formats are opaque. A frame the CPU has to compose (an effect the GPU
-  cannot draw) shows the image's place empty; the CPU never reads a
-  dmabuf.
+  clipping and effects of the GPU compositor unchanged), as premultiplied
+  (above): the shader passes its sample through, where a memfd or Kitty
+  picture's straight colour is first multiplied by its alpha; both then
+  blend `ONE, ONE_MINUS_SRC_ALPHA`. The CPU never reads a dmabuf, which is
+  why the offer needs every output composed by the GPU.
 - **Release** (`RELEASE <id> <sequence>\n`, Blit to client, no
   descriptor): Blit holds a frame's descriptors and EGLImage while it may
   still be sampled, and then destroys them and says so, to the connection
@@ -200,19 +210,38 @@ offsets, one message per `recvmsg` (`SOCK_SEQPACKET`).
     compositor stopping release what the image holds.
   So a producer with a pool of three buffers never waits for more than one
   frame. Refused frames are not released (the `ERROR` says the buffer is
-  the producer's again).
+  the producer's again). The release is conservative: it comes after a
+  newer frame has been presented, not when the GPU has finished reading,
+  and it carries no fence. A release fence (a `sync_file` the producer
+  waits on, as explicit-sync producers such as Vulkan swapchains expect)
+  is future work; until then the kernel's implicit synchronisation of the
+  dmabuf orders the producer's next writes after Blit's reads.
 - **The CPU compositor and a GPU fallback.** Under the CPU compositor the
-  hello says `dmabuf=0` and every `FRM3` is `ENOTSUP`. If the GPU stops
-  composing every output while dmabuf images are live, Blit releases them
-  (each `RELEASE` sent), the images keep their ids and placements and show
-  nothing, and later `FRM3` frames are `ENOTSUP` until the producer sends
-  the image by memfd.
+  hello says `dmabuf=0` and every `FRM3` is `ENOTSUP`. The same holds as
+  soon as any output is composed by the CPU, even while others are still
+  composed by the GPU: if that happens while dmabuf images are live, Blit
+  releases them (each `RELEASE` sent), the images keep their ids and
+  placements and show nothing until the producer sends them by memfd, and
+  later `FRM3` frames are `ENOTSUP`. A producer is never accepted and then
+  left showing an empty window.
 - **Diagnostics.** A session reports `frames.dmabuf`: `accepted`,
   `released`, and `refused` by reason (`unavailable`, `format`, `import`,
   `invalid`); an image `"dmabuf": true` while it shows one. `GET
   /v1/diagnostics` reports `graphics.frames.dmabuf`: `advertised`,
   `unavailable` (why not), `fences`, `formats` (the hello's list), the
-  totals, and the same counts per session that sent any.
+  totals, `fences_waited` (acquire fences handed to the GPU), and the same
+  counts per session that sent any.
+
+## Relation to ADR 0206 (gamescope)
+
+Three ways a GPU-drawn picture reaches the screen, by how much of it there
+is. A full-screen game hands the display over: Blit steps aside and
+gamescope drives it ([ADR 0206](0206-hand-the-display-to-gamescope.md)). A
+windowed one -- a browser page, a video, a game in a pane -- sends frames
+by dmabuf (this record), and Blit composes them with everything else
+without a copy. Not built, and not decided: a full-screen game's buffer
+put straight on a KMS plane, scanned out without being composed at all,
+with Blit's own picture on another plane or none.
 
 ## Implementation status
 
@@ -227,8 +256,10 @@ Blit's half is in 0.3.60, RGB only:
   the gate hosts' llvmpipe has no `EGL_EXT_image_dma_buf_import`): no
   offer and `ENOTSUP` under the CPU compositor and under a GPU compositor
   that cannot import, `EINVAL` and `EFBIG` for malformed frames, memfd
-  frames on a version 3 connection, the counts. ADR 0202's gate is
-  unchanged.
+  frames on a version 3 connection, the counts; and with two mock
+  displays, one forced to the CPU (`BLIT_TEST_GLES_CPU_CONNECTOR`, test
+  mode only), no offer (`an output is composed by the CPU`) and
+  `ENOTSUP`. ADR 0202's gate is unchanged.
 - Gated on hardware (`frame_dmabuf_live_gate`, run when
   `BLIT_GATE_LIVE_DMABUF` names a host): on the owner's Intel HD 515 test
   host (Mesa 25.0.7) a test producer (`tools/tests/frame_dmabuf_producer.c`,
@@ -237,10 +268,18 @@ Blit's half is in 0.3.60, RGB only:
   as the next was shown, the newest released by `a=d`, an unlisted
   modifier refused `ENOTSUP`; the last frame's colour covered the image's
   whole area in a screenshot of the display, with no picture byte
-  uploaded to the GPU meanwhile.
-- Not yet: the acquire fence on hardware (the test producer sends none),
-  the GPU-to-CPU fallback on hardware, a real producer (the Browser), and
-  the measurement. **TODO: YUV** (`NV12`, `P010`) through
+  uploaded to the GPU meanwhile. Alpha: an `AR24` frame of red 0x80 at
+  alpha 0x80 over an opaque blue picture showed (0x80, 0, 0x7f) over its
+  whole area, none of the (0x40, 0, 0x7f) a straight-alpha reading gives.
+  Fence: a frame the producer drew with EGL/GLES on the host's GPU into
+  the GBM buffer (two clears, two colours) and sent with its
+  `EGL_ANDROID_native_fence_sync` fd before the GPU had finished was
+  waited on by Blit's GPU (`fences_waited` +1) and showed both colours over
+  their halves.
+- Not yet: the GPU-to-CPU fallback on hardware (gated with the mock
+  only), a fence that is still pending for long (the test's renders in
+  microseconds), a release fence, a real producer (the Browser), and the
+  measurement. **TODO: YUV** (`NV12`, `P010`) through
   `GL_TEXTURE_EXTERNAL_OES` and an external-sampler program, with a gate
   that needs a GPU, for hardware-decoded video. Hibr's console and hold do
   not yet pass dmabuf descriptors through.

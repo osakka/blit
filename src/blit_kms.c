@@ -2108,6 +2108,14 @@ static void kms_gles_attach(BlitKms *kms, KmsOutput *output)
         kms_gles_detach(kms, output, kms->gles_error);
         return;
     }
+    /* Tests only: one connector composed by the CPU beside GPU-composed
+       ones, the mix ADR 0223's all-or-nothing rule is about. */
+    if (getenv("BLIT_TEST_MODE") != NULL && strcmp(getenv("BLIT_TEST_MODE"), "1") == 0 &&
+        getenv("BLIT_TEST_GLES_CPU_CONNECTOR") != NULL &&
+        strtoul(getenv("BLIT_TEST_GLES_CPU_CONNECTOR"), NULL, 10) == output->connector) {
+        kms_gles_detach(kms, output, "test: this connector is composed by the CPU");
+        return;
+    }
     error[0] = '\0';
     output->gles_target = blit_gles_target_open(kms->gles, output->mode.hdisplay,
                                                 output->mode.vdisplay,
@@ -3206,23 +3214,32 @@ int blit_kms_screenshot(BlitKms *kms, int index,
     return 1;
 }
 
-/* ADR 0223: import only while the GPU composes at least one output. The
-   CPU compositor never reads a dmabuf, so without one there is nowhere to
-   draw it. */
+/* ADR 0223: import only while the GPU composes every output. The CPU
+   compositor never reads a dmabuf, so a picture on an output it composes
+   would be accepted and never shown; all or nothing. */
 const char *blit_kms_dmabuf_formats(const BlitKms *kms, int *fences,
                                     const char **unavailable)
 {
-    int i, composing = 0;
+    int i;
     if (fences != NULL) *fences = 0;
     if (unavailable != NULL) *unavailable = "no GLES compositor";
     if (kms == NULL || kms->gles == NULL)
         return NULL;
-    for (i = 0; i < kms->output_count; ++i)
-        if (kms->outputs[i].gles_target != NULL)
-            composing = 1;
-    if (!composing) {
-        if (unavailable != NULL) *unavailable = "no output composed by GLES";
+    if (kms->output_count < 1) {
+        if (unavailable != NULL) *unavailable = "no output";
         return NULL;
+    }
+    for (i = 0; i < kms->output_count; ++i) {
+        if (kms->outputs[i].gles_target == NULL) {
+            if (unavailable != NULL) *unavailable = "an output is composed by the CPU";
+            return NULL;
+        }
+        /* The one frame the GPU hands to the CPU (kms_gles_unsupported):
+           a zoomed output without highp. */
+        if (kms->outputs[i].zoom > 100 && !blit_gles_zooms(kms->gles)) {
+            if (unavailable != NULL) *unavailable = "an output is zoomed and composed by the CPU";
+            return NULL;
+        }
     }
     return blit_gles_dmabuf_formats(kms->gles, fences, unavailable);
 }
@@ -3255,6 +3272,11 @@ unsigned int blit_kms_dmabuf_import(BlitKms *kms, int width, int height,
     d.fence_fd = fence_fd;
     return blit_gles_dmabuf_import(kms != NULL ? kms->gles : NULL, &d, image,
                                    error, capacity);
+}
+
+unsigned long long blit_kms_dmabuf_fences_waited(const BlitKms *kms)
+{
+    return kms != NULL ? blit_gles_dmabuf_fences_waited(kms->gles) : 0ULL;
 }
 
 void blit_kms_dmabuf_destroy(BlitKms *kms, unsigned int texture, void *image)

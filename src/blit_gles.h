@@ -99,6 +99,8 @@ void blit_gles_image_premultiplied(BlitGles *gles, BlitGlesTexture texture,
 const char *blit_gles_dmabuf_formats(const BlitGles *gles, int *fences,
                                      const char **unavailable);
 int blit_gles_dmabuf_accepts(const BlitGles *gles, uint32_t fourcc, uint64_t modifier);
+/* Acquire fences the GPU was told to wait on, since the context opened. */
+unsigned long long blit_gles_dmabuf_fences_waited(const BlitGles *gles);
 typedef struct {
     int width, height;
     uint32_t fourcc;

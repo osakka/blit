@@ -152,6 +152,72 @@ def colour_count(display, colour):
     return count
 
 
+def colour_counts(display, colours, tolerance):
+    """Pixels within `tolerance` of each colour, in one screenshot."""
+    bmp = api('GET', '/v1/diagnostics/screenshots/%s' % display, raw=True)
+    offset, = struct.unpack_from('<I', bmp, 10)
+    width, height = struct.unpack_from('<ii', bmp, 18)
+    bpp, = struct.unpack_from('<H', bmp, 28)
+    step = bpp // 8
+    stride = (width * step + 3) & ~3
+    counts = [0] * len(colours)
+    for row in range(abs(height)):
+        line = bmp[offset + row * stride: offset + row * stride + width * step]
+        blues, greens, reds = line[0::step], line[1::step], line[2::step]
+        for i, (r, g, b) in enumerate(colours):
+            # Cheap rejection first: the green channel alone.
+            if g - tolerance > 255 or g + tolerance < 0:
+                continue
+            counts[i] += sum(1 for x in range(width)
+                             if abs(greens[x] - g) <= tolerance and abs(reds[x] - r) <= tolerance and
+                             abs(blues[x] - b) <= tolerance)
+    return counts
+
+
+def held_phase(mode, display, hold, colours, tolerance):
+    """Runs the producer in `mode` on the display, captures it while it holds,
+    and returns the counts and the producer's result line."""
+    sid = session('%s/producer %s %d; sleep 2' % (REMOTE, mode, hold), display=display,
+                  width=120, height=40)
+    marker = 'DMABUF_%s_HOLDING' % mode.upper()
+    text = wait_text(sid, marker, 40)
+    check(marker in text, 'the %s producer did not reach its hold: %s' % (mode, text))
+    counts = [0] * len(colours)
+    for _ in range(10):
+        counts = colour_counts(display, colours, tolerance)
+        if counts[0] >= 256 * 128:
+            break
+        time.sleep(0.5)
+    seen = dominant(display) if counts[0] < 256 * 128 else []
+    text = wait_text(sid, 'DMABUF_RESULT', hold + 20)
+    result = text.replace('\n', '').split('DMABUF_RESULT', 1)[1] if 'DMABUF_RESULT' in text else text
+    retire(sid)
+    return counts, result.strip() + (' screen_top_colours=%s' % seen if seen else '')
+
+
+def retire(sid):
+    """A finished producer session goes, so the next one is the one shown."""
+    ended(sid, 20)
+    api('DELETE', '/v1/terminal-sessions/%s' % sid)
+    STARTED.remove(sid)
+
+
+def dominant(display):
+    """The commonest colours of the display, sampled, for a failure report."""
+    bmp = api('GET', '/v1/diagnostics/screenshots/%s' % display, raw=True)
+    offset, = struct.unpack_from('<I', bmp, 10)
+    width, height = struct.unpack_from('<ii', bmp, 18)
+    step = struct.unpack_from('<H', bmp, 28)[0] // 8
+    stride = (width * step + 3) & ~3
+    seen = {}
+    for row in range(0, abs(height), 4):
+        for x in range(0, width, 4):
+            at = offset + row * stride + x * step
+            key = '%02x%02x%02x' % (bmp[at + 2], bmp[at + 1], bmp[at])
+            seen[key] = seen.get(key, 0) + 1
+    return sorted(seen.items(), key=lambda kv: -kv[1])[:6]
+
+
 def output_of(diagnostics, display):
     outputs = diagnostics['render']['outputs']
     return next((o for o in outputs if o.get('display_id') == display), outputs[0])
@@ -185,7 +251,7 @@ def main():
         text = screen_text(probe)
         check('verdict=PROBE gbm=ok' in text.replace('\n', ''), 'GBM probe on the host: %s' % text)
         before = uploaded_bytes()
-        producer = session('%s/producer run 90 12; sleep 30' % REMOTE, display=display,
+        producer = session('%s/producer run 90 12; sleep 2' % REMOTE, display=display,
                            width=120, height=40)
         text = wait_text(producer, 'DMABUF_HOLDING', 60)
         check('DMABUF_HOLDING' in text, 'the producer did not reach its hold: %s' % text)
@@ -197,9 +263,13 @@ def main():
                 break
             time.sleep(0.5)
         during = uploaded_bytes()
+        seen = dominant(display) if covered < 256 * 128 else []
         text = wait_text(producer, 'DMABUF_RESULT', 40)
         result = ' '.join(l for l in text.replace('\n', '').split('DMABUF_RESULT')[1:]) if 'DMABUF_RESULT' in text else text
+        if seen:
+            result += ' screen_top_colours=%s' % seen
         frames = api('GET', '/v1/terminal-sessions/%s' % producer)['frames']
+        retire(producer)
         uploaded = during - before if during is not None and before is not None else 'unknown'
         print('FRAME_DMABUF_LIVE host=%s display=%s covered_px=%d image_px_at_1x=%d upload_bytes_delta=%s '
               'session_frames=%s result=%s' % (BASE, display, covered, 256 * 128, uploaded,
@@ -212,6 +282,31 @@ def main():
               'the last frame is not on screen: %d pixels of its colour, %d expected' % (covered, area))
         check(frames['dmabuf']['accepted'] >= 90 and frames['dmabuf']['released'] >= 90 and
               frames['dmabuf']['refused']['format'] >= 1, 'session counts %s' % frames)
+
+        # Alpha: AR24 is premultiplied. Red 0x80 at alpha 0x80 over opaque
+        # blue shows (0x80, 0, 0x7f); read as straight alpha it would be
+        # (0x40, 0, 0x7f).
+        (premultiplied, straight), result = held_phase(
+            'alpha', display, 8, [(0x80, 0x00, 0x7f), (0x40, 0x00, 0x7f)], 3)
+        print('FRAME_DMABUF_LIVE_ALPHA premultiplied_px=%d straight_px=%d expected_px=%d result=%s'
+              % (premultiplied, straight, area, result))
+        check('verdict=PASS' in result, 'the alpha producer reported %s' % result)
+        check(premultiplied >= area * 9 // 10 and straight == 0,
+              'AR24 was not blended as premultiplied: %d premultiplied, %d straight pixels'
+              % (premultiplied, straight))
+
+        # Fence: drawn by this host's GPU with EGL into the buffer, sent with
+        # its native fence before the GPU finished; Blit's GPU waits on it.
+        fences_before = api('GET', '/v1/diagnostics')['graphics']['frames']['dmabuf']['fences_waited']
+        (left, right), result = held_phase(
+            'fence', display, 8, [(0x30, 0x60, 0xc0), (0xc0, 0x40, 0x30)], 1)
+        fences = api('GET', '/v1/diagnostics')['graphics']['frames']['dmabuf']['fences_waited'] - fences_before
+        print('FRAME_DMABUF_LIVE_FENCE left_px=%d right_px=%d expected_each_px=%d fences_waited=%d result=%s'
+              % (left, right, area // 2, fences, result))
+        check('verdict=PASS' in result, 'the fence producer reported %s' % result)
+        check(fences >= 1, 'Blit did not hand the acquire fence to the GPU')
+        check(left >= area * 9 // 20 and right >= area * 9 // 20,
+              'the GPU-rendered frame is not on screen: %d and %d pixels' % (left, right))
         print('FRAME_DMABUF_LIVE_PASS')
     finally:
         cleanup = session('rm -rf %s && echo CLEAN_OK' % REMOTE)
