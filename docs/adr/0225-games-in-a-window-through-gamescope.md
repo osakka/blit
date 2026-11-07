@@ -110,13 +110,13 @@ desktop app** (a module and a window, the shape Boxer has), which:
    (newest wins, ADR 0202) and grows the pool, up to six. Where several views
    show the picture (Hibr's `hold`), the relay sends the producer one
    `RELEASE` per frame, after the last view has let it go.
-3. **Carries input** from the pane to gamescope's EIS socket: Kitty keyboard
-   protocol press/release → `ei_device_keyboard_key`; SGR-Pixels mouse
-   (mode 1016) → absolute pointer, scaled from pane pixels to `<w>x<h>`;
-   buttons and wheel → EIS buttons and scroll. The bridge never captures
-   the mouse; the desktop does, with its Release Pointer, and phase 1 has no
-   capture (see "The mouse" below). Input reaches the game only while the
-   pane has focus.
+3. **Asks Blit for input, carrying none itself:** once gamescope's EIS
+   socket exists, it sends `INPUT eis <path> <image-id>` and `INPUT on` on its
+   frame channel, and Blit sends the physical keyboard and mouse to that
+   socket (see "Input: Blit feeds gamescope's EIS directly" below; the wire is
+   in `docs/api.md`). The bridge has no input parser and never captures the
+   mouse; the desktop does, with its Release Pointer, and phase 1 has no
+   capture (see "The mouse" below).
 4. **Resizes** with the pane, and never restarts gamescope (a restart ends
    Steam and the game). There is no `requested_size`: the stream stays at
    gamescope's output size (`-W`/`-H`, from the pane's pixels at launch),
@@ -179,15 +179,15 @@ phases (#485) remain right for terminal programs and Boxer-class apps but no
 longer carry a game's input. This replaces the terminal-input path below
 where they disagree.
 
-**One program, one frame output, one input parser.** `blit-gamescope` sends
-FRM3 frames on whatever `BLIT_FRAME_SOCKET`/`BLIT_FRAME_TOKEN` its
-environment names, and reads Kitty keyboard, SGR-Pixels and `?7701`
-sequences on its standard input, exactly what a PTY delivers; its output is
-gamescope's EIS. Who sets that environment decides the layer, not the bridge:
-in a plain Blit session Blit sets the socket and the PTY carries the keys; as
-a Hibr desktop app the module launches it with a frame socket served by the
-console (relayed through `cn_image`, `hold` and Blit) and writes its key and
-mouse events to the bridge's input as the same sequences. One wire format per
+**One program, one frame output, no input parser.** `blit-gamescope` sends
+FRM3 frames and its INPUT request on whatever `BLIT_FRAME_SOCKET`/`BLIT_FRAME_TOKEN`
+its environment names, and reads on its standard input only its pane's
+pixel size (`CSI 4 ; h ; w t`), focus reports and the `?7701` lock notice.
+Who sets that environment decides the layer, not the bridge: in a plain
+Blit session Blit sets the socket; as a Hibr desktop app the module launches
+it with a frame socket served by the console (relayed through `cn_image`,
+`hold` and Blit), and the app turns its focus callback into `INPUT on`/`off`.
+One wire format per
 stream in both places, and no second code path in the bridge.
 
 **Phases.** (1) The bridge standalone in a plain Blit session on the owner's
@@ -315,9 +315,9 @@ regresses, a wlroots compositor fits behind the same bridge.
   nothing outside the picture; relative motion under `?7701` summed exactly
   (70,-30); the compositor dropping a live route answered
   `ERROR INPUT ENOENT` at once and the route ended. Decided the same day:
-  an image without a frame yet may be named, the pointer is scaled to the
-  EIS region (a stream gamescope has shrunk still maps to its whole
-  output), and a later refusal or drop is told on the wire. The same cases against libeis
+  an image without a frame yet may be named, the pointer is scaled to a bounded
+  EIS region, else to the frame (gamescope's region is unbounded, and its
+  stream stays at its output size, so the frame is its coordinate space), and a later refusal or drop is told on the wire. The same cases against libeis
   (`tools/tests/eis_receiver.c`, `frame_input_eis_gate`) need libei1 and
   libeis1 and are not run yet: they are for the Debian 13 test host.
   The bridge's half (`INPUT eis` after the hello, `INPUT on` on `OK input`)
