@@ -47,8 +47,8 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        /* Indexed by codepoint - U+100000: the icons run to U+1002D9 (cellular-4). */
-        unsigned hashes[0x2DA];
+        /* Indexed by codepoint - U+100000: the icons run to U+1002EB (volume-wide-3-right). */
+        unsigned hashes[0x2EC];
         int partial_icons = 0;
         int seam[2][96], reach[2], tall[2];
         int index;
@@ -162,6 +162,19 @@ int main(int argc, char **argv)
                     int other;
                     for (other = index + 1; other < groups[group][1]; ++other)
                         CHECK(hashes[index] != hashes[other]);
+                }
+        }
+        /* The two-column Wi-Fi (1-4, off) and volume (muted, 1-3) badges:
+           each level differs from the others as a whole badge, its left and
+           right columns together (one half alone may match). */
+        {
+            static const int wide[][2] = {{0x2da, 0x2e4}, {0x2e4, 0x2ec}};
+            int group;
+            for (group = 0; group < 2; ++group)
+                for (index = wide[group][0]; index < wide[group][1]; index += 2) {
+                    int other;
+                    for (other = index + 2; other < wide[group][1]; other += 2)
+                        CHECK(hashes[index] != hashes[other] || hashes[index + 1] != hashes[other + 1]);
                 }
         }
         CHECK(partial_icons > 0);

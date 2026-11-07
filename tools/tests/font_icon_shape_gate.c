@@ -12,7 +12,9 @@
    drop differs. The Wi-Fi fan (0.3.54): wifi-signal-1..4 pairwise, and
    wifi-off (the cross alone in monochrome) against each level. The bars
    are measured under their live names, cellular-1..4 (wifi-1..4 are the
-   same drawing, deprecated). */
+   same drawing, deprecated). The two-column Wi-Fi fan and volume (0.3.56)
+   are compared as whole badges, both columns side by side: wifi-wide
+   levels 1-4 pairwise and off against each, volume-wide 0-3 pairwise. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
@@ -35,10 +37,15 @@ static const Icon kIcons[] = {
     {"wiretap-1", 0x1002cb}, {"wiretap-1-off", 0x1002cc},
     {"wifi-signal-1", 0x1002d1}, {"wifi-signal-2", 0x1002d2}, {"wifi-signal-3", 0x1002d3},
     {"wifi-signal-4", 0x1002d4}, {"wifi-off", 0x1002d5},
+    {"wifi-signal-wide-1", 0x1002da}, {"wifi-signal-wide-2", 0x1002dc}, {"wifi-signal-wide-3", 0x1002de},
+    {"wifi-signal-wide-4", 0x1002e0}, {"wifi-off-wide", 0x1002e2},
+    {"volume-wide-0", 0x1002e4}, {"volume-wide-1", 0x1002e6}, {"volume-wide-2", 0x1002e8},
+    {"volume-wide-3", 0x1002ea},
 };
 #define NICONS ((int)(sizeof(kIcons) / sizeof(kIcons[0])))
 /* A two-column icon's entry is its left codepoint; its right is the next. */
-enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19, TAP1 = 21, WS1 = 23, WOFF = 27 };
+enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19, TAP1 = 21, WS1 = 23, WOFF = 27,
+       WW1 = 28, WWOFF = 32, VW0 = 33 };
 
 typedef struct { int w, h; unsigned char *m; } Mask;
 
@@ -98,7 +105,7 @@ int main(int argc, char **argv)
         double min = kSizes[s] == 22 ? MIN22 : MIN16;
         Mask m[NICONS];
         for (i = 0; i < NICONS; ++i)
-            if (!mask_of(&font, argv[2], argv[3], kSizes[s], kIcons[i].cp, i == TAP || i == TAP + 1 ? 2 : 1, &m[i])) {
+            if (!mask_of(&font, argv[2], argv[3], kSizes[s], kIcons[i].cp, i == TAP || i == TAP + 1 || i >= WW1 ? 2 : 1, &m[i])) {
                 fprintf(stderr, "FAIL: %s did not render\n", kIcons[i].name);
                 return 1;
             }
@@ -113,6 +120,9 @@ int main(int argc, char **argv)
         pair(m, TAP1, TAP1 + 1, min, "wiretap-1");
         for (i = WS1; i < WS1 + 4; ++i) for (j = i + 1; j < WS1 + 4; ++j) pair(m, i, j, min, "wifi-signal");
         for (i = WS1; i < WS1 + 4; ++i) pair(m, WOFF, i, min, "wifi-signal");
+        for (i = WW1; i < WW1 + 4; ++i) for (j = i + 1; j < WW1 + 4; ++j) pair(m, i, j, min, "wifi-wide");
+        for (i = WW1; i < WW1 + 4; ++i) pair(m, WWOFF, i, min, "wifi-wide");
+        for (i = VW0; i < VW0 + 4; ++i) for (j = i + 1; j < VW0 + 4; ++j) pair(m, i, j, min, "volume-wide");
         for (i = 0; i < NICONS; ++i) free(m[i].m);
     }
     if (failures) {

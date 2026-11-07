@@ -52,10 +52,18 @@ codepoints, of which a non-folder kind now uses only the classic two.
 | wifi-signal-1 … wifi-signal-4 | U+1002D1–U+1002D4 | Wi-Fi (0.3.55): a dot and three concentric arcs in a 90-degree fan opening upward, teal (#41d6bf) up to the level, the rest in the bars' inactive slate (#3e526b): 1 the dot, 2 with the inner arc, 3 with the middle arc, 4 all; one drawing, `wifi-signal.svg` |
 | wifi-off | U+1002D5 | Wi-Fi off (0.3.55): the fan all inactive and a red (#f56565) cross at the lower right; `wifi-off.svg`, the same fan. Its monochrome shape is the cross alone |
 | cellular-1 … cellular-4 | U+1002D6–U+1002D9 | The mobile signal (0.3.55): 1–4 active bars, `wifi-bars.svg`, the drawing `wifi-1`…`wifi-4` show; the new names of those deprecated ids |
+| wifi-signal-wide-1-left, -right … wifi-signal-wide-4-left, -right | U+1002DA–U+1002E1 | Wi-Fi in two columns (0.3.56): the same fan, `wifi-signal.svg` at levels 1–4, drawn across two cells in the square box the two-column icons share, about twice the one-column size; one icon, two columns |
+| wifi-off-wide-left, wifi-off-wide-right | U+1002E2, U+1002E3 | Wi-Fi off in two columns (0.3.56): `wifi-off.svg`, the fan unlit and the red cross at the lower right. Its monochrome shape is the cross alone, so in the icon pen the left column is blank |
+| volume-wide-0-left, -right … volume-wide-3-left, -right | U+1002E4–U+1002EB | Volume in two columns (0.3.56): 0 is muted, `volume-muted.svg` (the speaker and a red cross), 1–3 `volume.svg` with that many waves lit; one icon, two columns |
 
-The hui badge, the hui mark and the wiretap icons each span two columns as
-two codepoints, written side by side; each draws its half of the one drawing
-in `hui.svg`, `hui-mark.svg`, `wiretap.svg` or `wiretap-off.svg` (ADR 0197).
+The hui badge, the hui mark, the wiretap icons and the two-column Wi-Fi and
+volume icons each span two columns as two codepoints, written side by side;
+each draws its half of the one drawing in `hui.svg`, `hui-mark.svg`,
+`wiretap.svg`, `wiretap-off.svg`, `wifi-signal.svg`, `wifi-off.svg`,
+`volume.svg` or `volume-muted.svg` (ADR 0197). The wide Wi-Fi and volume
+icons are the one-column drawings, unchanged, at a level and two columns:
+a spanning icon is fitted by its design box, not its ink, so every level
+sits in the same place.
 None is a wide character, so no width table changes. `wiretap-1` and
 `wiretap-1-off` are one column each, like the battery and phone icons.
 
@@ -128,7 +136,8 @@ pressed boxes: `chalk-minimise`, `chalk-minimise-pressed`,
 `slate-light-minimise`, `slate-light-minimise-pressed`. The mark is a short
 bar along the bottom of the box; pressed is drawn as ADR 0219's pressed
 boxes are. U+1002D1–U+1002D9 are the Wi-Fi signal, Wi-Fi off and cellular
-icons, and U+1002DA is the next free codepoint.
+icons, U+1002DA–U+1002EB the two-column Wi-Fi and volume icons, and
+U+1002EC is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph
 

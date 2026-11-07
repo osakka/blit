@@ -272,6 +272,24 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `cellular-2` | `U+1002D7` | `"\udbc0\uded7"` | 2 |
 | `cellular-3` | `U+1002D8` | `"\udbc0\uded8"` | 3 |
 | `cellular-4` | `U+1002D9` | `"\udbc0\uded9"` | 4 |
+| `wifi-signal-wide-1-left` | `U+1002DA` | `"\udbc0\udeda"` | 1 |
+| `wifi-signal-wide-1-right` | `U+1002DB` | `"\udbc0\udedb"` | 1 |
+| `wifi-signal-wide-2-left` | `U+1002DC` | `"\udbc0\udedc"` | 2 |
+| `wifi-signal-wide-2-right` | `U+1002DD` | `"\udbc0\udedd"` | 2 |
+| `wifi-signal-wide-3-left` | `U+1002DE` | `"\udbc0\udede"` | 3 |
+| `wifi-signal-wide-3-right` | `U+1002DF` | `"\udbc0\udedf"` | 3 |
+| `wifi-signal-wide-4-left` | `U+1002E0` | `"\udbc0\udee0"` | 4 |
+| `wifi-signal-wide-4-right` | `U+1002E1` | `"\udbc0\udee1"` | 4 |
+| `wifi-off-wide-left` | `U+1002E2` | `"\udbc0\udee2"` | 0 |
+| `wifi-off-wide-right` | `U+1002E3` | `"\udbc0\udee3"` | 0 |
+| `volume-wide-0-left` | `U+1002E4` | `"\udbc0\udee4"` | — |
+| `volume-wide-0-right` | `U+1002E5` | `"\udbc0\udee5"` | — |
+| `volume-wide-1-left` | `U+1002E6` | `"\udbc0\udee6"` | 1 |
+| `volume-wide-1-right` | `U+1002E7` | `"\udbc0\udee7"` | 1 |
+| `volume-wide-2-left` | `U+1002E8` | `"\udbc0\udee8"` | 2 |
+| `volume-wide-2-right` | `U+1002E9` | `"\udbc0\udee9"` | 2 |
+| `volume-wide-3-left` | `U+1002EA` | `"\udbc0\udeea"` | 3 |
+| `volume-wide-3-right` | `U+1002EB` | `"\udbc0\udeeb"` | 3 |
 
 ## Themed text additions
 
