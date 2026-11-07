@@ -110,16 +110,22 @@ desktop app** (a module and a window, the shape Boxer has), which:
    mouse, the bridge turns on pointer lock (`?7701`, ADR 0198) and forwards
    its raw deltas as relative motion, which is what first-person games need.
    Input reaches the game only while the pane has focus.
-4. **Resizes** with the pane: asks the stream for the new size
-   (`SPA_FORMAT_VIDEO_requested_size`), restarting gamescope with new
-   `-W/-H` only if that is refused.
+4. **Resizes** with the pane, and never restarts gamescope (a restart ends
+   Steam and the game): it asks the stream for the new size
+   (`SPA_FORMAT_VIDEO_requested_size`); if gamescope does not follow, the
+   stream keeps its size and Blit scales the picture into the pane through
+   the placement's cell size (`c=`/`r=`), aspect kept, as it scales any
+   picture. The bridge never resamples.
 5. **Ends** with its child: when gamescope exits, the bridge deletes the
    picture (`a=d`) and exits with gamescope's status.
 
-**Full screen** stays ADR 0206 (the display handed to gamescope on its own
-VT): one tool, two modes, the same gamescope. Going from a window to full
-screen is ending one and starting the other; a seamless switch is not part
-of this decision.
+**Moving, resizing, minimising and full screen** are the window's own, done
+by the desktop as for any window; the game keeps running through every one.
+Full screen from a window is the window filling the display (Hibr's Full
+Screen and Leave Full Screen), the same gamescope process, resized as in
+item 4. The display hand-over of ADR 0206 is a separate way to launch, for
+the lowest latency; it is chosen at launch, and nothing ends a running game
+to move between the two.
 
 **Blit's own work items**, needed by the bridge and useful beyond it:
 
@@ -252,7 +258,8 @@ regresses, a wlroots compositor fits behind the same bridge.
   itself pulls `libeis1`); which the `blit-gamescope` package depends on and
   which the user installs.
 - Latency measured end to end (key press to pixel) against ADR 0206.
-- Whether gamescope honours `requested_size` for live resizes.
+- Whether gamescope honours `requested_size` for live resizes (if not, Blit
+  scales; the game is never restarted).
 
 ## Evidence (planned)
 
