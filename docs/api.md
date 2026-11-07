@@ -1721,6 +1721,27 @@ A client that says version 2 in its hello may also be sent `HUD1 on` or
 `HUD1 off` lines, and may send STA1 status lines for the performance panel;
 see "Performance panel".
 
+A client that says version 3 may send frames whose pixels are already in
+GPU memory: `FRM3`, a 72-byte header with the DRM fourcc, the format
+modifier and up to four planes, their dmabuf descriptors (and optionally an
+acquire fence) in `SCM_RIGHTS` ([ADR 0223](adr/0223-frames-by-dmabuf.md),
+"Wire format, version 3"). Its hello is answered
+`OK dmabuf=1 fence=<0|1> formats=<list>` while the GPU compositor can
+import them -- the list names each importable format and its modifiers,
+`XR24/0/100000000000001,AR24/0,...` (fourcc, then `/` and each modifier in
+hex) -- and `OK dmabuf=0` otherwise (the CPU compositor, or EGL without
+`EGL_EXT_image_dma_buf_import`). Blit imports the planes as a texture,
+never maps them, and answers `RELEASE <id> <sequence>` when it no longer
+needs a frame's buffer: once a newer frame of the image has been drawn, or
+at once for a frame superseded, stale or never shown, and when the image
+is deleted. A frame it cannot import is refused `ERROR <id> ENOTSUP` and
+should be sent again by memfd; a malformed one is `EINVAL`. Each session's
+`frames.dmabuf` counts frames accepted, released and refused by reason
+(`unavailable`, `format`, `import`, `invalid`), and an image says
+`"dmabuf": true` while it shows one; `/v1/diagnostics` reports
+`graphics.frames.dmabuf`: whether it is offered (or why not), the formats,
+whether fences are waited on, the totals and the same counts per session.
+
 ## Diagnostics and screenshots
 
 `GET /v1/diagnostics/observation` is the canonical incident snapshot. It is
