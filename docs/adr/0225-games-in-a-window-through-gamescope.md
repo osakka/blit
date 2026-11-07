@@ -265,12 +265,28 @@ regresses, a wlroots compositor fits behind the same bridge.
 - Steam's overlay and a Proton game in the pane (Big Picture itself is
   verified, below).
 - Prerequisites on the target: `steam-installer` and i386 multiarch,
-  `xwayland`, and `libei1` (the EIS client library the bridge links; gamescope
-  itself pulls `libeis1`); which the `blit-gamescope` package depends on and
-  which the user installs.
+  `xwayland`, and `libei1` (the EIS client library Blit loads at run time for
+  the input route; gamescope itself pulls only `libeis1`, so `libei1` is not
+  on the mini PC yet); the bridge itself needs only `libpipewire-0.3-0`.
 - Latency measured end to end (key press to pixel) against ADR 0206.
-- Whether gamescope honours `requested_size` for live resizes (if not, Blit
-  scales; the game is never restarted).
+- **Live resize: settled 2026-11-07.** gamescope 3.16.22 honours
+  `requested_size` only to shrink (its `calculate_capture_size` scales the
+  capture down, never up): on the mini PC an 880x660 stream went to 587x440
+  for a 660x440 pane, and back to 880x660 when the pane grew to 1100x880,
+  where Blit scaled it into an 1100x836 placement, aspect kept. No frame was
+  refused while resizing, and gamescope was never restarted.
+
+## Evidence
+
+- **Phase 1 frames, 2026-11-07** (`src/blit_gamescope.c`,
+  `gamescope_bridge_gate`): on the mini PC against Blit 0.3.60, vkcube
+  (640x480) sent 703 dmabuf frames in 12 s and Steam Big Picture (1280x720)
+  2153 in about 39 s, both about 60 fps, none refused for import, every
+  buffer released, no memfd frames; no gamescope, Steam or vkcube process
+  left after the session ended. The gate covers the hello, the exact FRM3
+  bytes, release order, the `ENOTSUP` fallback to memfd, the INPUT answers
+  and the terminal reader, and draws memfd frames in a real Blit session.
+  Not yet: what the frames show on a placed pane, any input, a Proton game.
 
 ## Evidence (planned)
 
