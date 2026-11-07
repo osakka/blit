@@ -19,7 +19,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Screens | main screen with 1,000 lines of scrollback; alternate screen (47, 1047, 1049) |
 | Editing | insert/delete characters and lines, erase, repeat, scroll regions, left/right margins, VT400 rectangle operations including copy (DECCRA) |
 | Mouse | X10/normal/button/any-motion tracking; legacy, SGR and SGR-pixel encodings; wheel and horizontal wheel |
-| Keyboard | xterm modifier encoding, application cursor and keypad modes, Kitty keyboard protocol flags 1, 2 and 8 |
+| Keyboard | xterm modifier encoding, application cursor and keypad modes, Kitty keyboard protocol flags 1, 2, 4 and 8 |
 | Graphics | Kitty graphics protocol (direct transmission, RGB/RGBA/PNG, zlib, placements, in-place edits); Sixel |
 | Text | Unicode 15.1 widths, combining marks (16 per cell), colour emoji with Emoji 18.0 sequences, Arabic shaping, Nerd Fonts, Blit icons |
 | Other | hyperlinks (OSC 8), notifications (OSC 9, 777), clipboard write (OSC 52), pointer shapes (OSC 22), synchronized output (2026), bracketed paste, focus events, pointer lock (7701) |
@@ -171,11 +171,20 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 - **Bracketed paste:** text pasted through the API in `paste` mode arrives
   wrapped in `CSI 200~ … CSI 201~`.
 - **Focus:** `CSI I` / `CSI O` when the focused pane changes (mode 1004).
+  Input leaving Blit counts too: when Blit hands physical input to another
+  VT, the focused session gets `CSI O` after the releases of the keys and
+  buttons it held, and `CSI I` when Blit takes input back.
 - **Keyboard:** xterm encoding of modified keys (`CSI 1;5A` and so on),
   F1–F20, application cursor and keypad modes. The Kitty keyboard protocol
-  is supported with flags 1 (disambiguate), 2 (report event types) and 8
-  (report all keys as escape codes), with its push/pop/query stack per
-  screen.
+  is supported with flags 1 (disambiguate), 2 (report event types), 4
+  (report alternate keys) and 8 (report all keys as escape codes), with its
+  push/pop/query stack per screen. With flag 4 a key sent as an escape code
+  is `CSI key:shifted:base ; modifiers u`: the shifted key only while Shift
+  is held, and the base-layout key, the key at the same physical position
+  on a US PC-101 layout (Blit reads evdev codes, which name positions); each
+  is left out when it equals the key, with an empty shifted field kept
+  before a base (`CSI 122::121;1u`). Functional keys have no alternates;
+  text typed without modifiers stays text unless flag 8 is set.
 - **Pointer lock (mode 7701, [ADR 0198](adr/0198-pointer-lock.md)):** a game
   or emulator in the focused pane can capture the mouse and receive raw
   movement as `CSI < b;dx;dy M`. Blit releases it when the pane loses focus,

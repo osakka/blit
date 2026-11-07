@@ -37,6 +37,9 @@ static struct {
     int watchdog_timeout_ms;
 } vt = { .fd = -1, .lock_fd = -1, .stop = -1, .watchdog_timeout_ms = 10000 };
 static volatile sig_atomic_t release_pending, acquire_pending;
+/* BLIT_TEST_VT_SIGNALS: SIGUSR1/SIGUSR2 request a release/acquire with no
+   VT owned, so a gate can drive the input half of the hand-over. */
+static int test_signals;
 
 /* What the main loop is doing, in a page shared with the recovery process,
    so a watchdog kill says where the loop was stuck rather than only that it
@@ -328,11 +331,29 @@ int blit_vt_owned(void) { return vt.fd >= 0; }
 int blit_vt_active(void) { return vt.fd < 0 || vt.active; }
 int blit_vt_number(void) { return vt.fd >= 0 ? vt.number : 0; }
 
+int blit_vt_test_signals(void)
+{
+    struct sigaction action;
+    if (vt.fd >= 0) return -1;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = vt_signal;
+    sigemptyset(&action.sa_mask);
+    if (sigaction(SIGUSR1, &action, NULL) < 0 ||
+        sigaction(SIGUSR2, &action, NULL) < 0) return -1;
+    test_signals = 1;
+    return 0;
+}
+
 int blit_vt_pending(void)
 {
     int status;
     pid_t reaped;
-    if (vt.fd < 0) return 0;
+    if (vt.fd < 0) {
+        if (!test_signals) return 0;
+        if (release_pending) { release_pending = 0; return 1; }
+        if (acquire_pending) { acquire_pending = 0; return 2; }
+        return 0;
+    }
     if (vt_now_ms() - vt.heartbeat_ms >= 1000) {
         int mode;
         if (ioctl(vt.fd, KDGKBMODE, &mode) < 0 ||

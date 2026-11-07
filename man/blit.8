@@ -384,6 +384,15 @@ With
 composes the output on this connector with the CPU while the GPU composes
 the others, to test that dmabuf frames are then not offered (ADR 0223).
 .TP
+.B BLIT_TEST_VT_SIGNALS
+With
+.BR BLIT_TEST_MODE=1
+and no VT owned,
+.B 1
+makes SIGUSR1 and SIGUSR2 run the input half of a console release and
+acquire (key and button releases, focus reports) without a console, to test
+input hand-over.
+.TP
 .B BLIT_KMS_MODESET
 When set, performs a full mode set on every frame.
 .TP

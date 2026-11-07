@@ -21,7 +21,10 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
   Dir.mkdir(File.join(work,'input'))
   File.write(File.join(work,'input/event0'),'')
   File.write(File.join(work,'input/event0.identity'),"bustype=3\nvendor=1234\nproduct=5678\nversion=1\nphys=usb-kitty-test/input0\nname=Kitty fixture\nkinds=keyboard\ncapabilities=keys\n")
-  pid=spawn(TestProfile.environment.merge('BLIT_INPUT_ROOT'=>File.join(work,'input')),
+  # BLIT_TEST_VT_SIGNALS: SIGUSR1/SIGUSR2 drive the console release/acquire
+  # path with no VT, so focus on input hand-over can be checked.
+  pid=spawn(TestProfile.environment.merge('BLIT_INPUT_ROOT'=>File.join(work,'input'),
+    'BLIT_TEST_MODE'=>'1','BLIT_TEST_VT_SIGNALS'=>'1'),
     TestProfile.binary,base.port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
   begin
     Timeout.timeout(8){loop{begin;req.call('GET','/v1/version');break;rescue Errno::ECONNREFUSED;sleep 0.02;end}}
@@ -58,7 +61,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
       serial+=1
       req.call('POST',path+'/input',{mode:'raw',data:JSON.generate({id:serial,out:output})+"\n"})
       await_title.call("armed-#{serial}")
-      events.each{|c,v,d|key.call(c,v,d)}
+      events.each{|c,v,d| c.respond_to?(:call) ? c.call : key.call(c,v,d)}
       actual=Base64.strict_decode64(await_title.call("result-#{serial}:").split(':',2)[1]).unpack1('H*')
       raise "#{name}: expected #{expected.unpack1('H*')}, got #{actual}" unless actual==expected.unpack1('H*')
     end
@@ -66,7 +69,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('legacy Super silent','',[[125,1],[125,0]],'')
     check.call('legacy text','',[[30,1],[30,0]],'a')
     check.call('initial query',esc+'?u',[],esc+'?0u')
-    check.call('masked flags',esc+'>31u'+esc+'?u',[],esc+'?11u')
+    check.call('masked flags',esc+'>31u'+esc+'?u',[],esc+'?15u')
     check.call('pop restores zero',esc+'<u'+esc+'?u',[],esc+'?0u')
     check.call('lone left Super',esc+'>9u',[[125,1]],esc+'57444;9u')
     check.call('Super+a','',[[30,1],[30,0],[125,0]],esc+'97;9u')
@@ -95,6 +98,21 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
       esc+'57358;65u'+esc+'97;65u'+esc+'57358;1u')
     check.call('event types without all-key mode',esc+'=2u',[[103,1],[103,2],[103,0]],
       esc+'A'+esc+'1;1:2A'+esc+'1;1:3A')
+    # Flag 4, report alternate keys: key:shifted:base, the shifted key only
+    # with Shift, each left out when it equals the key.
+    check.call('flag 4 query',esc+'=12u'+esc+'?u',[],esc+'?12u')
+    check.call('flag 4 US key, base omitted','',[[30,1],[30,0]],esc+'97;1u')
+    check.call('flag 4 shifted letter','',[[42,1],[30,1],[30,0],[42,0]],esc+'57441;2u'+esc+'97:65;2u')
+    check.call('flag 4 shifted digit','',[[42,1],[2,1],[2,0],[42,0]],esc+'57441;2u'+esc+'49:33;2u')
+    check.call('flag 4 shifted space has no alternates','',[[42,1],[57,1],[57,0],[42,0]],esc+'57441;2u'+esc+'32;2u')
+    check.call('flag 4 functional keys unchanged','',[[59,1],[59,0],[28,1],[28,0],[42,1],[103,1],[103,0],[42,0]],
+      esc+'1;1P'+esc+'13;1u'+esc+'57441;2u'+esc+'1;2A')
+    check.call('flag 4 with event types',esc+'=14u',[[42,1],[30,1],[30,0],[42,0]],
+      esc+'57441;2u'+esc+'97:65;2u'+esc+'97:65;2:3u'+esc+'57441;1:3u')
+    check.call('flag 4 with disambiguate, Ctrl+Shift',esc+'=5u',[[29,1],[42,1],[30,1],[30,0],[42,0],[29,0]],esc+'97:65;6u')
+    check.call('flag 4 alone stays legacy',esc+'=4u',[[30,1],[30,0],[29,1],[30,1],[30,0],[29,0]],"a\x01")
+    check.call('flag 4 push/pop',esc+'=0u'+esc+'>4u'+esc+'?u'+esc+'>13u'+esc+'?u'+esc+'<u'+esc+'?u'+esc+'<u'+esc+'?u',[],
+      esc+'?4u'+esc+'?13u'+esc+'?4u'+esc+'?0u')
     check.call('parameterised replies do not loop',esc+'=9u'+esc+'?9u',[],'')
     fixture=nil
     Timeout.timeout(5){loop{fixture=req.call('GET','/v1/input/devices')['devices'].find{|d|d['name']=='Kitty fixture'};break if fixture;sleep 0.05}}
@@ -102,6 +120,27 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('fixture NumLock baseline','',[[69,1,source],[69,0,source]],esc+'57360;1u')
     check.call('modifier state isolated per keyboard','',[[125,1],[30,1,source],[30,0,source],[125,0]],
       esc+'57444;9u'+esc+'97;1u')
+    # Focus on input hand-over: the console release path reports focus out
+    # (after its synthetic key releases), the acquire path focus in. The
+    # releases themselves are not seen here: they walk the claimed evdev
+    # keyboards, and a fixture without evdev ioctls is never claimed.
+    req.call('PATCH',path,{focused:true},{'If-Match'=>req.call('GET',path)['revision'].to_s})
+    raise 'gate session is not focused' unless req.call('GET',path)['focused']==true
+    usr=lambda{|sig| lambda{Process.kill(sig,pid);sleep 0.1}}
+    check.call('focus out on release',esc+'?1004h'+esc+'=10u',[[usr.call('USR1')]],esc+'O')
+    check.call('focus in on acquire','',[[usr.call('USR2')]],esc+'I')
+    check.call('no focus report without 1004',esc+'?1004l',[[usr.call('USR1')],[usr.call('USR2')]],'')
+    check.call('restore flags 9',esc+'=9u',[],'')
+    # Flag 4 on a non-US layout: the key is the layout's, the base key the
+    # US key at the same position.
+    revision=req.call('GET',"/v1/input/devices/#{source}")['revision']
+    req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{keymap:{'base'=>'us','keys'=>{
+      '21'=>['z','Z','',''],'12'=>['ß','?','\\','']}}}},{'If-Match'=>revision.to_s})
+    check.call('flag 4 layout base key',esc+'=12u',[[21,1,source],[21,0,source],[12,1,source],[12,0,source]],
+      esc+'122::121;1u'+esc+'223::45;1u')
+    check.call('flag 4 layout shifted and base','',[[42,1,source],[21,1,source],[21,0,source],[12,1,source],[12,0,source],[42,0,source]],
+      esc+'57441;2u'+esc+'122:90:121;2u'+esc+'223:63:45;2u')
+    check.call('flag 4 layout off',esc+'=9u',[[21,1,source],[21,0,source]],esc+'122;1u')
     revision=req.call('GET',"/v1/input/devices/#{source}")['revision']
     req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{modifiers:{'58'=>'meta','125'=>'none'}}},{'If-Match'=>revision.to_s})
     check.call('remapped Super and disabled physical Meta','',[[58,1,source],[30,1,source],[30,0,source],[58,0,source],
@@ -116,7 +155,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     raise 'keyboard state leaked between sessions' unless other.dig('terminal_capabilities','keyboard','active_flags')==0 &&
       req.call('GET',path).dig('terminal_capabilities','keyboard','active_flags')==9
     req.call('DELETE',"/v1/terminal-sessions/#{other['id']}")
-    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift legacy=preserved"
+    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 focus_handover=out_in legacy=preserved"
   ensure
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil

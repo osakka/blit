@@ -127,7 +127,8 @@ of this decision.
   codepoints, and the bridge would have to guess evdev codes back (lossy on
   non-US layouts). Blit reads evdev itself, so it adds the base-layout key to
   its Kitty keyboard reports (flag 4, alternate keys) so the bridge maps keys
-  exactly.
+  exactly. *Done in 0.3.61*, with focus reports (`CSI O`/`CSI I`, mode 1004)
+  when Blit hands physical input to another VT and takes it back.
 - **Gamepads: Steam owns them while a game runs.** EIS has no gamepad and
   uinput needs root, so the pads are not forwarded. Steam Input and SDL read
   them directly. So that a pad does not drive the desktop and the game at
