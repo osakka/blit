@@ -1,5 +1,28 @@
 # Verification status
 
+## 2026-11-07: 0.3.56 Wi-Fi and sound in two columns; one grey for the status icons
+
+- **Two-column forms**, alongside the one-column ones (unchanged, nothing
+  deprecated): `wifi-signal-wide-1` to `-4` (U+1002DA-1002E1), `wifi-off-wide`
+  (U+1002E2-1002E3), `volume-wide-0` muted (U+1002E4-1002E5) and
+  `volume-wide-1` to `-3` (U+1002E6-1002EB), each a `-left`/`-right` pair. Next
+  free is U+1002EC. They reuse the approved drawings (no new SVGs); a two-column
+  icon is fitted by its design box, so every level keeps its place. At 22 px the
+  fan is 18 by 15 px against 11 by 9 for one column. Levels differ by shape:
+  Wi-Fi 42.9% to 100%, volume 16.7% to 36.8% at 22 px
+  (`font_icon_shape_gate`, minimum 15%).
+- **One grey, #7d8796,** for the speaker and battery bodies, the unlit arcs,
+  bars and battery segments, and the off telephones: 3.08:1 on the light bar
+  #ececf0 and 4.25:1 on the dark #24242a. It replaces #c9d1d9 (1.31:1 on the
+  light bar) and #3e526b (1.93:1 on the dark). Only colours changed: a
+  glyph-by-glyph comparison shows identical outlines, boxes, layers and mono
+  shapes. `font_icon_colour_gate`'s default hash is re-pinned for that.
+- Shown to and approved by the owner from real-server renders on light and dark
+  bars at 22 and 16 px.
+- **Suites, glyph-only set** (no `src/` change since 0.3.55): `font` and
+  `schema` 56 pass, 0 fail; GLES `renderer` 81 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+
 ## 2026-11-06: 0.3.55 Wi-Fi as a fan; the bars become cellular
 
 - **Wi-Fi fan**, one column: `wifi-signal-1` to `-4` (U+1002D1-1002D4), a dot
