@@ -120,8 +120,63 @@ class Client:
             return b''
 
 
+def start_session(work):
+    """A session that writes its environment, so the gate has its frame
+    socket and token."""
+    script = os.path.join(work, 'run.sh')
+    with open(script, 'w') as out:
+        out.write("env > %s/env.part && mv %s/env.part %s/env; printf '\\033[?25l'; "
+                  "while :; do sleep 1; done\n" % (work, work, work))
+    session = json.loads(urllib.request.urlopen(urllib.request.Request(
+        BASE + '/v1/terminal-sessions', method='POST',
+        data=json.dumps({'command': '/bin/sh', 'arguments': [script], 'display_id': 'display-1',
+                         'surface': {'width': 40, 'height': 12}}).encode(),
+        headers={'Content-Type': 'application/json'}), timeout=10).read())['id']
+    wait_for(lambda: os.path.exists(os.path.join(work, 'env')), 'the session did not start')
+    child = dict(line.rstrip('\n').split('=', 1) for line in open(os.path.join(work, 'env')) if '=' in line)
+    return session, child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN']
+
+
+def mixed():
+    """All or nothing: two displays, the GPU composing one and the CPU the
+    other (BLIT_TEST_GLES_CPU_CONNECTOR, test mode). A picture on the CPU
+    one would be accepted and never shown, so dmabufs are not offered at
+    all and FRM3 is ENOTSUP -- the outputs are checked before EGL is."""
+    work = tempfile.mkdtemp(prefix='blit-dmabuf-gate-mixed-')
+    with open(os.environ['BLIT_DRM_MOCK_STATE'], 'w') as out:
+        out.write('2 0 0 0\n1 1024 768\n2 1024 768\n')
+    env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+               BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
+               BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'), BLIT_TEST_MODE='1',
+               BLIT_TEST_GLES_CPU_CONNECTOR='2')
+    server = subprocess.Popen([os.environ.get('BLIT_GATE_BINARY', os.path.join(ROOT, 'build/blit/blit-server')),
+                               str(PORT)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        wait_for(lambda: api('GET', '/v1/version'), 'the mixed server did not start', 15)
+        _, name, token = start_session(work)
+        actives = wait_for(lambda: (lambda o: sorted(x['compositor']['active'] for x in o)
+                                    if len(o) == 2 else None)(api('GET', '/v1/diagnostics')['render']['outputs']),
+                           'two outputs did not come up')
+        check(actives == ['cpu', 'gles'], 'compositors %s, expected one cpu and one gles' % actives)
+        dmabuf = api('GET', '/v1/diagnostics')['graphics']['frames']['dmabuf']
+        check(not dmabuf['advertised'] and dmabuf['unavailable'] == 'an output is composed by the CPU',
+              'a GPU/CPU mix offers dmabufs: %s' % dmabuf)
+        v3 = Client(name, token, 3)
+        check(v3.hello == b'OK dmabuf=0\n', 'a mixed compositor answered %r' % v3.hello)
+        v3.send(frm3(6, 1, 64, 64), [memfd(b'\0' * 64 * 64 * 4)])
+        check(v3.reply().startswith(b'ERROR 6 ENOTSUP'), 'FRM3 under a GPU/CPU mix was not ENOTSUP')
+        return 'mixed=cpu+gles:not_offered+ENOTSUP'
+    finally:
+        server.terminate()
+        try:
+            server.wait(5)
+        except subprocess.TimeoutExpired:
+            server.kill()
+
+
 def main():
     backend = os.environ.get('BLIT_GATE_BACKEND', 'native')
+    mixed_result = 'mixed=gles_only'
     work = tempfile.mkdtemp(prefix='blit-dmabuf-gate-')
     env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
@@ -130,18 +185,7 @@ def main():
                                str(PORT)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_for(lambda: api('GET', '/v1/version'), 'the server did not start', 15)
-        script = os.path.join(work, 'run.sh')
-        with open(script, 'w') as out:
-            out.write("env > %s/env.part && mv %s/env.part %s/env; printf '\\033[?25l'; "
-                      "while :; do sleep 1; done\n" % (work, work, work))
-        session = json.loads(urllib.request.urlopen(urllib.request.Request(
-            BASE + '/v1/terminal-sessions', method='POST',
-            data=json.dumps({'command': '/bin/sh', 'arguments': [script], 'display_id': 'display-1',
-                             'surface': {'width': 40, 'height': 12}}).encode(),
-            headers={'Content-Type': 'application/json'}), timeout=10).read())['id']
-        wait_for(lambda: os.path.exists(os.path.join(work, 'env')), 'the session did not start')
-        child = dict(line.rstrip('\n').split('=', 1) for line in open(os.path.join(work, 'env')) if '=' in line)
-        name, token = child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN']
+        session, name, token = start_session(work)
 
         # What the compositor says it can import decides the hello's answer.
         outputs = wait_for(lambda: api('GET', '/v1/diagnostics')['render']['outputs'],
@@ -222,16 +266,19 @@ def main():
         mine = [s for s in dmabuf['sessions'] if s['session_id'] == session]
         check(len(mine) == 1 and mine[0]['refused'] == d['refused'] and dmabuf['refused'] >= 14 and
               dmabuf['accepted'] == 0, 'diagnostics dmabuf %s' % dmabuf)
-        print('FRAME_DMABUF_PASS compositor=%s advertised=false unavailable="%s" hello_v1_v2=OK '
-              'hello_v3="OK dmabuf=0" frm3_from_v1=EINVAL malformed=EINVALx%d id0=EINVAL oversized=EFBIG '
-              'unimportable=ENOTSUPx3 memfd_on_v3=drawn counts=session+diagnostics'
-              % (compositor, dmabuf['unavailable'], len(malformed)))
+        summary = ('FRAME_DMABUF_PASS compositor=%s advertised=false unavailable="%s" hello_v1_v2=OK '
+                   'hello_v3="OK dmabuf=0" frm3_from_v1=EINVAL malformed=EINVALx%d id0=EINVAL oversized=EFBIG '
+                   'unimportable=ENOTSUPx3 memfd_on_v3=drawn counts=session+diagnostics'
+                   % (compositor, dmabuf['unavailable'], len(malformed)))
     finally:
         server.terminate()
         try:
             server.wait(5)
         except subprocess.TimeoutExpired:
             server.kill()
+    if backend == 'gles':
+        mixed_result = mixed()
+    print('%s %s' % (summary, mixed_result))
 
 
 if __name__ == '__main__':

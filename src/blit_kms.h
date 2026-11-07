@@ -300,5 +300,7 @@ unsigned int blit_kms_dmabuf_import(BlitKms *kms, int width, int height,
                                     const uint32_t *pitches, int fence_fd,
                                     void **image, char *error, size_t capacity);
 void blit_kms_dmabuf_destroy(BlitKms *kms, unsigned int texture, void *image);
+/* Acquire fences the GPU was told to wait on. */
+unsigned long long blit_kms_dmabuf_fences_waited(const BlitKms *kms);
 
 #endif

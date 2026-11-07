@@ -4339,10 +4339,12 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
         const char *formats = blit_kms_dmabuf_formats(runtime->kms, &fences, &unavailable);
         size_t at = (size_t)snprintf(dmabuf, sizeof(dmabuf),
             "{\"advertised\":%s,\"unavailable\":\"%s\",\"fences\":%s,\"formats\":\"%s\","
-            "\"accepted\":%llu,\"refused\":%llu,\"released\":%llu,\"sessions\":[",
+            "\"accepted\":%llu,\"refused\":%llu,\"released\":%llu,\"fences_waited\":%llu,"
+            "\"sessions\":[",
             formats != NULL ? "true" : "false", formats != NULL ? "" : unavailable,
             fences ? "true" : "false", formats != NULL ? formats : "",
-            runtime->dmabuf_accepted, runtime->dmabuf_refused, runtime->dmabuf_released);
+            runtime->dmabuf_accepted, runtime->dmabuf_refused, runtime->dmabuf_released,
+            blit_kms_dmabuf_fences_waited(runtime->kms));
         for (index = 0; index < BLIT_MAX_SESSIONS && at < sizeof(dmabuf); ++index) {
             const BlitSession *s = &runtime->sessions[index];
             if (!s->used || (s->dmabuf_accepted == 0 && s->dmabuf_released == 0 &&

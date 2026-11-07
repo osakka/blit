@@ -109,6 +109,7 @@ struct BlitGles {
     PFNEGLWAITSYNCKHRPROC WaitSync;
     PFNGLEGLIMAGETARGETTEXTURE2DOESPROC ImageTargetTexture2D;
     char dmabuf_unavailable[96];
+    unsigned long long fences_waited;  /* acquire fences handed to the GPU */
 
     PFNEGLGETPROCADDRESSPROC GetProcAddress;
     PFNEGLGETPLATFORMDISPLAYPROC GetPlatformDisplay;
@@ -1404,6 +1405,11 @@ void blit_gles_texture_delete(BlitGles *gles, BlitGlesTexture texture)
     gles->batch_texture = (GLuint)-1;
 }
 
+unsigned long long blit_gles_dmabuf_fences_waited(const BlitGles *gles)
+{
+    return gles != NULL ? gles->fences_waited : 0ULL;
+}
+
 const char *blit_gles_dmabuf_formats(const BlitGles *gles, int *fences,
                                      const char **unavailable)
 {
@@ -1510,7 +1516,7 @@ BlitGlesTexture blit_gles_dmabuf_import(BlitGles *gles, const BlitGlesDmabuf *d,
         if (sync == EGL_NO_SYNC_KHR) {
             close(d->fence_fd);
         } else {
-            gles->WaitSync(gles->display, sync, 0);
+            if (gles->WaitSync(gles->display, sync, 0)) ++gles->fences_waited;
             gles->DestroySync(gles->display, sync);
         }
     }
