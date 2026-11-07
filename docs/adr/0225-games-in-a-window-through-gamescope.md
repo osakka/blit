@@ -139,6 +139,32 @@ of this decision.
 - **The cursor.** gamescope's stream has no cursor, so Blit's own pointer is
   shown over the picture; Steam's hover cursor shapes are not reproduced.
 
+**One program, one frame output, one input parser.** `blit-gamescope` sends
+FRM3 frames on whatever `BLIT_FRAME_SOCKET`/`BLIT_FRAME_TOKEN` its
+environment names, and reads Kitty keyboard, SGR-Pixels and `?7701`
+sequences on its standard input, exactly what a PTY delivers; its output is
+gamescope's EIS. Who sets that environment decides the layer, not the bridge:
+in a plain Blit session Blit sets the socket and the PTY carries the keys; as
+a Hibr desktop app the module launches it with a frame socket served by the
+console (relayed through `cn_image`, `hold` and Blit) and writes its key and
+mouse events to the bridge's input as the same sequences. One wire format per
+stream in both places, and no second code path in the bridge.
+
+**Phases.** (1) The bridge standalone in a plain Blit session on the owner's
+machine: Steam playable in a pane, every Blit-side piece proven and measured
+(`graphics.frames.dmabuf`, no uploads, presents per second, key-to-pixel
+latency against ADR 0206). (2) The Hibr desktop app, once Hibr's key phases
+(#485), its dmabuf relay and the console's app-facing frame socket exist.
+Steamer's launch instructions follow phase 2.
+
+**The mouse: absolute by default, captured on request.** gamescope's stream
+has no cursor and nothing outside gamescope knows when a game grabs the
+mouse, so the bridge starts in absolute mode (Blit's own cursor over the
+picture, right for Steam's menus) and captures the mouse (pointer lock,
+relative motion) on a click in the pane or the toggle `Ctrl+Alt+M`; it lets
+go on the same toggle, on focus loss (`CSI O`) and when the game exits. This
+is the convention of virtual machines and remote desktops.
+
 **Why a desktop app, not a program in a Terminal window.** One source of
 truth for each stream. Frames: ADR 0202 made Hibr's console (`cn_image`) the
 one writer of every picture; a desktop app hands its frames to that writer,
@@ -189,12 +215,12 @@ regresses, a wlroots compositor fits behind the same bridge.
 
 ## Open questions, to settle before this is accepted
 
-- **Issue #1984 with Steam:** run `gamescope --backend headless -e -- steam
-  -gamepadui` on the mini PC and check the stream is not empty or
-  pointer-only. If it is, try `--prefer-vk-device` and, failing that, the
-  wlroots fallback.
-- Steam itself under headless gamescope (`-e -- steam -gamepadui`), not only
-  vkcube: the overlay, Big Picture, and a Proton game, on the mini PC.
+- **Issue #1984 with Steam: settled 2026-11-07.** `gamescope --backend
+  headless -W 1280 -H 720 -r 60 -e -- steam -gamepadui` on the mini PC: 120 of
+  120 frames live (Steam's Big Picture sign-in screen, clock and background
+  moving), also as LINEAR dmabufs; no empty or pointer-only stream.
+- Steam's overlay and a Proton game in the pane (Big Picture itself is
+  verified, below).
 - Prerequisites on the target: `steam-installer` and i386 multiarch,
   `xwayland`, and `libei1` (the EIS client library the bridge links; gamescope
   itself pulls `libeis1`); which the `blit-gamescope` package depends on and
