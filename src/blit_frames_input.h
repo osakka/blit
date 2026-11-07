@@ -542,7 +542,8 @@ static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int directi
 /* The pointer over the image's drawn rectangle, as a position in the
    compositor's pointer region (its device's first region, which is its own
    coordinate space whatever size of stream it sends), or in the image's
-   latest frame when the device has no region: wherever the picture is
+   latest frame when the device has no bounded region (gamescope offers one
+   INT32_MAX square, meaning its own output pixels): wherever the picture is
    placed and however large it is drawn, through the same placement and draw
    rectangle the compositors use. */
 static void frame_input_pointer(BlitRuntime *runtime)
@@ -582,7 +583,8 @@ static void frame_input_pointer(BlitRuntime *runtime)
             fx = (d->src_x + (double)(px - d->x) * d->src_w / d->width) / image->width;
             fy = (d->src_y + (double)(py - d->y) * d->src_h / d->height) / image->height;
             r = blit_ei.device_get_region(device, 0);
-            if (r != NULL && blit_ei.region_get_width(r) > 0 && blit_ei.region_get_height(r) > 0) {
+            if (r != NULL && blit_ei.region_get_width(r) > 0 && blit_ei.region_get_height(r) > 0 &&
+                blit_ei.region_get_width(r) < INT32_MAX && blit_ei.region_get_height(r) < INT32_MAX) {
                 rx = blit_ei.region_get_x(r);
                 ry = blit_ei.region_get_y(r);
                 rw = blit_ei.region_get_width(r);

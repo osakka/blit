@@ -1772,7 +1772,8 @@ compositor expects it rather than as terminal escapes
   as an absolute position while it is over the image's drawn rectangle,
   scaled to the compositor's pointer region (the EIS device region's offset
   and size, or the image's latest frame size when the device reports no
-  region), wherever and however large the picture is placed; and relative motion instead while the session holds
+  bounded region: gamescope offers one 2147483647 pixels square, meaning
+  its own output's pixels, which its stream matches), wherever and however large the picture is placed; and relative motion instead while the session holds
   pointer lock (`?7701`). Keys still reach the session as before, so the
   desktop's own keys (Release Pointer, Leave Full Screen) keep working.
 - When the route stops being live (`INPUT off`, the session losing focus,
