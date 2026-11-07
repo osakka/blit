@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-07: 0.3.62 input to a compositor's EIS socket (ADR 0225, Blit's half)
+
+- **The frame channel's INPUT request** (`docs/api.md`): a version-3 client
+  names a compositor's EIS socket and an image (`INPUT eis <path> <id>`), then
+  says `INPUT on`/`off` as its window gains and loses the keyboard. Blit loads
+  libei at run time, connects only to a socket owned by the client's uid
+  (checked again by `SO_PEERCRED` on the connected socket), and, while the
+  route is on, its session focused and the console Blit's, sends evdev key
+  press and release (no repeats), buttons, scroll, the absolute pointer over
+  the picture's drawn rectangle mapped into the compositor's pointer region,
+  and relative motion under pointer lock. Every end of the route releases what
+  was pressed through it; a compositor that refuses or goes is reported
+  `ERROR INPUT ENOENT` on the channel. Sessions report `frames.input`.
+- **The `blit-gamescope` bridge** (phase 1, frames; ADR 0225) is in the tree,
+  not yet packaged.
+- **Gated against a stand-in libei only** (`frame_input_gate`): request
+  answers, states, key order, release on every end, absolute mapping into an
+  880x440 region at two placements and after a resize, relative motion, the
+  compositor dropped. `frame_input_eis_gate` (a real libeis receiver) has not
+  run: no host has both libeis and a build toolchain. The real check is the
+  live test with gamescope on the mini PC.
+- **Suites, full set:** `all` 184 pass, 12 skip, 0 fail (a first run failed
+  `mask_gate` once on an idle-frame count, passing 3 of 3 alone and in the
+  rerun; Gitea #153); GLES `renderer` 81 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes. Deployed and verified on 10.54 and 10.52.
+
 ## 2026-11-07: 0.3.61 Kitty flag 4 and focus reports on input hand-over (ADR 0225)
 
 - **Kitty keyboard flag 4 (report alternate keys):** `CSI key:shifted:base ;
