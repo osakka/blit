@@ -1,5 +1,24 @@
 # Verification status
 
+## 2026-11-07: 0.3.57 the classic telephone in two columns
+
+- **Two-column classic telephone** for longwire's Classic phone style,
+  alongside the one-column ids (unchanged): `phone-classic-wide-off`
+  U+1002EC-1002ED, `-wait` U+1002EE-1002EF, `-on` U+1002F0-1002F1, `-ring`
+  U+1002F2-1002F3, each a `-left`/`-right` pair reusing the one-column drawing.
+  Next free is U+1002F4. About 16 by 16 px at 22 px against 9 by 9 for one
+  column.
+- **States differ by shape** in the black, white and auto pens: 21.8% (on
+  against ring) to 59.7% at 22 px, 19.5% to 57.4% at 16 px
+  (`font_icon_shape_gate`, minimums 15% and 10%). Shown to and approved by the
+  owner from real-server renders; the dashed "wait" reads speckled, as in one
+  column.
+- **Icon font** 322,932 to 333,552 bytes; rebuilt byte-for-byte first, no
+  existing glyph changed.
+- **Suites, glyph-only set** (no `src/` change since 0.3.56): `font` and
+  `schema` 56 pass, 0 fail; GLES `renderer` 81 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+
 ## 2026-11-07: 0.3.56 Wi-Fi and sound in two columns; one grey for the status icons
 
 - **Two-column forms**, alongside the one-column ones (unchanged, nothing
