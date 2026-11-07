@@ -301,9 +301,15 @@ regresses, a wlroots compositor fits behind the same bridge.
   (`BLIT_TEST_VT_SIGNALS`), every key and button released and emulation
   stopped on `INPUT off`, a focus change, the console given up, the channel
   closed and the image deleted; wheel notches as discrete scroll; the
-  absolute pointer scaled exactly at a 160x80 and a 320x160 placement and
-  after resizing to 64x32, nothing outside the picture; relative motion
-  under `?7701` summed exactly (70,-30). The same cases against libeis
+  absolute pointer scaled exactly to the compositor's 880x440 region (not
+  the 320x160 frames) at a 160x80 and a 320x160 placement and after
+  resizing to 64x32, the picture's far corner reaching the region's,
+  nothing outside the picture; relative motion under `?7701` summed exactly
+  (70,-30); the compositor dropping a live route answered
+  `ERROR INPUT ENOENT` at once and the route ended. Decided the same day:
+  an image without a frame yet may be named, the pointer is scaled to the
+  EIS region (a stream gamescope has shrunk still maps to its whole
+  output), and a later refusal or drop is told on the wire. The same cases against libeis
   (`tools/tests/eis_receiver.c`, `frame_input_eis_gate`) need libei1 and
   libeis1 and are not run yet: they are for the Debian 13 test host.
   The bridge's half (`INPUT eis` after the hello, `INPUT on` on `OK input`)

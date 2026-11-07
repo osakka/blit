@@ -100,7 +100,7 @@ typedef struct {
 typedef struct BlitFrameInput BlitFrameInput;
 
 struct BlitFrameInput {
-    struct ei *ei;          /* NULL once the compositor has gone */
+    struct ei *ei;          /* the libei context, for the route's life */
     int fd;                 /* ei_get_fd, polled in Blit's loop */
     unsigned int image_id;
     int on;                 /* INPUT on / INPUT off */
@@ -321,8 +321,9 @@ static void frame_input_forget_devices(BlitFrameInput *in)
     in->region[0] = '\0';
 }
 
-/* The compositor closed the connection or refused us: the route stays (one
-   per channel) but sends nothing more. */
+/* The compositor refused us in its handshake or closed the connection: the
+   client is told `ERROR INPUT ENOENT` now and the route ends (nothing held
+   can be released to a compositor that has gone). */
 static void frame_input_disconnected(BlitRuntime *runtime, BlitFrameClient *client,
                                      const char *why)
 {
@@ -330,9 +331,11 @@ static void frame_input_disconnected(BlitRuntime *runtime, BlitFrameClient *clie
     frame_input_forget_devices(in);
     if (in->ei != NULL)
         blit_ei.unref(in->ei);
-    in->ei = NULL;
-    in->fd = -1;
+    free(in);
+    client->input = NULL;
+    --frame_input_routes;
     frame_input_error(find_session_id(runtime, client->session_id), why);
+    frame_reply(client->fd, "ERROR INPUT ENOENT\n");
 }
 
 /* The channel closed: the route ends with it. */
@@ -420,7 +423,7 @@ static void frame_input_dispatch(BlitRuntime *runtime, BlitFrameClient *client)
         case BLIT_EI_EVENT_DISCONNECT:
             blit_ei.event_unref(event);
             frame_input_disconnected(runtime, client, in->connected ? "eis-disconnected" : "eis-refused");
-            return;
+            return;  /* the route is gone */
         case BLIT_EI_EVENT_SEAT_ADDED:
             blit_ei.seat_bind_capabilities(blit_ei.event_get_seat(event),
                                            (int)BLIT_EI_CAP_POINTER,
@@ -536,9 +539,12 @@ static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int directi
     }
 }
 
-/* The pointer over the image's drawn rectangle, as a position in its latest
-   frame: wherever the picture is placed and however large it is drawn, the
-   same placement and draw rectangle the compositors use. */
+/* The pointer over the image's drawn rectangle, as a position in the
+   compositor's pointer region (its device's first region, which is its own
+   coordinate space whatever size of stream it sends), or in the image's
+   latest frame when the device has no region: wherever the picture is
+   placed and however large it is drawn, through the same placement and draw
+   rectangle the compositors use. */
 static void frame_input_pointer(BlitRuntime *runtime)
 {
     int i;
@@ -567,20 +573,22 @@ static void frame_input_pointer(BlitRuntime *runtime)
         count = blit_graphics_collect(image, 1, draws, BLIT_GRAPHICS_MAX_PLACEMENTS + 1);
         for (k = count - 1; k >= 0; --k) {
             const BlitGraphicsDraw *d = &draws[k];
-            double x, y, rx = 0, ry = 0;
-            if (d->width < 1 || d->height < 1 || px < d->x || py < d->y ||
-                px >= d->x + d->width || py >= d->y + d->height)
+            struct ei_region *r;
+            double fx, fy, rx = 0, ry = 0, rw = image->width, rh = image->height;
+            if (d->width < 1 || d->height < 1 || image->width < 1 || image->height < 1 ||
+                px < d->x || py < d->y || px >= d->x + d->width || py >= d->y + d->height)
                 continue;
-            x = d->src_x + (double)(px - d->x) * d->src_w / d->width;
-            y = d->src_y + (double)(py - d->y) * d->src_h / d->height;
-            {
-                struct ei_region *r = blit_ei.device_get_region(device, 0);
-                if (r != NULL) {
-                    rx = blit_ei.region_get_x(r);
-                    ry = blit_ei.region_get_y(r);
-                }
+            /* Where in the frame, as a fraction of it. */
+            fx = (d->src_x + (double)(px - d->x) * d->src_w / d->width) / image->width;
+            fy = (d->src_y + (double)(py - d->y) * d->src_h / d->height) / image->height;
+            r = blit_ei.device_get_region(device, 0);
+            if (r != NULL && blit_ei.region_get_width(r) > 0 && blit_ei.region_get_height(r) > 0) {
+                rx = blit_ei.region_get_x(r);
+                ry = blit_ei.region_get_y(r);
+                rw = blit_ei.region_get_width(r);
+                rh = blit_ei.region_get_height(r);
             }
-            blit_ei.pointer_motion_absolute(device, rx + x, ry + y);
+            blit_ei.pointer_motion_absolute(device, rx + fx * rw, ry + fy * rh);
             frame_input_sent(session, device);
             break;
         }
@@ -752,7 +760,7 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
 }
 
 /* frames.input: the route of this session's channels that is furthest
-   along (live, on, off, closed), its image and the session's counts. */
+   along (live, on, off), its image and the session's counts. */
 static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
                                char *out, size_t capacity)
 {
@@ -767,8 +775,7 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
         int r;
         if (!client->used || in == NULL || client->session_id != session->id)
             continue;
-        if (in->ei == NULL) { s = "closed"; r = 1; }
-        else if (!in->on) { s = "off"; r = 2; }
+        if (!in->on) { s = "off"; r = 2; }
         else if (!frame_input_live(runtime, client)) { s = "on"; r = 3; }
         else { s = "live"; r = 4; }
         if (r > rank) {

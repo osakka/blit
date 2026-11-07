@@ -10,7 +10,9 @@
    Recording (EI_STUB_LOG=<file>): it plays a compositor that offers one seat
    and makes one device of what Blit binds, with one region of
    EI_STUB_REGION (WxH), and writes what Blit sends to the file in the same
-   canonical lines as tools/tests/eis_receiver.c, so the gate's behaviour
+   canonical lines as tools/tests/eis_receiver.c; when the peer closes the
+   socket Blit connected, it reports a disconnect, as libei does when a
+   compositor drops its client. So the gate's behaviour
    cases run on a host with no libeis. It proves Blit's side (which events,
    in which order, with which values); that libei carries them to a real EIS
    server is frame_input_eis_gate, against libeis.
@@ -18,6 +20,8 @@
    Built by the gate: tcc -shared -fPIC -o <dir>/libei.so.1 libei_stub.c */
 #define _GNU_SOURCE
 #include <fcntl.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -28,7 +32,7 @@
 #include <unistd.h>
 
 /* libei 1.x values, as Blit declares them. */
-enum { CONNECT = 1, SEAT_ADDED = 3, DEVICE_ADDED = 5, DEVICE_RESUMED = 8 };
+enum { CONNECT = 1, DISCONNECT = 2, SEAT_ADDED = 3, DEVICE_ADDED = 5, DEVICE_RESUMED = 8 };
 enum { CAP_POINTER = 1, CAP_POINTER_ABSOLUTE = 2, CAP_KEYBOARD = 4, CAP_SCROLL = 16, CAP_BUTTON = 32 };
 
 struct ei_seat { struct ei *ei; };
@@ -38,6 +42,8 @@ struct ei_event { int type; struct ei *ei; };
 struct ei {
     int fd;
     int wake[2];
+    int poll;          /* epoll over the wake pipe and the socket, as libei's */
+    int gone;
     int queue[8];
     int queued;
     unsigned int caps;
@@ -85,6 +91,7 @@ struct ei *ei_new_sender(void *user_data)
     if (ei == NULL) return NULL;
     ei->fd = -1;
     ei->wake[0] = ei->wake[1] = -1;
+    ei->poll = -1;
     ei->seat.ei = ei;
     ei->device.ei = ei;
     return ei;
@@ -96,6 +103,15 @@ int ei_setup_backend_fd(struct ei *ei, int fd)
     ei->fd = fd;
     if (record() == NULL) return 0;
     if (pipe2(ei->wake, O_NONBLOCK | O_CLOEXEC) != 0) return -1;
+    ei->poll = epoll_create1(EPOLL_CLOEXEC);
+    {
+        struct epoll_event watch;
+        memset(&watch, 0, sizeof(watch));
+        watch.events = EPOLLIN;
+        if (ei->poll < 0 || epoll_ctl(ei->poll, EPOLL_CTL_ADD, ei->wake[0], &watch) != 0 ||
+            epoll_ctl(ei->poll, EPOLL_CTL_ADD, fd, &watch) != 0)
+            return -1;
+    }
     if (region == NULL || sscanf(region, "%ux%u", &ei->region.width, &ei->region.height) != 2)
         ei->region.width = ei->region.height = 0;
     say("connect");
@@ -103,12 +119,19 @@ int ei_setup_backend_fd(struct ei *ei, int fd)
     post(ei, SEAT_ADDED);
     return 0;
 }
-int ei_get_fd(struct ei *ei) { return ei->wake[0]; }
+int ei_get_fd(struct ei *ei) { return ei->poll; }
 void ei_dispatch(struct ei *ei)
 {
     char drain[64];
     if (ei->wake[0] >= 0)
         while (read(ei->wake[0], drain, sizeof(drain)) > 0) {}
+    /* The peer closed: the compositor dropped us. */
+    if (ei->wake[0] >= 0 && !ei->gone &&
+        recv(ei->fd, drain, sizeof(drain), MSG_DONTWAIT | MSG_PEEK) == 0) {
+        ei->gone = 1;
+        epoll_ctl(ei->poll, EPOLL_CTL_DEL, ei->fd, NULL);
+        post(ei, DISCONNECT);
+    }
 }
 struct ei_event *ei_get_event(struct ei *ei)
 {
@@ -129,6 +152,7 @@ struct ei *ei_unref(struct ei *ei)
         close(ei->wake[0]);
         close(ei->wake[1]);
     }
+    if (ei->poll >= 0) close(ei->poll);
     if (ei->fd >= 0) close(ei->fd);
     free(ei);
     return NULL;

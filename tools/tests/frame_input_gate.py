@@ -10,7 +10,7 @@ local (frame_input_gate.sh): what needs no libeis, on any host.
   - against a stand-in libei (tools/tests/fixtures/libei_stub.c, which
     takes the connection and reports nothing): `EINVAL` for a malformed
     request, a version 2 channel, `INPUT on` without a route, an image
-    deleted or a Kitty image; `ENOENT` for a missing path, a file that is
+    deleted, a Kitty image or id 0; `ENOENT` for a missing path, a file that is
     not a socket, a link to a socket and a socket nobody listens on;
     `EACCES` for a socket another user owns (where one exists and the gate
     is not root); `OK input`, then `EBUSY` for a second route; `frames.input`
@@ -28,9 +28,12 @@ eis (frame_input_eis_gate.sh): what reaches a compositor, against
     emulation stopped, on INPUT off, on a focus change, on the console
     given up, on the channel closed and on the image deleted;
   - wheel notches as discrete scroll;
-  - the absolute pointer over the image's drawn rectangle, scaled to its
-    frame, at two placements and after the placement is resized, and
-    nothing outside it;
+  - the absolute pointer over the image's drawn rectangle, scaled to the
+    compositor's region (880x440, larger than the 320x160 frames), at two
+    placements and after the placement is resized, the picture's far corner
+    reaching the region's, and nothing outside it;
+  - the compositor dropping the connection: `ERROR INPUT ENOENT` on the
+    channel at once, the route ended (`INPUT on` is then EINVAL);
   - relative motion, summed exactly, while the session holds ?7701.
 """
 import ctypes
@@ -53,6 +56,9 @@ OFFSET = int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0'))
 SEALS = fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
 BINARY = os.environ.get('BLIT_GATE_BINARY', os.path.join(ROOT, 'build/blit/blit-server'))
 FRAME_W, FRAME_H = 320, 160   # 2:1, so a c=4r placement of 8x16 cells draws it unletterboxed
+# The compositor's pointer region, larger than the frames it sends (as when
+# gamescope shrinks its stream): the pointer is scaled to this, not to them.
+REGION_W, REGION_H = 880, 440
 BIND = 'bind keyboard,pointer,pointer_absolute,button,scroll'
 TAG = 'FRAME_INPUT'
 
@@ -364,7 +370,7 @@ class Receiver:
             self.held = listening_socket(self.path)
             return
         self.process = subprocess.Popen([os.path.join(ROOT, 'build/tests/eis_receiver'), self.path,
-                                         self.log, str(FRAME_W), str(FRAME_H)])
+                                         self.log, str(REGION_W), str(REGION_H)])
         wait_for(lambda: os.path.exists(self.path), 'the EIS receiver did not start')
 
     def lines(self):
@@ -385,6 +391,20 @@ class Receiver:
         got = self.lines()[self.seen:]
         check(got == [], '%s: sent %s' % (why, got))
 
+    def drop(self):
+        """The compositor goes away: the receiver killed, or the stand-in's
+        connections closed."""
+        if self.process is not None:
+            self.process.terminate()
+            self.process.wait(5)
+            return
+        self.held.settimeout(0.5)
+        try:
+            while True:
+                self.held.accept()[0].close()
+        except (socket.timeout, BlockingIOError):
+            pass
+
     def stop(self):
         if self.process is None:
             self.held.close()
@@ -400,7 +420,7 @@ def eis(stub=False):
     extra = {}
     if stub:
         extra = {'LD_LIBRARY_PATH': os.path.join(ROOT, 'build/tests/libei-stub'),
-                 'EI_STUB_LOG': receiver.log, 'EI_STUB_REGION': '%dx%d' % (FRAME_W, FRAME_H)}
+                 'EI_STUB_LOG': receiver.log, 'EI_STUB_REGION': '%dx%d' % (REGION_W, REGION_H)}
     server = Server((19836 if stub else 19835) + OFFSET, work, extra)
     try:
         a = Session(server, work, 'a')
@@ -505,7 +525,7 @@ def eis(stub=False):
         def point(at, sx, sy, why):
             server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
                            'y': origin[1] + at['y'] + sy})
-            receiver.expect(['abs %.2f %.2f' % (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])], why)
+            receiver.expect(['abs %.2f %.2f' % (sx * REGION_W / at['width'], sy * REGION_H / at['height'])], why)
 
         cases = []
         for row, column, columns, rows, sx, sy in ((3, 5, 20, 5, 40, 20), (1, 1, 40, 10, 100, 50)):
@@ -514,6 +534,12 @@ def eis(stub=False):
                           'placement %dx%d was not drawn' % (columns, rows))
             point(at, sx, sy, 'absolute at %d,%d %dx%d' % (at['x'], at['y'], at['width'], at['height']))
             point(at, 0, 0, 'the top-left of %dx%d' % (at['width'], at['height']))
+            # The picture's far corner reaches the region's: its last pixel
+            # maps into the region's last pixel's worth.
+            far = ((at['width'] - 1) * REGION_W / at['width'], (at['height'] - 1) * REGION_H / at['height'])
+            check(far[0] >= REGION_W - REGION_W / at['width'] and far[1] >= REGION_H - REGION_H / at['height'],
+                  'far corner arithmetic %s' % (far,))
+            point(at, at['width'] - 1, at['height'] - 1, 'the far corner of %dx%d' % (at['width'], at['height']))
             cases.append('%dx%d@%d,%d' % (at['width'], at['height'], at['x'], at['y']))
         # Resized in place: the same placement, smaller.
         place(a, 7, 1, 1, 8, 2)
@@ -576,6 +602,25 @@ def eis(stub=False):
               'frames.input after the delete %s' % info)
         ch.close()
         receiver.expect(['disconnect'], 'the second channel closed')
+
+        # The compositor goes away under a live route: the client is told
+        # ERROR INPUT ENOENT at once, and the route ends.
+        ch = Channel(a)
+        ch.frame(10, 1)
+        wait_for(lambda: a.graphics(10), 'image 10 did not land')
+        place(a, 10, 1, 1, 8, 2)
+        check(ch.ask('INPUT eis %s 10\n' % receiver.path) == b'OK input\n', 'the third route was refused')
+        ch.line('INPUT on\n')
+        receiver.expect(['connect', BIND, 'start'], 'the third route on')
+        check(ch.reply(0.3) == b'', 'a live route was answered')
+        receiver.drop()
+        got = ch.reply(5.0)
+        check(got == b'ERROR INPUT ENOENT\n', 'a dropped compositor was answered %r' % got)
+        info = wait_for(lambda: (lambda i: i if i['state'] == 'none' else None)(server.input(a.id)),
+                        'the route outlived its compositor')
+        check(info['last_error'] == 'eis-disconnected', 'frames.input after the drop %s' % info)
+        check(ch.ask('INPUT on\n') == b'ERROR INPUT EINVAL\n', 'INPUT on after the route ended was not EINVAL')
+        ch.close()
     finally:
         server.stop()
         log = receiver.stop()
@@ -585,9 +630,10 @@ def eis(stub=False):
     names = re.search(r'# names=(\w+)', log).group(1)
     check('# libeis names' not in log, 'event numbers disagree with libeis: %s' % log)
     print('%s_PASS keys=ordered repeats=dropped off+unfocused+console=silent '
-          'release_all=off,focus,console,close,delete scroll=discrete absolute=%s outside=silent '
+          'release_all=off,focus,console,close,delete scroll=discrete region=%dx%d absolute=%s '
+          'far_corner=region_far_corner outside=silent dropped=ERROR_INPUT_ENOENT '
           'relative=70,-30_in_%d events=%d frames=%d names=%s'
-          % (TAG, ','.join(cases), len(moves), sent, frames, names))
+          % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), sent, frames, names))
 
 
 if __name__ == '__main__':
