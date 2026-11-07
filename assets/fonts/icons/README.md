@@ -56,13 +56,19 @@ codepoints, of which a non-folder kind now uses only the classic two.
 | wifi-off-wide-left, wifi-off-wide-right | U+1002E2, U+1002E3 | Wi-Fi off in two columns (0.3.56): `wifi-off.svg`, the fan unlit and the red cross at the lower right. Its monochrome shape is the cross alone, so in the icon pen the left column is blank |
 | volume-wide-0-left, -right … volume-wide-3-left, -right | U+1002E4–U+1002EB | Volume in two columns (0.3.56): 0 is muted, `volume-muted.svg` (the speaker and a red cross), 1–3 `volume.svg` with that many waves lit; one icon, two columns |
 | phone-classic-wide-off-left, -right … phone-classic-wide-ring-left, -right | U+1002EC–U+1002F3 | The classic desk telephone in two columns (0.3.57), in its four states off, wait, on and ring: `phone-classic-off.svg`, `-wait.svg`, `-on.svg` and `-ring.svg`, the one-column drawings, about twice the size; one icon, two columns |
+| battery-wide-0-left, -right … battery-wide-4-left, -right | U+1002F4–U+1002FD | The battery lying on its side, in two columns (0.3.58): `battery-wide.svg`, 0–4 teal segments left to right, the unlit ones in the status grey; beside the upright one-column battery, which is unchanged; one icon, two columns |
+| battery-wide-0-charging-left, -right … battery-wide-4-charging-left, -right | U+1002FE–U+100307 | The same, charging: `battery-wide-charging.svg`, green segments and the yellow bolt with a dark edge, so it reads on a light bar and over the green |
+| battery-wide-ac-left, battery-wide-ac-right | U+100308, U+100309 | The same, on mains: `battery-wide-ac.svg`, full teal with the dark plug |
 
 The hui badge, the hui mark, the wiretap icons and the two-column Wi-Fi,
-volume and classic phone icons each span two columns as two codepoints,
-written side by side; each draws its half of the one drawing in `hui.svg`,
-`hui-mark.svg`, `wiretap.svg`, `wiretap-off.svg`, `wifi-signal.svg`,
-`wifi-off.svg`, `volume.svg`, `volume-muted.svg` or `phone-classic-*.svg`
-(ADR 0197). The wide Wi-Fi, volume and classic phone icons are the
+volume, classic phone and battery icons each span two columns as two
+codepoints, written side by side; each draws its half of the one drawing in
+`hui.svg`, `hui-mark.svg`, `wiretap.svg`, `wiretap-off.svg`,
+`wifi-signal.svg`, `wifi-off.svg`, `volume.svg`, `volume-muted.svg`,
+`phone-classic-*.svg` or `battery-wide*.svg` (ADR 0197). The two-column
+battery is its own drawing, horizontal, with the one-column battery's
+stroke; its levels follow `battery.svg`'s convention (`data-level` 1–4,
+inactive in the grey). The wide Wi-Fi, volume and classic phone icons are the
 one-column drawings, unchanged, at a level or state and two columns:
 a spanning icon is fitted by its design box, not its ink, so every level
 sits in the same place.
@@ -139,8 +145,8 @@ pressed boxes: `chalk-minimise`, `chalk-minimise-pressed`,
 bar along the bottom of the box; pressed is drawn as ADR 0219's pressed
 boxes are. U+1002D1–U+1002D9 are the Wi-Fi signal, Wi-Fi off and cellular
 icons, U+1002DA–U+1002EB the two-column Wi-Fi and volume icons,
-U+1002EC–U+1002F3 the two-column classic phones, and U+1002F4 is the next
-free codepoint.
+U+1002EC–U+1002F3 the two-column classic phones, U+1002F4–U+100309 the
+two-column batteries, and U+10030A is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph
 
@@ -197,7 +203,8 @@ decided when the font is built, from its SVG: a path whose `data-level` is
 above the icon's `signal_level` is left out (so a battery shows its bands, Wi-Fi
 and volume their active bars and waves); `data-mono="knockout"` on a path cuts
 its shapes out of the rest (the charging bolt, the mains plug, the hui
-letters); `data-mono="disc"` draws a path's first subpath only, so a ring
+letters; the wide battery's bolt edge is a ring wound as the knockout is, so
+in monochrome the bolt and its edge are cut out as one); `data-mono="disc"` draws a path's first subpath only, so a ring
 is its solid outer shape (the hui disc, solid in colour too since 0.3.51).
 An icon with none of these has no extra glyph: its colour coverage is its
 shape (the hui mark, the two-column wiretap icons: on and off differ by the drop,

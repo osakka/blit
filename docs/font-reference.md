@@ -120,7 +120,10 @@ JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-signal-1`
 through `wifi-signal-4` and `wifi-off` (Wi-Fi: a dot and three arcs, a cross when
 off; in two columns `wifi-signal-wide-1-left` + `-right` through `wifi-signal-wide-4-left` + `-right`
 and `wifi-off-wide-left` + `-right`), `cellular-1` through `cellular-4` (the mobile signal's four bars), `bluetooth`, `blit`, `battery-0` through `battery-4`,
-`battery-0-charging` through `battery-4-charging`, `battery-ac`, and
+`battery-0-charging` through `battery-4-charging`, `battery-ac` (lying in two columns
+`battery-wide-0-left` + `-right` through `battery-wide-4-left` + `-right`,
+`battery-wide-0-charging-left` + `-right` through `battery-wide-4-charging-left` + `-right`
+and `battery-wide-ac-left` + `-right`), and
 `volume-0` (muted) through `volume-3` (in two columns `volume-wide-0-left` + `-right` through
 `volume-wide-3-left` + `-right`), `power`, `phone-off`, `phone-wait`,
 `phone-on`, `phone-ring`, their classic counterparts `phone-classic-off`
@@ -335,13 +338,14 @@ pressed.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002F4 (the outer-edge frame, below,
+section. The next free codepoint is U+10030A (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
 hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
 off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
 minimise box U+1002CD–1002D0, then the Wi-Fi signal and cellular icons
-U+1002D1–1002D9, the two-column Wi-Fi and volume icons U+1002DA–1002EB, and
-the two-column classic phones U+1002EC–1002F3).
+U+1002D1–1002D9, the two-column Wi-Fi and volume icons U+1002DA–1002EB,
+the two-column classic phones U+1002EC–1002F3, and the two-column batteries
+U+1002F4–100309).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

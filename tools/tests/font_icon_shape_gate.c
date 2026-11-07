@@ -16,7 +16,10 @@
    are compared as whole badges, both columns side by side: wifi-wide
    levels 1-4 pairwise and off against each, volume-wide 0-3 pairwise.
    The two-column classic phone (0.3.57), phone-classic-wide off, wait, on
-   and ring pairwise, whole badge. */
+   and ring pairwise, whole badge. The two-column (horizontal) battery
+   (0.3.58), whole badge, as the one-column one: battery-wide 0-4 pairwise,
+   battery-wide-N-charging 0-4 pairwise, each level drain against charge,
+   and battery-wide-ac against all ten. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
@@ -45,11 +48,16 @@ static const Icon kIcons[] = {
     {"volume-wide-3", 0x1002ea},
     {"phone-classic-wide-off", 0x1002ec}, {"phone-classic-wide-wait", 0x1002ee},
     {"phone-classic-wide-on", 0x1002f0}, {"phone-classic-wide-ring", 0x1002f2},
+    {"battery-wide-0", 0x1002f4}, {"battery-wide-1", 0x1002f6}, {"battery-wide-2", 0x1002f8},
+    {"battery-wide-3", 0x1002fa}, {"battery-wide-4", 0x1002fc},
+    {"battery-wide-0-charging", 0x1002fe}, {"battery-wide-1-charging", 0x100300},
+    {"battery-wide-2-charging", 0x100302}, {"battery-wide-3-charging", 0x100304},
+    {"battery-wide-4-charging", 0x100306}, {"battery-wide-ac", 0x100308},
 };
 #define NICONS ((int)(sizeof(kIcons) / sizeof(kIcons[0])))
 /* A two-column icon's entry is its left codepoint; its right is the next. */
 enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19, TAP1 = 21, WS1 = 23, WOFF = 27,
-       WW1 = 28, WWOFF = 32, VW0 = 33, PCW = 37 };
+       WW1 = 28, WWOFF = 32, VW0 = 33, PCW = 37, BW0 = 41, BWC0 = 46, BWAC = 51 };
 
 typedef struct { int w, h; unsigned char *m; } Mask;
 
@@ -128,6 +136,10 @@ int main(int argc, char **argv)
         for (i = WW1; i < WW1 + 4; ++i) pair(m, WWOFF, i, min, "wifi-wide");
         for (i = VW0; i < VW0 + 4; ++i) for (j = i + 1; j < VW0 + 4; ++j) pair(m, i, j, min, "volume-wide");
         for (i = PCW; i < PCW + 4; ++i) for (j = i + 1; j < PCW + 4; ++j) pair(m, i, j, min, "phone-classic-wide");
+        for (i = BW0; i < BW0 + 5; ++i) for (j = i + 1; j < BW0 + 5; ++j) pair(m, i, j, min, "batt-wide");
+        for (i = BWC0; i < BWC0 + 5; ++i) for (j = i + 1; j < BWC0 + 5; ++j) pair(m, i, j, min, "chg-wide");
+        for (i = 0; i < 5; ++i) pair(m, BW0 + i, BWC0 + i, min, "drain/chg-w");
+        for (i = BW0; i < BW0 + 10; ++i) pair(m, BWAC, i, min, "ac-wide");
         for (i = 0; i < NICONS; ++i) free(m[i].m);
     }
     if (failures) {

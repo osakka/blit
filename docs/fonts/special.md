@@ -298,6 +298,28 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `phone-classic-wide-on-right` | `U+1002F1` | `"\udbc0\udef1"` | — |
 | `phone-classic-wide-ring-left` | `U+1002F2` | `"\udbc0\udef2"` | — |
 | `phone-classic-wide-ring-right` | `U+1002F3` | `"\udbc0\udef3"` | — |
+| `battery-wide-0-left` | `U+1002F4` | `"\udbc0\udef4"` | 0 |
+| `battery-wide-0-right` | `U+1002F5` | `"\udbc0\udef5"` | 0 |
+| `battery-wide-1-left` | `U+1002F6` | `"\udbc0\udef6"` | 1 |
+| `battery-wide-1-right` | `U+1002F7` | `"\udbc0\udef7"` | 1 |
+| `battery-wide-2-left` | `U+1002F8` | `"\udbc0\udef8"` | 2 |
+| `battery-wide-2-right` | `U+1002F9` | `"\udbc0\udef9"` | 2 |
+| `battery-wide-3-left` | `U+1002FA` | `"\udbc0\udefa"` | 3 |
+| `battery-wide-3-right` | `U+1002FB` | `"\udbc0\udefb"` | 3 |
+| `battery-wide-4-left` | `U+1002FC` | `"\udbc0\udefc"` | 4 |
+| `battery-wide-4-right` | `U+1002FD` | `"\udbc0\udefd"` | 4 |
+| `battery-wide-0-charging-left` | `U+1002FE` | `"\udbc0\udefe"` | 0 |
+| `battery-wide-0-charging-right` | `U+1002FF` | `"\udbc0\udeff"` | 0 |
+| `battery-wide-1-charging-left` | `U+100300` | `"\udbc0\udf00"` | 1 |
+| `battery-wide-1-charging-right` | `U+100301` | `"\udbc0\udf01"` | 1 |
+| `battery-wide-2-charging-left` | `U+100302` | `"\udbc0\udf02"` | 2 |
+| `battery-wide-2-charging-right` | `U+100303` | `"\udbc0\udf03"` | 2 |
+| `battery-wide-3-charging-left` | `U+100304` | `"\udbc0\udf04"` | 3 |
+| `battery-wide-3-charging-right` | `U+100305` | `"\udbc0\udf05"` | 3 |
+| `battery-wide-4-charging-left` | `U+100306` | `"\udbc0\udf06"` | 4 |
+| `battery-wide-4-charging-right` | `U+100307` | `"\udbc0\udf07"` | 4 |
+| `battery-wide-ac-left` | `U+100308` | `"\udbc0\udf08"` | — |
+| `battery-wide-ac-right` | `U+100309` | `"\udbc0\udf09"` | — |
 
 ## Themed text additions
 

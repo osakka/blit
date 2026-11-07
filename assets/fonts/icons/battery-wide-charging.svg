@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+  <title>Battery, wide — four levels, charging, with a bolt</title>
+  <path fill="#7d8796" d="M0.6 4H17V16H0.6Z M1.6 5V15H16V5Z M17.4 7.6H19.4V12.4H17.4Z"/>
+  <path data-level="1" data-inactive-fill="#7d8796" fill="#5fd068" d="M2 5.4H5.1V14.6H2Z"/>
+  <path data-level="2" data-inactive-fill="#7d8796" fill="#5fd068" d="M5.5 5.4H8.6V14.6H5.5Z"/>
+  <path data-level="3" data-inactive-fill="#7d8796" fill="#5fd068" d="M9 5.4H12.1V14.6H9Z"/>
+  <path data-level="4" data-inactive-fill="#7d8796" fill="#5fd068" d="M12.5 5.4H15.6V14.6H12.5Z"/>
+  <path fill="#24242a" d="M11.59 2.7L10.12 2.18L5.12 10.18L5.8 11.4L8.05 11.4L7.01 17.46L8.47 18.03L13.87 9.63L13.2 8.4L10.9 8.4Z M10 9.2L13.2 9.2L7.8 17.6L9 10.6L5.8 10.6L10.8 2.6Z"/>
+  <path data-mono="knockout" fill="#ffd23f" d="M10 9.2L13.2 9.2L7.8 17.6L9 10.6L5.8 10.6L10.8 2.6Z"/>
+</svg>

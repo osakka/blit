@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+  <title>Battery, wide — four levels, on battery</title>
+  <path fill="#7d8796" d="M0.6 4H17V16H0.6Z M1.6 5V15H16V5Z M17.4 7.6H19.4V12.4H17.4Z"/>
+  <path data-level="1" data-inactive-fill="#7d8796" fill="#41d6bf" d="M2 5.4H5.1V14.6H2Z"/>
+  <path data-level="2" data-inactive-fill="#7d8796" fill="#41d6bf" d="M5.5 5.4H8.6V14.6H5.5Z"/>
+  <path data-level="3" data-inactive-fill="#7d8796" fill="#41d6bf" d="M9 5.4H12.1V14.6H9Z"/>
+  <path data-level="4" data-inactive-fill="#7d8796" fill="#41d6bf" d="M12.5 5.4H15.6V14.6H12.5Z"/>
+</svg>

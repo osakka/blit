@@ -12,7 +12,8 @@
 #   (on, off; two-column, then one-column colour icons), U+1002CD-1002D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1002D1-1002D9 the Wi-Fi
 #   signal (1-4, off) and cellular (1-4) icons, U+1002DA-1002EB the two-column Wi-Fi
 #   (wifi-signal-wide-1..4, wifi-off-wide) and volume (volume-wide-0..3) icons, U+1002EC-1002F3 the
-#   two-column classic phones (phone-classic-wide-off, -wait, -on, -ring), and U+1002F4 is the next free.
+#   two-column classic phones (phone-classic-wide-off, -wait, -on, -ring), U+1002F4-100309 the two-column
+#   batteries (battery-wide-0..4, -0..4-charging, -ac), and U+10030A is the next free.
 # - Through the production raster, every glyph equals the design
 #   (tools/fonts/draw-control-glyphs.py, which reads the geometry tables in
 #   src/blit_control_glyphs.h and src/blit_window_glyphs.h) pixel for
@@ -63,7 +64,7 @@ check(mine.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'a contr
 icon_codes = catalogue.fetch('icons').map { |i| i['codepoint'].to_i(16) }
 retired = catalogue.fetch('retired').flat_map { |r| (r['from'].to_i(16)..r['to'].to_i(16)).to_a }
 check(((FIRST...NEXT_FREE).to_a & (icon_codes + retired)).empty?, 'a control reuses an icon or retired codepoint')
-NEXT_FREE_ALL = 0x1002F4 # past the outer-edge frame (ADR 0214), the pressed states (ADR 0219), the hui mark, wiretap, the minimise boxes (ADR 0222), Wi-Fi signal and cellular, the two-column Wi-Fi and volume, and the two-column classic phones
+NEXT_FREE_ALL = 0x10030A # past the outer-edge frame (ADR 0214), the pressed states (ADR 0219), the hui mark, wiretap, the minimise boxes (ADR 0222), Wi-Fi signal and cellular, the two-column Wi-Fi and volume, the two-column classic phones, and the two-column batteries
 check((icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).none? { |c| c >= NEXT_FREE_ALL },
       "something is mapped at or past U+#{NEXT_FREE_ALL.to_s(16).upcase}, the next free codepoint")
 
@@ -245,5 +246,5 @@ SIZES.each do |w, h|
   end
 end
 
-puts "CONTROL_GLYPH_PASS glyphs=20 catalogue=named,next_free=U+1002F4 sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
+puts "CONTROL_GLYPH_PASS glyphs=20 catalogue=named,next_free=U+10030A sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
      'design=pixel-exact chalk=coverage slate,capsule=pen_planes mockup_11x22=held states=distinct seams=joined capsule=3_pens_every_size'
