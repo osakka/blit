@@ -139,6 +139,27 @@ of this decision.
 - **The cursor.** gamescope's stream has no cursor, so Blit's own pointer is
   shown over the picture; Steam's hover cursor shapes are not reproduced.
 
+**Input: Blit feeds gamescope's EIS directly (decided 2026-11-07).** A
+game is not a terminal program. Blit is the one process that has the raw
+keyboard and mouse (evdev), and EIS is the standard way to hand input to a
+compositor; carrying a game's input as terminal escapes would take five
+translations (evdev, Kitty text, the PTY, `hold`, Hibr's decode and
+re-encode, the bridge's parse) to rebuild what evdev already has: press,
+repeat and release, physical keys, relative motion. So the bridge asks Blit,
+on its authenticated frame channel, to route input to gamescope's EIS socket
+(`INPUT eis <path> <width> <height>` after the hello; the name comes from an
+authenticated, uid-checked peer, never from the terminal stream, so ADR 0066
+holds). While the bridge's session has focus Blit sends evdev key codes with
+real press, repeat and release, the absolute pointer scaled to the stream's
+size, buttons and scroll, and relative motion while the pointer is locked;
+focus loss, the desktop's Release Pointer and the bridge's exit end the route
+and release every held key and button, as Blit already does when it gives up
+the console. libei is loaded at run time, so `blit` gains no hard
+dependency. The bridge has no input parser. Kitty flag 4 and Hibr's key
+phases (#485) remain right for terminal programs and Boxer-class apps but no
+longer carry a game's input. This replaces the terminal-input path below
+where they disagree.
+
 **One program, one frame output, one input parser.** `blit-gamescope` sends
 FRM3 frames on whatever `BLIT_FRAME_SOCKET`/`BLIT_FRAME_TOKEN` its
 environment names, and reads Kitty keyboard, SGR-Pixels and `?7701`
