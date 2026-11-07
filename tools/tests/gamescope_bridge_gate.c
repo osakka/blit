@@ -201,29 +201,42 @@ static void unit_channel(void)
         CHECK(requeued_count == 3, "an ERROR for a memfd frame requeued a held dmabuf");
     }
 
-    /* INPUT: the exact line, then each answer. */
-    CHECK(gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei", 1280, 720) == 0, "INPUT not sent");
+    /* INPUT (docs/api.md): the exact line, then each answer; OK input is
+       followed by INPUT on. */
+    CHECK(gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei") == 0, "INPUT not sent");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(strcmp((char *)msg, "INPUT eis /run/user/1000/gamescope-0-ei 1280 720\n") == 0 && nfds == 0,
+    CHECK(strcmp((char *)msg, "INPUT eis /run/user/1000/gamescope-0-ei 1\n") == 0 && nfds == 0,
           "INPUT message is %s", msg);
     CHECK(f.input_state == GS_INPUT_SENT, "INPUT not pending");
-    fake_reply(sv[1], "INPUT OK\n");
+    CHECK(gs_frames_send_input_focus(&f, 1) != 0, "INPUT on sent before OK input");
+    fake_reply(sv[1], "OK input\n");
     gs_frames_read(&f);
-    CHECK(f.input_state == GS_INPUT_OK, "INPUT OK not taken");
-    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei", 1280, 720);
+    CHECK(f.input_state == GS_INPUT_OK && f.input_on, "OK input not taken");
+    got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
+    msg[got > 0 ? got : 0] = '\0';
+    CHECK(strcmp((char *)msg, "INPUT on\n") == 0 && nfds == 0, "after OK input came %s", msg);
+    CHECK(gs_frames_send_input_focus(&f, 0) == 0 && !f.input_on, "INPUT off not sent");
+    got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
+    msg[got > 0 ? got : 0] = '\0';
+    CHECK(strcmp((char *)msg, "INPUT off\n") == 0, "INPUT off message is %s", msg);
+    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "INPUT ERROR ENOTSUP\n");
+    fake_reply(sv[1], "ERROR INPUT ENOTSUP\n");
     gs_frames_read(&f);
-    CHECK(f.input_state == GS_INPUT_UNSUPPORTED, "INPUT ERROR ENOTSUP not taken as unsupported");
-    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei", 1280, 720);
+    CHECK(f.input_state == GS_INPUT_UNSUPPORTED && !f.input_on, "ERROR INPUT ENOTSUP not taken as unsupported");
+    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "INPUT ERROR EACCES\n");
-    gs_frames_read(&f);
-    CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EACCES") == 0, "INPUT ERROR EACCES");
+    {
+        int before = requeued_count;
+        fake_reply(sv[1], "ERROR INPUT EACCES\n");
+        gs_frames_read(&f);
+        CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EACCES") == 0 &&
+              requeued_count == before, "ERROR INPUT EACCES");
+    }
     /* A Blit from before INPUT reads it as a malformed frame. */
     snprintf(line, sizeof(line), "ERROR %u EINVAL\n", GS_INPUT_LEGACY_ID);
-    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei", 1280, 720);
+    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
     {
         int before = requeued_count;
@@ -232,7 +245,7 @@ static void unit_channel(void)
         CHECK(f.input_state == GS_INPUT_UNSUPPORTED && requeued_count == before,
               "the pre-INPUT EINVAL was not taken as unsupported (state %d)", f.input_state);
     }
-    CHECK(gs_frames_send_input(&f, "relative-ei", 1, 1) != 0, "a relative EIS path was sent");
+    CHECK(gs_frames_send_input(&f, "relative-ei") != 0, "a relative EIS path was sent");
 
     /* Blit closing the channel gives every held buffer back. */
     close(sv[1]);
@@ -383,7 +396,7 @@ static int run_session(const char *result_path)
     fflush(out);
 
     /* INPUT, answered by this Blit. */
-    gs_frames_send_input(&f, "/run/user/0/gamescope-0-ei", 64, 48);
+    gs_frames_send_input(&f, "/run/user/0/gamescope-0-ei");
     for (i = 0; i < 40 && f.input_state == GS_INPUT_SENT; ++i) {
         usleep(50000);
         gs_frames_read(&f);

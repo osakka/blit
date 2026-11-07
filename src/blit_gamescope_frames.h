@@ -7,15 +7,19 @@
    `RELEASE <id> <seq>` or an `ERROR`, then handed back through `requeue`),
    FRM1 frames copied into a fresh sealed memfd when Blit says `dmabuf=0` or
    refuses FRM3 with ENOTSUP, and the INPUT request that names gamescope's EIS
-   socket for Blit to send the pane's input to (ADR 0225 "Input"):
+   socket for Blit to send the pane's input to (docs/api.md, "Picture frames
+   by descriptor"; ADR 0225), each one SOCK_SEQPACKET message, no descriptor:
 
-       INPUT eis <absolute socket path> <width> <height>\n
+       INPUT eis <absolute socket path> <image id>\n
+           answered `OK input\n` or `ERROR INPUT <code>\n`
+       INPUT on\n   INPUT off\n
+           whether the client's window has the keyboard; a route starts off.
+           In phase 1 the bridge sends `INPUT on` right after `OK input`.
 
-   one SOCK_SEQPACKET message, no descriptor, after a successful hello. Blit
-   answers one line, `INPUT OK\n` or `INPUT ERROR <code>\n`. A Blit from
-   before INPUT (0.3.60) treats it as a malformed frame and answers
-   `ERROR <u32 of bytes 4..7> EINVAL\n` -- "T ei" read little-endian, 1768235092
-   -- which counts here as ENOTSUP: the bridge then runs frames only.
+   A Blit from before INPUT (0.3.60) treats the request as a malformed frame
+   and answers `ERROR <u32 of bytes 4..7> EINVAL\n` -- "T ei" read
+   little-endian, 1768235092 -- which counts here as ENOTSUP: the bridge then
+   runs frames only.
 
    Header-only and static like Blit's other units; C99 plus POSIX/Linux. */
 #ifndef BLIT_GAMESCOPE_FRAMES_H
@@ -68,6 +72,7 @@ typedef struct {
     gs_requeue_fn requeue;
     void *context;
     int input_state;
+    int input_on;           /* INPUT on sent */
     char input_error[32];
     /* counters, for the log and the gates */
     uint64_t last_memfd_sequence; /* the newest FRM1 sent */
@@ -305,21 +310,32 @@ static int gs_frames_send_pixels(GsFrames *f, const unsigned char *bgrx, uint32_
 }
 
 /* The INPUT request (see the top of this file). */
-static int gs_frames_format_input(char *out, size_t cap, const char *path, uint32_t w, uint32_t h)
+static int gs_frames_format_input(char *out, size_t cap, const char *path, uint32_t image_id)
 {
-    int n = snprintf(out, cap, "INPUT eis %s %u %u\n", path, w, h);
+    int n = snprintf(out, cap, "INPUT eis %s %u\n", path, image_id);
     return n > 0 && (size_t)n < cap ? n : -1;
 }
 
-static int gs_frames_send_input(GsFrames *f, const char *path, uint32_t w, uint32_t h)
+static int gs_frames_send_input(GsFrames *f, const char *path)
 {
     char line[512];
     int n;
     if (f->fd < 0 || path[0] != '/' || strchr(path, ' ') || strchr(path, '\n')) return -1;
-    n = gs_frames_format_input(line, sizeof(line), path, w, h);
+    n = gs_frames_format_input(line, sizeof(line), path, f->image_id);
     if (n < 0 || gs_frames_sendmsg(f->fd, line, (size_t)n, -1) != 0) return -1;
     f->input_state = GS_INPUT_SENT;
+    f->input_on = 0;
     f->input_error[0] = '\0';
+    return 0;
+}
+
+/* `INPUT on` / `INPUT off`: whether the window has the keyboard. */
+static int gs_frames_send_input_focus(GsFrames *f, int on)
+{
+    const char *line = on ? "INPUT on\n" : "INPUT off\n";
+    if (f->fd < 0 || f->input_state != GS_INPUT_OK) return -1;
+    if (gs_frames_sendmsg(f->fd, line, strlen(line), -1) != 0) return -1;
+    f->input_on = on;
     return 0;
 }
 
@@ -356,13 +372,14 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
         ++f->stale_releases;
         return 1;
     }
-    if (strncmp(line, "INPUT ", 6) == 0) {
-        if (strncmp(line + 6, "OK", 2) == 0) {
-            f->input_state = GS_INPUT_OK;
-        } else if (sscanf(line + 6, "ERROR %31s", code) == 1) {
-            snprintf(f->input_error, sizeof(f->input_error), "%s", code);
-            f->input_state = strcmp(code, "ENOTSUP") == 0 ? GS_INPUT_UNSUPPORTED : GS_INPUT_REFUSED;
-        }
+    if (strcmp(line, "OK input") == 0) {
+        f->input_state = GS_INPUT_OK;
+        gs_frames_send_input_focus(f, 1); /* phase 1: the pane is the window */
+        return 1;
+    }
+    if (sscanf(line, "ERROR INPUT %31s", code) == 1) {
+        snprintf(f->input_error, sizeof(f->input_error), "%s", code);
+        f->input_state = strcmp(code, "ENOTSUP") == 0 ? GS_INPUT_UNSUPPORTED : GS_INPUT_REFUSED;
         return 1;
     }
     if (strncmp(line, "HUD1 ", 5) == 0) {

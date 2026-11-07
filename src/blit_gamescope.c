@@ -64,6 +64,7 @@ struct bridge {
     /* terminal */
     struct termios saved_termios;
     int termios_saved;
+    int stdin_flags;             /* restored at exit: O_NONBLOCK is shared with the shell */
     GsTty tty;
     int cols, rows;
     int pane_w, pane_h;          /* last size the terminal reported */
@@ -189,6 +190,7 @@ static void tty_restore(struct bridge *b)
         b->placed = 0;
     }
     tty_puts("\033[?1004l\033[?1006l\033[?1000l\033[?25h");
+    if (b->stdin_flags >= 0) fcntl(STDIN_FILENO, F_SETFL, b->stdin_flags);
     if (b->termios_saved) {
         tcsetattr(STDIN_FILENO, TCSANOW, &b->saved_termios);
         b->termios_saved = 0;
@@ -307,8 +309,8 @@ static void maybe_send_input(struct bridge *b)
     struct stat st;
     if (b->frames.input_state != GS_INPUT_NONE || !b->eis_path[0] || b->frames.fd < 0) return;
     if (stat(b->eis_path, &st) != 0 || !S_ISSOCK(st.st_mode)) return;
-    if (gs_frames_send_input(&b->frames, b->eis_path, (uint32_t)b->width, (uint32_t)b->height) == 0)
-        logf_(b, "INPUT eis %s %d %d sent", b->eis_path, b->width, b->height);
+    if (gs_frames_send_input(&b->frames, b->eis_path) == 0)
+        logf_(b, "INPUT eis %s %u sent", b->eis_path, b->frames.image_id);
 }
 
 static void child_line(struct bridge *b, const char *line)
@@ -645,7 +647,8 @@ static void on_frame_socket(void *data, int fd, uint32_t mask)
     }
     if (input != b->frames.input_state) {
         if (b->frames.input_state == GS_INPUT_OK)
-            logf_(b, "INPUT OK: Blit sends the pane's input to %s", b->eis_path);
+            logf_(b, "OK input: Blit sends the pane's input to %s (INPUT on %s)", b->eis_path,
+                  b->frames.input_on ? "sent" : "not sent");
         else
             logf_(b, "INPUT %s: this Blit does not send input to gamescope; frames only",
                   b->frames.input_error);
@@ -706,6 +709,7 @@ int main(int argc, char **argv)
     g_bridge = b;
     b->refresh = 60;
     b->child_err = -1;
+    b->stdin_flags = fcntl(STDIN_FILENO, F_GETFL);
     for (i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--")) { b->command = argv + i + 1; break; }
         else if (!strcmp(argv[i], "-W") && i + 1 < argc) b->width = atoi(argv[++i]);
