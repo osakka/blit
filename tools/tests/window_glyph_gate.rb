@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR 0210, 0211, 0214, 0219, 0222: the window-chrome glyph sets, Chalk (U+100231-100253)
+# ADR 0210, 0211, 0214, 0219, 0222, 0224: the window-chrome glyph sets, Chalk (U+100231-100253)
 # and Slate (U+100254-100276); Slate dark (U+100277-100299) is retired.
 #
 # - The catalogue lists all 70 by name, as cell geometry, in two sets of
@@ -143,7 +143,7 @@ Dir.mktmpdir('blit-window-glyphs') do |work|
     end
   end
 end
-check(raster.size == 97 * SIZES.size, "the raster drew #{raster.size} of #{97 * SIZES.size}")
+check(raster.size == 107 * SIZES.size, "the raster drew #{raster.size} of #{107 * SIZES.size}")
 mismatches = []
 raster.each do |key, got|
   mismatches << format('U+%X at %dx%d', key[1], *key[0]) unless design[key] == got
@@ -1097,8 +1097,395 @@ end
 check(min_ids.each_with_index.all? { |id, i| SIZES.all? { |w, h| raster.fetch([[w, h], MIN_FIRST + i])[1].size == (id.start_with?('chalk') ? w * h * 2 : w * h) } },
       'a minimise box is not exactly its cell')
 
+# ADR 0224: the full-screen box (normal, pressed), U+10030A-10030D, and the
+# sticky box (normal, pressed, on), U+10030E-100313, written out here, not
+# read from the design. Chalk's, then Slate's, each family.
+#
+# At the owner's 11x22: the box 11x11 on rows 5-15 as the minimise box, its
+# mark area 7x7 (box rows and columns 2-8; Slate pressed 5x5, 3-7). The
+# full-screen mark: four corner brackets, arms of 2 px (the corner pixel and
+# one more each way). The sticky mark: a pin, a 3x3 head on box rows 3-5,
+# columns 4-6, and a 1 px stem on column 5, rows 6-7. Sticky on: the
+# unpressed box with the pin bold (every pixel beside it, in the area, too).
+# Pressed: ADR 0219's pressed box with the mark (Chalk cut out of the solid
+# inside, Slate in the foreground on the mix pen).
+BOX_FIRST = 0x10030A
+box_ids = %w[chalk slate-light].flat_map { |s| ["#{s}-fullscreen", "#{s}-fullscreen-pressed"] } +
+          %w[chalk slate-light].flat_map { |s| ["#{s}-sticky", "#{s}-sticky-pressed", "#{s}-sticky-on"] }
+boxes = geometry.select { |e| e['codepoint'].to_i(16).between?(BOX_FIRST, BOX_FIRST + 9) }
+check(boxes.map { |e| [e['id'], e['codepoint'], e['set'], e['pens'], e['colour'], e['part'], e['background']] } ==
+      box_ids.each_with_index.map { |n, i| [n, format('%06X', BOX_FIRST + i), n.start_with?('chalk') ? 'chalk' : 'slate-light',
+                                            n.start_with?('chalk') ? 'foreground' : 'cell', false, 'title-bar', 'bar'] },
+      'the catalogue does not list the ten full-screen and sticky boxes (U+10030A-100313) in order with their sets, pens and part')
+check(boxes.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? && !e['deprecated'] },
+      'a full-screen or sticky box has no shape, or is deprecated')
+check((boxes.map { |e| e['codepoint'].to_i(16) } & (icon_codes + retired)).empty?, 'a full-screen or sticky box reuses an icon or retired codepoint')
+box_pixels = ->(id, w, h) { pixels(raster, w, h, BOX_FIRST + box_ids.index(id)) }
+box_roles = lambda do |id, w, h|
+  px = box_pixels.call(id, w, h)
+  (0...h).map { |y| (0...w).map { |x| a, r = px[y][x]; a.zero? ? '.' : (r || 'K') }.join }
+end
 
-puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA)+10_state(U+1002BB-1002C4)+4_minimise(U+1002CD-1002D0) minimise=bottom_bar,pressed_as_0219 states=pressed_inverse,slate_bevel,grow_edges_are_frame_lines,hatch_4px outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
+BOX_LITERAL = {
+  'chalk-fullscreen' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    K.........K
+    K.KK...KK.K
+    K.K.....K.K
+    K.........K
+    K.........K
+    K.........K
+    K.K.....K.K
+    K.KK...KK.K
+    K.........K
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-fullscreen-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KK..KKK..KK
+    KK.KKKKK.KK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KK.KKKKK.KK
+    KK..KKK..KK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-fullscreen' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KLLLLLLLLLK
+    KLKKLLLKKLK
+    KLKLLLLLKLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLKLLLLLKLK
+    KLKKLLLKKLK
+    KLLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-fullscreen-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKMMMMMMMLK
+    KKMKKMKKMLK
+    KKMKMMMKMLK
+    KKMMMMMMMLK
+    KKMKMMMKMLK
+    KKMKKMKKMLK
+    KKMMMMMMMLK
+    KKLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'chalk-sticky' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    K.........K
+    K.........K
+    K...KKK...K
+    K...KKK...K
+    K...KKK...K
+    K....K....K
+    K....K....K
+    K.........K
+    K.........K
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-sticky-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKK...KKKK
+    KKKK...KKKK
+    KKKK...KKKK
+    KKKKK.KKKKK
+    KKKKK.KKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'chalk-sticky-on' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    K.........K
+    K...KKK...K
+    K..KKKKK..K
+    K..KKKKK..K
+    K..KKKKK..K
+    K...KKK...K
+    K...KKK...K
+    K....K....K
+    K.........K
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-sticky' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KLLLKKKLLLK
+    KLLLKKKLLLK
+    KLLLKKKLLLK
+    KLLLLKLLLLK
+    KLLLLKLLLLK
+    KLLLLLLLLLK
+    KLLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-sticky-pressed' => <<~'ROWS'.split,
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KKKKKKKKKKK
+    KKMMMMMMMLK
+    KKMMKKKMMLK
+    KKMMKKKMMLK
+    KKMMKKKMMLK
+    KKMMMKMMMLK
+    KKMMMKMMMLK
+    KKMMMMMMMLK
+    KKLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+  'slate-light-sticky-on' => <<~'ROWS'.split
+    KKKKKKKKKKK
+    LLLLLLLLLLL
+    ...........
+    ...........
+    ...........
+    KKKKKKKKKKK
+    KLLLLLLLLLK
+    KLLLKKKLLLK
+    KLLKKKKKLLK
+    KLLKKKKKLLK
+    KLLKKKKKLLK
+    KLLLKKKLLLK
+    KLLLKKKLLLK
+    KLLLLKLLLLK
+    KLLLLLLLLLK
+    KKKKKKKKKKK
+    ...........
+    ...........
+    ...........
+    ...........
+    MMMMMMMMMMM
+    KKKKKKKKKKK
+  ROWS
+}.freeze
+BOX_LITERAL.each do |id, want|
+  check(box_roles.call(id, 11, 22) == want, "#{id} at 11x22 is not the approved drawing")
+end
+
+# The marks at every size, in an m x m mark area, as the header draws them
+# with the drawing it picks (BLIT_WINDOW_FULLSCREEN_MARK, _STICKY_MARK).
+header = File.read('src/blit_window_glyphs.h')
+FS_MARK = header[/#define BLIT_WINDOW_FULLSCREEN_MARK (\d)/, 1].to_i
+STICKY_MARK = header[/#define BLIT_WINDOW_STICKY_MARK (\d)/, 1].to_i
+box_mark = lambda do |sticky, m, x, y|
+  next false if x.negative? || y.negative? || x >= m || y >= m
+  if !sticky
+    a = [(m + 1) / 3, 1].max
+    if FS_MARK == 2
+      x + y == m - 1 || (y.zero? && x >= m - 1 - a) || (x == m - 1 && y <= a) ||
+        (y == m - 1 && x <= a) || (x.zero? && y >= m - 1 - a)
+    else
+      ([0, m - 1].include?(y) && (x < a || x >= m - a)) || ([0, m - 1].include?(x) && (y < a || y >= m - a))
+    end
+  elsif STICKY_MARK == 2
+    s = (m + 2) / 3
+    s += 1 if (m - s).odd?
+    o = (m - s) / 2
+    x.between?(o, o + s - 1) && y.between?(o, o + s - 1)
+  else
+    d = ((m - 1) / 2) | 1
+    s = [(d + 1) / 2, m - d].min
+    t = (m - d - s) / 2
+    c = (m - 1) / 2
+    r = d / 2
+    dx = (x - c).abs
+    if y >= t && y < t + d && dx <= r
+      !(d >= 5 && dx == r && [t, t + d - 1].include?(y))
+    else
+      x == c && y >= t + d && y < t + d + s
+    end
+  end
+end
+
+# At every size: the bar outside the box; the border in the foreground; the
+# mark where box_mark puts it (sticky on: it and the pixels beside it) and
+# the rest of the inside the close box's (unpressed) or ADR 0219's pressed
+# box's. Apart from close, shade, zoom and minimise, from each other, and
+# each state from the others.
+FAMILIES = { 'fullscreen' => %w[fullscreen fullscreen-pressed], 'sticky' => %w[sticky sticky-pressed sticky-on] }.freeze
+SIZES.each do |w, h|
+  bx, by, side = band.call(w, h)
+  %w[chalk slate-light].each do |style|
+    slate = style == 'slate-light'
+    plain = pixels(raster, w, h, SETS.fetch(style) + NAMES.index('title'))
+    FAMILIES.each do |family, names|
+      sticky = family == 'sticky'
+      names.each do |name|
+        pressed = name.end_with?('-pressed')
+        bold = name == 'sticky-on'
+        got = box_pixels.call("#{style}-#{name}", w, h)
+        what = "#{style}-#{name} at #{w}x#{h}"
+        inset = pressed && slate ? 3 : 2
+        m = side - 2 * inset
+        lo_x = bx + inset
+        lo_y = by + inset
+        in_mark = lambda do |y, x|
+          u = x - lo_x
+          v = y - lo_y
+          box_mark.call(sticky, m, u, v) ||
+            (bold && u.between?(0, m - 1) && v.between?(0, m - 1) &&
+             [[u - 1, v], [u + 1, v], [u, v - 1], [u, v + 1]].any? { |a, b| box_mark.call(sticky, m, a, b) })
+        end
+        (0...h).each do |y|
+          (0...w).each do |x|
+            inside_box = y.between?(by, by + side - 1) && x.between?(bx, bx + side - 1)
+            unless inside_box
+              check(got[y][x] == plain[y][x], "#{what}: pixel #{x},#{y} outside the box is not the bar's")
+              next
+            end
+            border = !(y.between?(by + 1, by + side - 2) && x.between?(bx + 1, bx + side - 2))
+            mark = m >= 1 && in_mark.call(y, x)
+            want = if border then [255, slate ? 'K' : nil]
+                   elsif !pressed
+                     if mark then [255, slate ? 'K' : nil]
+                     else slate ? [255, 'L'] : [0, nil]
+                     end
+                   elsif slate
+                     if mark || y == by + 1 || x == bx + 1 then [255, 'K']
+                     elsif y == by + side - 2 || x == bx + side - 2 then [255, 'L']
+                     else [255, 'M']
+                     end
+                   else mark ? [0, nil] : [255, nil]
+                   end
+            check(got[y][x] == want, "#{what}: pixel #{x},#{y} is #{got[y][x].inspect}, want #{want.inspect}")
+          end
+        end
+        # A mark area of 1 or 2 px is a dot or a stub, as the other marks
+        # there are: no shape to tell apart.
+        next if m < 3
+
+        others = if pressed
+                   %w[close-pressed shade-pressed zoom-pressed].map { |n| state_pixels.call("#{style}-#{n}", w, h) } +
+                     [min_pixels.call("#{style}-minimise-pressed", w, h)]
+                 else
+                   %w[close shade zoom].map { |n| pixels(raster, w, h, SETS.fetch(style) + NAMES.index(n)) } +
+                     [min_pixels.call("#{style}-minimise", w, h)]
+                 end
+        check(others.none? { |o| o == got }, "#{what} is drawn as the close, shade, zoom or minimise box")
+        other = sticky ? (pressed ? 'fullscreen-pressed' : 'fullscreen') : (pressed ? 'sticky-pressed' : 'sticky')
+        check(got != box_pixels.call("#{style}-#{other}", w, h), "#{what} is drawn as the #{other} box")
+        (names - [name]).each do |n|
+          check(got != box_pixels.call("#{style}-#{n}", w, h), "#{what} is the #{n} box")
+        end
+      end
+    end
+  end
+end
+check(box_ids.each_with_index.all? { |id, i| SIZES.all? { |w, h| raster.fetch([[w, h], BOX_FIRST + i])[1].size == (id.start_with?('chalk') ? w * h * 2 : w * h) } },
+      'a full-screen or sticky box is not exactly its cell')
+
+
+puts "WINDOW_GLYPH_PASS glyphs=70+13_frame(U+1002AE-1002BA)+10_state(U+1002BB-1002C4)+4_minimise(U+1002CD-1002D0)+10_fullscreen_sticky(U+10030A-100313) minimise=bottom_bar,pressed_as_0219 fullscreen=corner_brackets sticky=pin,on=bold states=pressed_inverse,slate_bevel,grow_edges_are_frame_lines,hatch_4px outer_edge=line_only title_ends=stripes_join,2px_clear,plain_ends_seam_with_title " \
      "slate_dark=retired footprints=lines_only shadow=none catalogue=named " \
      "sizes=#{SIZES.map { |s| s.join('x') }.join(',')} design=pixel-exact chalk=coverage slate=pen_planes " \
      "pewter=0.3.38_except_mix(#{mix_differs}_px,#{compared}_glyphs) dialog=no_halo,line+fg_only caps=corners_clear " \

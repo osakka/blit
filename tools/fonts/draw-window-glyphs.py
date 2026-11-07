@@ -20,7 +20,8 @@ The pressed boxes and the grow box (ADR 0219), U+1002BB-1002C4, are here
 too: five glyphs a set (close, shade and zoom pressed, the grow cell and
 the grow cell dragged), Chalk's then Slate's. So is the minimise box
 (ADR 0222), U+1002CD-1002D0: the box and the box pressed, Chalk's then
-Slate's.
+Slate's; and the full-screen box (the box, pressed), U+10030A-10030D, and
+the sticky box (the box, pressed, on), U+10030E-100313 (ADR 0224).
 
 The outer-edge frame (ADR 0214), U+1002AE-1002B6, is here too: ONE frame
 set (the line on the outermost edge of each frame cell, nothing else
@@ -145,6 +146,22 @@ MINIMISES = [
     ('minimise-pressed', 'title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom'),
 ]
 
+# ADR 0224: the full-screen box (two glyphs a set) and the sticky box (three),
+# Chalk's then Slate's; drawn by draw_state, their marks by box_mark.
+FULLSCREEN_FIRST = 0x10030A
+FULLSCREENS = [
+    ('fullscreen', 'title bar with the full-screen box: the square with a bracket in each corner'),
+    ('fullscreen-pressed', 'title bar with the full-screen box pressed (also hover): the box filled, a bracket in each corner'),
+]
+STICKY_FIRST = 0x10030E
+STICKIES = [
+    ('sticky', 'title bar with the sticky box: the square with a pin in it'),
+    ('sticky-pressed', 'title bar with the sticky box pressed (also hover): the box filled, a pin in it'),
+    ('sticky-on', 'title bar with the sticky box on (sticky is set): the square with the pin bold'),
+]
+EXTRA = STATES + MINIMISES + FULLSCREENS + STICKIES
+UNPRESSED = ('minimise', 'fullscreen', 'sticky', 'sticky-on')
+
 HEADER = ROOT / 'src/blit_window_glyphs.h'
 # Slate's roles (ADR 0211), resolved in the cell it is drawn in: K the
 # foreground, L the underline colour (white if unset; SGR 58 is also a
@@ -168,6 +185,37 @@ def pens(fg, bg, line=None):
 
 
 T = table()
+
+
+def box_mark(sticky, m, x, y):
+    """Is pixel (x, y) of an m x m mark area in the full-screen or sticky
+    mark (ADR 0224)? As blit_box_mark, with the drawing the header picks."""
+    if x < 0 or y < 0 or x >= m or y >= m:
+        return False
+    if not sticky:
+        a = max(1, (m + 1) // 3)
+        if T['FULLSCREEN_MARK'] == 2:
+            # A diagonal bottom-left to top-right, a head at each end.
+            return (x + y == m - 1 or (y == 0 and x >= m - 1 - a) or (x == m - 1 and y <= a) or
+                    (y == m - 1 and x <= a) or (x == 0 and y >= m - 1 - a))
+        # Four corner brackets, arms of a px.
+        return (((y == 0 or y == m - 1) and (x < a or x >= m - a)) or
+                ((x == 0 or x == m - 1) and (y < a or y >= m - a)))
+    if T['STICKY_MARK'] == 2:
+        # A centred square dot, a third of the area, its sides equal.
+        s = (m + 2) // 3
+        if (m - s) % 2:
+            s += 1
+        o = (m - s) // 2
+        return o <= x < o + s and o <= y < o + s
+    # A pin: a round head d px across on a stem half as long, centred.
+    d = ((m - 1) // 2) | 1
+    s = min((d + 1) // 2, m - d)
+    t, c, r = (m - d - s) // 2, (m - 1) // 2, d // 2
+    dx = abs(x - c)
+    if t <= y < t + d and dx <= r:
+        return not (d >= 5 and dx == r and y in (t, t + d - 1))
+    return x == c and t + d <= y < t + d + s
 
 
 def inside_round(x, y, x0, x1, y0, y1, r):
@@ -399,8 +447,9 @@ def draw_frame(index, w, h):
 
 def draw_state(style, index, w, h):
     """One pressed-box or grow glyph's role map (ADR 0219), index 0-4 of
-    STATES, or a minimise box's (ADR 0222), 5-6, MINIMISES'."""
-    name = (STATES + MINIMISES)[index][0]
+    STATES, a minimise box's (ADR 0222), 5-6, or a full-screen or sticky
+    box's (ADR 0224), 7-11: an index into EXTRA."""
+    name = EXTRA[index][0]
     slate = style != 'chalk'
     L, gap = T['LINE'], T['PRESS_GAP']
     c = Cell(w, h)
@@ -431,17 +480,19 @@ def draw_state(style, index, w, h):
     c.fill(0, w, 0, L, 'K'); c.fill(0, w, h - L, h, 'K')
     if slate:
         c.fill(0, w, L, 2 * L, 'L'); c.fill(0, w, h - 2 * L, h - L, 'M')
-    if name == 'minimise':
-        # The unpressed minimise box: the close box, and its mark in the
-        # foreground, the mark area the box less its border and the gap.
+    if name in UNPRESSED:
+        # An unpressed box: the close box, and its mark in the foreground,
+        # the mark area the box less its border and the gap.
         if slate:
             c.fill(bx, bx + side, by, by + side, 'L')
         outline(bx, bx + side, by, by + side, 'K')
         inset = L + gap
         m = side - 2 * inset
         lo, ly = bx + inset, by + inset
-        if m >= 1:
+        if m >= 1 and name == 'minimise':
             c.fill(lo + m // 4, lo + m - m // 4, ly + m - L, ly + m, 'K')
+        elif m >= 1:
+            mark(c, name, m, lo, ly, 'K')
         return c.rows()
     c.fill(bx, bx + side, by, by + side, 'M' if slate else 'K')
     outline(bx, bx + side, by, by + side, 'K')
@@ -465,6 +516,8 @@ def draw_state(style, index, w, h):
     elif name == 'minimise-pressed':
         # A 1 px bar along the mark area's bottom, a quarter of it clear each side.
         c.fill(lo + m // 4, lo + m - m // 4, ly + m - L, ly + m, ink)
+    elif name in ('fullscreen-pressed', 'sticky-pressed'):
+        mark(c, name, m, lo, ly, ink)
     else:
         centre = by + (side - 1) // 2
         for k in ((-1, 1) if slate else (-2, 0, 2)):
@@ -472,6 +525,18 @@ def draw_state(style, index, w, h):
             if ly <= y < ly + m:
                 c.fill(lo, lo + m, y, y + L, ink)
     return c.rows()
+
+
+def mark(c, name, m, lo, ly, ink):
+    """A full-screen or sticky mark in the m x m area at (lo, ly); sticky
+    on draws it bold: each mark pixel and the four beside it, in the area."""
+    sticky = name.startswith('sticky')
+    bold = name == 'sticky-on'
+    for y in range(m):
+        for x in range(m):
+            near = ((x, y),) + (((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)) if bold else ())
+            if any(box_mark(sticky, m, px, py) for px, py in near):
+                c.px[ly + y][lo + x] = ink
 
 
 def glyphs():
@@ -489,6 +554,10 @@ def glyphs():
     for style, first in (('chalk', MINIMISE_FIRST), ('slate-light', MINIMISE_FIRST + len(MINIMISES))):
         for index in range(len(MINIMISES)):
             yield first + index, style, 200 + len(STATES) + index
+    for family, base in ((FULLSCREENS, FULLSCREEN_FIRST), (STICKIES, STICKY_FIRST)):
+        for style, first in (('chalk', base), ('slate-light', base + len(family))):
+            for index in range(len(family)):
+                yield first + index, style, 200 + EXTRA.index(family[index])
 
 
 def rows_of(style, index, w, h):
@@ -577,7 +646,11 @@ def state_entries():
     entries = []
     for style, first, names in (('chalk', STATE_FIRST, STATES), ('slate-light', STATE_FIRST + len(STATES), STATES),
                                 ('chalk', MINIMISE_FIRST, MINIMISES),
-                                ('slate-light', MINIMISE_FIRST + len(MINIMISES), MINIMISES)):
+                                ('slate-light', MINIMISE_FIRST + len(MINIMISES), MINIMISES),
+                                ('chalk', FULLSCREEN_FIRST, FULLSCREENS),
+                                ('slate-light', FULLSCREEN_FIRST + len(FULLSCREENS), FULLSCREENS),
+                                ('chalk', STICKY_FIRST, STICKIES),
+                                ('slate-light', STICKY_FIRST + len(STICKIES), STICKIES)):
         set_name = {'chalk': 'Chalk', 'slate-light': 'Slate'}[style]
         slate = style != 'chalk'
         for index, (name, shape) in enumerate(names):
@@ -593,12 +666,14 @@ def state_entries():
 def owned(entry):
     """Is this catalogue entry one of this script's: a window glyph
     (U+100231-100276), an outer-edge frame glyph (U+1002AE-1002BA), a
-    pressed-box or grow glyph (U+1002BB-1002C4) or a minimise box
-    (U+1002CD-1002D0)?"""
+    pressed-box or grow glyph (U+1002BB-1002C4), a minimise box
+    (U+1002CD-1002D0) or a full-screen or sticky box (U+10030A-100313)?"""
     cp = int(entry['codepoint'], 16)
     return (STYLES[0][1] <= cp < RETIRED[0] or FRAME_FIRST <= cp < FRAME_FIRST + len(FRAMES) or
             STATE_FIRST <= cp < STATE_FIRST + 2 * len(STATES) or
-            MINIMISE_FIRST <= cp < MINIMISE_FIRST + 2 * len(MINIMISES))
+            MINIMISE_FIRST <= cp < MINIMISE_FIRST + 2 * len(MINIMISES) or
+            FULLSCREEN_FIRST <= cp < FULLSCREEN_FIRST + 2 * len(FULLSCREENS) or
+            STICKY_FIRST <= cp < STICKY_FIRST + 2 * len(STICKIES))
 
 
 def catalogue_entries():

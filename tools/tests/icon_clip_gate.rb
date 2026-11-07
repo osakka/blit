@@ -74,6 +74,8 @@ end
 [0x1002BE, 0x1002BF, 0x1002C3, 0x1002C4].each { |cp| spec << ['cell', cp, 1, 14, format('chrome-%X', cp)] }
 # ADR 0222: the minimise boxes, normal and pressed, reach all four edges as the boxes do.
 (0x1002CD..0x1002D0).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+# ADR 0224: the full-screen and sticky boxes, as the minimise boxes.
+(0x10030A..0x100313).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
 cells = ([[11, 22]] + (8..64).flat_map { |s| [[(s + 1) / 2, s], [s / 2, s]] }).uniq
 stride = ENV.fetch('BLIT_ICON_CLIP_STRIDE', '48').to_i
 freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")

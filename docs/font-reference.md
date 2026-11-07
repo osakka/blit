@@ -334,18 +334,50 @@ pressed.
 - Put it beside the other boxes with `stripe-to-box`, `stripe-between` and
   `stripe-from-box`, as they are.
 
+## The full-screen and sticky boxes
+
+ADR 0224. 10 glyphs at U+10030A–100313: a **full-screen** box, normal and
+pressed (U+10030A–10030D, two a set), and a **sticky** box, normal, pressed
+and on (U+10030E–100313, three a set), Chalk's then Slate's in each, for the
+title bar beside close, minimise, shade and zoom.
+
+| Glyph | Codepoint | Put it | Pens |
+| --- | --- | --- | --- |
+| `chalk-fullscreen`, `chalk-fullscreen-pressed` | U+10030A, U+10030B | in the title bar as a box; the pressed one while it is pressed or hovered | fg = the ink, bg = the bar |
+| `slate-light-fullscreen`, `slate-light-fullscreen-pressed` | U+10030C, U+10030D | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `chalk-sticky`, `chalk-sticky-pressed`, `chalk-sticky-on` | U+10030E–100310 | in the title bar as a box; pressed while it is pressed or hovered; on while the window is sticky | fg = the ink, bg = the bar |
+| `slate-light-sticky`, `slate-light-sticky-pressed`, `slate-light-sticky-on` | U+100311–100313 | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
+
+- **The box** is the minimise box's: the close box, its mark area the box
+  less the border and a 1 px gap (7x7 at 11 px).
+- **Full screen:** four corner brackets, one in each corner of the mark
+  area, each two arms a third of the area long (2 px at 11 px): the window
+  reaching to the edges. Nothing in the middle, so it is neither zoom's
+  square nor close's X.
+- **Sticky:** a pin, centred: a round head about half the area across (3x3
+  at 11 px) on a 1 px stem half as long (2 px).
+- **Sticky on** (the window is sticky; not being pressed): the unpressed box
+  with the pin bold, every pixel beside it in the mark area inked too (the
+  head 5 px across, the stem 3). It is apart from normal by its weight and
+  from pressed by the face, which stays the unpressed box's.
+- **Pressed** is ADR 0219's pressed box, as minimise's: Chalk solid with the
+  mark cut out; Slate the mix pen, the bevel inverted and the mark in the
+  foreground in a 5x5 area.
+- Put them beside the other boxes with `stripe-to-box`, `stripe-between`
+  and `stripe-from-box`, as they are.
+
 ## Controls: checkbox, switch and capsule
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+10030A (the outer-edge frame, below,
+section. The next free codepoint is U+100314 (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
 hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
 off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
 minimise box U+1002CD–1002D0, then the Wi-Fi signal and cellular icons
 U+1002D1–1002D9, the two-column Wi-Fi and volume icons U+1002DA–1002EB,
-the two-column classic phones U+1002EC–1002F3, and the two-column batteries
-U+1002F4–100309).
+the two-column classic phones U+1002EC–1002F3, the two-column batteries
+U+1002F4–100309, and the full-screen and sticky boxes U+10030A–100313).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

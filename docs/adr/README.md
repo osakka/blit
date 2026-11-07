@@ -241,6 +241,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0221 — The icon pen is a cell attribute, SGR 68](0221-icon-pen-is-a-cell-attribute.md)
 - [0222 — A minimise box, in Chalk and Slate](0222-a-minimise-box.md)
 - [0223 — Frames by dmabuf, imported by the GPU compositor without a copy](0223-frames-by-dmabuf.md) (proposed)
+- [0224 — A full-screen box and a sticky box, in Chalk and Slate](0224-full-screen-and-sticky-boxes.md)
 
 ## Status
 

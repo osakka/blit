@@ -31,10 +31,16 @@
 #define MIN_FIRST 0x1002CDU
 #define MIN_LAST 0x1002D0U
 #define MIN_SLATE 0x1002CFU
+/* ADR 0224: the full-screen box (normal, pressed) and the sticky box
+   (normal, pressed, on), ten glyphs in a row; Slate's are drawn in pens
+   (U+10030C-10030D and U+100311-100313). */
+#define BOX_FIRST 0x10030AU
+#define BOX_LAST 0x100313U
 #define COUNT ((LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1) + (STATE_LAST - STATE_FIRST + 1) + \
-               (MIN_LAST - MIN_FIRST + 1))
+               (MIN_LAST - MIN_FIRST + 1) + (BOX_LAST - BOX_FIRST + 1))
 
-/* The n-th glyph: the window sets, the frame, the pressed states, the minimise boxes. */
+/* The n-th glyph: the window sets, the frame, the pressed states, the
+   minimise boxes, the full-screen and sticky boxes. */
 static unsigned nth(unsigned n)
 {
     if (n <= LAST - FIRST) return FIRST + n;
@@ -42,7 +48,9 @@ static unsigned nth(unsigned n)
     if (n <= FRAME_LAST - FRAME_FIRST) return FRAME_FIRST + n;
     n -= FRAME_LAST - FRAME_FIRST + 1;
     if (n <= STATE_LAST - STATE_FIRST) return STATE_FIRST + n;
-    return MIN_FIRST + (n - (STATE_LAST - STATE_FIRST + 1));
+    n -= STATE_LAST - STATE_FIRST + 1;
+    if (n <= MIN_LAST - MIN_FIRST) return MIN_FIRST + n;
+    return BOX_FIRST + (n - (MIN_LAST - MIN_FIRST + 1));
 }
 
 int main(int argc, char **argv)
@@ -64,7 +72,8 @@ int main(int argc, char **argv)
             int p;
             cp = nth(n);
             pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U ||
-                cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST) || (cp >= MIN_SLATE && cp <= MIN_LAST);
+                cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST) || (cp >= MIN_SLATE && cp <= MIN_LAST) ||
+                cp == 0x10030CU || cp == 0x10030DU || (cp >= 0x100311U && cp <= BOX_LAST);
             if (!blit_raster_get(raster, cp, 1, 0, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;

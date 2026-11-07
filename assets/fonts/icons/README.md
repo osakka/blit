@@ -146,7 +146,9 @@ bar along the bottom of the box; pressed is drawn as ADR 0219's pressed
 boxes are. U+1002D1–U+1002D9 are the Wi-Fi signal, Wi-Fi off and cellular
 icons, U+1002DA–U+1002EB the two-column Wi-Fi and volume icons,
 U+1002EC–U+1002F3 the two-column classic phones, U+1002F4–U+100309 the
-two-column batteries, and U+10030A is the next free codepoint.
+two-column batteries, U+10030A–U+100313 the full-screen box (normal,
+pressed) and the sticky box (normal, pressed, on; ADR 0224), cell geometry
+as the minimise box, and U+100314 is the next free codepoint.
 
 ### What an application sets for a cell-geometry glyph
 

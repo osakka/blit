@@ -64,6 +64,21 @@
 #define BLIT_MINIMISE_FIRST 0x1002CDU   /* the minimise box (ADR 0222): */
 #define BLIT_MINIMISE_SET 2U            /*   per set, the box and the box pressed */
 #define BLIT_MINIMISE_COUNT (2U * BLIT_MINIMISE_SET) /* Chalk's two, then Slate's */
+#define BLIT_FULLSCREEN_FIRST 0x10030AU /* the full-screen box (ADR 0224): */
+#define BLIT_FULLSCREEN_SET 2U          /*   per set, the box and the box pressed */
+#define BLIT_FULLSCREEN_COUNT (2U * BLIT_FULLSCREEN_SET) /* Chalk's two, then Slate's */
+#define BLIT_STICKY_FIRST 0x10030EU     /* the sticky box (ADR 0224): */
+#define BLIT_STICKY_SET 3U              /*   per set, the box, the box pressed, the box on */
+#define BLIT_STICKY_COUNT (2U * BLIT_STICKY_SET) /* Chalk's three, then Slate's */
+/* ADR 0224's marks, each one of two drawings chosen when Blit is built:
+   full screen 1 four corner brackets, 2 a diagonal two-headed arrow;
+   sticky 1 a pin (a round head on a short stem), 2 a centred dot. */
+#ifndef BLIT_WINDOW_FULLSCREEN_MARK
+#define BLIT_WINDOW_FULLSCREEN_MARK 1
+#endif
+#ifndef BLIT_WINDOW_STICKY_MARK
+#define BLIT_WINDOW_STICKY_MARK 1
+#endif
 
 static int blit_window_glyph(uint32_t scalar)
 {
@@ -429,7 +444,8 @@ static void blit_frame_roles(uint32_t scalar, unsigned char *roles, int w, int h
    line pen line beside it. Pressed (dragging): Chalk the inside solid with a
    clear hatch; Slate the mix pen inside with a foreground hatch. */
 enum { WS_CLOSE_PRESSED, WS_SHADE_PRESSED, WS_ZOOM_PRESSED, WS_GROW, WS_GROW_PRESSED,
-       WS_MINIMISE, WS_MINIMISE_PRESSED };
+       WS_MINIMISE, WS_MINIMISE_PRESSED,
+       WS_FULLSCREEN, WS_FULLSCREEN_PRESSED, WS_STICKY, WS_STICKY_PRESSED, WS_STICKY_ON };
 
 /* ADR 0222: the minimise box, normal and pressed, 2 glyphs per set from
    BLIT_MINIMISE_FIRST, Chalk's then Slate's, drawn here as the pressed
@@ -445,19 +461,87 @@ static int blit_minimise_glyph(uint32_t scalar)
     return scalar >= BLIT_MINIMISE_FIRST && scalar < BLIT_MINIMISE_FIRST + BLIT_MINIMISE_COUNT;
 }
 
+/* ADR 0224: the full-screen box (normal, pressed) and the sticky box
+   (normal, pressed, on), 2 and 3 glyphs per set from BLIT_FULLSCREEN_FIRST
+   and BLIT_STICKY_FIRST, Chalk's then Slate's, drawn as the minimise box
+   is: the same box, the same mark area, pressed by ADR 0219. Their marks
+   are blit_box_mark's. The sticky box on (sticky is set, not being
+   pressed) is the unpressed box with its mark bold: the mark and every
+   pixel beside it (left, right, above, below) within the mark area. */
+static int blit_fullscreen_glyph(uint32_t scalar)
+{
+    return scalar >= BLIT_FULLSCREEN_FIRST && scalar < BLIT_FULLSCREEN_FIRST + BLIT_FULLSCREEN_COUNT;
+}
+
+static int blit_sticky_glyph(uint32_t scalar)
+{
+    return scalar >= BLIT_STICKY_FIRST && scalar < BLIT_STICKY_FIRST + BLIT_STICKY_COUNT;
+}
+
+/* Is pixel (x, y) of an m x m mark area in the full-screen (sticky 0) or
+   sticky (sticky 1) mark? */
+static int blit_box_mark(int sticky, int m, int x, int y)
+{
+    if (x < 0 || y < 0 || x >= m || y >= m) return 0;
+    if (!sticky) {
+        int a = (m + 1) / 3 > 0 ? (m + 1) / 3 : 1;
+#if BLIT_WINDOW_FULLSCREEN_MARK == 2
+        /* A diagonal from the bottom-left corner to the top-right, each end
+           a head: two arms of a px along the area's edges from the corner. */
+        return x + y == m - 1 || (y == 0 && x >= m - 1 - a) || (x == m - 1 && y <= a) ||
+            (y == m - 1 && x <= a) || (x == 0 && y >= m - 1 - a);
+#else
+        /* Four corner brackets, one in each corner of the area: each two
+           arms of a px (the corner pixel included) along the area's edges. */
+        return ((y == 0 || y == m - 1) && (x < a || x >= m - a)) ||
+            ((x == 0 || x == m - 1) && (y < a || y >= m - a));
+#endif
+    } else {
+#if BLIT_WINDOW_STICKY_MARK == 2
+        /* A filled square dot, centred: a third of the area (rounded up),
+           one more where that leaves the two sides unequal. */
+        int s = (m + 2) / 3, o;
+        if ((m - s) % 2) ++s;
+        o = (m - s) / 2;
+        return x >= o && x < o + s && y >= o && y < o + s;
+#else
+        /* A pin: a round head d px across (odd, about half the area), on a
+           1 px stem half as long, the two centred in the area together. */
+        int d = ((m - 1) / 2) | 1, s = (d + 1) / 2, t, c = (m - 1) / 2, r = d / 2, dx;
+        if (d + s > m) s = m - d;
+        t = (m - d - s) / 2;
+        dx = x > c ? x - c : c - x;
+        if (y >= t && y < t + d && dx <= r)
+            return !(d >= 5 && dx == r && (y == t || y == t + d - 1));
+        return x == c && y >= t + d && y < t + d + s;
+#endif
+    }
+}
+
 static int blit_state_glyph(uint32_t scalar)
 {
     return (scalar >= BLIT_STATE_FIRST && scalar < BLIT_STATE_FIRST + BLIT_STATE_COUNT) ||
-        blit_minimise_glyph(scalar);
+        blit_minimise_glyph(scalar) || blit_fullscreen_glyph(scalar) || blit_sticky_glyph(scalar);
 }
 
-/* Slate's five are drawn in pens, 0 to 4, and its two minimise boxes 5 and
-   6; Chalk's, coverage, have none: -1. */
+/* Slate's five are drawn in pens, 0 to 4, its two minimise boxes 5 and 6,
+   its two full-screen boxes 7 and 8 and its three sticky boxes 9 to 11;
+   Chalk's, coverage, have none: -1. */
 static int blit_state_pen_index(uint32_t scalar)
 {
     if (blit_minimise_glyph(scalar)) {
         unsigned i = scalar - BLIT_MINIMISE_FIRST;
         return i < BLIT_MINIMISE_SET ? -1 : (int)(BLIT_STATE_SET + i - BLIT_MINIMISE_SET);
+    }
+    if (blit_fullscreen_glyph(scalar)) {
+        unsigned i = scalar - BLIT_FULLSCREEN_FIRST;
+        return i < BLIT_FULLSCREEN_SET ? -1 :
+            (int)(BLIT_STATE_SET + BLIT_MINIMISE_SET + i - BLIT_FULLSCREEN_SET);
+    }
+    if (blit_sticky_glyph(scalar)) {
+        unsigned i = scalar - BLIT_STICKY_FIRST;
+        return i < BLIT_STICKY_SET ? -1 :
+            (int)(BLIT_STATE_SET + BLIT_MINIMISE_SET + BLIT_FULLSCREEN_SET + i - BLIT_STICKY_SET);
     }
     if (!blit_state_glyph(scalar) || scalar - BLIT_STATE_FIRST < BLIT_STATE_SET) return -1;
     return (int)(scalar - BLIT_STATE_FIRST - BLIT_STATE_SET);
@@ -474,11 +558,20 @@ static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h
         unsigned k = scalar - BLIT_MINIMISE_FIRST;
         index = WS_MINIMISE + k % BLIT_MINIMISE_SET;
         slate = k >= BLIT_MINIMISE_SET;
+    } else if (blit_fullscreen_glyph(scalar)) {
+        unsigned k = scalar - BLIT_FULLSCREEN_FIRST;
+        index = WS_FULLSCREEN + k % BLIT_FULLSCREEN_SET;
+        slate = k >= BLIT_FULLSCREEN_SET;
+    } else if (blit_sticky_glyph(scalar)) {
+        unsigned k = scalar - BLIT_STICKY_FIRST;
+        index = WS_STICKY + k % BLIT_STICKY_SET;
+        slate = k >= BLIT_STICKY_SET;
     } else {
         index = (scalar - BLIT_STATE_FIRST) % BLIT_STATE_SET;
         slate = scalar - BLIT_STATE_FIRST >= BLIT_STATE_SET;
     }
-    pressed = index != WS_GROW && index != WS_MINIMISE;
+    pressed = index != WS_GROW && index != WS_MINIMISE && index != WS_FULLSCREEN &&
+        index != WS_STICKY && index != WS_STICKY_ON;
     cell.roles = roles; cell.w = w; cell.h = h;
     memset(roles, WR_NONE, (size_t)w * (size_t)h);
     blit_window_band(w, h, &n, &top, &side, &bx, &by);
@@ -498,7 +591,8 @@ static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h
     }
     wg_bar(&cell, slate, 0, 0, w, n, top);
     if (!pressed) {
-        /* The unpressed minimise box: the close box, and its mark. */
+        /* An unpressed box (minimise, full screen, sticky and sticky on):
+           the close box, and its mark. */
         if (slate) wg_fill(&cell, bx, bx + side, by, by + side, WR_LINE);
         wg_outline(&cell, bx, bx + side, by, by + side, L);
         i = L + BLIT_WINDOW_PRESS_GAP;
@@ -529,6 +623,14 @@ static void blit_state_roles(uint32_t scalar, unsigned char *roles, int w, int h
             wg_outline_role(&cell, lo, lo + m - 1, ly, ly + m - 1, L, ink);
         } else if (index == WS_MINIMISE || index == WS_MINIMISE_PRESSED) {
             wg_fill(&cell, lo + m / 4, lo + m - m / 4, ly + m - L, ly + m, ink);
+        } else if (index >= WS_FULLSCREEN) {
+            int sticky = index >= WS_STICKY, bold = index == WS_STICKY_ON;
+            for (y = 0; y < m; ++y) for (x = 0; x < m; ++x) {
+                if (blit_box_mark(sticky, m, x, y) ||
+                    (bold && (blit_box_mark(sticky, m, x - 1, y) || blit_box_mark(sticky, m, x + 1, y) ||
+                              blit_box_mark(sticky, m, x, y - 1) || blit_box_mark(sticky, m, x, y + 1))))
+                    roles[(ly + y) * w + lo + x] = ink;
+            }
         } else {
             int centre = by + (side - 1) / 2;
             for (i = slate ? -1 : -2; i <= (slate ? 1 : 2); i += 2) {

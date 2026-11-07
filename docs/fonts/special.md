@@ -458,5 +458,15 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `chalk-minimise-pressed` | `U+1002CE` | `"\udbc0\udece"` | foreground | Chalk set: title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom |
 | `slate-light-minimise` | `U+1002CF` | `"\udbc0\udecf"` | cell pens | Slate set: title bar with the minimise box: the square with a short bar along its bottom |
 | `slate-light-minimise-pressed` | `U+1002D0` | `"\udbc0\uded0"` | cell pens | Slate set: title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom |
+| `chalk-fullscreen` | `U+10030A` | `"\udbc0\udf0a"` | foreground | Chalk set: title bar with the full-screen box: the square with a bracket in each corner |
+| `chalk-fullscreen-pressed` | `U+10030B` | `"\udbc0\udf0b"` | foreground | Chalk set: title bar with the full-screen box pressed (also hover): the box filled, a bracket in each corner |
+| `slate-light-fullscreen` | `U+10030C` | `"\udbc0\udf0c"` | cell pens | Slate set: title bar with the full-screen box: the square with a bracket in each corner |
+| `slate-light-fullscreen-pressed` | `U+10030D` | `"\udbc0\udf0d"` | cell pens | Slate set: title bar with the full-screen box pressed (also hover): the box filled, a bracket in each corner |
+| `chalk-sticky` | `U+10030E` | `"\udbc0\udf0e"` | foreground | Chalk set: title bar with the sticky box: the square with a pin in it |
+| `chalk-sticky-pressed` | `U+10030F` | `"\udbc0\udf0f"` | foreground | Chalk set: title bar with the sticky box pressed (also hover): the box filled, a pin in it |
+| `chalk-sticky-on` | `U+100310` | `"\udbc0\udf10"` | foreground | Chalk set: title bar with the sticky box on (sticky is set): the square with the pin bold |
+| `slate-light-sticky` | `U+100311` | `"\udbc0\udf11"` | cell pens | Slate set: title bar with the sticky box: the square with a pin in it |
+| `slate-light-sticky-pressed` | `U+100312` | `"\udbc0\udf12"` | cell pens | Slate set: title bar with the sticky box pressed (also hover): the box filled, a pin in it |
+| `slate-light-sticky-on` | `U+100313` | `"\udbc0\udf13"` | cell pens | Slate set: title bar with the sticky box on (sticky is set): the square with the pin bold |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).
