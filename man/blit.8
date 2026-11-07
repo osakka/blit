@@ -378,6 +378,12 @@ With
 .BR BLIT_TEST_MODE=1 ,
 makes the GPU start hang this many milliseconds, to test recovery.
 .TP
+.B BLIT_TEST_GLES_CPU_CONNECTOR
+With
+.BR BLIT_TEST_MODE=1 ,
+composes the output on this connector with the CPU while the GPU composes
+the others, to test that dmabuf frames are then not offered (ADR 0223).
+.TP
 .B BLIT_KMS_MODESET
 When set, performs a full mode set on every frame.
 .TP

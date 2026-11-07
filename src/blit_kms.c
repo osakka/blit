@@ -3229,11 +3229,18 @@ const char *blit_kms_dmabuf_formats(const BlitKms *kms, int *fences,
         if (unavailable != NULL) *unavailable = "no output";
         return NULL;
     }
-    for (i = 0; i < kms->output_count; ++i)
+    for (i = 0; i < kms->output_count; ++i) {
         if (kms->outputs[i].gles_target == NULL) {
             if (unavailable != NULL) *unavailable = "an output is composed by the CPU";
             return NULL;
         }
+        /* The one frame the GPU hands to the CPU (kms_gles_unsupported):
+           a zoomed output without highp. */
+        if (kms->outputs[i].zoom > 100 && !blit_gles_zooms(kms->gles)) {
+            if (unavailable != NULL) *unavailable = "an output is zoomed and composed by the CPU";
+            return NULL;
+        }
+    }
     return blit_gles_dmabuf_formats(kms->gles, fences, unavailable);
 }
 
