@@ -124,7 +124,8 @@ and `wifi-off-wide-left` + `-right`), `cellular-1` through `cellular-4` (the mob
 `volume-0` (muted) through `volume-3` (in two columns `volume-wide-0-left` + `-right` through
 `volume-wide-3-left` + `-right`), `power`, `phone-off`, `phone-wait`,
 `phone-on`, `phone-ring`, their classic counterparts `phone-classic-off`
-through `phone-classic-ring`, the file
+through `phone-classic-ring` (in two columns `phone-classic-wide-off-left` + `-right`
+through `phone-classic-wide-ring-left` + `-right`), the file
 icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), `hui-left` +
 `hui-right` (the badge: white letters on a teal disc) and `hui-mark-left` +
 `hui-mark-right` (the H-U-i monogram, no disc), and `wiretap-left` + `wiretap-right`
@@ -334,12 +335,13 @@ pressed.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1002EC (the outer-edge frame, below,
+section. The next free codepoint is U+1002F4 (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
 hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
 off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
 minimise box U+1002CD–1002D0, then the Wi-Fi signal and cellular icons
-U+1002D1–1002D9, and the two-column Wi-Fi and volume icons U+1002DA–1002EB).
+U+1002D1–1002D9, the two-column Wi-Fi and volume icons U+1002DA–1002EB, and
+the two-column classic phones U+1002EC–1002F3).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

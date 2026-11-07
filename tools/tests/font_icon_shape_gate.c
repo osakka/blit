@@ -14,7 +14,9 @@
    are measured under their live names, cellular-1..4 (wifi-1..4 are the
    same drawing, deprecated). The two-column Wi-Fi fan and volume (0.3.56)
    are compared as whole badges, both columns side by side: wifi-wide
-   levels 1-4 pairwise and off against each, volume-wide 0-3 pairwise. */
+   levels 1-4 pairwise and off against each, volume-wide 0-3 pairwise.
+   The two-column classic phone (0.3.57), phone-classic-wide off, wait, on
+   and ring pairwise, whole badge. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <string.h>
@@ -41,11 +43,13 @@ static const Icon kIcons[] = {
     {"wifi-signal-wide-4", 0x1002e0}, {"wifi-off-wide", 0x1002e2},
     {"volume-wide-0", 0x1002e4}, {"volume-wide-1", 0x1002e6}, {"volume-wide-2", 0x1002e8},
     {"volume-wide-3", 0x1002ea},
+    {"phone-classic-wide-off", 0x1002ec}, {"phone-classic-wide-wait", 0x1002ee},
+    {"phone-classic-wide-on", 0x1002f0}, {"phone-classic-wide-ring", 0x1002f2},
 };
 #define NICONS ((int)(sizeof(kIcons) / sizeof(kIcons[0])))
 /* A two-column icon's entry is its left codepoint; its right is the next. */
 enum { B0 = 0, C0 = 5, AC = 10, V0 = 11, W1 = 15, TAP = 19, TAP1 = 21, WS1 = 23, WOFF = 27,
-       WW1 = 28, WWOFF = 32, VW0 = 33 };
+       WW1 = 28, WWOFF = 32, VW0 = 33, PCW = 37 };
 
 typedef struct { int w, h; unsigned char *m; } Mask;
 
@@ -123,6 +127,7 @@ int main(int argc, char **argv)
         for (i = WW1; i < WW1 + 4; ++i) for (j = i + 1; j < WW1 + 4; ++j) pair(m, i, j, min, "wifi-wide");
         for (i = WW1; i < WW1 + 4; ++i) pair(m, WWOFF, i, min, "wifi-wide");
         for (i = VW0; i < VW0 + 4; ++i) for (j = i + 1; j < VW0 + 4; ++j) pair(m, i, j, min, "volume-wide");
+        for (i = PCW; i < PCW + 4; ++i) for (j = i + 1; j < PCW + 4; ++j) pair(m, i, j, min, "phone-classic-wide");
         for (i = 0; i < NICONS; ++i) free(m[i].m);
     }
     if (failures) {

@@ -32,7 +32,8 @@ Dir.chdir(root) do
     %w[jpg png gif].flat_map { |f| ["file-image-#{f}-left", "file-image-#{f}-right"] } +
     %w[hui-mark-left hui-mark-right wiretap-left wiretap-right wiretap-off-left wiretap-off-right wiretap-1 wiretap-1-off] +
     (1..4).map { |l| "wifi-signal-#{l}" } + %w[wifi-off] + (1..4).map { |l| "cellular-#{l}" } +
-    ((1..4).map { |l| "wifi-signal-wide-#{l}" } + %w[wifi-off-wide] + (0..3).map { |l| "volume-wide-#{l}" })
+    ((1..4).map { |l| "wifi-signal-wide-#{l}" } + %w[wifi-off-wide] + (0..3).map { |l| "volume-wide-#{l}" } +
+     %w[off wait on ring].map { |s| "phone-classic-wide-#{s}" })
       .flat_map { |i| ["#{i}-left", "#{i}-right"] }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
   # ADR 0214: the outer-edge frame is cell geometry at U+1002AE-1002B6, clear

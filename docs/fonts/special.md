@@ -290,6 +290,14 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `volume-wide-2-right` | `U+1002E9` | `"\udbc0\udee9"` | 2 |
 | `volume-wide-3-left` | `U+1002EA` | `"\udbc0\udeea"` | 3 |
 | `volume-wide-3-right` | `U+1002EB` | `"\udbc0\udeeb"` | 3 |
+| `phone-classic-wide-off-left` | `U+1002EC` | `"\udbc0\udeec"` | — |
+| `phone-classic-wide-off-right` | `U+1002ED` | `"\udbc0\udeed"` | — |
+| `phone-classic-wide-wait-left` | `U+1002EE` | `"\udbc0\udeee"` | — |
+| `phone-classic-wide-wait-right` | `U+1002EF` | `"\udbc0\udeef"` | — |
+| `phone-classic-wide-on-left` | `U+1002F0` | `"\udbc0\udef0"` | — |
+| `phone-classic-wide-on-right` | `U+1002F1` | `"\udbc0\udef1"` | — |
+| `phone-classic-wide-ring-left` | `U+1002F2` | `"\udbc0\udef2"` | — |
+| `phone-classic-wide-ring-right` | `U+1002F3` | `"\udbc0\udef3"` | — |
 
 ## Themed text additions
 

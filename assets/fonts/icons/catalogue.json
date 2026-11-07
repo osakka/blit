@@ -288,7 +288,15 @@
     {"id":"volume-wide-2-left", "codepoint":"1002E8", "source":"volume.svg", "signal_level":2, "columns":2, "column":0},
     {"id":"volume-wide-2-right", "codepoint":"1002E9", "source":"volume.svg", "signal_level":2, "columns":2, "column":1},
     {"id":"volume-wide-3-left", "codepoint":"1002EA", "source":"volume.svg", "signal_level":3, "columns":2, "column":0},
-    {"id":"volume-wide-3-right", "codepoint":"1002EB", "source":"volume.svg", "signal_level":3, "columns":2, "column":1}
+    {"id":"volume-wide-3-right", "codepoint":"1002EB", "source":"volume.svg", "signal_level":3, "columns":2, "column":1},
+    {"id":"phone-classic-wide-off-left", "codepoint":"1002EC", "source":"phone-classic-off.svg", "columns":2, "column":0},
+    {"id":"phone-classic-wide-off-right", "codepoint":"1002ED", "source":"phone-classic-off.svg", "columns":2, "column":1},
+    {"id":"phone-classic-wide-wait-left", "codepoint":"1002EE", "source":"phone-classic-wait.svg", "columns":2, "column":0},
+    {"id":"phone-classic-wide-wait-right", "codepoint":"1002EF", "source":"phone-classic-wait.svg", "columns":2, "column":1},
+    {"id":"phone-classic-wide-on-left", "codepoint":"1002F0", "source":"phone-classic-on.svg", "columns":2, "column":0},
+    {"id":"phone-classic-wide-on-right", "codepoint":"1002F1", "source":"phone-classic-on.svg", "columns":2, "column":1},
+    {"id":"phone-classic-wide-ring-left", "codepoint":"1002F2", "source":"phone-classic-ring.svg", "columns":2, "column":0},
+    {"id":"phone-classic-wide-ring-right", "codepoint":"1002F3", "source":"phone-classic-ring.svg", "columns":2, "column":1}
   ],
   "text_glyphs": [
     {"id":"berkanan", "codepoint":"16D2", "source":"berkanan.svg", "colour":false},
