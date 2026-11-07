@@ -37,6 +37,35 @@
 #define BLIT_GRAPHICS_MAX_DRAWS \
     (BLIT_GRAPHICS_MAX_IMAGES * (BLIT_GRAPHICS_MAX_PLACEMENTS + 1))
 
+/* ADR 0223: one dmabuf frame of a descriptor image, imported by the GPU
+   compositor. Its plane descriptors (and so the producer's buffer) are held
+   until a newer frame of the image has been presented; then Blit answers
+   RELEASE and closes them. The compositor only reads `texture` and sets
+   `drawn` when a frame it composed sampled it. */
+#define BLIT_DMABUF_PLANES 4
+typedef struct {
+    int used;
+    unsigned long long sequence;
+    int fds[BLIT_DMABUF_PLANES];
+    int fd_count;
+    unsigned int texture;   /* the GL texture bound to the EGLImage */
+    void *egl_image;
+    int drawn;
+} BlitGraphicsDmabufBuffer;
+
+struct BlitKms;
+typedef struct {
+    struct BlitKms *kms;    /* whose GLES context holds the textures */
+    int reply_fd;           /* a dup of the sender's socket, for RELEASE */
+    unsigned long long reply_serial;
+    unsigned int image_id;
+    /* What a release adds to: the session's count and Blit's. */
+    unsigned long *session_released;
+    unsigned long long *runtime_released;
+    /* The frame shown now, and the one before it until `shown` is drawn. */
+    BlitGraphicsDmabufBuffer shown, retiring;
+} BlitGraphicsDmabuf;
+
 /* Where one numbered placement puts an image, and which part of it. A zero
    source width or height means "to the image's edge". ADR 0060. */
 typedef struct {
@@ -134,6 +163,9 @@ typedef struct {
        freed when the update ends. */
     int retired;
     char retired_reason[16];
+    /* ADR 0223: set while the picture is a dmabuf frame the GPU imported.
+       `pixels` is then NULL and the CPU compositor does not draw it. */
+    BlitGraphicsDmabuf *dmabuf;
 } BlitGraphicsImage;
 
 /* One thing a renderer draws: a placement with its defaults resolved and its
@@ -240,7 +272,9 @@ static inline int blit_graphics_collect(const BlitGraphicsImage *images,
          image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index) {
         const BlitGraphicsImage *image = &images[image_index];
         int slot;
-        if (!image->used || !image->complete || image->pixels == NULL ||
+        if (!image->used || !image->complete ||
+            (image->pixels == NULL &&
+             (image->dmabuf == NULL || !image->dmabuf->shown.used)) ||
             image->width < 1 || image->height < 1)
             continue;
         for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {

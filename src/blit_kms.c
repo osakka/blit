@@ -1114,7 +1114,10 @@ static void draw_graphic(KmsOutput *output, const BlitGraphicsDraw *draw,
     int bytes_per_pixel = image->format == 24 ? 3 : 4;
     int destination_y;
 
-    if (width < 1 || height < 1 || draw->src_w < 1 || draw->src_h < 1)
+    /* ADR 0223: a dmabuf frame lives on the GPU only; the CPU compositor
+       never reads one back. */
+    if (width < 1 || height < 1 || draw->src_w < 1 || draw->src_h < 1 ||
+        image->pixels == NULL)
         return;
     /* Emulator frames normally arrive at their presentation size.  Keep the
        native-size path free of the scaler's two integer divisions and
@@ -3201,6 +3204,63 @@ int blit_kms_screenshot(BlitKms *kms, int index,
     *bytes = result;
     *length = total;
     return 1;
+}
+
+/* ADR 0223: import only while the GPU composes at least one output. The
+   CPU compositor never reads a dmabuf, so without one there is nowhere to
+   draw it. */
+const char *blit_kms_dmabuf_formats(const BlitKms *kms, int *fences,
+                                    const char **unavailable)
+{
+    int i, composing = 0;
+    if (fences != NULL) *fences = 0;
+    if (unavailable != NULL) *unavailable = "no GLES compositor";
+    if (kms == NULL || kms->gles == NULL)
+        return NULL;
+    for (i = 0; i < kms->output_count; ++i)
+        if (kms->outputs[i].gles_target != NULL)
+            composing = 1;
+    if (!composing) {
+        if (unavailable != NULL) *unavailable = "no output composed by GLES";
+        return NULL;
+    }
+    return blit_gles_dmabuf_formats(kms->gles, fences, unavailable);
+}
+
+int blit_kms_dmabuf_accepts(const BlitKms *kms, uint32_t fourcc, uint64_t modifier)
+{
+    return blit_kms_dmabuf_formats(kms, NULL, NULL) != NULL &&
+        blit_gles_dmabuf_accepts(kms->gles, fourcc, modifier);
+}
+
+unsigned int blit_kms_dmabuf_import(BlitKms *kms, int width, int height,
+                                    uint32_t fourcc, uint64_t modifier, int planes,
+                                    const int *fds, const uint32_t *offsets,
+                                    const uint32_t *pitches, int fence_fd,
+                                    void **image, char *error, size_t capacity)
+{
+    BlitGlesDmabuf d;
+    int i;
+    memset(&d, 0, sizeof(d));
+    d.width = width;
+    d.height = height;
+    d.fourcc = fourcc;
+    d.modifier = modifier;
+    d.planes = planes;
+    for (i = 0; i < planes && i < 4; ++i) {
+        d.fds[i] = fds[i];
+        d.offsets[i] = offsets[i];
+        d.pitches[i] = pitches[i];
+    }
+    d.fence_fd = fence_fd;
+    return blit_gles_dmabuf_import(kms != NULL ? kms->gles : NULL, &d, image,
+                                   error, capacity);
+}
+
+void blit_kms_dmabuf_destroy(BlitKms *kms, unsigned int texture, void *image)
+{
+    if (kms != NULL && kms->gles != NULL)
+        blit_gles_dmabuf_destroy(kms->gles, texture, image);
 }
 
 void blit_kms_close(BlitKms *kms)

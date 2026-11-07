@@ -284,4 +284,21 @@ int blit_kms_screenshot(BlitKms *kms, int index,
                         unsigned char **bytes, size_t *length);
 void blit_kms_close(BlitKms *kms);
 
+/* ADR 0223: dmabuf frames, imported by the GPU compositor. The formats it
+   can import (blit_gles_dmabuf_formats' token), or NULL when it cannot
+   now -- no GLES compositor, no output it composes, or no import in EGL --
+   with the reason in `unavailable`. */
+const char *blit_kms_dmabuf_formats(const BlitKms *kms, int *fences,
+                                    const char **unavailable);
+int blit_kms_dmabuf_accepts(const BlitKms *kms, uint32_t fourcc, uint64_t modifier);
+/* A GL texture of the planes (0 on failure, with the reason), and the
+   EGLImage behind it. The fence descriptor (-1 for none) is consumed; the
+   plane descriptors stay the caller's until blit_kms_dmabuf_destroy. */
+unsigned int blit_kms_dmabuf_import(BlitKms *kms, int width, int height,
+                                    uint32_t fourcc, uint64_t modifier, int planes,
+                                    const int *fds, const uint32_t *offsets,
+                                    const uint32_t *pitches, int fence_fd,
+                                    void **image, char *error, size_t capacity);
+void blit_kms_dmabuf_destroy(BlitKms *kms, unsigned int texture, void *image);
+
 #endif

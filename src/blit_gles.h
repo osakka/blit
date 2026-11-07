@@ -82,6 +82,40 @@ void blit_gles_image(BlitGles *gles, BlitGlesTexture texture,
                      int texture_width, int texture_height,
                      int source_x, int source_y, int source_width,
                      int source_height, int x, int y, int width, int height);
+/* ADR 0223: the same quad for a texture whose colour is premultiplied by
+   its alpha, as a dmabuf frame's is (the DRM and Wayland convention). */
+void blit_gles_image_premultiplied(BlitGles *gles, BlitGlesTexture texture,
+                                   int texture_width, int texture_height,
+                                   int source_x, int source_y, int source_width,
+                                   int source_height, int x, int y, int width,
+                                   int height);
+
+/* ---- ADR 0223: pictures imported from dmabufs. ----
+   The importable formats as one token, `<fourcc>/<modifier>[/<modifier>...]`
+   per format, comma-separated, modifiers in lowercase hex (XR24/0,AR24/0),
+   or NULL when this context cannot import (`unavailable` says why).
+   `fences` is 1 when an acquire fence (a sync_file) is waited on in the
+   GPU. */
+const char *blit_gles_dmabuf_formats(const BlitGles *gles, int *fences,
+                                     const char **unavailable);
+int blit_gles_dmabuf_accepts(const BlitGles *gles, uint32_t fourcc, uint64_t modifier);
+typedef struct {
+    int width, height;
+    uint32_t fourcc;
+    uint64_t modifier;
+    int planes;
+    int fds[4];
+    uint32_t offsets[4], pitches[4];
+    int fence_fd;   /* -1 for none; always consumed by the import */
+} BlitGlesDmabuf;
+/* A texture bound to an EGLImage of the planes, or 0 with the reason. The
+   plane descriptors stay the caller's, and must stay open until
+   blit_gles_dmabuf_destroy. Nothing is mapped or copied. */
+BlitGlesTexture blit_gles_dmabuf_import(BlitGles *gles, const BlitGlesDmabuf *dmabuf,
+                                        void **image, char *error,
+                                        size_t error_capacity);
+void blit_gles_dmabuf_destroy(BlitGles *gles, BlitGlesTexture texture, void *image);
+
 /* Clip later quads to a rectangle; width 0 clears the clip. */
 void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height);
 /* Flushes; on GBM queues the frame (lock it with blit_gles_lock_front). */

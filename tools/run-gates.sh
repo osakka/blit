@@ -56,6 +56,8 @@ Environment:
   BLIT_GATE_BACKEND  native (default) or gles
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
+  BLIT_GATE_LIVE_DMABUF  live host whose GPU imports dmabufs (BLIT_AUTH_TOKEN
+                     its API token); enables frame_dmabuf_live_gate (ADR 0223)
   BLIT_SOAK_SECONDS  soak duration      (default 120, gate's own default)
   BLIT_HIBR_ROOT     Hibr checkout providing the headers the adapter gate
                      compiles against (default /tmp/hibr-<packaging/HIBR_VERSION>
@@ -83,6 +85,7 @@ BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Terminus16.psf}
 PACKAGE=${BLIT_GATE_PACKAGE:-}
 LIVE=${BLIT_GATE_LIVE:-}
+LIVE_DMABUF=${BLIT_GATE_LIVE_DMABUF:-}
 BASE_PORT=${BLIT_GATE_BASE_PORT:-19400}
 # The adapter gate compiles hibr/console-blit.c, so it needs Hibr's headers.
 # Default to the pinned checkout rather than any newer development tree:
@@ -569,6 +572,14 @@ suite_hibr() {
     run_gate hibr_frame_barrier_scope_gate.rb ruby tools/tests/hibr_frame_barrier_scope_gate.rb
     run_gate font_resize_views_gate.rb ruby tools/tests/font_resize_views_gate.rb
     run_gate frame_descriptor_gate.sh sh "$ROOT"/tools/tests/frame_descriptor_gate.sh
+    run_gate frame_dmabuf_gate.sh sh "$ROOT"/tools/tests/frame_dmabuf_gate.sh
+    # ADR 0223: import, drawing and RELEASE need a GPU that imports dmabufs,
+    # so they run against a named live host, never implied by a local run.
+    if [ -n "$LIVE_DMABUF" ]; then
+        run_serial_gate frame_dmabuf_live_gate.sh sh "$ROOT"/tools/tests/frame_dmabuf_live_gate.sh "$LIVE_DMABUF"
+    else
+        skip_gate frame_dmabuf_live_gate.sh "set BLIT_GATE_LIVE_DMABUF to a host whose GPU imports dmabufs"
+    fi
     run_gate hibr_split_capture_gate.rb ruby tools/tests/hibr_split_capture_gate.rb
     run_gate hibr_join_placement_gate.sh "$ROOT"/tools/tests/hibr_join_placement_gate.sh
     # Needs only the Hibr headers, not a Hibr process: it compiles the shipped

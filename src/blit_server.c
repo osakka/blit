@@ -952,7 +952,8 @@ typedef struct {
     int authenticated;
     unsigned long long session_id;
     uid_t uid;  /* the peer's, from SO_PEERCRED at the hello */
-    int version;  /* the hello's, 1 or 2 */
+    int version;  /* the hello's, 1, 2 or 3 */
+    unsigned long long serial;  /* which connection, for a dmabuf's RELEASE */
     int hud_on;   /* the last HUD1 sent, to a version 2 client */
 } BlitFrameClient;
 
@@ -1092,6 +1093,12 @@ typedef struct {
     unsigned int frame_deleted[BLIT_FRAME_DELETED];
     int frame_deleted_next;
     unsigned long frames_accepted, frames_refused, frames_stale, frames_superseded;
+    /* ADR 0223: dmabuf frames accepted, refused by reason (no import here,
+       a format or modifier it cannot read, an import that failed, a
+       malformed or out-of-bounds frame) and released. */
+    unsigned long dmabuf_accepted, dmabuf_released;
+    unsigned long dmabuf_refused_unavailable, dmabuf_refused_format;
+    unsigned long dmabuf_refused_import, dmabuf_refused_invalid;
     char frames_last_error[32];
     int frame_connections;
     BlitPendingPlacement frame_pending[BLIT_FRAME_PENDING];
@@ -1808,6 +1815,9 @@ typedef struct {
     BlitFrameClient frame_clients[32];
     unsigned long long frames_accepted, frames_refused;
     char frames_last_error[32];
+    /* ADR 0223: dmabuf frames, all sessions. */
+    unsigned long long frame_serial;
+    unsigned long long dmabuf_accepted, dmabuf_refused, dmabuf_released;
     /* ADR 0203: the performance panel. The settings document's hud section
        as applied, the update clock, its cost, and each output's panel. */
     int hud_enabled, hud_corner, hud_hz, hud_opacity;
@@ -2036,6 +2046,9 @@ static void graphics_image_release(BlitGraphicsImage *image);
 static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
                                 const char *reason);
 static void frame_note_deleted(BlitSession *session, const BlitGraphicsImage *image);
+static void frame_dmabuf_free(BlitGraphicsImage *image);
+static void frame_dmabuf_drop_all(BlitRuntime *runtime);
+static void frame_dmabuf_presented(BlitRuntime *runtime);
 static int surface_targets_output(BlitRuntime *runtime,
                                   BlitSurface *surface, int output_index);
 static void pixel_frame_reset(BlitRuntime *runtime, BlitStream *stream,
@@ -4151,6 +4164,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
     char update[512];
     char hotplug[512];
     char hotplug_error[256];
+    static char dmabuf[1600 + BLIT_MAX_SESSIONS * 192];
     BlitKmsHotplugInfo hotplug_info;
     const char *backend = runtime->kms != NULL ? "drm-kms" : "unavailable";
     int sessions = 0;
@@ -4316,6 +4330,35 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                 first_error ? "" : ",");
         snprintf(errors + error_used, sizeof(errors) - error_used, "]");
     }
+    /* ADR 0223: whether dmabuf frames are offered, what can be imported,
+       and what became of those sent, in all and per session. */
+    {
+        int fences = 0, index, first = 1;
+        const char *unavailable = "";
+        const char *formats = blit_kms_dmabuf_formats(runtime->kms, &fences, &unavailable);
+        size_t at = (size_t)snprintf(dmabuf, sizeof(dmabuf),
+            "{\"advertised\":%s,\"unavailable\":\"%s\",\"fences\":%s,\"formats\":\"%s\","
+            "\"accepted\":%llu,\"refused\":%llu,\"released\":%llu,\"sessions\":[",
+            formats != NULL ? "true" : "false", formats != NULL ? "" : unavailable,
+            fences ? "true" : "false", formats != NULL ? formats : "",
+            runtime->dmabuf_accepted, runtime->dmabuf_refused, runtime->dmabuf_released);
+        for (index = 0; index < BLIT_MAX_SESSIONS && at < sizeof(dmabuf); ++index) {
+            const BlitSession *s = &runtime->sessions[index];
+            if (!s->used || (s->dmabuf_accepted == 0 && s->dmabuf_released == 0 &&
+                             s->dmabuf_refused_unavailable == 0 && s->dmabuf_refused_format == 0 &&
+                             s->dmabuf_refused_import == 0 && s->dmabuf_refused_invalid == 0))
+                continue;
+            at += (size_t)snprintf(dmabuf + at, sizeof(dmabuf) - at,
+                "%s{\"session_id\":\"%llu\",\"accepted\":%lu,\"released\":%lu,"
+                "\"refused\":{\"unavailable\":%lu,\"format\":%lu,\"import\":%lu,\"invalid\":%lu}}",
+                first ? "" : ",", s->id, s->dmabuf_accepted, s->dmabuf_released,
+                s->dmabuf_refused_unavailable, s->dmabuf_refused_format,
+                s->dmabuf_refused_import, s->dmabuf_refused_invalid);
+            first = 0;
+        }
+        if (at < sizeof(dmabuf))
+            snprintf(dmabuf + at, sizeof(dmabuf) - at, "]}");
+    }
     snprintf(body, capacity,
              "{\"revision\":1,\"health\":{\"ready\":%s,"
              "\"backend\":\"%s\",\"error\":\"%s\"},"
@@ -4345,7 +4388,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              "\"sixel_max_width\":%d,\"sixel_max_height\":%d,"
              "\"sixel_color_registers\":%d,"
              "\"frames\":{\"socket\":\"%s%s\",\"accepted\":%llu,\"refused\":%llu,"
-             "\"last_error\":\"%s\"}},"
+             "\"last_error\":\"%s\",\"dmabuf\":%s}},"
              "\"hud\":%s,\"update\":%s,"
              "\"errors\":%s,\"warnings\":%s}",
              runtime->kms != NULL && runtime->display_count > 0 ?
@@ -4375,7 +4418,7 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              BLIT_SIXEL_COLOR_REGISTERS,
              runtime->frame_fd >= 0 ? "@" : "", runtime->frame_fd >= 0 ? runtime->frame_name : "",
              runtime->frames_accepted, runtime->frames_refused,
-             runtime->frames_last_error, hud, update,
+             runtime->frames_last_error, dmabuf, hud, update,
              errors,
              warnings);
 }
@@ -10556,6 +10599,7 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
 static void graphics_image_release(BlitGraphicsImage *image)
 {
     if (image == NULL) return;
+    frame_dmabuf_free(image);
     free(image->pixels);
     memset(image, 0, sizeof(*image));
 }
@@ -16238,14 +16282,17 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                 "\"width\":%d,\"height\":%d,\"format\":%d,"
                 "\"bytes\":%lu,\"pixel_crc32\":%lu,\"x\":%d,\"y\":%d,"
                 "\"placement_width\":%d,\"placement_height\":%d,"
-                "\"z\":%d,\"revision\":%llu",
+                "\"z\":%d,\"revision\":%llu,\"dmabuf\":%s,\"sequence\":%llu",
                 first_graphics ? "" : ",", image->id, image->protocol,
                 image->complete ? "true" : "false",
                 image->visible ? "true" : "false", image->width,
                 image->height, image->format, (unsigned long)image->bytes,
                 pixel_crc,
                 image->x, image->y, top_width, top_height, image->z,
-                image->revision);
+                image->revision,
+                /* ADR 0223: the picture is a dmabuf frame on the GPU. */
+                image->dmabuf != NULL && image->dmabuf->shown.used ? "true" : "false",
+                image->descriptor_sequence);
             /* The same record carries the placements: the default one as id
                0, then each numbered one, with their source rectangles. A
                placement whose rectangle starts outside the image is listed
@@ -16312,9 +16359,15 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     used += (size_t)snprintf(
         body + used, capacity - used,
         ",\"frames\":{\"accepted\":%lu,\"refused\":%lu,\"stale\":%lu,"
-        "\"superseded\":%lu,\"last_error\":\"%s\"}",
+        "\"superseded\":%lu,\"last_error\":\"%s\","
+        /* ADR 0223: those that came as dmabufs. */
+        "\"dmabuf\":{\"accepted\":%lu,\"released\":%lu,\"refused\":{"
+        "\"unavailable\":%lu,\"format\":%lu,\"import\":%lu,\"invalid\":%lu}}}",
         session->frames_accepted, session->frames_refused, session->frames_stale,
-        session->frames_superseded, session->frames_last_error);
+        session->frames_superseded, session->frames_last_error,
+        session->dmabuf_accepted, session->dmabuf_released,
+        session->dmabuf_refused_unavailable, session->dmabuf_refused_format,
+        session->dmabuf_refused_import, session->dmabuf_refused_invalid);
     /* ADR 0203: the latest STA1 lines from its frame client, while they are
        younger than the five seconds the panel shows them for. */
     {
@@ -26018,6 +26071,8 @@ static void initialize_outputs(BlitRuntime *runtime)
 
 static void destroy_outputs(BlitRuntime *runtime)
 {
+    /* ADR 0223: dmabuf textures live in the GLES context closed here. */
+    frame_dmabuf_drop_all(runtime);
     if (runtime->kms != NULL)
         blit_kms_close(runtime->kms);
     runtime->kms = NULL;
@@ -27483,6 +27538,9 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
                          &kms_submitted_output_mask,
                          &kms_deferred_output_mask) < 0)
         fprintf(stderr, "blit: direct KMS present failed\n");
+    /* ADR 0223: a dmabuf frame drawn in what was just presented frees the
+       one before it. */
+    frame_dmabuf_presented(runtime);
     kms_present_ms = (double)(monotonic_us() - kms_present_started) /
         1000.0;
     /* ADR 0213: the ledger counts frames per output, and knows which display
@@ -31478,6 +31536,7 @@ int main(int argc, char **argv)
         if (ready > 0)
             frame_service(&runtime, &readable);
         frame_expire_placements(&runtime, monotonic_us());
+        frame_dmabuf_reconcile(&runtime);
         if (ready > 0) {
             for (i = 0; i < runtime.evdev_mouse_count; ++i)
                 if (runtime.evdev_mouse_fds[i] >= 0 &&

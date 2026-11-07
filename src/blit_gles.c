@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef EGL_PLATFORM_SURFACELESS_MESA
 #define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
@@ -87,6 +88,27 @@ struct BlitGles {
     void (*Uniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
     void (*Uniform3f)(GLint, GLfloat, GLfloat, GLfloat);
     void (*GetShaderPrecisionFormat)(GLenum, GLenum, GLint *, GLint *);
+    /* ADR 0223: dmabuf import. `dmabuf` is 1 when EGL can import dmabufs
+       (EGL_EXT_image_dma_buf_import) and GL can bind an EGLImage to a 2D
+       texture (GL_OES_EGL_image); `dmabuf_modifiers` when EGL takes an
+       explicit format modifier; `fences` when it can wait on a sync_file
+       in the GPU. The importable formats and their modifiers are listed
+       once, at open. */
+    int dmabuf, dmabuf_modifiers, fences;
+    int dmabuf_format_count;
+    uint32_t dmabuf_fourcc[4];
+    int dmabuf_modifier_count[4];
+    uint64_t dmabuf_modifier[4][16];
+    char dmabuf_list[1200];
+    PFNEGLCREATEIMAGEKHRPROC CreateImage;
+    PFNEGLDESTROYIMAGEKHRPROC DestroyImage;
+    PFNEGLQUERYDMABUFFORMATSEXTPROC QueryDmaBufFormats;
+    PFNEGLQUERYDMABUFMODIFIERSEXTPROC QueryDmaBufModifiers;
+    PFNEGLCREATESYNCKHRPROC CreateSync;
+    PFNEGLDESTROYSYNCKHRPROC DestroySync;
+    PFNEGLWAITSYNCKHRPROC WaitSync;
+    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC ImageTargetTexture2D;
+    char dmabuf_unavailable[96];
 
     PFNEGLGETPROCADDRESSPROC GetProcAddress;
     PFNEGLGETPLATFORMDISPLAYPROC GetPlatformDisplay;
@@ -784,6 +806,116 @@ static void gles_load_timer_queries(BlitGles *gles)
         gles->GetQueryObjectui64v && gles->GetIntegerv;
 }
 
+/* ADR 0223: whether a space-separated extension string names `name`. */
+static int gles_has_extension(const char *list, const char *name)
+{
+    size_t length = strlen(name);
+    const char *at = list;
+    while (list != NULL && (at = strstr(at, name)) != NULL) {
+        if ((at == list || at[-1] == ' ') && (at[length] == ' ' || at[length] == '\0'))
+            return 1;
+        at += length;
+    }
+    return 0;
+}
+
+#define GLES_FOURCC(a, b, c, d) \
+    ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
+
+/* ADR 0223: what this context can import from a dmabuf. The four RGB
+   formats Blit draws as a 2D texture (never external-only modifiers),
+   with the modifiers EGL lists for each, or LINEAR alone when EGL takes no
+   explicit modifier. Nothing is imported here: a format is listed when
+   EGL says it can be. */
+static void gles_load_dmabuf(BlitGles *gles)
+{
+    static const uint32_t wanted[4] = {
+        GLES_FOURCC('X', 'R', '2', '4'), GLES_FOURCC('A', 'R', '2', '4'),
+        GLES_FOURCC('X', 'B', '2', '4'), GLES_FOURCC('A', 'B', '2', '4')
+    };
+    const char *(*query)(EGLDisplay, EGLint) = (const char *(*)(EGLDisplay, EGLint))
+        dlsym(gles->egl_library, "eglQueryString");
+    const char *egl = query != NULL ? query(gles->display, EGL_EXTENSIONS) : NULL;
+    const char *gl = (const char *)gles->glGetString(GL_EXTENSIONS);
+    EGLint formats[256], format_count = 0;
+    size_t used = 0;
+    int i, j;
+
+    gles->dmabuf_list[0] = '\0';
+    if (egl == NULL || !gles_has_extension(egl, "EGL_EXT_image_dma_buf_import")) {
+        snprintf(gles->dmabuf_unavailable, sizeof(gles->dmabuf_unavailable),
+                 "no EGL_EXT_image_dma_buf_import");
+        return;
+    }
+    if (gl == NULL || !gles_has_extension(gl, "GL_OES_EGL_image")) {
+        snprintf(gles->dmabuf_unavailable, sizeof(gles->dmabuf_unavailable),
+                 "no GL_OES_EGL_image");
+        return;
+    }
+    gles->CreateImage = (PFNEGLCREATEIMAGEKHRPROC)gles->GetProcAddress("eglCreateImageKHR");
+    gles->DestroyImage = (PFNEGLDESTROYIMAGEKHRPROC)gles->GetProcAddress("eglDestroyImageKHR");
+    gles->ImageTargetTexture2D = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
+        gles->GetProcAddress("glEGLImageTargetTexture2DOES");
+    if (gles->CreateImage == NULL || gles->DestroyImage == NULL ||
+        gles->ImageTargetTexture2D == NULL) {
+        snprintf(gles->dmabuf_unavailable, sizeof(gles->dmabuf_unavailable),
+                 "no EGLImage entry points");
+        return;
+    }
+    if (gles_has_extension(egl, "EGL_EXT_image_dma_buf_import_modifiers")) {
+        gles->QueryDmaBufFormats = (PFNEGLQUERYDMABUFFORMATSEXTPROC)
+            gles->GetProcAddress("eglQueryDmaBufFormatsEXT");
+        gles->QueryDmaBufModifiers = (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)
+            gles->GetProcAddress("eglQueryDmaBufModifiersEXT");
+        gles->dmabuf_modifiers = gles->QueryDmaBufFormats != NULL &&
+            gles->QueryDmaBufModifiers != NULL &&
+            gles->QueryDmaBufFormats(gles->display, 256, formats, &format_count);
+    }
+    if (gles_has_extension(egl, "EGL_ANDROID_native_fence_sync") &&
+        gles_has_extension(egl, "EGL_KHR_wait_sync")) {
+        gles->CreateSync = (PFNEGLCREATESYNCKHRPROC)gles->GetProcAddress("eglCreateSyncKHR");
+        gles->DestroySync = (PFNEGLDESTROYSYNCKHRPROC)gles->GetProcAddress("eglDestroySyncKHR");
+        gles->WaitSync = (PFNEGLWAITSYNCKHRPROC)gles->GetProcAddress("eglWaitSyncKHR");
+        gles->fences = gles->CreateSync != NULL && gles->DestroySync != NULL &&
+            gles->WaitSync != NULL;
+    }
+    for (i = 0; i < 4; ++i) {
+        int k = gles->dmabuf_format_count, count = 0;
+        if (gles->dmabuf_modifiers) {
+            EGLuint64KHR modifiers[64];
+            EGLBoolean external[64];
+            EGLint n = 0;
+            for (j = 0; j < format_count && (uint32_t)formats[j] != wanted[i]; ++j) {}
+            if (j == format_count ||
+                !gles->QueryDmaBufModifiers(gles->display, (EGLint)wanted[i], 64,
+                                            modifiers, external, &n))
+                continue;
+            for (j = 0; j < n && count < 16; ++j)
+                if (!external[j])
+                    gles->dmabuf_modifier[k][count++] = (uint64_t)modifiers[j];
+        } else {
+            gles->dmabuf_modifier[k][count++] = 0;   /* DRM_FORMAT_MOD_LINEAR */
+        }
+        if (count == 0)
+            continue;
+        gles->dmabuf_fourcc[k] = wanted[i];
+        gles->dmabuf_modifier_count[k] = count;
+        ++gles->dmabuf_format_count;
+        used += (size_t)snprintf(gles->dmabuf_list + used, sizeof(gles->dmabuf_list) - used,
+                                 "%s%c%c%c%c", k ? "," : "", (char)wanted[i],
+                                 (char)(wanted[i] >> 8), (char)(wanted[i] >> 16),
+                                 (char)(wanted[i] >> 24));
+        for (j = 0; j < count && used < sizeof(gles->dmabuf_list); ++j)
+            used += (size_t)snprintf(gles->dmabuf_list + used,
+                                     sizeof(gles->dmabuf_list) - used, "/%llx",
+                                     (unsigned long long)gles->dmabuf_modifier[k][j]);
+    }
+    gles->dmabuf = gles->dmabuf_format_count > 0;
+    if (!gles->dmabuf)
+        snprintf(gles->dmabuf_unavailable, sizeof(gles->dmabuf_unavailable),
+                 "no importable RGB format");
+}
+
 /* Collects finished timings without waiting, then opens the next query. A
    disjoint event (clock change, power state) voids the results it spans. */
 static void gles_timer_begin(BlitGles *gles, BlitGlesTarget *target)
@@ -914,6 +1046,7 @@ static BlitGles *gles_open_common(int surfaceless, int drm_fd, char *error,
              (const char *)gles->glGetString(GL_RENDERER),
              (const char *)gles->glGetString(GL_VERSION));
     gles_load_timer_queries(gles);
+    gles_load_dmabuf(gles);
     gles_build_present(gles);
     gles_build_zoom(gles);
     gles_load_burn(gles);
@@ -1271,6 +1404,130 @@ void blit_gles_texture_delete(BlitGles *gles, BlitGlesTexture texture)
     gles->batch_texture = (GLuint)-1;
 }
 
+const char *blit_gles_dmabuf_formats(const BlitGles *gles, int *fences,
+                                     const char **unavailable)
+{
+    if (fences != NULL) *fences = gles != NULL && gles->fences;
+    if (unavailable != NULL)
+        *unavailable = gles == NULL ? "no GLES compositor" : gles->dmabuf_unavailable;
+    return gles != NULL && gles->dmabuf ? gles->dmabuf_list : NULL;
+}
+
+int blit_gles_dmabuf_accepts(const BlitGles *gles, uint32_t fourcc, uint64_t modifier)
+{
+    int i, j;
+    if (gles == NULL || !gles->dmabuf) return 0;
+    for (i = 0; i < gles->dmabuf_format_count; ++i)
+        if (gles->dmabuf_fourcc[i] == fourcc)
+            for (j = 0; j < gles->dmabuf_modifier_count[i]; ++j)
+                if (gles->dmabuf_modifier[i][j] == modifier)
+                    return 1;
+    return 0;
+}
+
+BlitGlesTexture blit_gles_dmabuf_import(BlitGles *gles, const BlitGlesDmabuf *d,
+                                        void **image_out, char *error,
+                                        size_t capacity)
+{
+    static const EGLint plane_fd[4] = {
+        EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE1_FD_EXT,
+        EGL_DMA_BUF_PLANE2_FD_EXT, EGL_DMA_BUF_PLANE3_FD_EXT };
+    static const EGLint plane_offset[4] = {
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT,
+        EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT };
+    static const EGLint plane_pitch[4] = {
+        EGL_DMA_BUF_PLANE0_PITCH_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT,
+        EGL_DMA_BUF_PLANE2_PITCH_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT };
+    static const EGLint plane_lo[4] = {
+        EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
+        EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT };
+    static const EGLint plane_hi[4] = {
+        EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT,
+        EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT };
+    EGLint attributes[6 + 4 * 10 + 1];
+    EGLImageKHR image;
+    GLuint texture = 0;
+    int n = 0, i;
+
+    *image_out = NULL;
+    if (d->fence_fd >= 0 && (gles == NULL || !gles->fences)) {
+        /* No GPU wait to hand it to: the dmabuf's implicit
+           synchronisation orders the producer's writes. */
+        close(d->fence_fd);
+    }
+    if (gles == NULL || !gles->dmabuf || d->planes < 1 || d->planes > 4) {
+        if (d->fence_fd >= 0 && gles != NULL && gles->fences) close(d->fence_fd);
+        gles_error(error, capacity, "dmabuf import unavailable");
+        return 0;
+    }
+    attributes[n++] = EGL_WIDTH; attributes[n++] = d->width;
+    attributes[n++] = EGL_HEIGHT; attributes[n++] = d->height;
+    attributes[n++] = EGL_LINUX_DRM_FOURCC_EXT; attributes[n++] = (EGLint)d->fourcc;
+    for (i = 0; i < d->planes; ++i) {
+        attributes[n++] = plane_fd[i]; attributes[n++] = d->fds[i];
+        attributes[n++] = plane_offset[i]; attributes[n++] = (EGLint)d->offsets[i];
+        attributes[n++] = plane_pitch[i]; attributes[n++] = (EGLint)d->pitches[i];
+        if (gles->dmabuf_modifiers) {
+            attributes[n++] = plane_lo[i];
+            attributes[n++] = (EGLint)(uint32_t)(d->modifier & 0xffffffffULL);
+            attributes[n++] = plane_hi[i];
+            attributes[n++] = (EGLint)(uint32_t)(d->modifier >> 32);
+        }
+    }
+    attributes[n] = EGL_NONE;
+    gles_flush(gles);
+    image = gles->CreateImage(gles->display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+                              (EGLClientBuffer)NULL, attributes);
+    if (image == EGL_NO_IMAGE_KHR) {
+        if (d->fence_fd >= 0 && gles->fences) close(d->fence_fd);
+        snprintf(error, capacity, "eglCreateImageKHR failed (0x%x)",
+                 (unsigned)gles->GetError());
+        return 0;
+    }
+    while (gles->glGetError() != GL_NO_ERROR) {}
+    gles->glGenTextures(1, &texture);
+    gles->glBindTexture(GL_TEXTURE_2D, texture);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gles->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gles->ImageTargetTexture2D(GL_TEXTURE_2D, (GLeglImageOES)image);
+    gles->batch_texture = (GLuint)-1;
+    if (gles->glGetError() != GL_NO_ERROR) {
+        gles->glDeleteTextures(1, &texture);
+        gles->DestroyImage(gles->display, image);
+        if (d->fence_fd >= 0 && gles->fences) close(d->fence_fd);
+        gles_error(error, capacity, "glEGLImageTargetTexture2DOES failed");
+        return 0;
+    }
+    /* The acquire fence: the GPU waits for it before anything drawn after
+       this samples the texture; the CPU never does. A fence EGL cannot take
+       is closed, and implicit synchronisation applies. */
+    if (d->fence_fd >= 0 && gles->fences) {
+        EGLint fence[] = { EGL_SYNC_NATIVE_FENCE_FD_ANDROID, d->fence_fd, EGL_NONE };
+        EGLSyncKHR sync = gles->CreateSync(gles->display, EGL_SYNC_NATIVE_FENCE_ANDROID,
+                                           fence);
+        if (sync == EGL_NO_SYNC_KHR) {
+            close(d->fence_fd);
+        } else {
+            gles->WaitSync(gles->display, sync, 0);
+            gles->DestroySync(gles->display, sync);
+        }
+    }
+    *image_out = (void *)image;
+    return texture;
+}
+
+void blit_gles_dmabuf_destroy(BlitGles *gles, BlitGlesTexture texture, void *image)
+{
+    if (gles == NULL) return;
+    gles_flush(gles);
+    if (texture != 0) gles->glDeleteTextures(1, &texture);
+    gles->batch_texture = (GLuint)-1;
+    if (image != NULL && gles->DestroyImage != NULL)
+        gles->DestroyImage(gles->display, (EGLImageKHR)image);
+}
+
 static void gles_flush(BlitGles *gles)
 {
     size_t stride = sizeof(struct BlitGlesVertex);
@@ -1382,10 +1639,36 @@ void blit_gles_quad(BlitGles *gles, int mode, BlitGlesTexture texture,
                    rgb, 255, mode);
 }
 
+static void gles_image(BlitGles *gles, BlitGlesTexture texture,
+                       int texture_width, int texture_height,
+                       int source_x, int source_y, int source_width,
+                       int source_height, int x, int y, int width, int height,
+                       int mode);
+
 void blit_gles_image(BlitGles *gles, BlitGlesTexture texture,
                      int texture_width, int texture_height,
                      int source_x, int source_y, int source_width,
                      int source_height, int x, int y, int width, int height)
+{
+    gles_image(gles, texture, texture_width, texture_height, source_x, source_y,
+               source_width, source_height, x, y, width, height, BLIT_GLES_IMAGE);
+}
+
+void blit_gles_image_premultiplied(BlitGles *gles, BlitGlesTexture texture,
+                                   int texture_width, int texture_height,
+                                   int source_x, int source_y, int source_width,
+                                   int source_height, int x, int y, int width,
+                                   int height)
+{
+    gles_image(gles, texture, texture_width, texture_height, source_x, source_y,
+               source_width, source_height, x, y, width, height, BLIT_GLES_PREMULT);
+}
+
+static void gles_image(BlitGles *gles, BlitGlesTexture texture,
+                       int texture_width, int texture_height,
+                       int source_x, int source_y, int source_width,
+                       int source_height, int x, int y, int width, int height,
+                       int mode)
 {
     /* A pixel centre d + 0.5 samples s = source + d*k + 0.5/width texels
        (k = source/destination): the same texel as floor(d*k), since d*k is
@@ -1408,7 +1691,7 @@ void blit_gles_image(BlitGles *gles, BlitGlesTexture texture,
     gles_rectangle(gles, (float)x, (float)y, (float)(x + width), (float)(y + height),
                    (float)(u0 / texture_width), (float)(v0 / texture_height),
                    (float)(u1 / texture_width), (float)(v1 / texture_height),
-                   0, 255, BLIT_GLES_IMAGE);
+                   0, 255, mode);
 }
 
 void blit_gles_clip(BlitGles *gles, int x, int y, int width, int height)

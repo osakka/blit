@@ -324,6 +324,14 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
     int bytes = image->format == 24 ? 3 : 4;
     int i;
     long long uploaded;
+    /* ADR 0223: a dmabuf frame is already a texture; nothing is uploaded.
+       Sampling it is what lets the frame before it be released. */
+    if (image->dmabuf != NULL && image->pixels == NULL) {
+        if (!image->dmabuf->shown.used || image->dmabuf->shown.texture == 0)
+            return 0;
+        image->dmabuf->shown.drawn = 1;
+        return image->dmabuf->shown.texture;
+    }
     for (i = 0; i < KMS_IMAGE_TEXTURES; ++i)
         if (r->images[i].texture && r->images[i].image == image) {
             slot = &r->images[i];
@@ -446,10 +454,12 @@ static void kms_gles_images(BlitKms *kms, KmsGlesResources *r,
         if (!in_band) continue;
         texture = kms_gles_image(kms, r, draw->image);
         if (!texture) continue;
-        blit_gles_image(kms->gles, texture, draw->image->width, draw->image->height,
-                        draw->src_x, draw->src_y, draw->src_w, draw->src_h,
-                        view->origin_x + draw->x, view->origin_y + draw->y,
-                        draw->width, draw->height);
+        (draw->image->dmabuf != NULL && draw->image->pixels == NULL ?
+             blit_gles_image_premultiplied : blit_gles_image)(
+            kms->gles, texture, draw->image->width, draw->image->height,
+            draw->src_x, draw->src_y, draw->src_w, draw->src_h,
+            view->origin_x + draw->x, view->origin_y + draw->y,
+            draw->width, draw->height);
     }
 }
 
