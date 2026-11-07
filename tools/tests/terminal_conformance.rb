@@ -1327,8 +1327,8 @@ assert_equal('', screen_text(snapshot).strip,
 puts 'PASS kitty-keyboard-flags-do-not-move-the-cursor'
 
 # The query reports current supported enhancements; unsupported bits are
-# masked rather than advertised. 5 requests disambiguation plus unsupported
-# alternate-key reporting, so only bit1 is active.
+# masked rather than advertised. 21 requests disambiguation, alternate keys
+# and unsupported associated text (16), so only 1 and 4 are active.
 snapshot = run_case(base, 'kitty-keyboard-query',
                     "stty -icanon -echo min 0 time 5; printf '\\033[?u'; " \
                     'dd if=/dev/tty bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
@@ -1336,10 +1336,10 @@ snapshot = run_case(base, 'kitty-keyboard-query',
 assert_equal('1b5b3f3075', row_text(snapshot), 'CSI ? u reports no flags in effect')
 
 snapshot = run_case(base, 'kitty-keyboard-query-after-push',
-                    "stty -icanon -echo min 0 time 5; printf '\\033[>5u'; printf '\\033[?u'; " \
+                    "stty -icanon -echo min 0 time 5; printf '\\033[>21u'; printf '\\033[?u'; " \
                     'dd if=/dev/tty bs=1 count=5 2>/dev/null | od -An -tx1 | tr -d \' \\n\'',
                     width: 80)
-assert_equal('1b5b3f3175', row_text(snapshot),
+assert_equal('1b5b3f3575', row_text(snapshot),
              'CSI ? u reports what is honoured, not what was requested')
 puts 'PASS kitty-keyboard-query'
 

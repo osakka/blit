@@ -13636,7 +13636,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         unsigned *flags = &session->terminal_keyboard_flags[screen];
         unsigned *depth = &session->terminal_keyboard_depth[screen];
         unsigned *stack = session->terminal_keyboard_stack[screen];
-        unsigned requested = (unsigned)first & 11u;
+        unsigned requested = (unsigned)first & 15u;
         if (prefix == '>') {
             if (*depth == 16) {
                 memmove(stack, stack + 1, 15 * sizeof(*stack));
@@ -16204,7 +16204,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         "\"graphics\":[\"kitty\",\"sixel\"],"
-        "\"keyboard\":{\"protocol\":\"kitty\",\"supported_flags\":11,"
+        "\"keyboard\":{\"protocol\":\"kitty\",\"supported_flags\":15,"
         "\"active_flags\":%u,\"stack_depth\":%u}}",
         escaped_terminal_term, session->terminal_cell_width,
         session->terminal_cell_height,
@@ -29368,8 +29368,13 @@ static int encode_kitty_key(const BlitSession *session,
 {
     unsigned flags = session->terminal_keyboard_flags[session->terminal_alternate ? 1 : 0];
     unsigned key = 0, modifiers;
+    /* Flag 4's alternates: the shifted key and the key the same physical key
+       is on the US PC-101 layout, which is evdev_us_unshifted -- the one
+       table Blit has for that, since evdev codes name physical positions. */
+    unsigned shifted_key = 0, base_key = 0;
+    char alternates[32] = "";
     int role = input_device_modifier_role(keyboard, code);
-    int modifier_key = 0, number = 0, i;
+    int modifier_key = 0, number = 0, i, text_key = 0;
     char final = 'u';
     size_t consumed;
     uint32_t scalar;
@@ -29449,13 +29454,27 @@ static int encode_kitty_key(const BlitSession *session,
     default:
         if (code >= KEY_F13 && code <= KEY_F24) key = 57376 + code - KEY_F13;
         else {
-            const char *plain = NULL;
+            const char *plain = NULL, *shifted = NULL;
+            int us = code >= BLIT_KEY_TABLE_FIRST && code <= BLIT_KEY_TABLE_LAST;
             for (i = 0; i < keyboard->keymap_count; ++i)
-                if (keyboard->keymap_codes[i] == code) { plain = keyboard->keymap_levels[i][0]; break; }
-            if (plain && utf8_decode((const unsigned char *)plain, strlen(plain), &consumed, &scalar)) key = scalar;
-            else if (code == KEY_SPACE) key = 32;
-            else if (code >= BLIT_KEY_TABLE_FIRST && code <= BLIT_KEY_TABLE_LAST)
+                if (keyboard->keymap_codes[i] == code) {
+                    plain = keyboard->keymap_levels[i][0];
+                    shifted = keyboard->keymap_levels[i][1];
+                    break;
+                }
+            if (plain && utf8_decode((const unsigned char *)plain, strlen(plain), &consumed, &scalar)) {
+                key = scalar;
+                if (shifted && utf8_decode((const unsigned char *)shifted, strlen(shifted),
+                                           &consumed, &scalar))
+                    shifted_key = scalar;
+            } else if (code == KEY_SPACE) key = 32;
+            else if (us) {
                 key = (unsigned char)evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST];
+                shifted_key = (unsigned char)evdev_us_shifted[code - BLIT_KEY_TABLE_FIRST];
+            }
+            if (code == KEY_SPACE) base_key = 32;
+            else if (us) base_key = (unsigned char)evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST];
+            text_key = key != 0;
         }
         break;
     }
@@ -29487,10 +29506,25 @@ static int encode_kitty_key(const BlitSession *session,
     modifiers = 1u + (keyboard->shift ? 1u : 0u) +
         (keyboard->alt ? 2u : 0u) + (keyboard->ctrl ? 4u : 0u) + (super ? 8u : 0u);
     if (flags & 8) modifiers += (keyboard->caps_lock ? 64u : 0u) + (keyboard->num_lock ? 128u : 0u);
+    /* Kitty's `key:shifted:base`: the shifted key only while Shift is held,
+       each field left out when it is the key itself, an empty shifted field
+       kept so the base stays third. Text keys only: functional keys have no
+       alternates. */
+    if ((flags & 4) && text_key) {
+        if (!keyboard->shift || shifted_key == key) shifted_key = 0;
+        if (base_key == key) base_key = 0;
+        if (shifted_key && base_key)
+            snprintf(alternates, sizeof(alternates), ":%u:%u", shifted_key, base_key);
+        else if (shifted_key)
+            snprintf(alternates, sizeof(alternates), ":%u", shifted_key);
+        else if (base_key)
+            snprintf(alternates, sizeof(alternates), "::%u", base_key);
+    }
     if ((flags & 2) && value != 1)
-        return snprintf(out, capacity, "\033[%u;%u:%d%c", key ? key : (unsigned)number,
-                        modifiers, value == 2 ? 2 : 3, final);
-    return snprintf(out, capacity, "\033[%u;%u%c", key ? key : (unsigned)number, modifiers, final);
+        return snprintf(out, capacity, "\033[%u%s;%u:%d%c", key ? key : (unsigned)number,
+                        alternates, modifiers, value == 2 ? 2 : 3, final);
+    return snprintf(out, capacity, "\033[%u%s;%u%c", key ? key : (unsigned)number, alternates,
+                    modifiers, final);
 }
 
 /* Returns 1 when the key was written to a session PTY and 0 when it was
@@ -29499,7 +29533,7 @@ static int send_evdev_key(BlitRuntime *runtime, unsigned short code, int value)
 {
     BlitSession *session = keyboard_target(runtime);
     BlitInputDevice *keyboard = keyboard_state(runtime);
-    char sequence[32];
+    char sequence[64];
     int length = 0;
     int modifier = evdev_modifier_parameter(keyboard);
     int control_byte = 0;
@@ -30015,10 +30049,25 @@ static void service_evdev_keyboard(BlitRuntime *runtime)
     }
 }
 
+/* Input leaving Blit or coming back to it (a VT switch) is focus leaving or
+   reaching the focused session, which a program that asked for mode 1004
+   is told. Its focus flag is unchanged: it is still the pane that has focus
+   inside Blit, and gets it back with the console. */
+static void console_focus_report(BlitRuntime *runtime, int focused)
+{
+    int i;
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->sessions[i].used && runtime->sessions[i].focused)
+            send_focus_report(runtime, &runtime->sessions[i], focused);
+}
+
 static void service_native_console(BlitRuntime *runtime)
 {
     int request = blit_vt_pending();
     int i, button;
+    /* Without an owned VT this is the BLIT_TEST_VT_SIGNALS hook: the input
+       half runs, there is no DRM or console to hand over. */
+    int console = blit_vt_owned();
     if (!request) return;
     if (request < 0) {
         diagnostic_log(runtime, "error", "console_ownership_lost",
@@ -30048,22 +30097,26 @@ static void service_native_console(BlitRuntime *runtime)
             for (button = 0; button < 3; ++button)
                 if (runtime->evdev_mouse_buttons[i] & (1U << button))
                     dispatch_evdev_mouse_button(runtime, i, button, 0);
-        if (blit_kms_suspend(runtime->kms) < 0 ||
-            blit_vt_acknowledge(0) < 0) {
+        /* After the releases, so a program sees its keys come up before it
+           is told it lost focus. */
+        console_focus_report(runtime, 0);
+        if (console && (blit_kms_suspend(runtime->kms) < 0 ||
+                        blit_vt_acknowledge(0) < 0)) {
             diagnostic_log(runtime, "error", "console_release_failed", strerror(errno));
             blit_running = 0;
             return;
         }
         diagnostic_log(runtime, "info", "console_released", "DRM and physical input suspended.");
     } else {
-        if (blit_kms_resume(runtime->kms) < 0 ||
-            blit_vt_acknowledge(1) < 0) {
+        if (console && (blit_kms_resume(runtime->kms) < 0 ||
+                        blit_vt_acknowledge(1) < 0)) {
             diagnostic_log(runtime, "error", "console_acquire_failed", strerror(errno));
             blit_running = 0;
             return;
         }
         runtime->console_input_since_us = monotonic_us();
         evdev_sync_modifiers(runtime);
+        console_focus_report(runtime, 1);
         runtime->render_pending = 1;
         reset_render_schedule(runtime, monotonic_us());
         diagnostic_log(runtime, "info", "console_acquired", "DRM reacquired; full repaint requested.");
@@ -31080,6 +31133,10 @@ int main(int argc, char **argv)
     discover_displays(&runtime);
     display_layouts_materialize(&runtime, 0);
     apply_test_refresh_override(&runtime);
+    if (getenv("BLIT_TEST_MODE") != NULL && strcmp(getenv("BLIT_TEST_MODE"), "1") == 0 &&
+        getenv("BLIT_TEST_VT_SIGNALS") != NULL &&
+        strcmp(getenv("BLIT_TEST_VT_SIGNALS"), "1") == 0)
+        blit_vt_test_signals();
     /* Issue #69. After enumeration, because the attribution rule counts
        displays, and before the stored document is applied, because a stored
        brightness is refused on a display that has no backlight. */

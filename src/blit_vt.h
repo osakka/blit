@@ -10,6 +10,10 @@ int blit_vt_number(void);
 /* 1=release requested, 2=acquire requested, -1=recovery process lost,
    -2=VT descriptor or keyboard isolation lost. */
 int blit_vt_pending(void);
+/* Test only (BLIT_TEST_MODE=1, BLIT_TEST_VT_SIGNALS=1): with no VT owned,
+   SIGUSR1 and SIGUSR2 make blit_vt_pending() report a release and an
+   acquire, so the input half of the hand-over runs without a console. */
+int blit_vt_test_signals(void);
 /* Caller relinquishes/reacquires DRM before acknowledging. */
 int blit_vt_acknowledge(int acquire);
 int blit_vt_switch(int number);
