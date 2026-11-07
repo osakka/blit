@@ -4,10 +4,11 @@
          The frame channel client against a fake Blit on a socketpair (hello
          parsing, FRM3 bytes and descriptor, buffers held until RELEASE or
          ERROR and then requeued, stale releases, the memfd fallback after
-         ENOTSUP, the INPUT request and its OK / ERROR / pre-INPUT answers)
-         and the terminal reader (size report, the capturing click, the
-         ?7701;2$y notice and CSI O ending capture, deltas and keys skipped,
-         sequences split across reads).
+         ENOTSUP, the INPUT request and its OK / ERROR / pre-INPUT answers,
+         a late ERROR INPUT ENOENT ending a live route) and the terminal
+         reader (size report, the ?7701;2$y notice, focus out and in; clicks,
+         the wheel, deltas and keys skipped with no event, since the bridge
+         never captures; sequences split across reads).
 
      gamescope_bridge_gate session RESULT_FILE
          Run as a Blit session's command by gamescope_bridge_gate.py: the
@@ -247,6 +248,29 @@ static void unit_channel(void)
     }
     CHECK(gs_frames_send_input(&f, "relative-ei") != 0, "a relative EIS path was sent");
 
+    /* A live route that Blit ends later (docs/api.md: the compositor refused
+       its handshake late or went away) is told apart from a refusal. */
+    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
+    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
+    CHECK(!f.input_was_ok, "a new INPUT request kept input_was_ok");
+    fake_reply(sv[1], "OK input\n");
+    gs_frames_read(&f);
+    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds); /* INPUT on */
+    CHECK(f.input_state == GS_INPUT_OK && f.input_was_ok && f.input_on, "OK input before the late ENOENT");
+    fake_reply(sv[1], "ERROR INPUT ENOENT\n");
+    gs_frames_read(&f);
+    CHECK(f.input_state == GS_INPUT_REFUSED && f.input_was_ok && !f.input_on &&
+          strcmp(f.input_error, "ENOENT") == 0,
+          "late ERROR INPUT ENOENT: state %d was_ok %d on %d error %s", f.input_state,
+          f.input_was_ok, f.input_on, f.input_error);
+    /* ENOENT before any OK input is a refusal, as before. */
+    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
+    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
+    fake_reply(sv[1], "ERROR INPUT ENOENT\n");
+    gs_frames_read(&f);
+    CHECK(f.input_state == GS_INPUT_REFUSED && !f.input_was_ok && strcmp(f.input_error, "ENOENT") == 0,
+          "early ERROR INPUT ENOENT taken as a live route ending");
+
     /* Blit closing the channel gives every held buffer back. */
     close(sv[1]);
     CHECK(gs_frames_read(&f) == -1 && f.fd == -1, "a closed channel was not noticed");
@@ -270,37 +294,35 @@ static void unit_tty(void)
              "\033[<35;100;50M\033[<64;10;10M\033[<0;10;10m\033[I");
     CHECK(event_count == 1 && events[0][0] == GS_TTY_FOCUS_IN, "keys, motion or wheel produced events (%d)",
           event_count);
-    /* A click captures, once. */
+    /* The bridge never captures: clicks (left, middle, right, press and
+       release), wheel notches and pointer-lock deltas give no event, and
+       nothing is ever written back (the reader has no output; the bridge
+       writes ?7701h nowhere). */
     event_count = 0;
-    feed(&t, "\033[<0;640;360M");
-    CHECK(event_count == 1 && events[0][0] == GS_TTY_CAPTURE && events[0][1] == 640 && t.captured,
-          "a click did not ask for the lock");
-    /* While captured: pointer-lock deltas and buttons (0;0) are skipped. */
-    event_count = 0;
-    feed(&t, "\033[<35;-4;7M\033[<35;12;-3M\033[<0;0;0M\033[<0;0;0m\033[<2;0;0M");
-    CHECK(event_count == 0 && t.captured, "locked input produced events or ended capture");
-    /* Blit's notice ends capture; a later click asks again. */
+    feed(&t, "\033[<0;640;360M\033[<0;640;360m\033[<1;5;5M\033[<2;5;5M\033[<2;5;5m"
+             "\033[<64;10;10M\033[<65;10;10M\033[<68;10;10M\033[<35;-4;7M\033[<35;12;-3M\033[<0;0;0M");
+    CHECK(event_count == 0, "clicks, the wheel or deltas produced %d events", event_count);
+    /* A desktop's lock ending is only a notice. */
     feed(&t, "\033[?7701;2$y");
-    CHECK(event_count == 1 && events[0][0] == GS_TTY_LOCK_ENDED && !t.captured, "?7701;2$y did not end capture");
-    event_count = 0;
-    feed(&t, "\033[<2;5;5M");
-    CHECK(event_count == 1 && events[0][0] == GS_TTY_CAPTURE, "right click after the notice did not capture");
-    /* Focus out ends capture too, split across reads. */
+    CHECK(event_count == 1 && events[0][0] == GS_TTY_LOCK_ENDED, "?7701;2$y not read");
+    /* Focus out, split across reads, then in. */
     event_count = 0;
     feed(&t, "\033");
     feed(&t, "[");
     feed(&t, "O");
-    CHECK(event_count == 1 && events[0][0] == GS_TTY_FOCUS_OUT && !t.captured, "split CSI O did not end capture");
-    /* A split click and an APC answer with ESC inside are read whole. */
+    feed(&t, "\033[I");
+    CHECK(event_count == 2 && events[0][0] == GS_TTY_FOCUS_OUT && events[1][0] == GS_TTY_FOCUS_IN,
+          "split CSI O or CSI I misread");
+    /* An APC answer with ESC inside, then a split size report, read whole. */
     event_count = 0;
-    feed(&t, "\033_Gi=1;OK\033\\\033[<0;3");
-    feed(&t, "3;44M");
-    CHECK(event_count == 1 && events[0][0] == GS_TTY_CAPTURE && events[0][1] == 33 && events[0][2] == 44,
-          "a split click after an APC was misread");
+    feed(&t, "\033_Gi=1;OK\033\\\033[4;48");
+    feed(&t, "0;640t");
+    CHECK(event_count == 1 && events[0][0] == GS_TTY_SIZE && events[0][1] == 640 && events[0][2] == 480,
+          "a split size report after an APC was misread");
     /* No release key: Ctrl+Alt+M is a key like any other. */
     event_count = 0;
     feed(&t, "\033[109;7u\033[109;7:3u");
-    CHECK(event_count == 0 && t.captured, "Ctrl+Alt+M did something");
+    CHECK(event_count == 0, "Ctrl+Alt+M did something");
 }
 
 /* ------------------------------------------------------------ session */
@@ -421,7 +443,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "GAMESCOPE_BRIDGE_UNIT_FAIL %d\n", failures);
             return 1;
         }
-        printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+fallback+memfd+input+tty\n");
+        printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+fallback+memfd+input+late-enoent+tty-no-capture\n");
         return 0;
     }
     if (argc >= 3 && strcmp(argv[1], "session") == 0)

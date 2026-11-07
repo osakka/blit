@@ -10,9 +10,16 @@
    them, else as FRM1 memfds. It places the picture with one Kitty `a=p` on
    its own terminal and deletes it at exit. Input does not pass through the
    bridge: it names gamescope's EIS socket to Blit with the INPUT request and
-   Blit sends the pane's keys and mouse there itself. The terminal is read
-   only for the pane's pixel size, focus and the click that captures the
-   mouse (blit_gamescope_tty.h).
+   Blit sends the pane's keys and mouse there itself. The bridge never
+   captures the mouse (the desktop does, ADR 0225). The terminal is read
+   only for the pane's pixel size, focus and the end of a desktop's pointer
+   lock (blit_gamescope_tty.h).
+
+   The stream stays at gamescope's output size (-W/-H, from the pane's
+   pixels at launch) for the whole run: those are also the coordinates of
+   gamescope's EIS pointer, and Blit maps the pointer to the frame's size.
+   On a pane resize the bridge only places the picture again; Blit scales
+   it, aspect kept.
 
    It exits with gamescope's status and never leaves gamescope or what it
    started running: the whole process group is ended on any exit.
@@ -50,8 +57,6 @@
 #ifndef BLIT_BUILD_VERSION
 #define BLIT_BUILD_VERSION "dev"
 #endif
-/* gamescope's private format key (src/pipewire_gamescope.hpp). */
-#define GS_SPA_FORMAT_VIDEO_requested_size 0x70000
 #define GS_IMAGE_ID 1
 #define GS_BUFFERS 6
 
@@ -83,7 +88,6 @@ struct bridge {
     unsigned long frames_in, frames_dropped;
     uint32_t stream_w, stream_h;
     int stream_dmabuf;           /* the negotiated buffers are dmabufs */
-    int requested_w, requested_h;
     /* PipeWire */
     struct pw_main_loop *loop;
     struct pw_context *context;
@@ -173,23 +177,22 @@ static void tty_setup(struct bridge *b)
         raw.c_oflag |= OPOST | ONLCR;
         tcsetattr(STDIN_FILENO, TCSANOW, &raw);
     }
-    /* The cursor hidden; the click reports (1000, SGR 1006) only to see the
-       click that captures the mouse; focus reports (1004). */
-    tty_puts("\033[?25l\033[2J\033[?1000h\033[?1006h\033[?1004h");
+    /* The cursor hidden and focus reports (1004). No mouse reporting: Blit
+       sends the pointer to gamescope itself, and the bridge never captures
+       the mouse (capture is the desktop's, ADR 0225). */
+    tty_puts("\033[?25l\033[2J\033[?1004h");
 }
 
 static void tty_restore(struct bridge *b)
 {
     char seq[64];
     int n;
-    if (b->tty.captured) tty_puts("\033[?7701l");
-    b->tty.captured = 0;
     if (b->placed) {
         n = gs_frames_delete(seq, sizeof(seq), GS_IMAGE_ID);
         if (n > 0) tty_write(seq, (size_t)n);
         b->placed = 0;
     }
-    tty_puts("\033[?1004l\033[?1006l\033[?1000l\033[?25h");
+    tty_puts("\033[?1004l\033[?25h");
     if (b->stdin_flags >= 0) fcntl(STDIN_FILENO, F_SETFL, b->stdin_flags);
     if (b->termios_saved) {
         tcsetattr(STDIN_FILENO, TCSANOW, &b->saved_termios);
@@ -205,17 +208,15 @@ static void on_tty_event(void *context, int event, int a, int c)
         b->pane_w = a;
         b->pane_h = c;
         break;
-    case GS_TTY_CAPTURE:
-        /* A click in the pane asks for the mouse (ADR 0198); Blit answers
-           ?7701;2$y if it will not lock, and ends the lock on its own. */
-        tty_puts("\033[?7701h");
-        logf_(b, "click at %d,%d: pointer lock requested", a, c);
-        break;
     case GS_TTY_LOCK_ENDED:
+        /* A desktop may lock the pointer; the bridge never does. */
         logf_(b, "pointer lock ended by Blit");
         break;
     case GS_TTY_FOCUS_OUT:
         logf_(b, "focus out");
+        break;
+    case GS_TTY_FOCUS_IN:
+        logf_(b, "focus in");
         break;
     default:
         break;
@@ -386,10 +387,6 @@ static const struct spa_pod *enum_format(struct bridge *b, struct spa_pod_builde
         SPA_FORMAT_VIDEO_size, SPA_POD_CHOICE_RANGE_Rectangle(&def, &min, &max),
         SPA_FORMAT_VIDEO_framerate, SPA_POD_CHOICE_RANGE_Fraction(&fdef, &fmin, &fmax),
         0);
-    if (b->requested_w > 0) {
-        struct spa_rectangle req = SPA_RECTANGLE(b->requested_w, b->requested_h);
-        spa_pod_builder_add(bld, GS_SPA_FORMAT_VIDEO_requested_size, SPA_POD_Rectangle(&req), 0);
-    }
     if (dmabuf) {
         spa_pod_builder_prop(bld, SPA_FORMAT_VIDEO_modifier, SPA_POD_PROP_FLAG_MANDATORY);
         spa_pod_builder_long(bld, 0); /* DRM_FORMAT_MOD_LINEAR */
@@ -436,8 +433,8 @@ static void on_process(void *data)
     if (!newest) return;
     ++b->frames_in;
     d = &newest->buffer->datas[0];
-    /* A buffer from before a size change (the stream renegotiates on a
-       resize) does not hold a frame of the new size: dropped, not sent. */
+    /* A buffer from before a size change (should the stream renegotiate)
+       does not hold a frame of the new size: dropped, not sent. */
     if (d->chunk && b->stream_w &&
         (uint64_t)d->chunk->offset + (uint64_t)(d->chunk->stride ? d->chunk->stride : b->stream_w * 4) *
             (b->stream_h - 1) + (uint64_t)b->stream_w * 4 > d->maxsize) {
@@ -587,33 +584,19 @@ static const struct pw_core_events core_events = {
 
 /* ---------------------------------------------------------------- loop */
 
-static void request_resize(struct bridge *b)
+/* The pane changed size: the picture is placed again and Blit scales it,
+   aspect kept. The stream is never asked for another size: gamescope's EIS
+   pointer coordinates are its output's pixels (-W/-H; its region is
+   INT32_MAX square and absolute x/y go straight to wlserver_mousewarp), and
+   Blit maps the pointer to the frame's size, so a shrunk stream would put
+   the pointer in the wrong place. Restarting gamescope with new -W/-H would
+   end Steam and the game, so that is never done either (ADR 0225). */
+static void pane_resized(struct bridge *b)
 {
-    uint8_t buffer[1024];
-    struct spa_pod_builder bld = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
-    const struct spa_pod *params[1];
     read_winsize(b);
     if (b->placed) place_picture(b);
-    if (!b->stream || b->pane_w <= 0 || b->pane_h <= 0) return;
-    if (b->pane_w == (int)b->stream_w && b->pane_h == (int)b->stream_h) return;
-    /* gamescope honours requested_size only below its output size
-       (calculate_capture_size in its src/pipewire.cpp scales down, never
-       up). A larger pane keeps the picture, scaled by Blit to the
-       placement; growing gamescope means restarting it with new -W/-H,
-       which would end Steam and the game, so it is never done (ADR 0225). */
-    if (b->pane_w > b->width || b->pane_h > b->height) {
-        logf_(b, "resize: %dx%d is larger than gamescope's %dx%d; Blit scales the picture",
-              b->pane_w, b->pane_h, b->width, b->height);
-        if (b->requested_w <= 0) return;
-        b->requested_w = b->width; /* back to full size */
-        b->requested_h = b->height;
-    } else {
-        b->requested_w = b->pane_w;
-        b->requested_h = b->pane_h;
-    }
-    params[0] = enum_format(b, &bld, b->stream_dmabuf);
-    pw_stream_update_params(b->stream, params, 1);
-    logf_(b, "resize: requested %dx%d from the stream", b->requested_w, b->requested_h);
+    logf_(b, "resize: pane %dx%d, stream stays %ux%u; Blit scales the picture",
+          b->pane_w, b->pane_h, b->stream_w, b->stream_h);
 }
 
 static void on_stdin(void *data, int fd, uint32_t mask)
@@ -625,7 +608,7 @@ static void on_stdin(void *data, int fd, uint32_t mask)
     (void)mask;
     if (n > 0) {
         gs_tty_feed(&b->tty, buf, (size_t)n, on_tty_event, b);
-        if (b->pane_w != pane_w || b->pane_h != pane_h) request_resize(b);
+        if (b->pane_w != pane_w || b->pane_h != pane_h) pane_resized(b);
     } else if (n == 0 || (errno != EAGAIN && errno != EINTR)) {
         logf_(b, "terminal closed");
         b->exit_code = 129;
@@ -649,6 +632,12 @@ static void on_frame_socket(void *data, int fd, uint32_t mask)
         if (b->frames.input_state == GS_INPUT_OK)
             logf_(b, "OK input: Blit sends the pane's input to %s (INPUT on %s)", b->eis_path,
                   b->frames.input_on ? "sent" : "not sent");
+        else if (b->frames.input_was_ok && strcmp(b->frames.input_error, "ENOENT") == 0)
+            /* Blit ended a live route (docs/api.md, "Picture frames by
+               descriptor"): the compositor refused late or went away. */
+            logf_(b, "input route ended: compositor gone (ENOENT)");
+        else if (b->frames.input_was_ok)
+            logf_(b, "input route ended by Blit (%s)", b->frames.input_error);
         else
             logf_(b, "INPUT %s: this Blit does not send input to gamescope; frames only",
                   b->frames.input_error);

@@ -2,19 +2,21 @@
 
    The bridge does not forward keys or the mouse: Blit sends the pane's input
    to gamescope's EIS socket itself (the INPUT request, blit_gamescope_frames.h).
-   The terminal tells the bridge only four things, and this unit recognises
+   The terminal tells the bridge only three things, and this unit recognises
    exactly those in the bytes Blit writes to the PTY, everything else being
-   skipped whole (so a Kitty key or a pointer-lock delta is never misread):
+   skipped whole (so a Kitty key, a mouse report or a pointer-lock delta is
+   never misread):
 
    - `CSI 4 ; <height> ; <width> t`: the pane's size in pixels (XTWINOPS 14);
-   - `CSI < b ; x ; y M` with a plain button press (b < 3, no motion, no
-     wheel): a click in the pane, which asks for pointer lock (`CSI ? 7701 h`,
-     ADR 0198) when the mouse is not captured -- never from a timer;
-   - `CSI ? 7701 ; 2 $ y`: Blit ended the lock (focus moved, the desktop's
-     Release Pointer, a reset) or refused it: back to absolute;
-   - `CSI O`: focus left the pane (mode 1004): back to absolute.
+   - `CSI ? 7701 ; 2 $ y`: Blit ended a pointer lock (focus moved, the
+     desktop's Release Pointer, a reset) or refused one;
+   - `CSI O` / `CSI I`: focus left or reached the pane (mode 1004).
 
-   There is no release key of the bridge's own (ADR 0198). */
+   The bridge never captures the mouse and turns on no mouse reporting.
+   Capture belongs to the desktop, which locks the pointer and releases it
+   with its own Release Pointer (ADR 0198); a bare Blit pane has no release
+   key, so phase 1 has no capture. A lock a desktop takes still ends with the
+   ?7701;2$y notice, which the bridge only logs. */
 #ifndef BLIT_GAMESCOPE_TTY_H
 #define BLIT_GAMESCOPE_TTY_H
 
@@ -24,14 +26,12 @@
 enum gs_tty_event {
     GS_TTY_NONE = 0,
     GS_TTY_SIZE,         /* a, b: width, height in pixels */
-    GS_TTY_CAPTURE,      /* write CSI ? 7701 h */
     GS_TTY_LOCK_ENDED,   /* the ?7701;2$y notice */
     GS_TTY_FOCUS_OUT,
     GS_TTY_FOCUS_IN
 };
 
 typedef struct {
-    int captured;          /* lock asked for and not ended */
     unsigned char seq[64]; /* the escape sequence being read */
     size_t length;
     int in_escape;         /* 0 none, 1 after ESC, 2 in CSI, 3 in a string (APC/OSC/DCS) */
@@ -57,32 +57,23 @@ static void gs_tty_csi(GsTty *t, gs_tty_emit emit, void *context)
             if (p[count] < 100000) p[count] = p[count] * 10 + (c - '0');
         } else if (c == ';') {
             ++count;
-        } else if (c == '$' || c == ':' || c == '-') {
-            if (c == '-') return; /* a signed delta: never a click */
-            if (c == ':') return; /* Kitty key sub-fields: not ours */
+        } else if (c == '-' || c == ':') {
+            return; /* a signed pointer-lock delta or Kitty key sub-fields: not ours */
         }
     }
     ++count;
     if (!lead && final == 't' && p[0] == 4 && count >= 3) {
         emit(context, GS_TTY_SIZE, p[2], p[1]);
     } else if (!lead && final == 'O' && n == 1) {
-        if (t->captured) t->captured = 0;
         emit(context, GS_TTY_FOCUS_OUT, 0, 0);
     } else if (!lead && final == 'I' && n == 1) {
         emit(context, GS_TTY_FOCUS_IN, 0, 0);
     } else if (lead == '?' && final == 'y' && n >= 2 && s[n - 2] == '$' && p[0] == 7701) {
-        if (p[1] == 2 || p[1] == 0) {
-            t->captured = 0;
+        if (p[1] == 2 || p[1] == 0)
             emit(context, GS_TTY_LOCK_ENDED, 0, 0);
-        }
-    } else if (lead == '<' && final == 'M' && count == 3) {
-        /* While captured, these are pointer-lock deltas and buttons: Blit
-           sends them to gamescope itself, so they are only skipped here. */
-        if (!t->captured && p[0] < 3) {
-            t->captured = 1;
-            emit(context, GS_TTY_CAPTURE, p[1], p[2]);
-        }
     }
+    /* Mouse reports (`CSI <`), should a desktop's lock send any, are skipped:
+       Blit sends the pointer to gamescope itself. */
 }
 
 /* Feeds bytes read from the terminal; sequences may be split across calls. */

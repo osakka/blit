@@ -113,16 +113,17 @@ desktop app** (a module and a window, the shape Boxer has), which:
 3. **Carries input** from the pane to gamescope's EIS socket: Kitty keyboard
    protocol press/release → `ei_device_keyboard_key`; SGR-Pixels mouse
    (mode 1016) → absolute pointer, scaled from pane pixels to `<w>x<h>`;
-   buttons and wheel → EIS buttons and scroll. When the game captures the
-   mouse, the bridge turns on pointer lock (`?7701`, ADR 0198) and forwards
-   its raw deltas as relative motion, which is what first-person games need.
-   Input reaches the game only while the pane has focus.
+   buttons and wheel → EIS buttons and scroll. The bridge never captures
+   the mouse; the desktop does, with its Release Pointer, and phase 1 has no
+   capture (see "The mouse" below). Input reaches the game only while the
+   pane has focus.
 4. **Resizes** with the pane, and never restarts gamescope (a restart ends
-   Steam and the game): it asks the stream for the new size
-   (`SPA_FORMAT_VIDEO_requested_size`); if gamescope does not follow, the
-   stream keeps its size and Blit scales the picture into the pane through
-   the placement's cell size (`c=`/`r=`), aspect kept, as it scales any
-   picture. The bridge never resamples.
+   Steam and the game). There is no `requested_size`: the stream stays at
+   gamescope's output size (`-W`/`-H`, from the pane's pixels at launch),
+   which is also gamescope's EIS pointer coordinate space, and on a resize
+   the bridge only places the picture again; Blit scales it into the pane
+   through the placement's cell size (`c=`/`r=`), aspect kept, as it scales
+   any picture. The bridge never resamples.
 5. **Ends** with its child: when gamescope exits, the bridge deletes the
    picture (`a=d`) and exits with gamescope's status.
 
@@ -196,17 +197,20 @@ latency against ADR 0206). (2) The Hibr desktop app, once Hibr's key phases
 (#485), its dmabuf relay and the console's app-facing frame socket exist.
 Steamer's launch instructions follow phase 2.
 
-**The mouse: absolute by default, captured on a click, released by the one
-release key.** gamescope's stream has no cursor and nothing outside gamescope
-knows when a game grabs the mouse, so the bridge starts in absolute mode
-(Blit's own cursor over the picture, right for Steam's menus) and captures
-the mouse (pointer lock, relative motion) on a click in the pane, as Boxer
-does. It has no key of its own: ADR 0198 gives one release key, the
-desktop's Release Pointer shortcut (Hibr's, `ctrl-f10` by default,
-rebindable), and Blit also ends a lock on focus change, exit or reset. The
-bridge treats Blit's `CSI ? 7701 ; 2 $ y` notice and a focus-out (`CSI O`) as
-the end of capture: back to absolute, held keys and buttons released to EIS.
-It gives the lock back itself only when the game exits.
+**The mouse: absolute, and the bridge never captures it.** gamescope's
+stream has no cursor and nothing outside gamescope knows when a game grabs
+the mouse, so the pointer is absolute (Blit's own cursor over the picture,
+right for Steam's menus). Capture (pointer lock, relative motion) belongs to
+the desktop, which has the one release key of ADR 0198: in phase 2 the Hibr
+app captures and releases through the desktop's own mechanism
+(`dt_pointerlock`, ended by the desktop's Release Pointer shortcut, Hibr's
+`ctrl-f10` by default, or a focus change), as Boxer does. Phase 1 has no
+capture: a bare Blit pane has no release key, so a lock taken there could
+not be undone. The bridge turns on no mouse reporting (Blit sends the
+pointer to gamescope itself); it keeps focus reports (1004) and the size
+query, and only logs Blit's `CSI ? 7701 ; 2 $ y` notice and focus out and
+in, since a desktop may still lock the pointer. Blit releases held keys and
+buttons to EIS when a route stops being live.
 
 **Why a desktop app, not a program in a Terminal window.** One source of
 truth for each stream. Frames: ADR 0202 made Hibr's console (`cn_image`) the
@@ -269,12 +273,16 @@ regresses, a wlroots compositor fits behind the same bridge.
   the input route; gamescope itself pulls only `libeis1`, so `libei1` is not
   on the mini PC yet); the bridge itself needs only `libpipewire-0.3-0`.
 - Latency measured end to end (key press to pixel) against ADR 0206.
-- **Live resize: settled 2026-11-07.** gamescope 3.16.22 honours
-  `requested_size` only to shrink (its `calculate_capture_size` scales the
-  capture down, never up): on the mini PC an 880x660 stream went to 587x440
-  for a 660x440 pane, and back to 880x660 when the pane grew to 1100x880,
-  where Blit scaled it into an 1100x836 placement, aspect kept. No frame was
-  refused while resizing, and gamescope was never restarted.
+- **Live resize: settled 2026-11-07, then reversed.** gamescope 3.16.22
+  honours `requested_size` only to shrink (its `calculate_capture_size`
+  scales the capture down, never up): on the mini PC an 880x660 stream went
+  to 587x440 for a 660x440 pane, and back to 880x660 when the pane grew to
+  1100x880, where Blit scaled it into an 1100x836 placement, aspect kept.
+  The bridge no longer asks for it: gamescope's EIS pointer coordinates are
+  its output's pixels (`-W`/`-H`; its region is INT32_MAX square and
+  absolute x/y go straight to `wlserver_mousewarp`), and Blit maps the
+  pointer to the frame's size, so a shrunk stream would misplace the
+  pointer. The stream stays at gamescope's output size and Blit scales it.
 
 ## Evidence
 
@@ -314,6 +322,19 @@ regresses, a wlroots compositor fits behind the same bridge.
   libeis1 and are not run yet: they are for the Debian 13 test host.
   The bridge's half (`INPUT eis` after the hello, `INPUT on` on `OK input`)
   is in `gamescope_bridge_gate`.
+- **Live input, 2026-11-07, mini PC** (the bridge in a bare Blit pane, input
+  by the route): keys reached vkcube (Space paused it, Escape closed it, 978
+  events). Two design faults were found and fixed in the bridge.
+  Capture-on-click left the owner stuck: the click asked for pointer lock,
+  a bare pane has no release key, the pointer was hidden and unreachable,
+  and only Escape, which closes the game, got them out; the bridge now never
+  captures (above). gamescope's EIS region is INT32_MAX square (its output's
+  pixels, unbounded): Blit now treats an unbounded region as none and maps
+  the pointer to the frame (main `625f546`), so the bridge no longer shrinks
+  the stream with `requested_size` (above). A late `ERROR INPUT ENOENT`
+  after `OK input` is logged as the compositor gone, not as a Blit without
+  input. `gamescope_bridge_gate` covers clicks and the wheel giving no event
+  and no `?7701h`, no mouse modes, and the late ENOENT.
 
 ## Evidence (planned)
 

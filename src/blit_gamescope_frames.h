@@ -11,7 +11,9 @@
    by descriptor"; ADR 0225), each one SOCK_SEQPACKET message, no descriptor:
 
        INPUT eis <absolute socket path> <image id>\n
-           answered `OK input\n` or `ERROR INPUT <code>\n`
+           answered `OK input\n` or `ERROR INPUT <code>\n`; an
+           `ERROR INPUT ENOENT\n` after `OK input` means the compositor
+           went and Blit ended the route
        INPUT on\n   INPUT off\n
            whether the client's window has the keyboard; a route starts off.
            In phase 1 the bridge sends `INPUT on` right after `OK input`.
@@ -73,6 +75,8 @@ typedef struct {
     void *context;
     int input_state;
     int input_on;           /* INPUT on sent */
+    int input_was_ok;       /* this request was answered OK input: a later
+                               ERROR INPUT ends a live route, not a refusal */
     char input_error[32];
     /* counters, for the log and the gates */
     uint64_t last_memfd_sequence; /* the newest FRM1 sent */
@@ -325,6 +329,7 @@ static int gs_frames_send_input(GsFrames *f, const char *path)
     if (n < 0 || gs_frames_sendmsg(f->fd, line, (size_t)n, -1) != 0) return -1;
     f->input_state = GS_INPUT_SENT;
     f->input_on = 0;
+    f->input_was_ok = 0;
     f->input_error[0] = '\0';
     return 0;
 }
@@ -374,11 +379,15 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
     }
     if (strcmp(line, "OK input") == 0) {
         f->input_state = GS_INPUT_OK;
+        f->input_was_ok = 1;
         gs_frames_send_input_focus(f, 1); /* phase 1: the pane is the window */
         return 1;
     }
     if (sscanf(line, "ERROR INPUT %31s", code) == 1) {
+        /* After OK input this is the route ending (ENOENT: the compositor
+           refused the handshake late or went away); input_was_ok stays. */
         snprintf(f->input_error, sizeof(f->input_error), "%s", code);
+        f->input_on = 0;
         f->input_state = strcmp(code, "ENOTSUP") == 0 ? GS_INPUT_UNSUPPORTED : GS_INPUT_REFUSED;
         return 1;
     }
