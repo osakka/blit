@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-07: 0.3.63 the pointer in gamescope's space; the bridge never captures (ADR 0225)
+
+- **Live test of 0.3.62 on the mini PC** (owner at the keyboard, vkcube
+  through `blit-gamescope` in the DP-1 top pane, Hibr's join detached and
+  reattached afterwards): keys reached the game (Space paused vkcube, Escape
+  closed it; 978 events sent through EIS); dmabuf frames at about 60 fps, none
+  dropped. Two faults: the bridge captured the mouse on any click, and a bare
+  Blit pane has no release key, so the owner was stuck until Escape closed the
+  game; and gamescope's EIS region is INT32_MAX square (its source: the
+  absolute position goes straight to `wlserver_mousewarp` in its output's
+  pixels), so 0.3.62 scaled the pointer to 2^31.
+- **Fixes:** Blit treats an unbounded region as none and maps the pointer to
+  the frame; the bridge never captures (capture is the desktop's, with its
+  Release Pointer), turns on no mouse modes, and no longer asks gamescope to
+  shrink its stream, so the frame always is gamescope's output and pointer
+  space and Blit scales; a late `ERROR INPUT ENOENT` is logged as the
+  compositor going. The mouse in a game is not yet verified live.
+- **Suites, full set:** `all` 184 pass, 12 skip, 0 fail (a first run failed
+  `hibr_split_capture_gate` on one missed presentation deadline, passing 3 of
+  3 alone and in the rerun; Gitea #154); GLES `renderer` 81 pass, 1 skip,
+  0 fail; `package_artifact_gate` passes. Deployed and verified on 10.54 and
+  10.52.
+
 ## 2026-11-07: 0.3.62 input to a compositor's EIS socket (ADR 0225, Blit's half)
 
 - **The frame channel's INPUT request** (`docs/api.md`): a version-3 client
