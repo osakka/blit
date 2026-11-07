@@ -161,11 +161,15 @@ translations (evdev, Kitty text, the PTY, `hold`, Hibr's decode and
 re-encode, the bridge's parse) to rebuild what evdev already has: press,
 repeat and release, physical keys, relative motion. So the bridge asks Blit,
 on its authenticated frame channel, to route input to gamescope's EIS socket
-(`INPUT eis <path> <width> <height>` after the hello; the name comes from an
+(`INPUT eis <path> <image-id>` after the hello, then `INPUT on`/`INPUT off`
+as its window gains and loses the keyboard; wire text in `docs/api.md`; the name comes from an
 authenticated, uid-checked peer, never from the terminal stream, so ADR 0066
-holds). While the bridge's session has focus Blit sends evdev key codes with
-real press, repeat and release, the absolute pointer scaled to the stream's
-size, buttons and scroll, and relative motion while the pointer is locked;
+holds). While the route is on and the bridge's session has Blit's focus (inside
+Hibr only the desktop knows which window has the keys, so `on`/`off` come
+from its focus callback through the bridge), Blit sends evdev key codes with
+real press and release (the compositor repeats), the absolute pointer over
+the picture's drawn rectangle scaled to its latest frame size (so a scaled
+or moved window needs no message), buttons and scroll, and relative motion while the pointer is locked;
 focus loss, the desktop's Release Pointer and the bridge's exit end the route
 and release every held key and button, as Blit already does when it gives up
 the console. libei is loaded at run time, so `blit` gains no hard

@@ -1745,6 +1745,35 @@ should be sent again by memfd; a malformed one is `EINVAL`. Each session's
 whether fences are waited on, the totals, `fences_waited` and the same
 counts per session.
 
+A version-3 client may also ask Blit to send the physical keyboard and mouse
+to a compositor's EIS socket, so that a game it shows gets input as a
+compositor expects it rather than as terminal escapes
+([ADR 0225](adr/0225-games-in-a-window-through-gamescope.md)):
+
+- `INPUT eis <path> <image-id>` names the socket (an absolute path to a
+  Unix socket owned by the client's own uid, which Blit checks against the
+  channel's peer credentials) and the image whose picture stands for the
+  compositor's output. Answered `OK input`, or `ERROR INPUT <code>`:
+  `EINVAL` (malformed, unknown image), `EACCES` (the socket is not the
+  client's), `ENOENT` (no such socket, or it refused the connection),
+  `EBUSY` (this channel already has a route), `ENOTSUP` (libei could not
+  be loaded). One route per channel; it ends with the channel.
+- `INPUT on` and `INPUT off` say whether the client's window has the
+  keyboard. A route starts off. It is live only while it is on and the
+  client's session is Blit's focused session; the desktop, which alone
+  knows which of its windows has focus, sends these through its client.
+- While live, Blit sends evdev key codes as they happen, press and release
+  (the compositor makes its own repeats); buttons and scroll; the pointer
+  as an absolute position while it is over the image's drawn rectangle,
+  scaled to the image's latest frame size, wherever and however large the
+  picture is placed; and relative motion instead while the session holds
+  pointer lock (`?7701`). Keys still reach the session as before, so the
+  desktop's own keys (Release Pointer, Leave Full Screen) keep working.
+- When the route stops being live (`INPUT off`, the session losing focus,
+  Blit giving up the console, the image deleted, the channel closed) Blit
+  first releases every key and button it pressed there. Each session
+  reports `frames.input`: the route's state, events sent and the last error.
+
 ## Diagnostics and screenshots
 
 `GET /v1/diagnostics/observation` is the canonical incident snapshot. It is
