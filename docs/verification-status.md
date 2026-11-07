@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-07: 0.3.60 frames by dmabuf (ADR 0223, Blit's half)
+
+- **Version 3 of the frame channel:** a program in a Blit session can hand
+  Blit a picture already in GPU memory (`FRM3`, plane fds and an optional
+  acquire fence by `SCM_RIGHTS`); the GPU compositor imports it
+  (`EGL_LINUX_DMA_BUF_EXT`) and draws it with no copy and no upload; Blit
+  answers `RELEASE <id> <seq>` when it is done with a buffer. Offered in the
+  hello (`OK dmabuf=1 fence=<0|1> formats=...`) only while the GPU composes
+  every output; otherwise `dmabuf=0`, every v3 frame `ENOTSUP`, and live
+  buffers released. Formats XR24, AR24, XB24, AB24 with the modifiers EGL
+  lists; AR24/AB24 are premultiplied. YUV is not done.
+- **On real hardware, 10.52 (Intel HD 515, Mesa 25.0.7)**, through the system
+  Blit with a scratch build of this code (`frame_dmabuf_live_gate`): 90 frames
+  imported and drawn, all released in order, `upload_bytes_delta=0`; a 50%
+  alpha AR24 frame blended as premultiplied (131072 of 131072 pixels as
+  expected); a frame rendered by the host's GPU sent with its
+  `EGL_ANDROID_native_fence_sync` fence drew both halves after the GPU wait
+  (`fences_waited` +1). Not tested on hardware: the GPU-to-CPU fallback (gated
+  with the DRM mock, mixed CPU and GPU outputs), a long-pending fence, YUV.
+- **ADR 0223 stays proposed** until a real producer (the Browser, or the
+  gamescope bridge of ADR 0225) is measured on the owner's machine.
+- **Suites, full set:** `all` 182 pass, 11 skip, 0 fail (JOBS=2); GLES
+  `renderer` 81 pass, 1 skip, 0 fail; `package_artifact_gate` passes. The
+  implementing agent saw `hibr_split_capture_gate` fail once in its own run
+  (passed 3 of 3 alone, and here).
+
 ## 2026-11-07: 0.3.59 Full Screen and Sticky boxes, Flat and Embossed
 
 - **Ten window glyphs** (ADR 0224), asked for by the owner through Hibr #484:
