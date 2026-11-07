@@ -142,8 +142,20 @@ static void place_picture(struct bridge *b)
 {
     char seq[128];
     int n;
-    if (b->cols <= 0 || b->rows <= 0) return;
-    n = gs_frames_place(seq, sizeof(seq), GS_IMAGE_ID, b->cols, b->rows);
+    int cols = b->cols, rows = b->rows;
+    if (cols <= 0 || rows <= 0) return;
+    /* The picture keeps its aspect: the largest whole-cell box of the
+       stream's shape inside the pane. Blit scales it; the bridge never
+       resamples. */
+    if (b->stream_w && b->stream_h && b->pane_w > 0 && b->pane_h > 0) {
+        double cw = (double)b->pane_w / cols, ch = (double)b->pane_h / rows;
+        double sx = (double)b->pane_w / b->stream_w, sy = (double)b->pane_h / b->stream_h;
+        double scale = sx < sy ? sx : sy;
+        int c = (int)(b->stream_w * scale / cw + 0.5), r = (int)(b->stream_h * scale / ch + 0.5);
+        if (c >= 1 && c <= cols) cols = c;
+        if (r >= 1 && r <= rows) rows = r;
+    }
+    n = gs_frames_place(seq, sizeof(seq), GS_IMAGE_ID, cols, rows);
     if (n > 0) tty_write(seq, (size_t)n);
     b->placed = 1;
 }
@@ -422,6 +434,15 @@ static void on_process(void *data)
     if (!newest) return;
     ++b->frames_in;
     d = &newest->buffer->datas[0];
+    /* A buffer from before a size change (the stream renegotiates on a
+       resize) does not hold a frame of the new size: dropped, not sent. */
+    if (d->chunk && b->stream_w &&
+        (uint64_t)d->chunk->offset + (uint64_t)(d->chunk->stride ? d->chunk->stride : b->stream_w * 4) *
+            (b->stream_h - 1) + (uint64_t)b->stream_w * 4 > d->maxsize) {
+        ++b->frames_dropped;
+        pw_stream_queue_buffer(b->stream, newest);
+        return;
+    }
     if (!d->chunk || d->chunk->size == 0 || b->frames.fd < 0 || !b->stream_w) {
         pw_stream_queue_buffer(b->stream, newest);
         return;
@@ -461,6 +482,7 @@ static void on_param_changed(void *data, uint32_t id, const struct spa_pod *para
     b->stream_w = info.size.width;
     b->stream_h = info.size.height;
     b->stream_dmabuf = spa_pod_find_prop(param, NULL, SPA_FORMAT_VIDEO_modifier) != NULL;
+    if (b->placed) place_picture(b); /* a new size keeps its aspect in the pane */
     logf_(b, "stream format %ux%u %s", b->stream_w, b->stream_h,
           b->stream_dmabuf ? "dmabuf LINEAR" : "memfd");
     types = b->stream_dmabuf ? (1 << SPA_DATA_DmaBuf) : ((1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr));
@@ -572,8 +594,21 @@ static void request_resize(struct bridge *b)
     if (b->placed) place_picture(b);
     if (!b->stream || b->pane_w <= 0 || b->pane_h <= 0) return;
     if (b->pane_w == (int)b->stream_w && b->pane_h == (int)b->stream_h) return;
-    b->requested_w = b->pane_w;
-    b->requested_h = b->pane_h;
+    /* gamescope honours requested_size only below its output size
+       (calculate_capture_size in its src/pipewire.cpp scales down, never
+       up). A larger pane keeps the picture, scaled by Blit to the
+       placement; growing gamescope means restarting it with new -W/-H,
+       which would end Steam and the game, so it is never done (ADR 0225). */
+    if (b->pane_w > b->width || b->pane_h > b->height) {
+        logf_(b, "resize: %dx%d is larger than gamescope's %dx%d; Blit scales the picture",
+              b->pane_w, b->pane_h, b->width, b->height);
+        if (b->requested_w <= 0) return;
+        b->requested_w = b->width; /* back to full size */
+        b->requested_h = b->height;
+    } else {
+        b->requested_w = b->pane_w;
+        b->requested_h = b->pane_h;
+    }
     params[0] = enum_format(b, &bld, b->stream_dmabuf);
     pw_stream_update_params(b->stream, params, 1);
     logf_(b, "resize: requested %dx%d from the stream", b->requested_w, b->requested_h);
