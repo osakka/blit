@@ -80,8 +80,8 @@ What was established on 2026-11-07:
 ## Decision (proposed)
 
 Option 3: **`blit-gamescope`**, a small program shipped by Blit as its own
-package (Suggested by `blit`, like `blit-font-sources`), run in a Blit
-session (a Hibr pane), which:
+package (Suggested by `blit`, like `blit-font-sources`), run as a **Hibr
+desktop app** (a module and a window, the shape Boxer has), which:
 
 1. **Starts gamescope** as the session's user:
    `gamescope --backend headless -W <w> -H <h> -r <refresh> [-e] -- <command>`
@@ -139,18 +139,33 @@ of this decision.
 - **The cursor.** gamescope's stream has no cursor, so Blit's own pointer is
   shown over the picture; Steam's hover cursor shapes are not reproduced.
 
-**Hibr's work items.** A Hibr pane is `hold`'s terminal emulator, not
-Blit's PTY, so everything the bridge needs crosses `hold`:
+**Why a desktop app, not a program in a Terminal window.** One source of
+truth for each stream. Frames: ADR 0202 made Hibr's console (`cn_image`) the
+one writer of every picture; a desktop app hands its frames to that writer,
+where a Terminal program would open a second frame connection beside it.
+Input: window focus lives in Hibr, so keys reach the bridge by the path every
+desktop app uses, one encoding (Blit's Kitty reports) and one decoding (the
+console).
+
+**Hibr's work items.** Everything the bridge needs crosses `hold` and the
+desktop:
 
 - **Frames:** `hold` relays memfd frames today (ADR 0202) but not dmabuf
   frames. It must pass FRM3 frames and their plane fds through to the views
   that show the picture, and the `RELEASE` replies back, as it does memfds.
   Without this the bridge works only with the memfd fallback.
-- **Input:** `hold` must pass to the program in the pane the Kitty keyboard
-  reports (including the base-layout key Blit is adding), SGR-Pixels mouse
-  (mode 1016), pointer lock (`?7701`, its deltas, and its release), and
-  XTWINOPS `CSI 14 t`. Some of this exists (Boxer uses pointer lock through
-  Hibr); what is missing is to be checked, not assumed.
+- **Input: one key event, extended, not a second one.** The desktop's
+  console today pushes only Kitty flag 1 and turns keys into names, so no
+  desktop app sees a key release, which gamescope's EIS needs. The existing
+  key event gains a phase (press, repeat, release) and the base-layout key
+  (Kitty flag 4, which Blit adds); a window that wants phases declares it,
+  the way the Kitty protocol does, and the same event then arrives more often.
+  Default dispatch stays press-only, so other apps are unchanged. The console
+  pushes Kitty flags 1, 2, 4 and 8 to Blit for the whole display (`hold`
+  already passes flags up to 31). Mouse (SGR-Pixels) and pointer lock reach a
+  desktop app as they reach Boxer today (`_mouse`, `dt_pointerlock`).
+- **Pixel size:** a desktop app knows its window's pixels; `hold`'s emulator
+  also gains XTWINOPS `CSI 14 t`/`16 t` (it answers only `CSI 18 t` today).
 - **Launch:** Steamer (and a Control Panel entry) open a pane running
   `blit-gamescope -- steam ...`.
 
