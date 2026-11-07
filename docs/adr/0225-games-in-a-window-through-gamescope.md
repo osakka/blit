@@ -214,9 +214,8 @@ picture (it is the one writer of pictures), and the bridge's standard
 output is for its log, not for pictures. `blit-gamescope --no-place` (with `-W`/`-H`,
 since it then asks the pane nothing) never writes Kitty `a=p` or `a=d`; with
 `-W`/`-H` the bridge already sends no `CSI 14 t` at start, and with
-`--no-place` none on `SIGWINCH` either. It still writes its terminal set-up
-(cursor hidden, the screen cleared, focus reports on) and its undoing at
-exit.
+`--no-place` none on `SIGWINCH` either. It writes no terminal set-up either:
+its standard output carries only its log.
 
 **Phases.** (1) The bridge standalone in a plain Blit session on the owner's
 machine: Steam playable in a pane, every Blit-side piece proven and measured

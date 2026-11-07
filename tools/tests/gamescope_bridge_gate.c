@@ -244,17 +244,6 @@ static void unit_channel(void)
         CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EACCES") == 0 &&
               requeued_count == before, "ERROR INPUT EACCES");
     }
-    /* A Blit from before INPUT reads it as a malformed frame. */
-    snprintf(line, sizeof(line), "ERROR %u EINVAL\n", GS_INPUT_LEGACY_ID);
-    gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
-    fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    {
-        int before = requeued_count;
-        fake_reply(sv[1], line);
-        gs_frames_read(&f);
-        CHECK(f.input_state == GS_INPUT_UNSUPPORTED && requeued_count == before,
-              "the pre-INPUT EINVAL was not taken as unsupported (state %d)", f.input_state);
-    }
     CHECK(gs_frames_send_input(&f, "relative-ei") != 0, "a relative EIS path was sent");
 
     /* A live route that Blit ends later (docs/api.md: the compositor refused

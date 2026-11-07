@@ -745,7 +745,7 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
     for (slot = 0; slot < BLIT_FRAME_INPUT_ROUTES && client->inputs[slot] != NULL; ++slot) {}
     if (slot == BLIT_FRAME_INPUT_ROUTES) {
         /* As many routes as a session can have images. */
-        frame_input_refuse(runtime, client, image_id, "ENOMEM");
+        frame_input_refuse(runtime, client, image_id, "EBUSY");
         return;
     }
     if (!frame_input_load()) {

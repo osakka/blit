@@ -1765,7 +1765,9 @@ trailing newline is optional.
   Kitty image; `INPUT on` or `INPUT off` for an image with no route),
   `EACCES` (the socket is not the client's), `ENOENT` (no such socket, or
   it refused the connection), `EBUSY` (this image already has a route on
-  this connection), `ENOTSUP` (libei could not be loaded). If the
+  this connection, or the connection already has 16, the most images a
+  session holds), `ENOMEM` (Blit could not allocate the route), `ENOTSUP`
+  (libei could not be loaded). If the
   compositor refuses the connection later, in its handshake, or drops it,
   Blit sends `ERROR INPUT <image-id> ENOENT` then and that route ends; the
   connection's other routes are untouched. A route ends with its image or

@@ -177,6 +177,9 @@ static void place_picture(struct bridge *b)
 static void tty_setup(struct bridge *b)
 {
     struct termios raw;
+    /* Under --no-place no terminal reads the bridge's output (a desktop
+       app drains it for the log), so the terminal is left as it is. */
+    if (b->placement.no_place) return;
     if (tcgetattr(STDIN_FILENO, &b->saved_termios) == 0) {
         b->termios_saved = 1;
         raw = b->saved_termios;
@@ -196,7 +199,7 @@ static void tty_restore(struct bridge *b)
     int n;
     n = gs_placement_delete(&b->placement, seq, sizeof(seq), GS_IMAGE_ID);
     if (n > 0) tty_write(seq, (size_t)n);
-    tty_puts("\033[?1004l\033[?25h");
+    if (!b->placement.no_place) tty_puts("\033[?1004l\033[?25h");
     if (b->stdin_flags >= 0) fcntl(STDIN_FILENO, F_SETFL, b->stdin_flags);
     if (b->termios_saved) {
         tcsetattr(STDIN_FILENO, TCSANOW, &b->saved_termios);

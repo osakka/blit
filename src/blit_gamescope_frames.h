@@ -49,8 +49,6 @@
 
 #define GS_HOLD_MAX 16
 #define GS_FOURCC_XR24 0x34325258u /* 'X' 'R' '2' '4' */
-/* The id an older Blit reads from an INPUT message (bytes 4..7, "T ei"). */
-#define GS_INPUT_LEGACY_ID 1768235092u
 
 enum gs_input_state {
     GS_INPUT_NONE = 0,     /* not asked */
@@ -409,12 +407,6 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
     if (sscanf(line, "ERROR %llu %31s", &id, code) == 2) {
         ++f->errors;
         snprintf(f->last_error, sizeof(f->last_error), "ERROR %llu %s", id, code);
-        if (id == GS_INPUT_LEGACY_ID && f->input_state == GS_INPUT_SENT) {
-            /* A Blit that predates INPUT read it as a malformed frame. */
-            f->input_state = GS_INPUT_UNSUPPORTED;
-            snprintf(f->input_error, sizeof(f->input_error), "ENOTSUP");
-            return 1;
-        }
         if (id != f->image_id) return 1;
         /* A refused frame is the producer's again. Replies come in the order
            frames are read, and an accepted frame gets no reply, so the
