@@ -177,7 +177,7 @@ def colour_counts(display, colours, tolerance):
 def held_phase(mode, display, hold, colours, tolerance):
     """Runs the producer in `mode` on the display, captures it while it holds,
     and returns the counts and the producer's result line."""
-    sid = session('%s/producer %s %d; sleep 20' % (REMOTE, mode, hold), display=display,
+    sid = session('%s/producer %s %d; sleep 2' % (REMOTE, mode, hold), display=display,
                   width=120, height=40)
     marker = 'DMABUF_%s_HOLDING' % mode.upper()
     text = wait_text(sid, marker, 40)
@@ -188,9 +188,34 @@ def held_phase(mode, display, hold, colours, tolerance):
         if counts[0] >= 256 * 128:
             break
         time.sleep(0.5)
+    seen = dominant(display) if counts[0] < 256 * 128 else []
     text = wait_text(sid, 'DMABUF_RESULT', hold + 20)
     result = text.replace('\n', '').split('DMABUF_RESULT', 1)[1] if 'DMABUF_RESULT' in text else text
-    return counts, result.strip()
+    retire(sid)
+    return counts, result.strip() + (' screen_top_colours=%s' % seen if seen else '')
+
+
+def retire(sid):
+    """A finished producer session goes, so the next one is the one shown."""
+    ended(sid, 20)
+    api('DELETE', '/v1/terminal-sessions/%s' % sid)
+    STARTED.remove(sid)
+
+
+def dominant(display):
+    """The commonest colours of the display, sampled, for a failure report."""
+    bmp = api('GET', '/v1/diagnostics/screenshots/%s' % display, raw=True)
+    offset, = struct.unpack_from('<I', bmp, 10)
+    width, height = struct.unpack_from('<ii', bmp, 18)
+    step = struct.unpack_from('<H', bmp, 28)[0] // 8
+    stride = (width * step + 3) & ~3
+    seen = {}
+    for row in range(0, abs(height), 4):
+        for x in range(0, width, 4):
+            at = offset + row * stride + x * step
+            key = '%02x%02x%02x' % (bmp[at + 2], bmp[at + 1], bmp[at])
+            seen[key] = seen.get(key, 0) + 1
+    return sorted(seen.items(), key=lambda kv: -kv[1])[:6]
 
 
 def output_of(diagnostics, display):
@@ -226,7 +251,7 @@ def main():
         text = screen_text(probe)
         check('verdict=PROBE gbm=ok' in text.replace('\n', ''), 'GBM probe on the host: %s' % text)
         before = uploaded_bytes()
-        producer = session('%s/producer run 90 12; sleep 30' % REMOTE, display=display,
+        producer = session('%s/producer run 90 12; sleep 2' % REMOTE, display=display,
                            width=120, height=40)
         text = wait_text(producer, 'DMABUF_HOLDING', 60)
         check('DMABUF_HOLDING' in text, 'the producer did not reach its hold: %s' % text)
@@ -238,9 +263,13 @@ def main():
                 break
             time.sleep(0.5)
         during = uploaded_bytes()
+        seen = dominant(display) if covered < 256 * 128 else []
         text = wait_text(producer, 'DMABUF_RESULT', 40)
         result = ' '.join(l for l in text.replace('\n', '').split('DMABUF_RESULT')[1:]) if 'DMABUF_RESULT' in text else text
+        if seen:
+            result += ' screen_top_colours=%s' % seen
         frames = api('GET', '/v1/terminal-sessions/%s' % producer)['frames']
+        retire(producer)
         uploaded = during - before if during is not None and before is not None else 'unknown'
         print('FRAME_DMABUF_LIVE host=%s display=%s covered_px=%d image_px_at_1x=%d upload_bytes_delta=%s '
               'session_frames=%s result=%s' % (BASE, display, covered, 256 * 128, uploaded,
