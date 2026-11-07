@@ -102,7 +102,14 @@ desktop app** (a module and a window, the shape Boxer has), which:
    one). The picture is placed in the pane with Kitty escapes (`a=p`) as
    every frame-channel picture is. No copy anywhere; if Blit answers
    `dmabuf=0` (CPU compositor) the bridge asks PipeWire for memfd buffers and
-   sends version-1 frames instead.
+   sends version-1 frames instead. The same fallback holds mid-stream: on
+   `ERROR <id> ENOTSUP` (a view that cannot import joined, or an output fell
+   back to the CPU; ADR 0223) the bridge resends by memfd and stays on memfd
+   for the rest of the connection; only a new hello tries dmabuf again. The
+   bridge never stalls on its pool: with no buffer free it drops that frame
+   (newest wins, ADR 0202) and grows the pool, up to six. Where several views
+   show the picture (Hibr's `hold`), the relay sends the producer one
+   `RELEASE` per frame, after the last view has let it go.
 3. **Carries input** from the pane to gamescope's EIS socket: Kitty keyboard
    protocol press/release → `ei_device_keyboard_key`; SGR-Pixels mouse
    (mode 1016) → absolute pointer, scaled from pane pixels to `<w>x<h>`;
