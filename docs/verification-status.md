@@ -1,5 +1,29 @@
 # Verification status
 
+## 2026-11-07: 0.3.58 the battery lying in two columns
+
+- **Horizontal two-column battery**, alongside the upright one-column ones
+  (unchanged): `battery-wide-0..4` U+1002F4-1002FD, `battery-wide-0..4-charging`
+  U+1002FE-100307, `battery-wide-ac` U+100308-100309; next free U+10030A.
+  Sources `battery-wide.svg`, `battery-wide-charging.svg`, `battery-wide-ac.svg`.
+  At 22 px the ink is 18 by 11 px against 8 by 13 for one column.
+- **Monochrome by shape** (ADR 0220/0221): levels are the body and lit segments;
+  charging cuts the bolt out (`data-mono="knockout"`); ac is the solid body with
+  the plug cut out. `font_icon_shape_gate`: levels 17.1% to 65.4%, charging
+  20.5% to 66.5%, drain against charge 31.7% to 49.5%, ac against all 18.5% to
+  60.9% at 22 px (minimum 15%); 15.9% or more at 16 px (minimum 10%).
+- **The bolt has a dark edge** (#24242a): measured in the render the bolt's
+  boundary is 4.6 to 6.1:1 at 22 px and 3.1 to 4.4:1 at 16 px on both bars,
+  where the yellow alone was 1.2:1 on the light bar. The one-column charging
+  battery keeps its bolt, since an edge would change its monochrome shape.
+- Shown to and approved by the owner from real-server renders. Charging at
+  levels 3 and 4 in the pens, at 16 px, is the hardest to read.
+- **Icon font** 333,552 to 351,540 bytes; rebuilt byte-for-byte first, no
+  existing glyph changed.
+- **Suites, glyph-only set** (no `src/` change since 0.3.57): `font` and
+  `schema` 56 pass, 0 fail; GLES `renderer` 81 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+
 ## 2026-11-07: 0.3.57 the classic telephone in two columns
 
 - **Two-column classic telephone** for longwire's Classic phone style,
