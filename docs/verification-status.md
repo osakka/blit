@@ -9,6 +9,23 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-07: 0.3.61 Kitty flag 4 and focus reports on input hand-over (ADR 0225)
+
+- **Kitty keyboard flag 4 (report alternate keys):** `CSI key:shifted:base ;
+  mods u`, the base key being the US PC-101 key at the same physical position
+  (from the evdev code); supported flags are now 15. With a device keymap the
+  key is the layout's and the base the US key.
+- **Focus reports on input hand-over:** a session with mode 1004 gets `CSI O`
+  when Blit releases physical input for a VT switch, after the synthetic key
+  and button releases, and `CSI I` when it takes input back. Hibr 0.99.466
+  builds key phases for desktop apps (Boxer) on these (hibr #315/#485).
+- **Not gated:** the order of the focus-out after the synthetic releases on
+  the real VT path is read from the code; the gate drives it through the
+  `BLIT_TEST_VT_SIGNALS` hook, and only the QEMU gate runs a real VT switch.
+- **Suites, full set:** `all` 182 pass, 11 skip, 0 fail; GLES `renderer` 81
+  pass, 1 skip, 0 fail; `package_artifact_gate` passes. Deployed and
+  verified on the mini PC (10.54) and 10.52.
+
 ## 2026-11-07: 0.3.60 frames by dmabuf (ADR 0223, Blit's half)
 
 - **Version 3 of the frame channel:** a program in a Blit session can hand
