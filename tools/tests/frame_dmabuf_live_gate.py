@@ -24,6 +24,7 @@ Not proved: the acquire fence (the producer sends none: making a sync_file
 needs a GPU API it does not load) and the GPU-to-CPU fallback.
 """
 import base64
+import hashlib
 import json
 import os
 import struct
@@ -101,24 +102,32 @@ def ended(sid, seconds):
 
 
 def send_file(local, remote):
-    """The producer, base64 through a session's terminal, 600 bytes a request."""
+    """The producer, base64 through a session's terminal: canonical lines of
+    76 characters, about 600 bytes a request, paced so the terminal's input
+    queue never overflows, ended by ^D at a line start. Its checksum there
+    must match."""
     data = open(local, 'rb').read()
     encoded = base64.b64encode(data).decode()
-    sid = session('stty -echo -icanon; mkdir -p %s && base64 -d > %s.part && chmod 755 %s.part '
-                  '&& mv %s.part %s && echo SENT_OK' % (REMOTE, remote, remote, remote, remote))
-    time.sleep(0.5)
+    sid = session('stty -echo; mkdir -p %s && base64 -d > %s.part && chmod 755 %s.part '
+                  '&& mv %s.part %s && echo SENT_OK $(sha256sum %s)'
+                  % (REMOTE, remote, remote, remote, remote, remote), width=160)
+    time.sleep(1.0)
     lines = [encoded[i:i + 76] + '\n' for i in range(0, len(encoded), 76)]
     chunk = ''
     for line in lines:
-        chunk += line
-        if len(chunk) >= 600:
+        if len(chunk) + len(line) > 600:
             api('POST', '/v1/terminal-sessions/%s/input' % sid, {'data': chunk, 'mode': 'raw'})
+            time.sleep(0.05)
             chunk = ''
+        chunk += line
     if chunk:
         api('POST', '/v1/terminal-sessions/%s/input' % sid, {'data': chunk, 'mode': 'raw'})
+    time.sleep(0.3)
     api('POST', '/v1/terminal-sessions/%s/input' % sid, {'data': '\x04', 'mode': 'raw'})
-    check(ended(sid, 30), 'the transfer session did not end')
-    check('SENT_OK' in screen_text(sid), 'the producer did not arrive: %s' % screen_text(sid))
+    check(ended(sid, 60), 'the transfer session did not end: %s' % screen_text(sid))
+    text = screen_text(sid)
+    check('SENT_OK %s' % hashlib.sha256(data).hexdigest() in text,
+          'the producer did not arrive whole: %s' % text)
     return sid
 
 
@@ -179,8 +188,13 @@ def main():
         sessions.append(producer)
         text = wait_text(producer, 'DMABUF_HOLDING', 60)
         check('DMABUF_HOLDING' in text, 'the producer did not reach its hold: %s' % text)
-        time.sleep(1.0)
-        covered = colour_count(display, LAST)
+        # The display shows the producer's pane once it has a frame of it.
+        covered = 0
+        for _ in range(10):
+            covered = colour_count(display, LAST)
+            if covered >= 256 * 128:
+                break
+            time.sleep(0.5)
         during = uploaded_bytes()
         text = wait_text(producer, 'DMABUF_RESULT', 40)
         result = ' '.join(l for l in text.replace('\n', '').split('DMABUF_RESULT')[1:]) if 'DMABUF_RESULT' in text else text
