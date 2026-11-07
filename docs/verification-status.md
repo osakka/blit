@@ -1,5 +1,14 @@
 # Verification status
 
+A ledger, newest first: each entry records what was true and what was tested
+at that release, and is not revised afterwards. Older entries describe Blit as
+it was then. In particular SDL (and with it SDL's KMSDRM driver, its renderers
+and its rotation) was removed in 0.2.22 (ADR 0184), so entries before that
+mention an SDL backend that no longer exists. Blit today presents only through
+Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
+time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
+read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
+
 ## 2026-11-07: 0.3.58 the battery lying in two columns
 
 - **Horizontal two-column battery**, alongside the upright one-column ones
