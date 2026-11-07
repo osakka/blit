@@ -20,9 +20,12 @@
 /* The hash of the default rasters of kPlain then kHui at kSizes, recorded
    from the raster and icon font as they were before the setting existed;
    re-recorded in 0.3.51 for the hui badge's new artwork alone (a solid disc,
-   white letters): every other glyph and layer in the font is unchanged. */
-#define DEFAULT_ICON_HASH 0x124bfb84454ae910ULL
-/* Icons whose artwork is untouched and which have no levels and no knockouts:
+   white letters): every other glyph and layer in the font is unchanged.
+   Re-recorded in 0.3.56 for one change alone: the greys of the status
+   icons became one #7d8796 (volume-3's speaker body was #c9d1d9, 1.31:1 on
+   a light bar); no outline, layer or box changed, only that colour. */
+#define DEFAULT_ICON_HASH 0xb89e99439992c314ULL
+/* Icons whose outlines are untouched and which have no levels and no knockouts:
    hibr-pen, blit, bluetooth, power, phone-on, volume-3. */
 static const uint32_t kPlain[] = { 0x100001, 0x100000, 0x100006, 0x10001a, 0x10001d, 0x100017 };
 /* A monochrome glyph from a disc and knockouts: the hui badge, two columns. */
