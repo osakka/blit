@@ -559,10 +559,12 @@ def eis(stub=False):
         ch.frame(8, 1)
         wait_for(lambda: a.graphics(8), 'image 8 did not land')
         place(a, 8, 1, 1, 8, 2)
+        # As the bridge does: INPUT on as soon as OK input is read, before
+        # the compositor has offered a seat; emulation starts when its
+        # device is resumed.
         check(ch.ask('INPUT eis %s 8\n' % receiver.path) == b'OK input\n', 'the second route was refused')
-        receiver.expect(['connect', BIND], 'the second route bound its seat')
         ch.line('INPUT on\n')
-        receiver.expect(['start'], 'the second route on')
+        receiver.expect(['connect', BIND, 'start'], 'INPUT on before the seat was bound')
         key(35, 1)
         receiver.expect(['key 35 press'], 'held before the image goes')
         a.write('\033_Ga=d,d=I,i=8,q=2\033\\')
