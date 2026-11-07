@@ -1750,40 +1750,54 @@ to a compositor's EIS socket, so that a game it shows gets input as a
 compositor expects it rather than as terminal escapes
 ([ADR 0225](adr/0225-games-in-a-window-through-gamescope.md)):
 
+Every INPUT line names the image its route is for, so one connection can
+carry the routes of several pictures (a desktop multiplexes its windows'
+pictures over one connection per display). Each request is one message; a
+trailing newline is optional.
+
 - `INPUT eis <path> <image-id>` names the socket (an absolute path to a
   Unix socket owned by the client's own uid, which Blit checks against the
   channel's peer credentials) and the image whose picture stands for the
   compositor's output. The image need not have a frame yet; the pointer
-  maps once it has a frame and a placement. Answered `OK input`, or
-  `ERROR INPUT <code>`: `EINVAL` (malformed; image id 0, a deleted image or
-  a Kitty image; `INPUT on` or `INPUT off` with no route), `EACCES` (the
-  socket is not the client's), `ENOENT` (no such socket, or it refused the
-  connection), `EBUSY` (this channel already has a route), `ENOTSUP`
-  (libei could not be loaded). If the compositor refuses the connection
-  later, in its handshake, or drops it, Blit sends `ERROR INPUT ENOENT`
-  then and the route ends. One route per channel; it ends with the
-  channel.
-- `INPUT on` and `INPUT off` say whether the client's window has the
-  keyboard. A route starts off. It is live only while it is on and the
-  client's session is Blit's focused session; the desktop, which alone
-  knows which of its windows has focus, sends these through its client.
+  maps once it has a frame and a placement. Answered `OK input <image-id>`,
+  or `ERROR INPUT <image-id> <code>` (the id is 0 when the line names none
+  or cannot be read): `EINVAL` (malformed; image id 0, a deleted image or a
+  Kitty image; `INPUT on` or `INPUT off` for an image with no route),
+  `EACCES` (the socket is not the client's), `ENOENT` (no such socket, or
+  it refused the connection), `EBUSY` (this image already has a route on
+  this connection), `ENOTSUP` (libei could not be loaded). If the
+  compositor refuses the connection later, in its handshake, or drops it,
+  Blit sends `ERROR INPUT <image-id> ENOENT` then and that route ends; the
+  connection's other routes are untouched. A route ends with its image or
+  its connection.
+- `INPUT on <image-id>` and `INPUT off <image-id>` say whether that
+  picture's window has the keyboard. A route starts off. At most one route
+  is on per session: `INPUT on` turns off any other route of the same
+  session, on any of its connections, releasing what it held first, so two
+  windows never both get the keys even if an `off` is lost. A route is live
+  only while it is on, its connection's session is Blit's focused session,
+  the console is Blit's and its image exists; the desktop, which alone
+  knows which of its windows has focus, sends these.
 - While live, Blit sends evdev key codes as they happen, press and release
   (the compositor makes its own repeats); buttons and scroll; the pointer
   as an absolute position while it is over the image's drawn rectangle,
   scaled to the compositor's pointer region (the EIS device region's offset
   and size, or the image's latest frame size when the device reports no
   bounded region: gamescope offers one 2147483647 pixels square, meaning
-  its own output's pixels, which its stream matches), wherever and however large the picture is placed; and relative motion instead while the session holds
-  pointer lock (`?7701`). Keys still reach the session as before, so the
-  desktop's own keys (Release Pointer, Leave Full Screen) keep working.
-- When the route stops being live (`INPUT off`, the session losing focus,
-  Blit giving up the console, the image deleted, the channel closed) Blit
-  first releases every key and button it pressed there. Each session
-  reports `frames.input`: the route's `state` (`none`, `off`, `on` while
-  on but not live, or `live`), its `image`, the `events` sent (keys, buttons, scroll notches and motions,
-  all routes of the session), the `last_error` (an INPUT code, or
-  `eis-refused`/`eis-disconnected`) and the compositor's absolute
-  `region` (`WxH+X+Y`, empty until it offers one).
+  its own output's pixels, which its stream matches), wherever and however
+  large the picture is placed; and relative motion instead while the
+  session holds pointer lock (`?7701`). Keys still reach the session as
+  before, so the desktop's own keys (Release Pointer, Leave Full Screen)
+  keep working.
+- When a route stops being live (`INPUT off`, another route turned on, the
+  session losing focus, Blit giving up the console, the image deleted, the
+  connection closed) Blit first releases every key and button it pressed
+  there. Each session reports `frames.input`: `events` (keys, buttons,
+  scroll notches and motions sent, all routes of the session), `last_error`
+  (an INPUT code, or `eis-refused`/`eis-disconnected`), and `routes`, one
+  per route: its `image`, `state` (`off`, `on` while on but not live, or
+  `live`) and the compositor's absolute `region` (`WxH+X+Y`, empty until it
+  offers one).
 
 ## Diagnostics and screenshots
 
