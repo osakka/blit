@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-08: 0.3.66 the blit-gamescope package; GPL-3.0-or-later; the timing lane
+
+- **`blit-gamescope`, its own package** (ADR 0225): /usr/bin/blit-gamescope;
+  `Depends: blit (= 0.3.66-1), libc6, libpipewire-0.3-0, libei1, gamescope`
+  (Debian 13's `libpipewire-0.3-0t64` provides the old name, checked on the
+  mini PC); `blit` only Suggests it, so a plain install carries none of it.
+  Built deterministically (two builds, identical sha256) against PipeWire
+  1.4.2's headers in build/deps; checked by `package_artifact_gate`.
+  Published to hibr-apt beside blit. Steamer will Depend on it (owner).
+- **Under `--no-place`** the bridge sends only `INPUT eis`; the desktop's
+  focus callback sends `INPUT on`/`off` (Hibr #486 step 4).
+- **Licence (owner):** Blit is GPL-3.0-or-later. LICENSE, COPYING, a
+  copyright file in the blit and blit-gamescope packages; fonts and icon
+  artwork keep their own licences, the Hibr adapter Hibr's LGPL-3.0-or-later.
+- **Timing lane:** six gates that count frames, ticks or waits against the
+  clock moved to `run_serial_gate` (burn_in, mask, performance_panel,
+  tube_effects, zoomed_effects, settings_writer); they had failed one at a
+  time under parallel load (Gitea #153 closed; #154 closed the same day).
+- **Suites:** `all` 186 pass, 12 skip, 0 fail; GLES `renderer` 82 pass, 1
+  skip, 0 fail with the new lanes (the run before them failed
+  `performance_panel` once, passing 3 of 3 alone); `package_artifact_gate`
+  passes with all three packages. Deployed and verified on 10.54 and 10.52.
+
 ## 2026-11-08: 0.3.65 pictures bounded by memory, not by count (ADR 0226 phase 1)
 
 - **Growable picture and placement tables** replace the fixed 16 pictures
