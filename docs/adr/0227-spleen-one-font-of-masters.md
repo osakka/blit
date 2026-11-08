@@ -153,8 +153,8 @@ host uses it. Terminus 16 is now the only pixel font.
   smaller master in between.
 - **An operator can add a font of masters** by copying a directory of
   pixel-grid outline fonts into `/usr/local/lib/blit/fonts/text`.
-- **The package:** the five OTFs (about 0.7 MB) replace the PSF (about
-  20 KB).
+- **The package:** the five OTFs (583 KB) replace the PSF (31 KB); the
+  .deb grows by about 68 KB compressed.
 - **A master at a crisp size ignores the hinting setting.** The setting's
   own description (ADR 0218) says text glyphs follow it; these glyphs have
   no in-between pixels for it to change.
