@@ -57,7 +57,7 @@ limit is stated. Blit already answers `ENOSPC` when its store is full and
    Larger change across the server, both compositors and the API; bounds
    what actually runs out.
 
-## Decision (proposed)
+## Decision (approved by the owner, 2026-11-08; phase 1 being built)
 
 Option 3.
 
