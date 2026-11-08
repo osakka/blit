@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-08: 0.3.67 animated effects follow each display's refresh (ADR 0188)
+
+- **`effects_animation_hz`** takes `"auto"` (the default) or 10-240. Auto
+  ticks each animated output at its own refresh; a number lands on the
+  largest whole-vblank rate at or below it, refresh / ceil(refresh /
+  setting) (50 on 60 Hz is 30, 120 on 144 Hz is 72), and each output's
+  `effects.animation_hz` reports what it keeps. The gap-only rule is
+  unchanged: a tick only fills a gap, never inside a quiet window or a Hibr
+  barrier, just after a vblank.
+- **Measured on 10.52** (Intel HD 515, 60 Hz, the glowing line on one pane,
+  15 s each): no animated effect 11 presents/s, 107 ms GPU/s, Blit 7.8% CPU;
+  30 Hz 32 presents/s, 316 ms GPU/s, 10.7% CPU; auto 46 presents/s, 482 ms
+  GPU/s, 13.3% CPU; no missed deadline in any. **With a 24 fps picture
+  playing** (12 s each): 30 Hz 41 presents/s, 9 ticks/s, 1 missed deadline;
+  auto 56 presents/s, 26 ticks/s filling the gaps, 0 missed. The cost exists
+  only while an animated effect is on. 10.52's settings were restored.
+- **Suites:** `all` 186 pass, 12 skip, 0 fail; GLES `renderer` 82 pass, 1
+  skip, 0 fail; `package_artifact_gate` passes. Installed on 10.52 for the
+  measurement, then released; deployed and verified on 10.54 and 10.52.
+- **Also live today** (Hibr 0.99.469, Steam window): after the display
+  clients were renewed, 5,606 input events reached gamescope through EIS and
+  60,868 frames arrived as dmabuf on the mini PC.
+
 ## 2026-11-08: 0.3.66 the blit-gamescope package; GPL-3.0-or-later; the timing lane
 
 - **`blit-gamescope`, its own package** (ADR 0225): /usr/bin/blit-gamescope;
