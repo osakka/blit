@@ -15,7 +15,8 @@
 #define KMS_ATLAS_SIZE 2048
 #define KMS_SPRITE_SLOTS 8192
 #define KMS_SPRITE_MARGIN_Y 2
-#define KMS_IMAGE_TEXTURES 32
+/* ADR 0226: picture textures are a cache bounded by bytes, not slots. */
+#define KMS_IMAGE_TEXTURE_BUDGET (512ULL * 1024ULL * 1024ULL)
 
 typedef struct {
     int used;
@@ -35,11 +36,16 @@ typedef struct {
     int atlas_x, atlas_y, w, h, dx, dy, mode;
 } KmsSprite;
 
+/* One picture's texture. `image` is the record it was made from: the
+   server frees a record's texture before the record itself
+   (blit_kms_graphics_forget), so it is live while the entry is, and the
+   texture's bytes are charged to the picture's budget through it. */
 typedef struct {
-    const BlitGraphicsImage *image;
+    BlitGraphicsImage *image;
     unsigned long long generation;
     BlitGlesTexture texture;
     int width, height, format;
+    size_t bytes;
     unsigned long long used_frame;
 } KmsImageTexture;
 
@@ -49,7 +55,11 @@ struct KmsGlesResources {
     KmsSprite sprites[KMS_SPRITE_SLOTS];
     int sprite_count;
     unsigned long long atlas_resets, sprites_rendered;
-    KmsImageTexture images[KMS_IMAGE_TEXTURES];
+    /* ADR 0226: the picture textures, `image_count` of them in a table that
+       grows, holding `image_bytes` together. */
+    KmsImageTexture *images;
+    int image_count, image_capacity;
+    unsigned long long image_bytes;
     unsigned long long frame;
     BlitGlesTexture pointer;
     unsigned long long pointer_revision;
@@ -76,7 +86,22 @@ struct KmsGlesResources {
     BlitGlesTexture corners;
     int corners_radius;
     unsigned long long effect_quads;
+    /* ADR 0226: the frame's draw list, kept so a steady scene allocates
+       nothing. */
+    BlitGraphicsDrawList draws;
 };
+
+/* A picture texture deleted and its bytes credited to the picture. */
+static void kms_gles_image_drop(BlitKms *kms, KmsGlesResources *r, int index)
+{
+    KmsImageTexture *slot = &r->images[index];
+    if (kms->gles != NULL)
+        blit_gles_texture_delete(kms->gles, slot->texture);
+    r->image_bytes -= slot->bytes;
+    if (slot->image != NULL)
+        blit_graphics_account(slot->image->budget, &slot->image->texture_charged, 0);
+    r->images[index] = r->images[--r->image_count];
+}
 
 static void kms_gles_resources_free(BlitKms *kms)
 {
@@ -87,14 +112,17 @@ static void kms_gles_resources_free(BlitKms *kms)
         blit_gles_texture_delete(kms->gles, r->atlas);
         blit_gles_texture_delete(kms->gles, r->pointer);
         blit_gles_texture_delete(kms->gles, r->corners);
-        for (i = 0; i < KMS_IMAGE_TEXTURES; ++i)
-            blit_gles_texture_delete(kms->gles, r->images[i].texture);
         for (i = 0; i < KMS_MAX_OUTPUTS; ++i)
             blit_gles_texture_delete(kms->gles, r->hud[i]);
     }
+    /* Every picture texture credited to its picture, context or not. */
+    while (r->image_count > 0)
+        kms_gles_image_drop(kms, r, r->image_count - 1);
     free(r->scratch_black);
     free(r->scratch_white);
     free(r->sprite_pixels);
+    free(r->images);
+    blit_graphics_draws_free(&r->draws);
     free(r);
     kms->gles_resources = NULL;
 }
@@ -332,8 +360,8 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
         image->dmabuf->shown.drawn = 1;
         return image->dmabuf->shown.texture;
     }
-    for (i = 0; i < KMS_IMAGE_TEXTURES; ++i)
-        if (r->images[i].texture && r->images[i].image == image) {
+    for (i = 0; i < r->image_count; ++i)
+        if (r->images[i].image == image) {
             slot = &r->images[i];
             break;
         }
@@ -343,18 +371,40 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
         slot->used_frame = r->frame;
         return slot->texture;
     }
-    if (slot == NULL) {
-        slot = &r->images[0];
-        for (i = 0; i < KMS_IMAGE_TEXTURES; ++i) {
-            if (!r->images[i].texture) { slot = &r->images[i]; break; }
-            if (r->images[i].used_frame < slot->used_frame) slot = &r->images[i];
-        }
+    if (slot != NULL && (slot->width != image->width ||
+                         slot->height != image->height ||
+                         slot->format != image->format)) {
+        kms_gles_image_drop(kms, r, (int)(slot - r->images));
+        slot = NULL;
     }
-    if (slot->texture && (slot->width != image->width ||
-                          slot->height != image->height ||
-                          slot->format != image->format)) {
-        blit_gles_texture_delete(kms->gles, slot->texture);
-        slot->texture = 0;
+    if (slot == NULL) {
+        /* ADR 0226: room within the GPU's budget, least recently drawn
+           first. A texture drawn in this frame is never recycled, so
+           nothing on screen is uploaded again; a frame that needs more
+           than the budget is drawn over it. */
+        size_t need = (size_t)image->width * (size_t)image->height * (size_t)bytes;
+        unsigned long long limit = kms->texture_budget > 0 ? kms->texture_budget :
+            KMS_IMAGE_TEXTURE_BUDGET;
+        while (r->image_bytes + need > limit) {
+            int least = -1;
+            for (i = 0; i < r->image_count; ++i)
+                if (r->images[i].used_frame != r->frame &&
+                    (least < 0 || r->images[i].used_frame < r->images[least].used_frame))
+                    least = i;
+            if (least < 0) break;
+            kms_gles_image_drop(kms, r, least);
+        }
+        if (r->image_count == r->image_capacity) {
+            int capacity = r->image_capacity > 0 ? r->image_capacity * 2 : 32;
+            KmsImageTexture *grown = (KmsImageTexture *)realloc(
+                r->images, (size_t)capacity * sizeof(*grown));
+            if (grown == NULL) return 0;
+            r->images = grown;
+            r->image_capacity = capacity;
+        }
+        slot = &r->images[r->image_count++];
+        memset(slot, 0, sizeof(*slot));
+        slot->image = (BlitGraphicsImage *)image;
     }
     uploaded = kms_now_us();
     /* ADR 0200: a texture one or more in-place edits behind is refreshed
@@ -375,21 +425,28 @@ static BlitGlesTexture kms_gles_image(BlitKms *kms, KmsGlesResources *r,
             }
         }
     }
-    if (!slot->texture)
+    if (!slot->texture) {
         slot->texture = blit_gles_texture_create(kms->gles, image->width,
                                                  image->height, bytes);
+        if (slot->texture) {
+            /* Charged when made, credited when deleted (ADR 0226). */
+            slot->bytes = (size_t)image->width * (size_t)image->height * (size_t)bytes;
+            r->image_bytes += slot->bytes;
+            blit_graphics_account(slot->image->budget, &slot->image->texture_charged,
+                                  slot->bytes);
+        }
+    }
     if (!slot->texture ||
         blit_gles_texture_update(kms->gles, slot->texture, bytes, 0, 0,
                                  image->width, image->height, image->pixels,
                                  image->width * bytes) < 0) {
-        slot->image = NULL;
         r->upload_us += kms_now_us() - uploaded;
+        kms_gles_image_drop(kms, r, (int)(slot - r->images));
         return 0;
     }
     r->upload_us += kms_now_us() - uploaded;
     r->upload_bytes += (unsigned long long)image->width *
         (unsigned long long)image->height * bytes;
-    slot->image = image;
     slot->generation = image->generation;
     slot->width = image->width;
     slot->height = image->height;
@@ -407,12 +464,14 @@ static const char *kms_gles_unsupported(BlitKms *kms, const KmsOutput *output,
     if (output->zoom > 100 && !blit_gles_zooms(kms->gles))
         return "zoom needs highp fragment precision";
     for (v = 0; v < view_count; ++v) {
-        BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+        static BlitGraphicsDrawList list;
+        BlitGraphicsDraw *draws;
         int count;
         if (views[v].display_id != output->info.id || views[v].graphics == NULL)
             continue;
         count = blit_graphics_collect(views[v].graphics, views[v].graphics_count,
-                                      draws, BLIT_GRAPHICS_MAX_DRAWS);
+                                      &list);
+        draws = list.draws;
         for (d = 0; d < count; ++d) {
             if (draws[d].image->format != 24 && draws[d].image->format != 32)
                 return "an image has an unsupported format";
@@ -580,7 +639,7 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
         (font != NULL && font->height > 0 ? font->height : KMS_FONT_H);
     int italic_lean = (ch + 15) / 16;
     uint32_t floor_colour = view->default_background;
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+    BlitGraphicsDraw *draws = NULL;
     int draw_count = 0, row, column;
     int x0 = view->origin_x, y0 = view->origin_y;
     int x1 = x0 + view->columns * cw, y1 = y0 + view->rows * ch;
@@ -611,9 +670,11 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
     }
     blit_gles_clip(kms->gles, cx0, cy0, cx1 - cx0, cy1 - cy0);
     blit_gles_rect(kms->gles, cx0, cy0, cx1 - cx0, cy1 - cy0, floor_colour, 255);
-    if (view->graphics != NULL)
+    if (view->graphics != NULL) {
         draw_count = blit_graphics_collect(view->graphics, view->graphics_count,
-                                           draws, BLIT_GRAPHICS_MAX_DRAWS);
+                                           &r->draws);
+        draws = r->draws.draws;
+    }
     kms_gles_images(kms, r, view, draws, draw_count, 0);
     for (row = first_row; row < last_row; ++row) {
         column = first_column;

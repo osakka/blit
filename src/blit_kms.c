@@ -225,6 +225,8 @@ struct BlitKms {
     int screenshot_written;
     BlitGles *gles;
     KmsGlesResources *gles_resources;
+    /* ADR 0226: the picture texture cache's bytes (0: the default). */
+    unsigned long long texture_budget;
     int gles_requested;
     char gles_error[160];
 };
@@ -1331,7 +1333,9 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
     int italic_lean = (ch + 15) / 16;
     uint32_t uniform_background = 0;
     uint32_t floor_colour = view->default_background;
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+    /* ADR 0226: the frame's draw list grows with the pictures; kept. */
+    static BlitGraphicsDrawList list;
+    BlitGraphicsDraw *draws = NULL;
     int draw_count = 0;
     int draw_index;
     int clip_x0;
@@ -1373,10 +1377,11 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
        colour -- explicit black included -- is opaque. */
     fill_rect(output, clip_x0, clip_y0, clip_x1 - clip_x0,
               clip_y1 - clip_y0, floor_colour);
-    if (view->graphics != NULL)
+    if (view->graphics != NULL) {
         draw_count = blit_graphics_collect(view->graphics,
-                                           view->graphics_count, draws,
-                                           BLIT_GRAPHICS_MAX_DRAWS);
+                                           view->graphics_count, &list);
+        draws = list.draws;
+    }
     for (draw_index = 0; draw_index < draw_count; ++draw_index)
         if (draws[draw_index].z < KMS_GRAPHICS_Z_UNDER_BACKGROUND)
             draw_graphic(output, &draws[draw_index], view->origin_x,
@@ -1721,7 +1726,8 @@ static int graphics_ceil_div(int value, int divisor)
 static int graphics_bounds_for_view(const BlitKmsSurfaceView *view,
                                     int *x, int *y, int *width, int *height)
 {
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_DRAWS];
+    static BlitGraphicsDrawList list;
+    BlitGraphicsDraw *draws;
     int draw_count;
     int draw_index;
     int cell_width;
@@ -1739,7 +1745,8 @@ static int graphics_bounds_for_view(const BlitKmsSurfaceView *view,
     cell_width = view->cell_width;
     cell_height = view->cell_height;
     draw_count = blit_graphics_collect(view->graphics, view->graphics_count,
-                                       draws, BLIT_GRAPHICS_MAX_DRAWS);
+                                       &list);
+    draws = list.draws;
     for (draw_index = 0; draw_index < draw_count; ++draw_index) {
         const BlitGraphicsDraw *draw = &draws[draw_index];
         int draw_right = draw->x + draw->width;
@@ -3277,6 +3284,29 @@ unsigned int blit_kms_dmabuf_import(BlitKms *kms, int width, int height,
 unsigned long long blit_kms_dmabuf_fences_waited(const BlitKms *kms)
 {
     return kms != NULL ? blit_gles_dmabuf_fences_waited(kms->gles) : 0ULL;
+}
+
+void blit_kms_graphics_forget(BlitKms *kms, const BlitGraphicsImage *image)
+{
+    KmsGlesResources *r = kms != NULL ? kms->gles_resources : NULL;
+    int i;
+    if (r == NULL) return;
+    for (i = 0; i < r->image_count; ++i)
+        if (r->images[i].image == image) {
+            kms_gles_image_drop(kms, r, i);
+            return;
+        }
+}
+
+void blit_kms_set_texture_budget(BlitKms *kms, unsigned long long bytes)
+{
+    if (kms != NULL) kms->texture_budget = bytes;
+}
+
+unsigned long long blit_kms_texture_bytes(const BlitKms *kms)
+{
+    return kms != NULL && kms->gles_resources != NULL ?
+        kms->gles_resources->image_bytes : 0;
 }
 
 void blit_kms_dmabuf_destroy(BlitKms *kms, unsigned int texture, void *image)

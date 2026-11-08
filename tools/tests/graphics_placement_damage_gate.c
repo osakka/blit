@@ -11,28 +11,31 @@ int main(void)
 {
     BlitSession *s = calloc(1, sizeof(*s));
     BlitSurface *v = calloc(1, sizeof(*v));
-    BlitGraphicsScene a, b;
+    BlitGraphicsScene a = {0}, b = {0};
     BlitGraphicsImage *image;
     unsigned char pixels[16] = {0};
     int i;
     CHECK(s && v);
     v->width = 80; v->height = 40;
     s->terminal_cell_width = 8; s->terminal_cell_height = 16; s->pty_fd = -1;
-    image = &s->graphics[0];
+    /* ADR 0226: pictures are records from the session's table. */
+    image = graphics_image_new(s);
+    CHECK(image);
     image->used = image->complete = image->visible = 1; image->id = 1;
     image->width = 640; image->height = 640; image->format = 32;
     image->pixels = pixels; image->generation = 1;
     image->placement_width = 640; image->placement_height = 640;
     image->z = -1073741825;
-    image = &s->graphics[1];
+    image = graphics_image_new(s);
+    CHECK(image);
     image->used = image->complete = image->visible = 1; image->id = 2;
     image->width = 16; image->height = 32; image->format = 32;
     image->pixels = pixels; image->generation = 2;
     image->x = 16; image->y = 32;
     strcpy(image->protocol, "kitty");
-    blit_graphics_scene_build(&a, s->graphics, 8);
+    blit_graphics_scene_build(&a, s->graphics, s->graphics_count);
     for (i = 0; i < 7; ++i) {
-        b = a;
+        blit_graphics_scene_assign(&b, &a);
         switch (i) {
         case 0: image->x += 8; break;
         case 1: ++image->generation; break;
@@ -42,13 +45,13 @@ int main(void)
         case 5: image->visible = 0; break;
         case 6: image->visible = 1; break;
         }
-        blit_graphics_scene_build(&b, s->graphics, 8);
+        blit_graphics_scene_build(&b, s->graphics, s->graphics_count);
         hits = 0;
         CHECK(blit_graphics_scene_delta(&a, &b, count_damage, NULL));
         CHECK(hits == (i == 5 || i == 6 ? 1 : 2));
         CHECK(a.signature != b.signature);
         hits = 0; CHECK(!blit_graphics_scene_delta(&b, &b, count_damage, NULL)); CHECK(!hits);
-        a = b;
+        blit_graphics_scene_assign(&a, &b);
     }
     image->src_x = 0; image->x = 16; image->y = 32;
     v->cursor_x = 6; v->cursor_y = 5;
@@ -67,6 +70,10 @@ int main(void)
     s->terminal_string_length = strlen(s->terminal_string);
     terminal_apply_kitty(s, v);
     CHECK(v->damage_x == 2 && v->damage_y == 2 && v->damage_width == 78 && v->damage_height == 38);
+    /* The test's pixels are its own, not the store's. */
+    for (i = 0; i < s->graphics_count; ++i) s->graphics[i]->pixels = NULL;
+    graphics_session_release(s);
+    blit_graphics_scene_free(&a); blit_graphics_scene_free(&b);
     free(v); free(s);
     puts("PLACEMENT_DAMAGE_PASS shared_snapshot=move,pixels,z,crop,opacity,delete,add wallpaper=unchanged protocol=old_new_union");
     return 0;

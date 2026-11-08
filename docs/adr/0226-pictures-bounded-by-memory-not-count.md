@@ -139,7 +139,26 @@ atlas textures (see Open questions).
   32-slot table thrashing, which phase 1 removes. Decided by the phase 1
   measurement on 10.52.
 
-## Evidence (planned)
+## Evidence
+
+Phase 1, built 2026-11-08 (not yet run on the owner's machine or 10.52):
+
+- `graphics_memory_gate` (tools/tests), on the CPU compositor:
+  `GRAPHICS_MEMORY_PASS backend=native many=1000 placed=500 drawn=500 upload_bytes=0(flat) pixels=192000 textures=0 session_freed=1,3,4,2(least_recently_shown) kept=4 refused=ENOSPC server_freed=1:1,2:3,1:2 refused=ENOSPC ceiling=4097:ENOSPC`
+- and on the GPU compositor (GLES, surfaceless softpipe):
+  `GRAPHICS_MEMORY_PASS backend=gles many=1000 placed=500 drawn=500 upload_bytes=96000(flat) pixels=192000 textures=96000 session_freed=1,3,4,2(least_recently_shown) kept=2 refused=ENOSPC server_freed=1:1,2:3 refused=ENOSPC ceiling=4097:ENOSPC`
+  The GPU run kept fewer pictures before refusing in both budget
+  scenarios, because there a shown picture is also charged for its
+  texture; the order of frees is the same. On the GPU the server budget
+  refused with B still kept: freeing it alone would not have made room,
+  and Blit frees nothing for nothing.
+- The full set (`tools/run-gates.sh all`): `RUN_GATES_FAIL pass=184 skip=12 fail=1 (arabic_kms_ink, whose fixture still used the old picture array; fixed, then passing alone; the baseline's failing hibr_split_capture_gate passed)`;
+  GLES `renderer`: `RUN_GATES_FAIL pass=81 skip=1 fail=1 (presentation_effects_gate's animation rate, 14.5/s against a 15/s floor at load 5; passing when run again, as on the baseline tree)`.
+- An idle session's struct shrank from 53,432 to 39,848 bytes (16 picture
+  records out of it); a picture record from 832 to 496 bytes, now
+  allocated only when used.
+
+Planned:
 
 - A gate that creates 1000 small pictures in one session, places 500 on
   screen, and checks that all 500 draw (screenshot), that none is

@@ -62,7 +62,8 @@ typedef struct {
     /* ADR 0213: set to 1 when a synchronized view was drawn anyway, from
        its live cells and pictures, because the frame was a full redraw. */
     int *synchronized_drawn;
-    const BlitGraphicsImage *graphics;
+    /* ADR 0226: the session's picture table, NULL where a record is free. */
+    BlitGraphicsImage *const *graphics;
     int graphics_count;
     /* Graphics placement/lifetime is independent of terminal cell revision.
        The KMS presenter uses this identity to notice an image-only delete or
@@ -300,6 +301,12 @@ unsigned int blit_kms_dmabuf_import(BlitKms *kms, int width, int height,
                                     const uint32_t *pitches, int fence_fd,
                                     void **image, char *error, size_t capacity);
 void blit_kms_dmabuf_destroy(BlitKms *kms, unsigned int texture, void *image);
+/* ADR 0226: a picture record's GPU texture deleted and credited, before
+   the server frees the record; the byte budget of the picture texture cache
+   (0: 512 MiB), recycled least recently drawn first; and what it holds. */
+void blit_kms_graphics_forget(BlitKms *kms, const BlitGraphicsImage *image);
+void blit_kms_set_texture_budget(BlitKms *kms, unsigned long long bytes);
+unsigned long long blit_kms_texture_bytes(const BlitKms *kms);
 /* Acquire fences the GPU was told to wait on. */
 unsigned long long blit_kms_dmabuf_fences_waited(const BlitKms *kms);
 

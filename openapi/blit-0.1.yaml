@@ -2955,6 +2955,28 @@ components:
                   minimum: 10
                   maximum: 30
                   description: Frame rate of animated pane effects (ADR 0188).
+                graphics_session_budget_mib:
+                  type: integer
+                  minimum: 1
+                  maximum: 65536
+                  description: >-
+                    A session's picture budget in MiB (ADR 0226; default
+                    256). Applied live.
+                graphics_server_budget_mib:
+                  type: integer
+                  minimum: 1
+                  maximum: 65536
+                  description: >-
+                    The picture budget across sessions in MiB (ADR 0226;
+                    default a quarter of physical memory, at most 2048).
+                    Applied live.
+                graphics_texture_budget_mib:
+                  type: integer
+                  minimum: 1
+                  maximum: 65536
+                  description: >-
+                    The GPU compositor's picture texture cache in MiB
+                    (ADR 0226; default 512). Applied live.
                 restart_after_update:
                   type: string
                   enum: [at-login-screen, manual]
@@ -2974,7 +2996,8 @@ components:
                      display_backend_requested, display_backend_active,
                      presentation_configuration, kms_async_pageflip,
                      kms_compositor, kms_frame_timing, effects_animation_hz,
-                     restart_after_update,
+                     graphics_session_budget_mib, graphics_server_budget_mib,
+                     graphics_texture_budget_mib, restart_after_update,
                      expect_desktop, login, login_restart_required, pointer,
                      pointer_shown, hud]
           properties:
@@ -3003,6 +3026,9 @@ components:
                 uses is `render.outputs[].compositor` in `/v1/diagnostics`.
             kms_frame_timing: {type: string, enum: [immediate, late]}
             effects_animation_hz: {type: integer, minimum: 10, maximum: 30}
+            graphics_session_budget_mib: {type: integer, minimum: 1}
+            graphics_server_budget_mib: {type: integer, minimum: 1}
+            graphics_texture_budget_mib: {type: integer, minimum: 1}
             restart_after_update: {type: string, enum: [at-login-screen, manual]}
             expect_desktop: {type: boolean}
             login: {$ref: '#/components/schemas/LoginPolicy'}
@@ -3414,11 +3440,34 @@ components:
             answers with. The sixel bound is not a limit of its own -- a
             decoded sixel image is an ordinary graphics image -- so a
             full-size sixel canvas is exactly `max_bytes` (issue #8).
-          required: [max_images, max_width, max_height, max_bytes,
+            ADR 0226: a session's pictures are bounded by memory --
+            `budget.session_bytes` each, `budget.server_bytes` across
+            sessions, and `budget.texture_bytes` for the GPU compositor's
+            texture cache -- and `max_images` and `max_placements` are only
+            ceilings per session against a runaway program. `used` is what
+            is charged now.
+          required: [max_images, max_placements, budget, used, max_width,
+                     max_height, max_bytes,
                      sixel_max_width, sixel_max_height,
                      sixel_color_registers, frames]
           properties:
             max_images: {type: integer, minimum: 1}
+            max_placements: {type: integer, minimum: 1}
+            budget:
+              type: object
+              required: [session_bytes, server_bytes, texture_bytes]
+              properties:
+                session_bytes: {type: integer, minimum: 1}
+                server_bytes: {type: integer, minimum: 1}
+                texture_bytes: {type: integer, minimum: 1}
+              additionalProperties: false
+            used:
+              type: object
+              required: [server_bytes, texture_bytes]
+              properties:
+                server_bytes: {type: integer, minimum: 0}
+                texture_bytes: {type: integer, minimum: 0}
+              additionalProperties: false
             max_width: {type: integer, minimum: 1}
             max_height: {type: integer, minimum: 1}
             max_bytes: {type: integer, minimum: 1}
@@ -5216,8 +5265,8 @@ components:
       required: [id, revision, surface_revision, state, surface_id, title,
         terminal_capabilities, terminal_defaults, hibr_attachment, hibr_desktop,
         text_layout, login_manager, process_id, focused, surface_mode,
-        mouse_reporting, pointer_shape, graphics, graphics_diagnostics,
-        frames]
+        mouse_reporting, pointer_shape, graphics, graphics_memory,
+        graphics_diagnostics, frames]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
         revision: {$ref: '#/components/schemas/Revision'}
@@ -5267,6 +5316,36 @@ components:
             Bounded Kitty or sixel graphics records observed in this session.
             The field is diagnostic until the protocol capability is advertised.
           items: {$ref: '#/components/schemas/GraphicsImage'}
+        graphics_memory:
+          type: object
+          description: >-
+            ADR 0226: the bytes this session's pictures are charged (CPU
+            pixels, sixel and Kitty scratch, GPU textures), its budget, its
+            pictures and placements, the pictures freed to make room --
+            `unshown` at the picture ceiling, `budget` over a budget, least
+            recently shown first -- and the pictures refused, for the
+            `ceiling` or the `budget`.
+          required: [bytes, budget, images, placements, freed, refused]
+          properties:
+            bytes: {type: integer, minimum: 0}
+            budget: {type: integer, minimum: 1}
+            images: {type: integer, minimum: 0}
+            placements: {type: integer, minimum: 0}
+            freed:
+              type: object
+              required: [unshown, budget]
+              properties:
+                unshown: {type: integer, minimum: 0}
+                budget: {type: integer, minimum: 0}
+              additionalProperties: false
+            refused:
+              type: object
+              required: [ceiling, budget]
+              properties:
+                ceiling: {type: integer, minimum: 0}
+                budget: {type: integer, minimum: 0}
+              additionalProperties: false
+          additionalProperties: false
         graphics_diagnostics:
           $ref: '#/components/schemas/GraphicsDiagnostics'
         input_route:

@@ -13,7 +13,8 @@
 
    Each route is one image's, so one channel carries the routes of several
    pictures (a desktop multiplexes its windows over one channel per display,
-   Hibr #486): up to BLIT_FRAME_INPUT_ROUTES per channel, each with its own
+   Hibr #486): one per picture, so up to BLIT_FRAME_INPUT_ROUTES (the
+   session's picture ceiling, ADR 0226) per channel, each with its own
    libei context, devices and held keys and buttons. At most one route of a
    session is on, across all of its channels: `INPUT on` turns the others
    off, releasing what they held, before the new one gets anything. A route
@@ -353,7 +354,7 @@ static void frame_input_reconcile(BlitRuntime *runtime)
         if (!client->used)
             continue;
         session = find_session_id(runtime, client->session_id);
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             if (in == NULL)
                 continue;
@@ -385,11 +386,14 @@ static void frame_input_disconnected(BlitRuntime *runtime, BlitFrameClient *clie
 static void frame_input_close(BlitRuntime *runtime, BlitFrameClient *client)
 {
     int k;
-    for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k)
+    for (k = 0; k < client->input_capacity; ++k)
         if (client->inputs[k] != NULL) {
             frame_input_end(runtime, client, client->inputs[k]);
             frame_input_free(client, k);
         }
+    free(client->inputs);
+    client->inputs = NULL;
+    client->input_capacity = 0;
 }
 
 static void frame_input_device_event(BlitFrameInput *in, int type, struct ei_device *device)
@@ -493,7 +497,7 @@ static void frame_input_select(const BlitRuntime *runtime, fd_set *readable, int
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         if (!runtime->frame_clients[i].used)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < runtime->frame_clients[i].input_capacity; ++k) {
             const BlitFrameInput *in = runtime->frame_clients[i].inputs[k];
             if (in != NULL && in->ei != NULL && in->fd >= 0) {
                 FD_SET(in->fd, readable);
@@ -512,7 +516,7 @@ static void frame_input_service(BlitRuntime *runtime, const fd_set *readable)
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             if (in != NULL && in->ei != NULL && in->fd >= 0 && FD_ISSET(in->fd, readable))
                 frame_input_dispatch(runtime, client, k);
@@ -531,7 +535,7 @@ static void frame_input_key(BlitRuntime *runtime, unsigned int code, int pressed
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
@@ -557,7 +561,7 @@ static void frame_input_button(BlitRuntime *runtime, int button, int pressed)
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
@@ -584,7 +588,7 @@ static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int directi
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
@@ -612,7 +616,8 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
 {
     BlitSession *session, *under;
     BlitGraphicsImage *image;
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_PLACEMENTS + 1];
+    static BlitGraphicsDrawList list;
+    BlitGraphicsDraw *draws;
     struct ei_device *device;
     int column, row, px = 0, py = 0, count, k;
     device = frame_input_device(in, BLIT_EI_CAP_POINTER_ABSOLUTE);
@@ -627,7 +632,8 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
     /* Surface pixels, zero-based; the topmost draw under them wins. */
     --px;
     --py;
-    count = blit_graphics_collect(image, 1, draws, BLIT_GRAPHICS_MAX_PLACEMENTS + 1);
+    count = blit_graphics_collect(&image, 1, &list);
+    draws = list.draws;
     for (k = count - 1; k >= 0; --k) {
         const BlitGraphicsDraw *d = &draws[k];
         struct ei_region *r;
@@ -660,7 +666,7 @@ static void frame_input_pointer(BlitRuntime *runtime)
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k)
+        for (k = 0; k < client->input_capacity; ++k)
             if (client->inputs[k] != NULL && frame_input_sync(runtime, client, client->inputs[k]))
                 frame_input_pointer_route(runtime, client, client->inputs[k]);
     }
@@ -678,7 +684,7 @@ static void frame_input_relative(BlitRuntime *runtime, int dx, int dy)
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used || client->session_id != holder->id)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
@@ -709,7 +715,7 @@ static void frame_input_refuse(BlitRuntime *runtime, BlitFrameClient *client,
 static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id)
 {
     int k;
-    for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k)
+    for (k = 0; k < client->input_capacity; ++k)
         if (client->inputs[k] != NULL && client->inputs[k]->image_id == image_id)
             return k;
     return -1;
@@ -742,11 +748,27 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
         frame_input_refuse(runtime, client, image_id, "EBUSY");
         return;
     }
-    for (slot = 0; slot < BLIT_FRAME_INPUT_ROUTES && client->inputs[slot] != NULL; ++slot) {}
-    if (slot == BLIT_FRAME_INPUT_ROUTES) {
-        /* As many routes as a session can have images. */
-        frame_input_refuse(runtime, client, image_id, "EBUSY");
-        return;
+    for (slot = 0; slot < client->input_capacity && client->inputs[slot] != NULL; ++slot) {}
+    if (slot == client->input_capacity) {
+        /* ADR 0226: the table grows, to as many routes as a session can
+           have pictures. */
+        int capacity = client->input_capacity > 0 ? client->input_capacity * 2 : 4;
+        struct BlitFrameInput **grown;
+        if (client->input_capacity >= BLIT_FRAME_INPUT_ROUTES) {
+            frame_input_refuse(runtime, client, image_id, "EBUSY");
+            return;
+        }
+        if (capacity > BLIT_FRAME_INPUT_ROUTES) capacity = BLIT_FRAME_INPUT_ROUTES;
+        grown = (struct BlitFrameInput **)realloc(client->inputs,
+                                                  (size_t)capacity * sizeof(*grown));
+        if (grown == NULL) {
+            frame_input_refuse(runtime, client, image_id, "ENOMEM");
+            return;
+        }
+        memset(grown + client->input_capacity, 0,
+               (size_t)(capacity - client->input_capacity) * sizeof(*grown));
+        client->inputs = grown;
+        client->input_capacity = capacity;
     }
     if (!frame_input_load()) {
         frame_input_refuse(runtime, client, image_id, "ENOTSUP");
@@ -820,7 +842,7 @@ static void frame_input_turn_on(BlitRuntime *runtime, BlitFrameClient *client, B
         BlitFrameClient *other = &runtime->frame_clients[i];
         if (!other->used || !other->authenticated || other->session_id != client->session_id)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k)
+        for (k = 0; k < other->input_capacity; ++k)
             if (other->inputs[k] != NULL && other->inputs[k] != route && other->inputs[k]->on) {
                 other->inputs[k]->on = 0;
                 frame_input_sync(runtime, other, other->inputs[k]);
@@ -926,7 +948,7 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
         const BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used || client->session_id != session->id)
             continue;
-        for (k = 0; k < BLIT_FRAME_INPUT_ROUTES; ++k) {
+        for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             char entry[128];
             if (in == NULL)

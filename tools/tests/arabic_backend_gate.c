@@ -15,6 +15,8 @@ static int cursor_visible,cursor_column,cursor_row;
 static int wallpaper_active;
 static unsigned char wallpaper_rgb[12]={0x31,0x52,0x73,0x31,0x52,0x73,0x31,0x52,0x73,0x31,0x52,0x73};
 static BlitGraphicsImage wallpaper;
+/* ADR 0226: a view takes a table of picture records. */
+static BlitGraphicsImage *wallpaper_table[1] = { &wallpaper };
 static BlitFont *font;
 static KmsOutput output;
 static BlitKmsSurfaceView view;
@@ -115,7 +117,7 @@ int main(int argc,char **argv)
         wallpaper.pixels=wallpaper_rgb; wallpaper.bytes=wallpaper.capacity=sizeof(wallpaper_rgb);
         wallpaper.placement_width=COLS*cw; wallpaper.placement_height=ROWS*ch;
         wallpaper.z=-1; wallpaper.generation=wallpaper.revision=si+1;
-        view.graphics=&wallpaper; view.graphics_count=0;
+        view.graphics=wallpaper_table; view.graphics_count=0;
         /* Neighbours outside the dirty cell must survive restoration. */
         cps[2][4]=0xfeb2; cps[3][4]=0xfe92; counts[3][4]=1; marks[3][4][0]=0x0650;
         cps[4][4]=0xfe92; cps[1][9]=0xfef7;

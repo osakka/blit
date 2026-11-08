@@ -17,7 +17,24 @@ static uint32_t codepoints[COLS * ROWS], foreground[COLS * ROWS],
     background[COLS * ROWS];
 static uint32_t attributes[COLS * ROWS];
 static uint32_t reference[W * H], gpu[W * H], retained[W * H];
-static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
+/* ADR 0226: a session's pictures are a table of records, each with its own
+   placement table; the fixture keeps sixteen of each. */
+#define GATE_IMAGES 16
+static BlitGraphicsImage images[GATE_IMAGES];
+static BlitGraphicsImage *image_table[GATE_IMAGES];
+static BlitGraphicsPlacement image_placements[GATE_IMAGES][8];
+
+static void fixture_reset(void)
+{
+    int i;
+    memset(images, 0, sizeof(images));
+    memset(image_placements, 0, sizeof(image_placements));
+    for (i = 0; i < GATE_IMAGES; ++i) {
+        images[i].placements = image_placements[i];
+        images[i].placement_capacity = 8;
+        image_table[i] = &images[i];
+    }
+}
 static unsigned char image_rgb[16 * 16 * 3], image_rgba[12 * 12 * 4];
 static BlitFont font, wide;
 static int max_diff, damage_scenes, scenes;
@@ -39,7 +56,7 @@ static void reset(void)
     memset(foreground, 0, sizeof(foreground));
     memset(background, 0, sizeof(background));
     memset(attributes, 0, sizeof(attributes));
-    memset(images, 0, sizeof(images));
+    fixture_reset();
 }
 
 static void image(int slot, int x, int y, int z, int rgba)
@@ -155,6 +172,7 @@ static void diff(const char *scene, const BlitKmsSurfaceView *view)
 
 int main(void)
 {
+    fixture_reset();
     BlitKms kms;
     KmsOutput *out;
     BlitKmsSurfaceView view;
@@ -195,7 +213,7 @@ int main(void)
     view.codepoints = codepoints; view.foreground = foreground;
     view.background = background; view.attributes = attributes;
     view.default_foreground = 0xd0d0d0; view.default_background = 0x101820;
-    view.graphics = images; view.graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+    view.graphics = image_table; view.graphics_count = GATE_IMAGES;
 
     reset();
     text(0, 0, "plain text on the default background", 0, 0, 0);

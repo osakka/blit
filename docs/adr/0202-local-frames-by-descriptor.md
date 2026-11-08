@@ -144,7 +144,10 @@ Option 3.
   hold keeps one more during a replacement. One frame in flight per image: a newer frame for the same id
   replaces one not yet uploaded, so a slow GPU drops frames instead of
   queueing them. Errors are a one-line reply on the socket, with the same
-  codes as Kitty (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`).
+  codes as Kitty (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`). The count of 16
+  is superseded by [ADR 0226](0226-pictures-bounded-by-memory-not-count.md):
+  a session's pictures are bounded by memory budgets, with a ceiling of
+  4096 against a runaway program; one frame in flight per image stays.
 
 ## Wire format (version 1)
 
