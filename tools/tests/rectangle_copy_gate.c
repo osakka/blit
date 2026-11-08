@@ -146,11 +146,13 @@ int main(void)
         const unsigned char command[]="\033[3;3;3;4;1;6;9;1$v";
         char reply[64]; int fds[2]; ssize_t count;
         seed(); wide(2,2); CHECK(runtime);
-        session->graphics[0].used=1; session->graphics[0].x=77;
+        /* ADR 0226: a picture is a record from the session's table. */
+        BlitGraphicsImage *picture=graphics_image_new(session);
+        CHECK(picture); picture->x=77;
         for(x=0;x<(int)sizeof(command)-1;++x)
             terminal_consume_output(runtime,session,grid,command+x,1);
         equal_cell(8,5,2,2);equal_cell(9,5,3,2);
-        CHECK(session->graphics[0].used&&session->graphics[0].x==77);
+        CHECK(session->graphics[0]==picture&&picture->used&&picture->x==77);
         CHECK(pipe(fds)==0);session->pty_fd=fds[1];
         terminal_consume_output(runtime,session,grid,(const unsigned char*)"\033[c\033Z",5);
         count=read(fds[0],reply,sizeof(reply));

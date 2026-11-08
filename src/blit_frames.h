@@ -239,9 +239,9 @@ static void frame_dmabuf_presented(BlitRuntime *runtime)
         BlitSession *session = &runtime->sessions[i];
         if (!session->used)
             continue;
-        for (k = 0; k < BLIT_GRAPHICS_MAX_IMAGES; ++k) {
-            BlitGraphicsDmabuf *d = session->graphics[k].dmabuf;
-            if (session->graphics[k].used && d != NULL && d->retiring.used && d->shown.drawn)
+        for (k = 0; k < session->graphics_count; ++k) {
+            BlitGraphicsDmabuf *d = session->graphics[k]->dmabuf;
+            if (session->graphics[k]->used && d != NULL && d->retiring.used && d->shown.drawn)
                 frame_dmabuf_release(d, &d->retiring);
         }
     }
@@ -260,9 +260,9 @@ static void frame_dmabuf_drop_all(BlitRuntime *runtime)
         int dropped = 0;
         if (!session->used)
             continue;
-        for (k = 0; k < BLIT_GRAPHICS_MAX_IMAGES; ++k)
-            if (session->graphics[k].used && session->graphics[k].dmabuf != NULL) {
-                frame_dmabuf_free(&session->graphics[k]);
+        for (k = 0; k < session->graphics_count; ++k)
+            if (session->graphics[k]->used && session->graphics[k]->dmabuf != NULL) {
+                frame_dmabuf_free(session->graphics[k]);
                 dropped = 1;
             }
         surface = dropped ? find_surface_id(runtime, session->id) : NULL;
@@ -280,9 +280,9 @@ static void frame_dmabuf_reconcile(BlitRuntime *runtime)
     if (blit_kms_dmabuf_formats(runtime->kms, NULL, NULL) != NULL)
         return;
     for (i = 0; i < BLIT_MAX_SESSIONS && !live; ++i)
-        for (k = 0; runtime->sessions[i].used && k < BLIT_GRAPHICS_MAX_IMAGES; ++k)
-            if (runtime->sessions[i].graphics[k].used &&
-                runtime->sessions[i].graphics[k].dmabuf != NULL)
+        for (k = 0; runtime->sessions[i].used && k < runtime->sessions[i].graphics_count; ++k)
+            if (runtime->sessions[i].graphics[k]->used &&
+                runtime->sessions[i].graphics[k]->dmabuf != NULL)
                 live = 1;
     if (live)
         frame_dmabuf_drop_all(runtime);
@@ -433,10 +433,12 @@ static void frame_dmabuf_apply(BlitRuntime *runtime, BlitSession *session,
     }
     fresh.fd_count = (int)f->planes;
     d->shown = fresh;
-    /* No CPU pixels: the picture is the texture. */
+    /* No CPU pixels: the picture is the texture, the producer's memory
+       (ADR 0226 charges it nothing). */
     free(image->pixels);
     image->pixels = NULL;
     image->bytes = image->capacity = 0;
+    graphics_image_charge(session, image);
     image->width = (int)f->width;
     image->height = (int)f->height;
     image->format = alpha ? 32 : 24;
@@ -504,7 +506,16 @@ static void frame_apply(BlitRuntime *runtime, BlitSession *session, int client_f
     if (whole && (image->pixels == NULL || image->width != (int)f->width ||
                   image->height != (int)f->height || image->format != (int)f->format)) {
         size_t bytes = (size_t)f->width * f->height * bpp;
-        unsigned char *pixels = (unsigned char *)malloc(bytes);
+        unsigned char *pixels;
+        /* ADR 0226: room within the budgets, what the image holds counted
+           towards them. */
+        if (!graphics_make_room(session, bytes > image->charged ? bytes - image->charged : 0,
+                                image)) {
+            frame_refuse(runtime, session, client_fd, f->image_id, "ENOSPC", "frame-budget");
+            if (!image->complete) graphics_image_release(image);
+            return;
+        }
+        pixels = (unsigned char *)malloc(bytes);
         if (pixels == NULL) {
             frame_refuse(runtime, session, client_fd, f->image_id, "ENOMEM", "frame-allocation");
             if (!image->complete) graphics_image_release(image);
@@ -513,6 +524,7 @@ static void frame_apply(BlitRuntime *runtime, BlitSession *session, int client_f
         free(image->pixels);
         image->pixels = pixels;
         image->capacity = image->bytes = bytes;
+        graphics_image_charge(session, image);
         image->width = (int)f->width;
         image->height = (int)f->height;
         image->format = (int)f->format;
@@ -573,7 +585,6 @@ static BlitGraphicsImage *frame_image_for(BlitRuntime *runtime, BlitSession *ses
         return NULL;
     }
     if (image == NULL) {
-        int index;
         if (frame_was_deleted(session, f->image_id)) {
             frame_refuse(runtime, session, client_fd, f->image_id, "ENOENT", "frame-deleted");
             return NULL;
@@ -582,17 +593,14 @@ static BlitGraphicsImage *frame_image_for(BlitRuntime *runtime, BlitSession *ses
             frame_refuse(runtime, session, client_fd, f->image_id, "ENOENT", "frame-edit-unknown");
             return NULL;
         }
-        for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES && image == NULL; ++index)
-            if (!session->graphics[index].used)
-                image = &session->graphics[index];
+        image = graphics_image_new(session);
         if (image == NULL)
             image = graphics_reclaim_unshown(session);
         if (image == NULL) {
+            ++session->graphics_refused_ceiling;
             frame_refuse(runtime, session, client_fd, f->image_id, "ENOSPC", "frame-store-full");
             return NULL;
         }
-        memset(image, 0, sizeof(*image));
-        image->used = 1;
         image->id = f->image_id;
         image->descriptor = 1;
         snprintf(image->protocol, sizeof(image->protocol), "kitty");
@@ -627,7 +635,7 @@ static void frame_landed(BlitRuntime *runtime, BlitSession *session,
             placement.src_x = p->src_x; placement.src_y = p->src_y;
             placement.src_w = p->src_w; placement.src_h = p->src_h;
             placement.scroll_anchored = p->scroll_anchored;
-            if (!kitty_place(image, &placement)) {
+            if (!kitty_place(session, image, &placement)) {
                 graphics_reject(session, "placement-store-full");
                 kitty_reply(session, (int)p->image_id, p->quiet, "ENOSPC");
             } else {

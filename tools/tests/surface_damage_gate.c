@@ -403,7 +403,7 @@ static void nonvisual_terminal_bytes_gate(void)
     owner.terminal_escape=0; owner.terminal_string_length=0;
     if (!terminal_consume_output(NULL,&owner,&subject,(const unsigned char *)"X",1) ||
         !subject.damage_valid) { fprintf(stderr,"NONVISUAL_PTY_FAIL printable damage lost\n");++failures; }
-    for (i=0;i<BLIT_GRAPHICS_MAX_IMAGES;++i) graphics_image_release(&owner.graphics[i]);
+    graphics_session_release(&owner);
 }
 
 static void stable_client_names_gate(void)

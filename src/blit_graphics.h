@@ -3,8 +3,14 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-#define BLIT_GRAPHICS_MAX_IMAGES 16
+/* ADR 0226: a session's pictures live in a table that grows on demand, and
+   memory, not a count, is what bounds them (the budgets below). The count
+   is only a ceiling against a runaway program, far above any desktop: past
+   it a new picture is refused (Kitty ENOSPC, the API 409). */
+#define BLIT_GRAPHICS_MAX_IMAGES 4096
 /* A physical 1920x2160 output needs a full-screen RGB image for Hibr
    wallpaper (12,441,600 bytes). Keep the limit bounded while covering
    4096-class displays and RGBA frames without silently forcing a glyph
@@ -32,10 +38,33 @@
 #define BLIT_SIXEL_MAX_HEIGHT BLIT_GRAPHICS_MAX_HEIGHT
 #define BLIT_SIXEL_COLOR_REGISTERS 256
 
-/* A numbered Kitty placement (the p key) beyond the image's default one. */
-#define BLIT_GRAPHICS_MAX_PLACEMENTS 8
-#define BLIT_GRAPHICS_MAX_DRAWS \
-    (BLIT_GRAPHICS_MAX_IMAGES * (BLIT_GRAPHICS_MAX_PLACEMENTS + 1))
+/* ADR 0226: the ceiling on a session's placements, every picture's default
+   placement and numbered ones (the p key) together. Each picture's numbered
+   placements live in a table of their own that grows on demand. */
+#define BLIT_GRAPHICS_MAX_PLACEMENTS 16384
+
+/* ADR 0226: a picture budget -- the bytes of decoded pixels Blit keeps (CPU
+   copies, sixel and Kitty scratch, and the GPU textures made from them).
+   A session's budget adds to the server's (`server`), whose own is NULL. */
+typedef struct BlitGraphicsBudget {
+    unsigned long long used;
+    struct BlitGraphicsBudget *server;
+} BlitGraphicsBudget;
+
+/* ADR 0226: the one accounting function. `held` is what one holder (a
+   picture's pixels, a scratch buffer, a texture) is charged now; it becomes
+   `bytes`, and the budget and the server's move by the difference. Every
+   allocation and free of picture memory comes through here, so what is
+   reported and what is enforced cannot disagree. A NULL budget only records
+   the holder's charge. */
+static inline void blit_graphics_account(BlitGraphicsBudget *budget,
+                                         size_t *held, size_t bytes)
+{
+    BlitGraphicsBudget *b;
+    for (b = budget; b != NULL; b = b->server)
+        b->used = b->used - (unsigned long long)*held + (unsigned long long)bytes;
+    *held = bytes;
+}
 
 /* ADR 0223: one dmabuf frame of a descriptor image, imported by the GPU
    compositor. Its plane descriptors (and so the producer's buffer) are held
@@ -124,8 +153,10 @@ typedef struct {
     int scroll_anchored;
     /* Placements addressed by a nonzero placement id. The fields above are
        the default placement, the one with id 0, which is also the only one
-       sixel and API frames have. */
-    BlitGraphicsPlacement placements[BLIT_GRAPHICS_MAX_PLACEMENTS];
+       sixel and API frames have. ADR 0226: a table of `placement_capacity`
+       slots that grows on demand (doubling) and is freed with the image. */
+    BlitGraphicsPlacement *placements;
+    int placement_capacity;
     unsigned long long revision;
     /* Unique identity for the pixel contents.  The GPU compositor uses this
        to discard a texture when a Kitty/Sixel image is replaced or updated. */
@@ -166,6 +197,15 @@ typedef struct {
     /* ADR 0223: set while the picture is a dmabuf frame the GPU imported.
        `pixels` is then NULL and the CPU compositor does not draw it. */
     BlitGraphicsDmabuf *dmabuf;
+    /* ADR 0226: the budget this picture is charged to (its session's), what
+       its pixels and its GPU texture are charged now (the texture by the
+       compositor that made it), and when it was last shown -- the frame
+       that last drew one of its placements, or its creation if none has.
+       Unshown pictures are freed least recently shown first. */
+    BlitGraphicsBudget *budget;
+    size_t charged;
+    size_t texture_charged;
+    unsigned long long shown_at;
 } BlitGraphicsImage;
 
 /* One thing a renderer draws: a placement with its defaults resolved and its
@@ -187,7 +227,67 @@ typedef struct {
     int src_y;
     int src_w;
     int src_h;
+    /* Discovery order, which settles a tie in the sort. */
+    int order;
 } BlitGraphicsDraw;
+
+/* ADR 0226: what a renderer draws in one frame, a list that grows with the
+   pictures (it was sized for 16 pictures of 9 placements). Kept by its
+   owner between frames, so a steady scene allocates nothing. */
+typedef struct {
+    BlitGraphicsDraw *draws;
+    int count;
+    int capacity;
+} BlitGraphicsDrawList;
+
+static inline int blit_graphics_draws_reserve(BlitGraphicsDrawList *list, int need)
+{
+    BlitGraphicsDraw *grown;
+    int capacity = list->capacity > 0 ? list->capacity : 64;
+    if (need <= list->capacity) return 1;
+    while (capacity < need) capacity *= 2;
+    grown = (BlitGraphicsDraw *)realloc(list->draws, (size_t)capacity * sizeof(*grown));
+    if (grown == NULL) return 0;
+    list->draws = grown;
+    list->capacity = capacity;
+    return 1;
+}
+
+static inline void blit_graphics_draws_free(BlitGraphicsDrawList *list)
+{
+    free(list->draws);
+    memset(list, 0, sizeof(*list));
+}
+
+/* ADR 0226: a free numbered placement slot of the image, the table grown
+   (doubling) when it has none. NULL only when memory runs out. */
+static inline BlitGraphicsPlacement *blit_graphics_placement_slot(BlitGraphicsImage *image)
+{
+    BlitGraphicsPlacement *grown;
+    int slot, capacity;
+    for (slot = 0; slot < image->placement_capacity; ++slot)
+        if (!image->placements[slot].used) return &image->placements[slot];
+    capacity = image->placement_capacity > 0 ? image->placement_capacity * 2 : 4;
+    grown = (BlitGraphicsPlacement *)realloc(image->placements,
+                                             (size_t)capacity * sizeof(*grown));
+    if (grown == NULL) return NULL;
+    memset(grown + image->placement_capacity, 0,
+           (size_t)(capacity - image->placement_capacity) * sizeof(*grown));
+    image->placements = grown;
+    slot = image->placement_capacity;
+    image->placement_capacity = capacity;
+    return &image->placements[slot];
+}
+
+/* How many placements the image has: its default one, if shown, and its
+   numbered ones. */
+static inline int blit_graphics_placement_count(const BlitGraphicsImage *image)
+{
+    int slot, count = image->visible ? 1 : 0;
+    for (slot = 0; slot < image->placement_capacity; ++slot)
+        if (image->placements[slot].used) ++count;
+    return count;
+}
 
 /* ADR 0200: the rectangle that changed since a renderer's copy at
    generation `since`, found by walking the edit history back from the
@@ -259,28 +359,35 @@ static inline int blit_graphics_draw_precedes(const BlitGraphicsDraw *left,
     return left->placement_id < right->placement_id;
 }
 
-/* Every visible placement of every drawable image, ordered by z, image id and
-   placement id. Returns the number written. */
-static inline int blit_graphics_collect(const BlitGraphicsImage *images,
-                                        int count, BlitGraphicsDraw *out,
-                                        int capacity)
+static int blit_graphics_draw_compare(const void *a, const void *b)
 {
-    int written = 0;
+    const BlitGraphicsDraw *left = (const BlitGraphicsDraw *)a;
+    const BlitGraphicsDraw *right = (const BlitGraphicsDraw *)b;
+    if (blit_graphics_draw_precedes(left, right)) return -1;
+    if (blit_graphics_draw_precedes(right, left)) return 1;
+    return left->order < right->order ? -1 : left->order > right->order;
+}
+
+/* Every visible placement of every drawable image, ordered by z, image id and
+   placement id, then by the order they were found in. `images` holds `count`
+   pictures, NULL where a slot is free. Returns the number in the list, which
+   is short only when memory ran out. */
+static inline int blit_graphics_collect(BlitGraphicsImage *const *images,
+                                        int count, BlitGraphicsDrawList *list)
+{
     int image_index;
-    int i;
-    for (image_index = 0; image_index < count &&
-         image_index < BLIT_GRAPHICS_MAX_IMAGES; ++image_index) {
-        const BlitGraphicsImage *image = &images[image_index];
+    list->count = 0;
+    for (image_index = 0; image_index < count; ++image_index) {
+        const BlitGraphicsImage *image = images[image_index];
         int slot;
-        if (!image->used || !image->complete ||
+        if (image == NULL || !image->used || !image->complete ||
             (image->pixels == NULL &&
              (image->dmabuf == NULL || !image->dmabuf->shown.used)) ||
             image->width < 1 || image->height < 1)
             continue;
-        for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+        for (slot = -1; slot < image->placement_capacity; ++slot) {
             BlitGraphicsDraw draw;
             int ok;
-            if (written >= capacity) return written;
             if (slot < 0) {
                 if (!image->visible) continue;
                 ok = blit_graphics_draw_resolve(
@@ -296,14 +403,16 @@ static inline int blit_graphics_collect(const BlitGraphicsImage *images,
                 if (ok) draw.placement_id = p->id;
             }
             if (!ok) continue;
-            for (i = written; i > 0 &&
-                 blit_graphics_draw_precedes(&draw, &out[i - 1]); --i)
-                out[i] = out[i - 1];
-            out[i] = draw;
-            ++written;
+            if (!blit_graphics_draws_reserve(list, list->count + 1)) goto sort;
+            draw.order = list->count;
+            list->draws[list->count++] = draw;
         }
     }
-    return written;
+sort:
+    if (list->count > 1)
+        qsort(list->draws, (size_t)list->count, sizeof(list->draws[0]),
+              blit_graphics_draw_compare);
+    return list->count;
 }
 
 /* Whether anything of this image is currently shown. */
@@ -311,7 +420,7 @@ static inline int blit_graphics_shown(const BlitGraphicsImage *image)
 {
     int slot;
     if (image->visible) return 1;
-    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+    for (slot = 0; slot < image->placement_capacity; ++slot)
         if (image->placements[slot].used) return 1;
     return 0;
 }

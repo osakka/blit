@@ -19,7 +19,24 @@ static uint32_t foreground[COLS * ROWS];
 static uint32_t background[COLS * ROWS];
 static uint32_t attributes[COLS * ROWS];
 static unsigned char image_pixels[4 * 8 * 3 * 2];
-static BlitGraphicsImage images[BLIT_GRAPHICS_MAX_IMAGES];
+/* ADR 0226: a session's pictures are a table of records, each with its own
+   placement table; the fixture keeps sixteen of each. */
+#define GATE_IMAGES 16
+static BlitGraphicsImage images[GATE_IMAGES];
+static BlitGraphicsImage *image_table[GATE_IMAGES];
+static BlitGraphicsPlacement image_placements[GATE_IMAGES][8];
+
+static void fixture_reset(void)
+{
+    int i;
+    memset(images, 0, sizeof(images));
+    memset(image_placements, 0, sizeof(image_placements));
+    for (i = 0; i < GATE_IMAGES; ++i) {
+        images[i].placements = image_placements[i];
+        images[i].placement_capacity = 8;
+        image_table[i] = &images[i];
+    }
+}
 static uint32_t front_pixels[W * H];
 static uint32_t back_pixels[W * H];
 static void place(int z);
@@ -295,7 +312,7 @@ static void incremental_matches_full_gate(void)
     memset(foreground, 0, sizeof(foreground));
     memset(background, 0, sizeof(background));
     memset(attributes, 0, sizeof(attributes));
-    memset(images, 0, sizeof(images));
+    fixture_reset();
     kms.output_count = 1;
     target = &kms.outputs[0];
     target->info.id = 93;
@@ -313,7 +330,7 @@ static void incremental_matches_full_gate(void)
     view.codepoints = codepoints; view.background = background;
     view.foreground = foreground; view.attributes = attributes;
     view.default_background = 0x102030;
-    view.graphics = images; view.graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+    view.graphics = image_table; view.graphics_count = GATE_IMAGES;
     for (step = 0; step < 128; ++step) {
         int x = (step * 7 + 3) % (COLS - 1);
         int y = (step * 3 + 1) % ROWS;
@@ -386,7 +403,7 @@ static void reset(void)
     memset(foreground, 0, sizeof(foreground));
     memset(background, 0, sizeof(background));
     memset(attributes, 0, sizeof(attributes));
-    memset(images, 0, sizeof(images));
+    fixture_reset();
 }
 
 static void buffer_coherence_gate(void)
@@ -504,8 +521,8 @@ static void draw_damage(uint32_t default_background, int damage_column,
     view.attributes = attributes;
     view.default_foreground = WHITE;
     view.default_background = default_background;
-    view.graphics = images;
-    view.graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+    view.graphics = image_table;
+    view.graphics_count = GATE_IMAGES;
     view.cursor_x = -1;
     view.cursor_y = -1;
     if (damage_column >= 0) {
@@ -604,8 +621,8 @@ static void graphics_bounds_gate(void)
     view.cell_height = CH;
     view.columns = COLS;
     view.rows = ROWS;
-    view.graphics = images;
-    view.graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+    view.graphics = image_table;
+    view.graphics_count = GATE_IMAGES;
     reset();
     place(-1073741825);
     images[0].x = 40;
@@ -683,6 +700,7 @@ static void pointer_art_present_gate(void)
 
 int main(void)
 {
+    fixture_reset();
     long full;
     long got;
     uint32_t face = 0x101820U;

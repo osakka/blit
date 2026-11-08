@@ -420,6 +420,10 @@ typedef struct {
     unsigned long long synchronized_live_draws;
 } BlitGraphicsLedger;
 
+/* Frees and deletes waiting for the service pass's trace (it was sized by
+   the 16-picture store; a pass that frees more counts what it dropped). */
+#define BLIT_GRAPHICS_TRACE_PENDING 24
+
 /* What a surface showed at its last presented frame, and the placements
    that have vanished since and are being watched for their return. */
 typedef struct {
@@ -502,7 +506,9 @@ typedef struct {
        instead of merely plausible. */
     unsigned long long presented_revision;
     /* ADR 0213: the blink detector's memory of this surface. */
-    BlitBlinkShown blink_shown[BLIT_GRAPHICS_MAX_DRAWS];
+    /* ADR 0226: grows with the scene, freed with the surface. */
+    BlitBlinkShown *blink_shown;
+    int blink_shown_capacity;
     int blink_shown_count;
     int blink_shown_valid;
     BlitBlinkTrack blink_track[BLIT_BLINK_TRACKS];
@@ -946,8 +952,8 @@ typedef struct {
     int opacity;
 } BlitOverlay;
 
-/* Input routes on one frame channel: one per image, and a session holds at
-   most BLIT_GRAPHICS_MAX_IMAGES at once. */
+/* Input routes on one frame channel: one per image, so as many as a
+   session may hold pictures (ADR 0226), with no number of their own. */
 #define BLIT_FRAME_INPUT_ROUTES BLIT_GRAPHICS_MAX_IMAGES
 
 typedef struct {
@@ -962,8 +968,10 @@ typedef struct {
     /* ADR 0225: this channel's input routes to compositors' EIS sockets,
        one per image it named in an accepted `INPUT eis`, the rest NULL
        (blit_frames_input.h). A desktop multiplexes its windows' pictures
-       over one channel, so each picture has its own. */
-    struct BlitFrameInput *inputs[BLIT_FRAME_INPUT_ROUTES];
+       over one channel, so each picture has its own. ADR 0226: a table of
+       `input_capacity` slots that grows on demand, freed with the channel. */
+    struct BlitFrameInput **inputs;
+    int input_capacity;
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64
@@ -1264,7 +1272,21 @@ typedef struct {
     char terminal_term[64];
     uint32_t terminal_underline_color;
     int terminal_underline_color_set;
-    BlitGraphicsImage graphics[BLIT_GRAPHICS_MAX_IMAGES];
+    /* ADR 0226: the session's pictures, a table of `graphics_count`
+       records that grows on demand (doubling) up to BLIT_GRAPHICS_MAX_IMAGES.
+       Each record is allocated on its own and lives until the session ends,
+       reused when free (`used` 0), so a BlitGraphicsImage pointer held
+       across calls -- the GPU texture cache's key, `shown` while a new
+       picture is made -- stays valid memory, as a slot of the old fixed
+       array did. An idle session holds none. */
+    BlitGraphicsImage **graphics;
+    int graphics_count;
+    int graphics_table;
+    /* ADR 0226: what this session's pictures are charged (and the server
+       budget through it), and why pictures were freed or refused. */
+    BlitGraphicsBudget graphics_budget;
+    unsigned long graphics_freed_unshown, graphics_freed_budget;
+    unsigned long graphics_refused_ceiling, graphics_refused_budget;
     unsigned long graphics_rejected;
     unsigned long graphics_evicted;
     char graphics_last_error[64];
@@ -1277,7 +1299,7 @@ typedef struct {
     /* Deletes and other frees waiting for the trace: the parser has no
        runtime, so they are logged in the service pass, as the pointer
        lock's give-back is. A full queue counts what it could not keep. */
-    char graphics_trace_pending[BLIT_GRAPHICS_MAX_IMAGES + 8][112];
+    char graphics_trace_pending[BLIT_GRAPHICS_TRACE_PENDING][112];
     int graphics_trace_pending_count;
     unsigned long graphics_trace_dropped;
     /* A diagnostic capture of this session's raw PTY output, armed with
@@ -2292,6 +2314,54 @@ static uint64_t monotonic_us(void)
 
 /* ADR 0213: the ledger and its append. */
 static BlitGraphicsLedger graphics_ledger;
+
+/* ADR 0226: the server's picture budget and the limits from the settings
+   (zero: the default). `sessions` lets the server budget free pictures in
+   any session -- the parsers that make pictures have no runtime -- and
+   `kms` lets a freed picture's GPU texture go with it. `clock` orders the
+   last-shown stamps. */
+static struct {
+    BlitGraphicsBudget budget;
+    unsigned long long session_limit, server_limit, texture_limit;
+    BlitSession *sessions;
+    int session_count;
+    BlitFrameClient *frame_clients;
+    int frame_client_count;
+    BlitKms *kms;
+    unsigned long long clock;
+} graphics_memory;
+
+#define BLIT_GRAPHICS_SESSION_BUDGET (256ULL * 1024ULL * 1024ULL)
+#define BLIT_GRAPHICS_SERVER_BUDGET_CAP (2048ULL * 1024ULL * 1024ULL)
+#define BLIT_GRAPHICS_TEXTURE_BUDGET (512ULL * 1024ULL * 1024ULL)
+/* The largest budget a setting may name, in MiB (64 GiB). */
+#define BLIT_GRAPHICS_BUDGET_MAX_MIB 65536
+
+static unsigned long long graphics_session_limit(void)
+{
+    return graphics_memory.session_limit > 0 ? graphics_memory.session_limit :
+        BLIT_GRAPHICS_SESSION_BUDGET;
+}
+
+/* A quarter of physical memory, at most 2 GiB, unless the settings say. */
+static unsigned long long graphics_server_limit(void)
+{
+    static unsigned long long physical;
+    if (graphics_memory.server_limit > 0) return graphics_memory.server_limit;
+    if (physical == 0) {
+        long pages = sysconf(_SC_PHYS_PAGES), size = sysconf(_SC_PAGE_SIZE);
+        physical = pages > 0 && size > 0 ?
+            (unsigned long long)pages * (unsigned long long)size : 4ULL << 30;
+    }
+    return physical / 4 < BLIT_GRAPHICS_SERVER_BUDGET_CAP ? physical / 4 :
+        BLIT_GRAPHICS_SERVER_BUDGET_CAP;
+}
+
+static unsigned long long graphics_texture_limit(void)
+{
+    return graphics_memory.texture_limit > 0 ? graphics_memory.texture_limit :
+        BLIT_GRAPHICS_TEXTURE_BUDGET;
+}
 
 static const char *const graphics_ledger_kinds[] = {
     "transmit", "place", "delete", "free", "reset", "blink", "barrier"
@@ -4413,7 +4483,12 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
                 the same numbers XTSMGRAPHICS answers with; an advertised
                 limit that disagrees with the enforced one is worse than no
                 answer (issue #8). */
-             "\"graphics\":{\"max_images\":%d,\"max_width\":%d,"
+             "\"graphics\":{\"max_images\":%d,\"max_placements\":%d,"
+             /* ADR 0226: memory is the limit; the counts are ceilings. */
+             "\"budget\":{\"session_bytes\":%llu,\"server_bytes\":%llu,"
+             "\"texture_bytes\":%llu},"
+             "\"used\":{\"server_bytes\":%llu,\"texture_bytes\":%llu},"
+             "\"max_width\":%d,"
              "\"max_height\":%d,\"max_bytes\":%lu,"
              "\"sixel_max_width\":%d,\"sixel_max_height\":%d,"
              "\"sixel_color_registers\":%d,"
@@ -4441,7 +4516,11 @@ static void diagnostics_json(const BlitRuntime *runtime, char *body,
              runtime->previous_pointer_x, runtime->previous_pointer_y,
              runtime->previous_pointer_output,
              runtime->pointer_dirty ? "true" : "false",
-             BLIT_GRAPHICS_MAX_IMAGES, BLIT_GRAPHICS_MAX_WIDTH,
+             BLIT_GRAPHICS_MAX_IMAGES, BLIT_GRAPHICS_MAX_PLACEMENTS,
+             graphics_session_limit(), graphics_server_limit(),
+             graphics_texture_limit(), graphics_memory.budget.used,
+             blit_kms_texture_bytes(runtime->kms),
+             BLIT_GRAPHICS_MAX_WIDTH,
              BLIT_GRAPHICS_MAX_HEIGHT,
              (unsigned long)BLIT_GRAPHICS_MAX_BYTES,
              BLIT_SIXEL_MAX_WIDTH, BLIT_SIXEL_MAX_HEIGHT,
@@ -7825,9 +7904,9 @@ static void surface_summary_json(const BlitSurface *surface,
                 surface->links[y][x] != 0)
                 ++non_empty;
     if (session != NULL)
-        for (x = 0; x < BLIT_GRAPHICS_MAX_IMAGES; ++x)
-            if (session->graphics[x].used && session->graphics[x].complete &&
-                blit_graphics_shown(&session->graphics[x]))
+        for (x = 0; x < session->graphics_count; ++x)
+            if (session->graphics[x]->used && session->graphics[x]->complete &&
+                blit_graphics_shown(session->graphics[x]))
                 ++graphics;
     snprintf(body, capacity,
              "{\"id\":\"surface-%llu\",\"revision\":%llu,"
@@ -7989,10 +8068,12 @@ static void mark_graphics_image_damage(BlitSurface *surface,
                                        const BlitGraphicsImage *image,
                                        int cell_width, int cell_height)
 {
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_PLACEMENTS + 1];
+    static BlitGraphicsDrawList list;
+    BlitGraphicsImage *one = (BlitGraphicsImage *)image;
+    BlitGraphicsDraw *draws;
     int i;
-    int count = blit_graphics_collect(image, 1, draws,
-                                     BLIT_GRAPHICS_MAX_PLACEMENTS + 1);
+    int count = blit_graphics_collect(&one, 1, &list);
+    draws = list.draws;
     for (i = 0; i < count; ++i)
         mark_graphics_damage(surface, draws[i].x, draws[i].y,
             draws[i].width, draws[i].height, cell_width, cell_height);
@@ -8008,10 +8089,12 @@ static void mark_graphics_rect_damage(BlitSurface *surface,
                                       int x, int y, int w, int h,
                                       int cell_width, int cell_height)
 {
-    BlitGraphicsDraw draws[BLIT_GRAPHICS_MAX_PLACEMENTS + 1];
+    static BlitGraphicsDrawList list;
+    BlitGraphicsImage *one = (BlitGraphicsImage *)image;
+    BlitGraphicsDraw *draws;
     int i;
-    int count = blit_graphics_collect(image, 1, draws,
-                                     BLIT_GRAPHICS_MAX_PLACEMENTS + 1);
+    int count = blit_graphics_collect(&one, 1, &list);
+    draws = list.draws;
     for (i = 0; i < count; ++i) {
         const BlitGraphicsDraw *d = &draws[i];
         int x0 = x > d->src_x ? x : d->src_x;
@@ -9657,9 +9740,9 @@ static void terminal_scroll_graphics(BlitSession *session,
     int ch = session->terminal_cell_height > 0 ?
         session->terminal_cell_height : 16;
 
-    for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
+    for (image_index = 0; image_index < session->graphics_count;
          ++image_index) {
-        BlitGraphicsImage *image = &session->graphics[image_index];
+        BlitGraphicsImage *image = session->graphics[image_index];
         int slot;
         int image_moved = 0;
         if (!image->used || !image->complete) continue;
@@ -9669,7 +9752,7 @@ static void terminal_scroll_graphics(BlitSession *session,
                 &image->placement_height, &image->src_y, &image->src_h,
                 &image->visible, image->scroll_anchored, top, bottom, left,
                 right, delta, cw, ch);
-        for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+        for (slot = 0; slot < image->placement_capacity; ++slot) {
             BlitGraphicsPlacement *placement = &image->placements[slot];
             if (!placement->used) continue;
             image_moved |= terminal_scroll_graphics_rect(
@@ -10626,12 +10709,77 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
     }
 }
 
+/* ADR 0226: the picture's pixels charged as they stand -- the allocation
+   when it has one -- to its session's budget, which becomes its budget. */
+static void graphics_image_charge(BlitSession *session, BlitGraphicsImage *image)
+{
+    if (session->graphics_budget.server == NULL)
+        session->graphics_budget.server = &graphics_memory.budget;
+    if (image->budget == NULL)
+        image->budget = &session->graphics_budget;
+    blit_graphics_account(image->budget, &image->charged,
+                          image->pixels != NULL ? image->capacity : 0);
+}
+
+/* Everything a picture holds freed and credited -- its GPU texture, its
+   dmabufs, its pixels, its placements -- and the record left free for reuse. */
 static void graphics_image_release(BlitGraphicsImage *image)
 {
     if (image == NULL) return;
+    if (graphics_memory.kms != NULL)
+        blit_kms_graphics_forget(graphics_memory.kms, image);
     frame_dmabuf_free(image);
     free(image->pixels);
+    image->pixels = NULL;
+    blit_graphics_account(image->budget, &image->charged, 0);
+    blit_graphics_account(image->budget, &image->texture_charged, 0);
+    free(image->placements);
     memset(image, 0, sizeof(*image));
+}
+
+/* ADR 0226: a free picture record of the session, marked used, charged to
+   the session and stamped as just shown; the table grows (doubling) when no
+   record is free. NULL at BLIT_GRAPHICS_MAX_IMAGES or when memory runs out. */
+static BlitGraphicsImage *graphics_image_new(BlitSession *session)
+{
+    BlitGraphicsImage *image = NULL;
+    int index;
+    for (index = 0; index < session->graphics_count && image == NULL; ++index)
+        if (!session->graphics[index]->used)
+            image = session->graphics[index];
+    if (image == NULL) {
+        if (session->graphics_count >= BLIT_GRAPHICS_MAX_IMAGES)
+            return NULL;
+        if (session->graphics_count == session->graphics_table) {
+            int table = session->graphics_table > 0 ? session->graphics_table * 2 : 8;
+            BlitGraphicsImage **grown = (BlitGraphicsImage **)realloc(
+                session->graphics, (size_t)table * sizeof(*grown));
+            if (grown == NULL) return NULL;
+            session->graphics = grown;
+            session->graphics_table = table;
+        }
+        image = (BlitGraphicsImage *)calloc(1, sizeof(*image));
+        if (image == NULL) return NULL;
+        session->graphics[session->graphics_count++] = image;
+    }
+    memset(image, 0, sizeof(*image));
+    image->used = 1;
+    image->shown_at = ++graphics_memory.clock;
+    graphics_image_charge(session, image);
+    return image;
+}
+
+/* The session's pictures released and their table freed (it ends). */
+static void graphics_session_release(BlitSession *session)
+{
+    int index;
+    for (index = 0; index < session->graphics_count; ++index) {
+        graphics_image_release(session->graphics[index]);
+        free(session->graphics[index]);
+    }
+    free(session->graphics);
+    session->graphics = NULL;
+    session->graphics_count = session->graphics_table = 0;
 }
 
 static void graphics_reject(BlitSession *session, const char *reason)
@@ -10695,10 +10843,10 @@ static BlitGraphicsImage *graphics_image_find(BlitSession *session,
                                               unsigned int id)
 {
     int index;
-    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-        if (session->graphics[index].used && !session->graphics[index].retired &&
-            session->graphics[index].id == id)
-            return &session->graphics[index];
+    for (index = 0; index < session->graphics_count; ++index)
+        if (session->graphics[index]->used && !session->graphics[index]->retired &&
+            session->graphics[index]->id == id)
+            return session->graphics[index];
     return NULL;
 }
 
@@ -11068,7 +11216,7 @@ static int kitty_placement_get(const BlitGraphicsImage *image,
         out->src_h = image->src_h;
         return 1;
     }
-    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+    for (slot = 0; slot < image->placement_capacity; ++slot)
         if (image->placements[slot].used && image->placements[slot].id == id) {
             *out = image->placements[slot];
             return 1;
@@ -11135,16 +11283,22 @@ static int kitty_stage_land(BlitSession *session, int image_id, int quiet)
         target->bytes = stage->bytes;
         target->capacity = stage->capacity;
         stage->pixels = before.pixels;  /* freed with the stage below */
+        stage->capacity = before.capacity;
+        graphics_image_charge(session, target);
+        graphics_image_charge(session, stage);
         if (!kitty_placements_in_bounds(target)) {
             /* A smaller replacement must not leave a placement cropping
                outside it: keep the old pixels instead. */
             stage->pixels = target->pixels;
+            stage->capacity = target->capacity;
             target->pixels = before.pixels;
             target->width = before.width;
             target->height = before.height;
             target->format = before.format;
             target->bytes = before.bytes;
             target->capacity = before.capacity;
+            graphics_image_charge(session, target);
+            graphics_image_charge(session, stage);
             graphics_image_release(stage);
             graphics_reject(session, "placement-bounds");
             kitty_reply(session, image_id, quiet, "EINVAL");
@@ -11193,20 +11347,38 @@ static void kitty_placement_remove(BlitGraphicsImage *image, unsigned int id)
         image->visible = 0;
         return;
     }
-    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+    for (slot = 0; slot < image->placement_capacity; ++slot)
         if (image->placements[slot].used && image->placements[slot].id == id)
             memset(&image->placements[slot], 0,
                    sizeof(image->placements[slot]));
 }
 
+/* ADR 0226: how many placements the session's pictures have together. */
+static int graphics_placements_in_use(const BlitSession *session)
+{
+    int index, count = 0;
+    for (index = 0; index < session->graphics_count; ++index)
+        if (session->graphics[index]->used)
+            count += blit_graphics_placement_count(session->graphics[index]);
+    return count;
+}
+
 /* Displaying an (image, placement) pair again replaces it. Placement id 0
    is the image's single default placement, which moves rather than
-   multiplying. Returns 0 when the image has no room for another numbered
-   placement. */
-static int kitty_place(BlitGraphicsImage *image, const KittyPlacement *request)
+   multiplying. Returns 0 when a new placement would pass the session's
+   ceiling (ADR 0226), or memory for it runs out. */
+static int kitty_place(BlitSession *session, BlitGraphicsImage *image,
+                       const KittyPlacement *request)
 {
+    BlitGraphicsPlacement existing;
     int slot;
     int free_slot = -1;
+    if (!(request->id == 0 ? image->visible :
+          kitty_placement_get(image, request->id, &existing)) &&
+        graphics_placements_in_use(session) >= BLIT_GRAPHICS_MAX_PLACEMENTS) {
+        ++session->graphics_refused_ceiling;
+        return 0;
+    }
     if (request->id == 0) {
         image->visible = 1;
         image->x = request->x;
@@ -11222,7 +11394,7 @@ static int kitty_place(BlitGraphicsImage *image, const KittyPlacement *request)
         ++image->revision;
         return 1;
     }
-    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+    for (slot = 0; slot < image->placement_capacity; ++slot) {
         if (image->placements[slot].used &&
             image->placements[slot].id == request->id) {
             free_slot = slot;
@@ -11230,7 +11402,11 @@ static int kitty_place(BlitGraphicsImage *image, const KittyPlacement *request)
         }
         if (!image->placements[slot].used && free_slot < 0) free_slot = slot;
     }
-    if (free_slot < 0) return 0;
+    if (free_slot < 0) {
+        BlitGraphicsPlacement *grown = blit_graphics_placement_slot(image);
+        if (grown == NULL) return 0;
+        free_slot = (int)(grown - image->placements);
+    }
     image->placements[free_slot].used = 1;
     image->placements[free_slot].id = request->id;
     image->placements[free_slot].x = request->x;
@@ -11258,7 +11434,7 @@ static int kitty_placements_in_bounds(const BlitGraphicsImage *image)
     if (image->visible && (image->src_x >= image->width ||
                            image->src_y >= image->height))
         return 0;
-    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+    for (slot = 0; slot < image->placement_capacity; ++slot)
         if (image->placements[slot].used &&
             (image->placements[slot].src_x >= image->width ||
              image->placements[slot].src_y >= image->height))
@@ -11308,7 +11484,7 @@ static int kitty_image_has_placement(const BlitGraphicsImage *image)
 {
     int slot;
     if (image->visible) return 1;
-    for (slot = 0; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot)
+    for (slot = 0; slot < image->placement_capacity; ++slot)
         if (image->placements[slot].used) return 1;
     return 0;
 }
@@ -11346,29 +11522,118 @@ static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
     graphics_image_release(image);
 }
 
-/* A slot for a new image when the store is full: the least recently changed
-   complete Kitty or sixel image that nothing shows. Anything still on screen,
-   still uploading, or owned by the API is left alone. */
+static int frame_input_holds(const BlitSession *session, unsigned int image_id);
+
+/* ADR 0226: whether a picture counts as shown, and so is never freed for
+   room: placed and not deleted, or with a placement held for its next
+   frame (ADR 0202's `a=p` that arrived first: it is about to appear), or
+   holding an input route (ADR 0225: freeing it would end the route). */
+static int graphics_shown(const BlitSession *session, const BlitGraphicsImage *image)
+{
+    int k;
+    if (kitty_image_has_placement(image)) return 1;
+    for (k = 0; k < BLIT_FRAME_PENDING; ++k)
+        if (session->frame_pending[k].used && session->frame_pending[k].image_id == image->id)
+            return 1;
+    return frame_input_holds(session, image->id);
+}
+
+/* ADR 0226: the picture to free for room -- complete, shown nowhere, least
+   recently shown -- in `session`, or in any session when it is NULL (`owner`
+   says whose). Nothing on screen, still arriving or held by a synchronized
+   update is ever chosen, nor `keep`. `freeable` adds up what all such
+   pictures are charged. */
+static BlitGraphicsImage *graphics_least_shown(BlitSession *session,
+                                               const BlitGraphicsImage *keep,
+                                               BlitSession **owner,
+                                               unsigned long long *freeable)
+{
+    BlitGraphicsImage *least = NULL;
+    int s, index;
+    if (freeable != NULL) *freeable = 0;
+    for (s = 0; s < (session != NULL ? 1 : graphics_memory.session_count); ++s) {
+        BlitSession *in = session != NULL ? session : &graphics_memory.sessions[s];
+        if (session == NULL && !in->used) continue;
+        for (index = 0; index < in->graphics_count; ++index) {
+            BlitGraphicsImage *image = in->graphics[index];
+            if (!image->used || !image->complete || image->retired || image == keep ||
+                graphics_shown(in, image))
+                continue;
+            if (freeable != NULL)
+                *freeable += (unsigned long long)image->charged + image->texture_charged;
+            if (least == NULL || image->shown_at < least->shown_at) {
+                least = image;
+                if (owner != NULL) *owner = in;
+            }
+        }
+    }
+    return least;
+}
+
+/* A record for a new picture when the session is at its ceiling: the
+   unshown picture least recently shown is freed. NULL when every picture is
+   on screen, still arriving or held. */
 static BlitGraphicsImage *graphics_reclaim_unshown(BlitSession *session)
 {
-    BlitGraphicsImage *oldest = NULL;
-    int index;
+    BlitGraphicsImage *least = graphics_least_shown(session, NULL, NULL, NULL);
+    if (least == NULL) return NULL;
+    graphics_image_free(session, least, "evicted-unshown");
+    ++session->graphics_evicted;
+    ++session->graphics_freed_unshown;
+    return graphics_image_new(session);
+}
 
-    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
-        BlitGraphicsImage *image = &session->graphics[index];
-        if (!image->used || !image->complete ||
-            kitty_image_has_placement(image) ||
-            (strcmp(image->protocol, "kitty") != 0 &&
-             strcmp(image->protocol, "sixel") != 0))
-            continue;
-        if (oldest == NULL || image->revision < oldest->revision)
-            oldest = image;
-    }
-    if (oldest != NULL) {
-        graphics_image_free(session, oldest, "evicted-unshown");
+/* ADR 0226: room for `bytes` more picture memory in the session. Over its
+   budget, the session's unshown pictures are freed least recently shown
+   first; over the server's, those of every session. Nothing is freed when
+   freeing all that could be would still not make room; the picture is
+   refused instead, and so it is when only pictures on screen are left.
+   1 when there is room. */
+static int graphics_make_room(BlitSession *session, size_t bytes,
+                              const BlitGraphicsImage *keep)
+{
+    unsigned long long limit = graphics_session_limit(), freeable;
+    BlitSession *owner = session;
+    BlitGraphicsImage *least;
+
+    if (session->graphics_budget.server == NULL)
+        session->graphics_budget.server = &graphics_memory.budget;
+    while (session->graphics_budget.used + bytes > limit) {
+        least = graphics_least_shown(session, keep, NULL, &freeable);
+        if (least == NULL || session->graphics_budget.used - freeable + bytes > limit) {
+            ++session->graphics_refused_budget;
+            return 0;
+        }
+        graphics_image_free(session, least, "evicted-budget");
         ++session->graphics_evicted;
+        ++session->graphics_freed_budget;
     }
-    return oldest;
+    limit = graphics_server_limit();
+    while (graphics_memory.budget.used + bytes > limit) {
+        least = graphics_least_shown(graphics_memory.sessions != NULL ? NULL : session,
+                                     keep, &owner, &freeable);
+        if (least == NULL || graphics_memory.budget.used - freeable + bytes > limit) {
+            ++session->graphics_refused_budget;
+            return 0;
+        }
+        graphics_image_free(owner, least, "evicted-budget");
+        ++owner->graphics_evicted;
+        ++owner->graphics_freed_budget;
+    }
+    return 1;
+}
+
+/* ADR 0226: the shown pictures of a session whose frame was just drawn are
+   stamped, one stamp a frame. */
+static void graphics_stamp_shown(BlitSession *session)
+{
+    unsigned long long stamp = ++graphics_memory.clock;
+    int index;
+    for (index = 0; index < session->graphics_count; ++index) {
+        BlitGraphicsImage *image = session->graphics[index];
+        if (image->used && image->complete && kitty_image_has_placement(image))
+            image->shown_at = stamp;
+    }
 }
 
 /* a=d. Lowercase targets remove placements and keep the image's data;
@@ -11397,9 +11662,10 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
     snprintf(reason, sizeof(reason), "delete-d=%c", target);
     ++session->kitty_deletes[strchr(kitty_delete_kinds, target) - kitty_delete_kinds];
     ++graphics_ledger.deletes;
-    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
-        BlitGraphicsImage *image = &session->graphics[index];
+    for (index = 0; index < session->graphics_count; ++index) {
+        BlitGraphicsImage *image = session->graphics[index];
         BlitGraphicsImage before;
+        BlitGraphicsPlacement *held = NULL;
         int removed = 0;
         int hold;
         if (!image->used || image->retired) continue;
@@ -11407,10 +11673,21 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
            update is still the frame being held. */
         hold = free_data && session->terminal_synchronized && image->complete &&
             kitty_image_has_placement(image);
-        if (hold) before = *image;
         if (by_position && strcmp(image->protocol, "kitty") != 0) continue;
         if (kind == 'i' && image->id != image_id) continue;
-        for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+        if (hold) {
+            before = *image;
+            /* The numbered placements are a table of their own (ADR 0226),
+               so the held frame keeps a copy of it too. */
+            if (image->placement_capacity > 0) {
+                held = (BlitGraphicsPlacement *)malloc(
+                    (size_t)image->placement_capacity * sizeof(*held));
+                if (held == NULL) hold = 0;
+                else memcpy(held, image->placements,
+                            (size_t)image->placement_capacity * sizeof(*held));
+            }
+        }
+        for (slot = -1; slot < image->placement_capacity; ++slot) {
             unsigned int id = slot < 0 ? 0U : image->placements[slot].id;
             BlitGraphicsPlacement placed;
             BlitGraphicsDraw draw;
@@ -11463,11 +11740,16 @@ static int kitty_delete(BlitSession *session, BlitSurface *surface,
         if (hold && (removed > 0 || kind == 'a') &&
             !kitty_image_has_placement(image)) {
             *image = before;
+            if (held != NULL)
+                memcpy(image->placements, held,
+                       (size_t)image->placement_capacity * sizeof(*held));
+            free(held);
             image->retired = 1;
             snprintf(image->retired_reason, sizeof(image->retired_reason), "%s", reason);
             ++freed;
             continue;
         }
+        free(held);
         if (free_data && (removed > 0 || kind == 'a') &&
             !kitty_image_has_placement(image)) {
             frame_note_deleted(session, image);
@@ -11497,11 +11779,11 @@ static void graphics_release_retired(BlitSession *session, BlitSurface *surface)
     int index;
     int slot;
 
-    for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index) {
-        BlitGraphicsImage *image = &session->graphics[index];
+    for (index = 0; index < session->graphics_count; ++index) {
+        BlitGraphicsImage *image = session->graphics[index];
         char reason[24];
         if (!image->used || !image->retired) continue;
-        for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+        for (slot = -1; slot < image->placement_capacity; ++slot) {
             unsigned int id = slot < 0 ? 0U : image->placements[slot].id;
             BlitGraphicsPlacement placed;
             BlitGraphicsDraw draw;
@@ -11778,15 +12060,17 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             query.capacity = (size_t)width * (size_t)height *
                 (format == 24 ? 3U : 4U);
             query.pixels = (unsigned char *)malloc(query.capacity);
+            /* Scratch for the probe's data, charged while it lives. */
+            graphics_image_charge(session, &query);
             if (query.pixels == NULL ||
                 !kitty_decode_chunk(&query, separator + 1) ||
                 query.base64_tail_length != 0 || query.bytes != query.capacity) {
-                free(query.pixels);
+                graphics_image_release(&query);
                 kitty_fail(session, image_id, quiet, "query-data", "EINVAL");
                 return;
             }
         }
-        free(query.pixels);
+        graphics_image_release(&query);
         snprintf(response, sizeof(response), "OK");
         kitty_reply(session, image_id, quiet, response);
         return;
@@ -11841,7 +12125,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             old_valid = blit_graphics_draw_resolve(image, previous.x, previous.y,
                 previous.width, previous.height, previous.z, previous.src_x,
                 previous.src_y, previous.src_w, previous.src_h, &old_draw);
-        if (!kitty_place(image, &placement)) {
+        if (!kitty_place(session, image, &placement)) {
             kitty_fail(session, image_id, quiet, "placement-store-full", "ENOSPC");
             return;
         }
@@ -11924,54 +12208,58 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     }
     if (image == NULL) {
         /* A staged upload has its own slot and takes none of the store's. */
-        if (stage)
+        size_t needed = format == 100 || compressed ?
+            (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
+            (size_t)width * (size_t)height * (format == 24 ? 3U : 4U);
+        if (needed > BLIT_GRAPHICS_MAX_BYTES) {
+            kitty_fail(session, image_id, quiet, "image-bounds", "EFBIG");
+            return;
+        }
+        /* ADR 0226: memory is the limit. Over a budget, pictures nothing
+           shows are freed least recently shown first; with only pictures
+           on screen left, the new one is refused. */
+        if (!graphics_make_room(session, needed, shown)) {
+            kitty_fail(session, image_id, quiet, "image-budget", "ENOSPC");
+            return;
+        }
+        if (stage) {
             image = &session->terminal_kitty_stage;
-        for (index = 0; image == NULL && index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-            if (!session->graphics[index].used) {
-                image = &session->graphics[index];
-                break;
-            }
-        /* A full store gives up what a synchronized update was holding
-           before it gives up anything else: the held frame is not worth
-           refusing a picture for. */
-        for (index = 0; image == NULL && index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-            if (session->graphics[index].used && session->graphics[index].retired) {
-                graphics_image_free(session, &session->graphics[index],
+            memset(image, 0, sizeof(*image));
+            image->used = 1;
+            graphics_image_charge(session, image);
+        }
+        if (image == NULL)
+            image = graphics_image_new(session);
+        /* At the ceiling (ADR 0226) the store gives up what a synchronized
+           update was holding before it gives up anything else: the held
+           frame is not worth refusing a picture for. */
+        for (index = 0; image == NULL && index < session->graphics_count; ++index)
+            if (session->graphics[index]->used && session->graphics[index]->retired) {
+                graphics_image_free(session, session->graphics[index],
                                     "evicted-retired");
-                image = &session->graphics[index];
+                image = graphics_image_new(session);
             }
         if (image == NULL) {
-            for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-                if (session->graphics[index].used &&
-                    !session->graphics[index].complete) {
-                    graphics_image_free(session, &session->graphics[index],
+            for (index = 0; index < session->graphics_count; ++index)
+                if (session->graphics[index]->used &&
+                    !session->graphics[index]->complete) {
+                    graphics_image_free(session, session->graphics[index],
                                         "evicted-incomplete");
                     ++session->graphics_evicted;
-                    image = &session->graphics[index];
+                    ++session->graphics_freed_unshown;
+                    image = graphics_image_new(session);
                     break;
                 }
         }
+        /* d=a keeps the data of images it unplaced, as the protocol says,
+           so a full store may be full of images nothing shows. */
+        if (image == NULL)
+            image = graphics_reclaim_unshown(session);
         if (image == NULL) {
-            /* d=a keeps the data of images it unplaced, as the protocol
-               says, so a full store may be full of images nothing shows. */
-            for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-                if (session->graphics[index].used &&
-                    session->graphics[index].complete &&
-                    strcmp(session->graphics[index].protocol, "kitty") == 0 &&
-                    !kitty_image_has_placement(&session->graphics[index])) {
-                    graphics_image_free(session, &session->graphics[index],
-                                        "evicted-unplaced");
-                    ++session->graphics_evicted;
-                    image = &session->graphics[index];
-                    break;
-                }
-        }
-        if (image == NULL) {
+            ++session->graphics_refused_ceiling;
             kitty_fail(session, image_id, quiet, "image-store-full", "ENOSPC");
             return;
         }
-        memset(image, 0, sizeof(*image));
-        image->used = 1;
         image->id = (unsigned int)image_id;
         snprintf(image->protocol, sizeof(image->protocol), "kitty");
         image->width = width;
@@ -11986,20 +12274,14 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
            PNG which is both -- has no known length until it has been parsed,
            so it accumulates against the staging bound instead of the pixel
            size. */
-        image->capacity = (image->encoded || image->compressed) ?
-            (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
-            (size_t)width * (size_t)height * (format == 24 ? 3U : 4U);
-        if (image->capacity > BLIT_GRAPHICS_MAX_BYTES) {
-            graphics_image_free(session, image, "transmit-failed");
-            kitty_fail(session, image_id, quiet, "image-bounds", "EFBIG");
-            return;
-        }
+        image->capacity = needed;
         image->pixels = (unsigned char *)malloc(image->capacity);
         if (image->pixels == NULL) {
             graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "allocation-failed", "ENOMEM");
             return;
         }
+        graphics_image_charge(session, image);
         image->revision = 1;
         image->generation = next_graphics_generation();
     }
@@ -12018,7 +12300,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         }
         /* A staged replacement is placed on the image it replaces, which
            keeps showing its old pixels until the new ones are complete. */
-        if (!kitty_place(stage ? shown : image, &placement)) {
+        if (!kitty_place(session, stage ? shown : image, &placement)) {
             graphics_image_free(session, image, "transmit-failed");
             kitty_fail(session, image_id, quiet, "placement-store-full", "ENOSPC");
             return;
@@ -12061,9 +12343,14 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
                 (size_t)BLIT_GRAPHICS_MAX_ENCODED_BYTES :
                 (size_t)image->width * (size_t)image->height *
                     (image->format == 24 ? 3U : 4U);
-            unsigned char *inflated = (unsigned char *)malloc(
-                expected > 0 ? expected : 1U);
+            unsigned char *inflated;
             uLongf produced = (uLongf)expected;
+            if (!graphics_make_room(session, expected, image)) {
+                graphics_image_free(session, image, "transmit-failed");
+                kitty_fail(session, image_id, quiet, "image-budget", "ENOSPC");
+                return;
+            }
+            inflated = (unsigned char *)malloc(expected > 0 ? expected : 1U);
             if (inflated == NULL) {
                 graphics_image_free(session, image, "transmit-failed");
                 kitty_fail(session, image_id, quiet, "allocation-failed", "ENOMEM");
@@ -12082,6 +12369,7 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             image->bytes = (size_t)produced;
             image->capacity = expected;
             image->compressed = 0;
+            graphics_image_charge(session, image);
         }
         if (image->encoded) {
             /* The container is complete; replace it with decoded samples.
@@ -12104,6 +12392,14 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
             image->bytes = image->capacity =
                 (size_t)decoded_width * (size_t)decoded_height * 4U;
             image->encoded = 0;
+            graphics_image_charge(session, image);
+            /* Its size is known only now; the container it replaced is
+               gone, so a picture over the budget is refused here. */
+            if (!graphics_make_room(session, 0, image)) {
+                graphics_image_free(session, image, "transmit-failed");
+                kitty_fail(session, image_id, quiet, "image-budget", "ENOSPC");
+                return;
+            }
         }
         /* A PNG's size is only known now, so a source rectangle that starts
            outside it could not be refused when the placement was made. */
@@ -12181,6 +12477,9 @@ typedef struct {
     int maximum_x;
     int maximum_y;
     int exhausted;
+    /* ADR 0226: the scratch is picture memory, charged to the session. */
+    BlitGraphicsBudget *budget;
+    size_t charged;
 } BlitSixelCanvas;
 
 #define BLIT_SIXEL_STRIDE ((size_t)BLIT_SIXEL_MAX_WIDTH * 4U)
@@ -12210,7 +12509,16 @@ static int sixel_canvas_reserve(BlitSixelCanvas *canvas, int rows)
            (size_t)(target - canvas->rows) * BLIT_SIXEL_STRIDE);
     canvas->pixels = grown;
     canvas->rows = target;
+    blit_graphics_account(canvas->budget, &canvas->charged,
+                          (size_t)target * BLIT_SIXEL_STRIDE);
     return 1;
+}
+
+static void sixel_canvas_free(BlitSixelCanvas *canvas)
+{
+    free(canvas->pixels);
+    canvas->pixels = NULL;
+    blit_graphics_account(canvas->budget, &canvas->charged, 0);
 }
 
 /* Clips. Sixel has no reliable end-of-image size declaration -- the `"`
@@ -12284,6 +12592,9 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
     int image_id = 1;
 
     memset(&canvas, 0, sizeof(canvas));
+    if (session->graphics_budget.server == NULL)
+        session->graphics_budget.server = &graphics_memory.budget;
+    canvas.budget = &session->graphics_budget;
     if (!sixel_canvas_reserve(&canvas, 6)) {
         graphics_reject(session, "sixel-allocation-failed");
         return;
@@ -12318,7 +12629,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
         } else if (command == '#') {
             int colour = sixel_number(&cursor, -1);
             if (colour < 0 || colour >= BLIT_SIXEL_COLOR_REGISTERS) {
-                free(canvas.pixels);
+                sixel_canvas_free(&canvas);
                 graphics_reject(session, "sixel-colour");
                 return;
             }
@@ -12337,7 +12648,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
                 if (*cursor == ';') ++cursor;
                 third = sixel_number(&cursor, -1);
                 if (mode < 0 || first < 0 || second < 0 || third < 0) {
-                    free(canvas.pixels);
+                    sixel_canvas_free(&canvas);
                     graphics_reject(session, "sixel-colour");
                     return;
                 }
@@ -12365,7 +12676,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             /* Only an unparseable run is refused: no digits, or a byte that
                is not sixel data. `!0~` repeats nothing and is legal. */
             if (repeat < 0 || *cursor < '?' || *cursor > '~') {
-                free(canvas.pixels);
+                sixel_canvas_free(&canvas);
                 graphics_reject(session, "sixel-repeat");
                 return;
             }
@@ -12410,7 +12721,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
     if (raster_height > 0 && height > raster_height)
         height = raster_height;
     if (width < 1 || height < 1) {
-        free(canvas.pixels);
+        sixel_canvas_free(&canvas);
         graphics_reject(session, canvas.exhausted ?
                         "sixel-allocation-failed" : "sixel-empty");
         return;
@@ -12418,7 +12729,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
     if (raster_width > width) width = raster_width;
     if (raster_height > height) height = raster_height;
     if (!sixel_canvas_reserve(&canvas, height)) {
-        free(canvas.pixels);
+        sixel_canvas_free(&canvas);
         graphics_reject(session, "sixel-allocation-failed");
         return;
     }
@@ -12447,15 +12758,18 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
                 }
         }
     }
-    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
-        if (!session->graphics[i].used) {
-            image = &session->graphics[i];
-            break;
-        }
+    /* ADR 0226: the picture's room within the budgets, then its record. */
+    if (!graphics_make_room(session, (size_t)width * (size_t)height * 4U, NULL)) {
+        sixel_canvas_free(&canvas);
+        graphics_reject(session, "image-budget");
+        return;
+    }
+    image = graphics_image_new(session);
     if (image == NULL)
         image = graphics_reclaim_unshown(session);
     if (image == NULL) {
-        free(canvas.pixels);
+        sixel_canvas_free(&canvas);
+        ++session->graphics_refused_ceiling;
         graphics_reject(session, "image-store-full");
         return;
     }
@@ -12519,15 +12833,14 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
             visible_height = screen_height - pixel_y;
         if (visible_width < 1) visible_width = 1;
         if (visible_height < 1) visible_height = 1;
-        memset(image, 0, sizeof(*image));
         image->pixels = (unsigned char *)malloc((size_t)width *
                                                 (size_t)height * 4U);
         if (image->pixels == NULL) {
-            free(canvas.pixels);
+            sixel_canvas_free(&canvas);
+            graphics_image_release(image);
             graphics_reject(session, "sixel-allocation-failed");
             return;
         }
-        image->used = 1;
         image->complete = 1;
         image->id = (unsigned int)image_id;
         snprintf(image->protocol, sizeof(image->protocol), "sixel");
@@ -12536,6 +12849,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
         image->format = 32;
         image->opaque = background_select != 1;
         image->bytes = image->capacity = (size_t)width * (size_t)height * 4U;
+        graphics_image_charge(session, image);
         for (i = 0; i < height; ++i)
             memcpy(image->pixels + (size_t)i * (size_t)width * 4U,
                    canvas.pixels + (size_t)i * BLIT_SIXEL_STRIDE,
@@ -12553,7 +12867,7 @@ static void terminal_apply_sixel(BlitSession *session, BlitSurface *surface,
         image->revision = 1;
         image->generation = next_graphics_generation();
     }
-    free(canvas.pixels);
+    sixel_canvas_free(&canvas);
     mark_graphics_image_damage(surface, image, cell_width, cell_height);
 }
 
@@ -12731,8 +13045,8 @@ static int session_graphics_in_use(const BlitSession *session)
     int count = 0;
     int i;
 
-    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i)
-        if (session->graphics[i].used)
+    for (i = 0; i < session->graphics_count; ++i)
+        if (session->graphics[i]->used)
             ++count;
     return count;
 }
@@ -16277,10 +16591,13 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
     {
         int graphics_index;
         int first_graphics = 1;
-        for (graphics_index = 0; graphics_index < BLIT_GRAPHICS_MAX_IMAGES;
+        for (graphics_index = 0; graphics_index < session->graphics_count;
              ++graphics_index) {
-            BlitGraphicsImage *image = &session->graphics[graphics_index];
+            BlitGraphicsImage *image = session->graphics[graphics_index];
             if (!image->used) continue;
+            /* ADR 0226: a session may hold thousands of pictures; the list
+               stops while the rest of the object still fits. */
+            if (used + 8192 > capacity) break;
             /* A checksum of the decoded samples, so a test can assert that
                two transmissions of the same picture produced the same
                picture.  Dimensions and byte counts agree for images that
@@ -16332,7 +16649,8 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             {
                 int slot;
                 int first_placement = 1;
-                for (slot = -1; slot < BLIT_GRAPHICS_MAX_PLACEMENTS; ++slot) {
+                for (slot = -1; slot < image->placement_capacity &&
+                     used + 8192 <= capacity; ++slot) {
                     BlitGraphicsPlacement placed;
                     BlitGraphicsDraw draw;
                     unsigned int placed_id = slot < 0 ? 0U :
@@ -16372,8 +16690,18 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                     sizeof(escaped_graphics_error));
         used += (size_t)snprintf(
             body + used, capacity - used,
+            ",\"graphics_memory\":{\"bytes\":%llu,\"budget\":%llu,"
+            "\"images\":%d,\"placements\":%d,"
+            "\"freed\":{\"unshown\":%lu,\"budget\":%lu},"
+            "\"refused\":{\"ceiling\":%lu,\"budget\":%lu}}"
             ",\"graphics_diagnostics\":{\"rejected\":%lu,"
             "\"evicted\":%lu,\"last_error\":\"%s\",\"deletes\":{",
+            /* ADR 0226: what its pictures are charged, and why pictures
+               were freed or refused. */
+            session->graphics_budget.used, graphics_session_limit(),
+            session_graphics_in_use(session), graphics_placements_in_use(session),
+            session->graphics_freed_unshown, session->graphics_freed_budget,
+            session->graphics_refused_ceiling, session->graphics_refused_budget,
             session->graphics_rejected, session->graphics_evicted,
             escaped_graphics_error);
         for (kind = 0; kind < 16 && used < capacity; ++kind)
@@ -18831,6 +19159,9 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
         runtime->outputs[i].initialized = 0;
     if (surface != NULL) {
         terminal_scrollback_release(surface);
+        blit_graphics_scene_free(&surface->graphics_presented);
+        blit_graphics_scene_free(&surface->graphics_prepared);
+        free(surface->blink_shown);
         memset(surface, 0, sizeof(*surface));
         for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
             if (runtime->surfaces[i] == surface) {
@@ -18840,16 +19171,16 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
             }
         }
     }
-    for (i = 0; i < BLIT_GRAPHICS_MAX_IMAGES; ++i) {
-        if (session->graphics[i].used) {
+    for (i = 0; i < session->graphics_count; ++i) {
+        if (session->graphics[i]->used) {
             ++graphics_ledger.images_freed;
             graphics_ledger_note(session, BLIT_LEDGER_RESET,
-                                 session->graphics[i].id, 0, NULL,
-                                 (unsigned long long)session->graphics[i].bytes,
+                                 session->graphics[i]->id, 0, NULL,
+                                 (unsigned long long)session->graphics[i]->bytes,
                                  "session-ended");
         }
-        graphics_image_release(&session->graphics[i]);
     }
+    graphics_session_release(session);
     graphics_image_release(&session->terminal_kitty_stage);
     if (session->focused)
         session->focused = 0;
@@ -19496,12 +19827,12 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
     BlitSession *session;
     BlitSurface *surface;
     BlitGraphicsImage *image;
-    int index;
     int old_x = 0;
     int old_y = 0;
     int old_width = 0;
     int old_height = 0;
     int old_visible = 0;
+    int fresh = 0;
 
     if (!json_string(message, "session_id", session_id, sizeof(session_id)) ||
         (sscanf(session_id, "session-%llu", &session_number) != 1 &&
@@ -19555,24 +19886,38 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
                                  session->terminal_cell_height > 0 ?
                                      session->terminal_cell_height : 16);
     }
+    /* ADR 0226: room for the pixels within the budgets (what the picture
+       holds now counts towards them), then its record; refused, the client
+       is told 409. */
+    if (!(image != NULL && image->pixels != NULL && image->width == width &&
+          image->height == height && image->format == format &&
+          image->capacity == bytes) &&
+        !graphics_make_room(session, image != NULL && image->charged < bytes ?
+                                bytes - image->charged : (image != NULL ? 0 : bytes),
+                            image))
+        return -2;
     if (image == NULL) {
-        for (index = 0; index < BLIT_GRAPHICS_MAX_IMAGES; ++index)
-            if (!session->graphics[index].used) {
-                image = &session->graphics[index];
-                break;
-            }
+        image = graphics_image_new(session);
         if (image == NULL)
-            return 0;
+            image = graphics_reclaim_unshown(session);
+        if (image == NULL) {
+            ++session->graphics_refused_ceiling;
+            return -1;
+        }
+        fresh = 1;
     }
-    if (image->used && image->pixels != NULL &&
+    if (!fresh && image->pixels != NULL &&
         image->width == width && image->height == height &&
         image->format == format && image->capacity == bytes) {
         image->bytes = 0;
         image->complete = 0;
         image->visible = 0;
     } else {
-        graphics_image_free(session, image, "frame-resized");
-        image->used = 1;
+        if (!fresh) {
+            graphics_image_free(session, image, "frame-resized");
+            image->used = 1;
+            image->shown_at = ++graphics_memory.clock;
+        }
         image->id = (unsigned int)image_id;
         snprintf(image->protocol, sizeof(image->protocol), "api");
         image->width = width;
@@ -19584,6 +19929,7 @@ static int pixel_frame_begin(BlitRuntime *runtime, BlitStream *stream,
             graphics_image_free(session, image, "frame-alloc-failed");
             return 0;
         }
+        graphics_image_charge(session, image);
     }
     image->x = x;
     image->y = y;
@@ -19761,9 +20107,15 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
         int i;
         for (i = 0; i < BLIT_MAX_STREAMS; ++i)
             if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
-                if (!pixel_frame_begin(runtime, &runtime->streams[i], message)) {
+                int begun = pixel_frame_begin(runtime, &runtime->streams[i], message);
+                if (begun <= 0) {
                     ++runtime->pixel_frame_errors;
-                    send_websocket_text(fd,
+                    /* ADR 0226: a picture past the session's ceiling or
+                       its budget is a 409, as a lifecycle conflict is. */
+                    send_websocket_text(fd, begun == -1 ?
+                        "{\"type\":\"pixel_frame_error\",\"code\":\"image_store_full\",\"status\":409}" :
+                        begun == -2 ?
+                        "{\"type\":\"pixel_frame_error\",\"code\":\"image_budget\",\"status\":409}" :
                         "{\"type\":\"pixel_frame_error\",\"code\":\"invalid_begin\"}");
                 }
                 break;
@@ -21652,7 +22004,9 @@ static void settings_copy_unseen_server(BlitRuntime *runtime, char *out,
     static const char *const known[] = {
         "render_interval_ms", "pane_layout", "display_backend",
         "kms_async_pageflip", "expect_desktop", "shutdown_key", "kms_compositor",
-        "kms_frame_timing", "effects_animation_hz", "restart_after_update"
+        "kms_frame_timing", "effects_animation_hz", "restart_after_update",
+        "graphics_session_budget_mib", "graphics_server_budget_mib",
+        "graphics_texture_budget_mib"
     };
     const char *cursor = json_key_cursor(runtime->settings_document, "server");
     char key[64];
@@ -22487,6 +22841,24 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
                      first ? "" : ",", runtime->effects_animation_hz);
         first = 0;
     }
+    /* ADR 0226: the picture budgets, in MiB, when the document sets them. */
+    {
+        static const char *const names[] = {
+            "graphics_session_budget_mib", "graphics_server_budget_mib",
+            "graphics_texture_budget_mib"
+        };
+        const unsigned long long limits[] = {
+            graphics_memory.session_limit, graphics_memory.server_limit,
+            graphics_memory.texture_limit
+        };
+        int i;
+        for (i = 0; i < 3; ++i)
+            if (limits[i] > 0) {
+                json_appendf(out, capacity, &used, "%s\"%s\":%llu",
+                             first ? "" : ",", names[i], limits[i] >> 20);
+                first = 0;
+            }
+    }
     if (runtime->restart_after_update_configured) {
         json_appendf(out, capacity, &used, "%s\"restart_after_update\":\"%s\"",
                      first ? "" : ",", runtime->restart_after_update_manual ?
@@ -23029,6 +23401,22 @@ static void settings_apply_server(BlitRuntime *runtime)
                 runtime->effects_animation_hz_configured = 1;
             }
         }
+        /* ADR 0226: picture budgets in MiB; applied live -- the next
+           picture over one frees or is refused, and the GPU's cache
+           recycles down to its own as it draws. */
+        {
+            int mib;
+            if (json_int(server, "graphics_session_budget_mib", &mib) &&
+                mib >= 1 && mib <= BLIT_GRAPHICS_BUDGET_MAX_MIB)
+                graphics_memory.session_limit = (unsigned long long)mib << 20;
+            if (json_int(server, "graphics_server_budget_mib", &mib) &&
+                mib >= 1 && mib <= BLIT_GRAPHICS_BUDGET_MAX_MIB)
+                graphics_memory.server_limit = (unsigned long long)mib << 20;
+            if (json_int(server, "graphics_texture_budget_mib", &mib) &&
+                mib >= 1 && mib <= BLIT_GRAPHICS_BUDGET_MAX_MIB)
+                graphics_memory.texture_limit = (unsigned long long)mib << 20;
+            blit_kms_set_texture_budget(runtime->kms, graphics_texture_limit());
+        }
         if (json_string(server, "restart_after_update", chord, sizeof(chord)) &&
             (strcmp(chord, "at-login-screen") == 0 || strcmp(chord, "manual") == 0)) {
             runtime->restart_after_update_manual = strcmp(chord, "manual") == 0;
@@ -23113,6 +23501,18 @@ static int settings_server_backend_valid(const char *document)
         int hz;
         if (!json_int(server, "effects_animation_hz", &hz) || hz < 10 || hz > 30)
             return 0;
+    }
+    {
+        static const char *const budgets[] = {
+            "graphics_session_budget_mib", "graphics_server_budget_mib",
+            "graphics_texture_budget_mib"
+        };
+        int i, mib;
+        for (i = 0; i < 3; ++i)
+            if (json_key_cursor(server, budgets[i]) != NULL &&
+                (!json_int(server, budgets[i], &mib) || mib < 1 ||
+                 mib > BLIT_GRAPHICS_BUDGET_MAX_MIB))
+                return 0;
     }
     if (json_key_cursor(server, "restart_after_update") != NULL &&
         !(json_string(server, "restart_after_update", backend, sizeof(backend)) &&
@@ -23292,6 +23692,9 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"configuration_valid\":%s},"
                  "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
                  "\"kms_frame_timing\":\"%s\",\"effects_animation_hz\":%d,"
+                 "\"graphics_session_budget_mib\":%llu,"
+                 "\"graphics_server_budget_mib\":%llu,"
+                 "\"graphics_texture_budget_mib\":%llu,"
                  "\"restart_after_update\":\"%s\","
                  "\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
@@ -23318,6 +23721,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->kms_compositor_gles ? "gles" : "cpu",
                  runtime->kms_frame_timing_immediate ? "immediate" : "late",
                  runtime->effects_animation_hz,
+                 graphics_session_limit() >> 20, graphics_server_limit() >> 20,
+                 graphics_texture_limit() >> 20,
                  runtime->restart_after_update_manual ? "manual" : "at-login-screen",
                  runtime->expect_desktop ? "true" : "false", login,
                  restart_required ? "true" : "false",
@@ -23430,6 +23835,10 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->kms_frame_timing_configured = 0;
     runtime->effects_animation_hz = 30;
     runtime->effects_animation_hz_configured = 0;
+    graphics_memory.session_limit = 0;
+    graphics_memory.server_limit = 0;
+    graphics_memory.texture_limit = 0;
+    blit_kms_set_texture_budget(runtime->kms, graphics_texture_limit());
     runtime->restart_after_update_manual = 0;
     runtime->restart_after_update_configured = 0;
     runtime->expect_desktop = runtime->boot_expect_desktop;
@@ -24864,7 +25273,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_server_backend_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
-                             "server.display_backend must be kms, server.kms_compositor cpu or gles, server.kms_frame_timing late or immediate, server.effects_animation_hz 10 through 30, and server.restart_after_update at-login-screen or manual.");
+                             "server.display_backend must be kms, server.kms_compositor cpu or gles, server.kms_frame_timing late or immediate, server.effects_animation_hz 10 through 30, server.graphics_session_budget_mib, graphics_server_budget_mib and graphics_texture_budget_mib 1 through 65536, and server.restart_after_update at-login-screen or manual.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -25976,6 +26385,9 @@ static void discover_displays(BlitRuntime *runtime)
         return;
     }
     runtime->display_count = blit_kms_display_count(runtime->kms);
+    /* ADR 0226: a freed picture's texture goes with it. */
+    graphics_memory.kms = runtime->kms;
+    blit_kms_set_texture_budget(runtime->kms, graphics_texture_limit());
     if (runtime->display_count > BLIT_MAX_DISPLAYS)
         runtime->display_count = BLIT_MAX_DISPLAYS;
     for (i = 0; i < runtime->display_count; ++i) {
@@ -26113,6 +26525,7 @@ static void destroy_outputs(BlitRuntime *runtime)
     if (runtime->kms != NULL)
         blit_kms_close(runtime->kms);
     runtime->kms = NULL;
+    graphics_memory.kms = NULL;
     runtime->output_count = 0;
 }
 
@@ -27009,10 +27422,10 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
                                                (BlitSession *)session);
         if (graphics_session == NULL)
             graphics_session = session;
-        for (image_index = 0; image_index < BLIT_GRAPHICS_MAX_IMAGES;
+        for (image_index = 0; image_index < graphics_session->graphics_count;
              ++image_index) {
             const BlitGraphicsImage *image =
-                &graphics_session->graphics[image_index];
+                graphics_session->graphics[image_index];
             if (!image->used)
                 continue;
             /* The signature describes the graphics scene, not session
@@ -27070,7 +27483,7 @@ static unsigned long long graphics_scene_signature(const BlitRuntime *runtime,
             signature ^= (unsigned long long)(unsigned int)image->src_h;
             signature *= 1099511628211ULL;
             for (placement_index = 0;
-                 placement_index < BLIT_GRAPHICS_MAX_PLACEMENTS;
+                 placement_index < image->placement_capacity;
                  ++placement_index) {
                 const BlitGraphicsPlacement *placed =
                     &image->placements[placement_index];
@@ -27350,6 +27763,21 @@ static void graphics_blink_present(BlitSurface *surface, const BlitSession *sess
         graphics_blink_cause(session->id, was->image_id, free_track->reason,
                              sizeof(free_track->reason));
     }
+    if (scene->count > surface->blink_shown_capacity) {
+        int capacity = surface->blink_shown_capacity > 0 ? surface->blink_shown_capacity : 16;
+        BlitBlinkShown *grown;
+        while (capacity < scene->count) capacity *= 2;
+        grown = (BlitBlinkShown *)realloc(surface->blink_shown,
+                                          (size_t)capacity * sizeof(*grown));
+        if (grown == NULL) {
+            /* Nothing remembered: the next frame starts watching afresh. */
+            surface->blink_shown_valid = 0;
+            surface->blink_shown_count = 0;
+            return;
+        }
+        surface->blink_shown = grown;
+        surface->blink_shown_capacity = capacity;
+    }
     surface->blink_shown_count = scene->count;
     for (index = 0; index < scene->count; ++index) {
         surface->blink_shown[index].image_id = scene->items[index].image_id;
@@ -27376,7 +27804,8 @@ static void prepare_graphics_damage(BlitRuntime *runtime, BlitFramePlan *plan)
         if (!s || s->terminal_synchronized) continue;
         source = hibr_render_source(runtime, s);
         if (!source) source = s;
-        blit_graphics_scene_build(&v->graphics_prepared, source->graphics, BLIT_GRAPHICS_MAX_IMAGES);
+        blit_graphics_scene_build(&v->graphics_prepared, source->graphics,
+                                  source->graphics_count);
         damage.surface = v;
         damage.cw = runtime_terminal_cell_width(runtime);
         damage.ch = runtime_terminal_cell_height(runtime);
@@ -27541,7 +27970,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
         views[view_count].default_background =
             session_default_background(render_source);
         views[view_count].graphics = render_source->graphics;
-        views[view_count].graphics_count = BLIT_GRAPHICS_MAX_IMAGES;
+        views[view_count].graphics_count = render_source->graphics_count;
         /* Per-surface identity avoids redrawing unrelated panes. Shared
            descriptor preparation covers graphics-only mutations even
            when the producer changed no terminal cell/revision. */
@@ -27659,7 +28088,7 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
                     ++graphics_ledger.synchronized_live_draws;
                     blit_graphics_scene_build(&live,
                         (source != NULL ? source : held)->graphics,
-                        BLIT_GRAPHICS_MAX_IMAGES);
+                        (source != NULL ? source : held)->graphics_count);
                     graphics_blink_present(surface, held, view_output[surface_index], &live);
                 }
             }
@@ -27675,15 +28104,21 @@ static void render_outputs(BlitRuntime *runtime, const BlitFramePlan *input_plan
                         BlitSession *source = hibr_render_source(runtime, session);
                         blit_graphics_scene_build(&shown,
                             (source != NULL ? source : session)->graphics,
-                            BLIT_GRAPHICS_MAX_IMAGES);
+                            (source != NULL ? source : session)->graphics_count);
                         scene = &shown;
                     }
                     graphics_blink_present(surface, session,
                                            view_output[surface_index], scene);
+                    /* ADR 0226: what the frame drew was shown now. */
+                    {
+                        BlitSession *source = hibr_render_source(runtime, session);
+                        graphics_stamp_shown(source != NULL ? source : session);
+                    }
                 }
                 surface->damage_valid = 0;
                 if (surface->graphics_damage_prepared)
-                    surface->graphics_presented = surface->graphics_prepared;
+                    blit_graphics_scene_assign(&surface->graphics_presented,
+                                               &surface->graphics_prepared);
                 surface->presented_revision =
                     views[surface_index].surface_revision;
                 if (session != NULL)
@@ -30962,6 +31397,12 @@ int main(int argc, char **argv)
         strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "late") != 0;
     runtime.kms_frame_timing_immediate = runtime.boot_kms_frame_timing_immediate;
     runtime.effects_animation_hz = 30;
+    /* ADR 0226: the server budget frees across these sessions. */
+    graphics_memory.sessions = runtime.sessions;
+    graphics_memory.session_count = BLIT_MAX_SESSIONS;
+    graphics_memory.frame_clients = runtime.frame_clients;
+    graphics_memory.frame_client_count =
+        (int)(sizeof(runtime.frame_clients) / sizeof(runtime.frame_clients[0]));
     runtime.boot_pane_columns = 1;
     runtime.boot_pane_rows = 1;
     {

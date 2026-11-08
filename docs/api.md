@@ -1138,7 +1138,9 @@ later puts it on disk (that is `storage.saved_revision` catching up), so an
 holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
-`effects_animation_hz`, `restart_after_update`, `expect_desktop` and
+`effects_animation_hz`, `graphics_session_budget_mib`,
+`graphics_server_budget_mib`, `graphics_texture_budget_mib` (1–65536; see
+"Picture memory"), `restart_after_update`, `expect_desktop` and
 `shutdown_key`. The other
 sections are `display_layouts`, `effects`, `pointer`, `login`,
 `auxiliary_displays`, `input_devices`, `audio_devices` and `displays`.
@@ -1335,6 +1337,9 @@ destination starts at `x`,`y`; it is not a Chrome zoom setting. Omitting both
 placement fields preserves source-sized placement for older producers. A
 partial pair, non-integer, zero or out-of-range size is rejected as
 `pixel_frame_error`/`invalid_begin` before changing the current image.
+A picture past the session's ceiling or its picture budget is refused with
+`"status": 409` and the code `image_store_full` or `image_budget` ("Picture
+memory").
 Blit's display adapter converts the callback's requested destination cells
 using the current cell metrics and sends this pair.
 
@@ -1697,6 +1702,60 @@ send the documented characters; ASCII, Unicode or Nerd UI modes do not
 become multicolour on their own. The active `glyphs` and `mappings` counts
 describe the primary font file, not the glyph stack's repertoire.
 
+## Picture memory
+
+A session's pictures -- Kitty and sixel images, API pixel frames and frames
+by descriptor alike -- are bounded by memory, not by count
+([ADR 0226](adr/0226-pictures-bounded-by-memory-not-count.md)). Each session
+has a picture budget, the bytes of decoded pixels Blit keeps for it: CPU
+copies, sixel and Kitty scratch, and the GPU textures made from them (a
+picture with both is charged for both). A dmabuf frame is the producer's
+memory and is charged nothing. The budgets are settings in the document's
+`server` section, in MiB, applied live:
+
+| Setting | Default |
+|---|---|
+| `graphics_session_budget_mib` | 256 per session |
+| `graphics_server_budget_mib` | a quarter of physical memory, at most 2048, across sessions |
+| `graphics_texture_budget_mib` | 512, the GPU compositor's texture cache |
+
+A picture is shown when it is placed and the placement is not deleted
+(the default placement included), when a placement is held for its next
+frame (an `a=p` that came before the picture's first frame by descriptor),
+or when it holds an input route on the frame channel. When a new picture
+would pass a budget, Blit first frees pictures that are not shown, least
+recently shown first: the session's own, then, for the server budget, any
+session's. A shown picture is never freed. If freeing every unshown picture
+would still not make room, nothing is freed and the picture is refused: Kitty answers
+`ENOSPC`, a frame by descriptor is refused `ENOSPC` (`frame-budget`), and a
+`pixel_frame_begin` gets `pixel_frame_error` with `image_budget` and
+`"status": 409`. A program that scrolls through many pictures deletes the
+placements it scrolls away (`a=d,d=i` keeps the data) so they can be freed.
+
+The counts are ceilings against a runaway program, far above any desktop:
+4096 pictures and 16384 placements (every picture's together) per session.
+Past the picture ceiling an unshown picture is freed, least recently shown
+first, as a full store always was; with every picture on screen the new one
+is refused (`ENOSPC`, `frame-store-full`, or `image_store_full` with
+`"status": 409`). A new placement past the placement ceiling is refused
+`ENOSPC`. The frame channel's input routes follow pictures: one per picture,
+up to the picture ceiling per connection.
+
+The GPU compositor keeps every picture's texture it draws in a cache bounded
+by `graphics_texture_budget_mib`, recycled least recently drawn first and
+never within the frame that drew it, so nothing on screen is uploaded again
+while it stays there (`graphics_upload_bytes` in `/v1/diagnostics/runtime`
+stays flat). XTSMGRAPHICS answers as before.
+
+`/v1/diagnostics` `graphics` reports the ceilings (`max_images`,
+`max_placements`), the per-picture bounds (`max_width`, `max_height`,
+`max_bytes`), `budget` (`session_bytes`, `server_bytes`, `texture_bytes`)
+and `used` (`server_bytes`, all sessions' pictures; `texture_bytes`, the
+GPU cache). Each session's `graphics_memory` reports its pictures' `bytes`
+and `budget`, its `images` and `placements`, the pictures `freed` by reason
+(`unshown` at the ceiling, `budget` over a budget) and those `refused` by
+reason (`ceiling`, `budget`).
+
 ## Picture frames by descriptor
 
 A program running in a Blit session can send an image's pixels without
@@ -1765,8 +1824,8 @@ trailing newline is optional.
   Kitty image; `INPUT on` or `INPUT off` for an image with no route),
   `EACCES` (the socket is not the client's), `ENOENT` (no such socket, or
   it refused the connection), `EBUSY` (this image already has a route on
-  this connection, or the connection already has 16, the most images a
-  session holds), `ENOMEM` (Blit could not allocate the route), `ENOTSUP`
+  this connection, or the connection already has 4096, the picture ceiling
+  of a session, `graphics.max_images`), `ENOMEM` (Blit could not allocate the route), `ENOTSUP`
   (libei could not be loaded). If the
   compositor refuses the connection later, in its handshake, or drops it,
   Blit sends `ERROR INPUT <image-id> ENOENT` then and that route ends; the

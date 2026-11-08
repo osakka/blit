@@ -29,7 +29,9 @@ int main(int argc, char **argv)
     BlitKms *kms; KmsSnapshot hardware;
     BlitKmsSurfaceView v = {0};
     BlitGraphicsImage images[3] = {{0}};
-    BlitGraphicsScene old, next;
+    /* ADR 0226: the view and the scene take the session's picture table. */
+    BlitGraphicsImage *table[3] = { &images[0], &images[1], &images[2] };
+    BlitGraphicsScene old = {0}, next = {0};
     uint32_t cells[40*12] = {0}, reference[320*192];
     uint32_t attributes[40*12] = {0};
     unsigned char wallpaper[320*192*4], window[32*24*4], overlap[32*24*4];
@@ -67,9 +69,9 @@ int main(int argc, char **argv)
     v.columns=v.stride=40;v.rows=12;v.cell_width=8;v.cell_height=16;
     v.codepoints=cells;v.foreground=cells;v.background=cells;
     v.attributes=attributes;
-    v.graphics=images;v.graphics_count=3;v.graphics_damage_complete=1;
+    v.graphics=table;v.graphics_count=3;v.graphics_damage_complete=1;
     v.damage_valid=1;v.damage_width=40;v.damage_height=12;
-    blit_graphics_scene_build(&old,images,3);v.graphics_signature=old.signature;
+    blit_graphics_scene_build(&old,table,3);v.graphics_signature=old.signature;
     present(kms,&v,visual);
     for(step=0;step<36;++step) {
         images[1].x=(step*7)%264; images[1].y=32+(step%3)*13;
@@ -80,7 +82,7 @@ int main(int argc, char **argv)
         if(step==34) images[1].visible=1;
         if(step==35) { images[1].x=-7; images[1].y=-5; }
         v.damage_valid=0;
-        blit_graphics_scene_build(&next,images,3);
+        blit_graphics_scene_build(&next,table,3);
         CHECK(blit_graphics_scene_delta(&old,&next,damaged,&v));
         v.graphics_signature=next.signature;++v.surface_revision;
         present(kms,&v,visual);
@@ -92,7 +94,7 @@ int main(int argc, char **argv)
         present(kms,&v,++visual);
         for(row=0;row<192;++row)
             CHECK(!memcmp(reference+row*320,(unsigned char*)kms->outputs[0].front.map+row*kms->outputs[0].front.pitch,320*4));
-        old=next;
+        blit_graphics_scene_assign(&old,&next);
     }
     /* Unknown callers retain all-image fallback. */
     v.graphics_damage_complete=0;v.graphics_signature^=1;++v.surface_revision;

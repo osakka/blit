@@ -505,6 +505,8 @@ suite_renderer() {
     run_gate kitty_placement_gate.rb ruby tools/tests/kitty_placement_gate.rb
     run_gate kitty_frame_edit_gate.rb ruby tools/tests/kitty_frame_edit_gate.rb
     run_gate kitty_delete_gate.rb ruby tools/tests/kitty_delete_gate.rb
+    # ADR 0226: waits on frames to order pictures by when they were shown.
+    run_serial_gate graphics_memory_gate.rb ruby tools/tests/graphics_memory_gate.rb
     run_serial_gate graphics_blink_gate.rb ruby tools/tests/graphics_blink_gate.rb
     run_serial_gate kms_frame_timing_gate.rb ruby tools/tests/kms_frame_timing_gate.rb
     run_gate graphics_reset_gate.rb ruby tools/tests/graphics_reset_gate.rb
@@ -578,6 +580,7 @@ suite_hibr() {
     # libei); the second needs libei.so.1 and libeis.so.1 and skips (77)
     # without them.
     run_gate frame_input_gate.sh sh "$ROOT"/tools/tests/frame_input_gate.sh
+    run_serial_gate graphics_memory_frames_gate.sh sh "$ROOT"/tools/tests/graphics_memory_frames_gate.sh
     run_gate frame_input_eis_gate.sh sh "$ROOT"/tools/tests/frame_input_eis_gate.sh
     # ADR 0223: import, drawing and RELEASE need a GPU that imports dmabufs,
     # so they run against a named live host, never implied by a local run.
