@@ -9,6 +9,38 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-08: 0.3.65 pictures bounded by memory, not by count (ADR 0226 phase 1)
+
+- **Growable picture and placement tables** replace the fixed 16 pictures
+  and 8 placements per session; ceilings 4096 pictures and 16384 placements
+  per session guard against a runaway program (`ENOSPC`). Pictures are
+  records allocated one by one and kept until the session ends, so pointers
+  held across calls stay valid. Frame-channel input routes follow pictures.
+- **Memory budgets** through one accounting function: 256 MiB per session,
+  a quarter of physical memory up to 2 GiB across the server, 512 MiB of
+  GPU textures; all settings. Under pressure Blit frees unshown pictures,
+  least recently shown first, and refuses once only shown ones remain
+  (nothing is freed for nothing). Shown means placed and not deleted, a
+  placement held for the next frame, or an input route.
+- **The GPU texture cache is bounded by bytes**, not 32 slots: nothing on
+  screen is re-uploaded. An idle session is 39,848 bytes, was 53,432.
+- **Gates:** `graphics_memory_gate` (1000 pictures, 500 placed, all drawn,
+  uploads flat on GLES; budget frees in least-recently-shown order 1,3,4,2;
+  server budget across sessions; picture 4097 refused) and
+  `graphics_memory_frames_gate` (a route keeps its picture under pressure).
+- **Suites:** `all` 185 pass, 12 skip, 1 fail (`hibr_split_capture_gate`
+  on one missed presentation deadline on the mock, its third time; the gate
+  now reports mock timing instead of failing on it, Gitea #154 closed, and
+  passes); GLES `renderer` 82 pass, 1 skip, 0 fail on a quiet machine (a run
+  while the split gate ran alongside failed `presentation_effects` at 14.6
+  animation frames a second against 15). `package_artifact_gate` passes.
+- **Deployed:** the mini PC verified (and the owner returned to the login
+  screen: an update restarts Blit; the held desktop resumes on login). 10.52
+  left the network as the update finished, so the helper could not confirm;
+  it came back without a reboot (up 18 hours) running 0.3.65.
+- **Not yet:** 500 thumbnails measured on 10.52's GPU (decides the atlas),
+  dmabuf pictures under the budgets, the texture budget under real pressure.
+
 ## 2026-11-08: 0.3.64 input routes per picture; the bridge's --no-place (ADR 0225)
 
 - **INPUT per image** (`docs/api.md`): `INPUT eis <path> <id>`, `INPUT on
