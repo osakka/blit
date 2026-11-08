@@ -391,14 +391,21 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     later = nil
     Timeout.timeout(10) { sleep 0.1 until (later = edge_of.call(screenshot)) }
     check(later.last > band.last || later.last < band.first, "the band did not move down: #{band.last} -> #{later.last}")
-    # The clock: frames at the configured rate, nothing redrawn, no glow work.
+    # The clock: frames at the output's rate, nothing redrawn, no glow work.
+    # By default ("auto") that rate is the display's refresh: the DRM mock's
+    # mode, 60 Hz.
     fx = -> { get('/v1/diagnostics').dig('render', 'outputs', 0) }
     # The rate is judged over the time that really passed between the two
     # reads, not the sum of the sleeps (issue #151): the requests in between
     # take time of their own, and a failure must say what it measured.
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     first = fx.call
-    check(first.dig('effects', 'animation_hz') == 30, "animation_hz #{first.dig('effects', 'animation_hz')}")
+    refresh = first['refresh_hz'].round
+    check(refresh == 60, "the DRM mock's refresh is #{first['refresh_hz']} Hz, not 60")
+    check(first.dig('effects', 'animation_hz') == refresh,
+          "auto: animation_hz #{first.dig('effects', 'animation_hz')} on a #{refresh} Hz display")
+    effective = get('/v1/settings').dig('effective', 'effects_animation_hz')
+    check(effective == 'auto', "the effective effects_animation_hz is #{effective.inspect}, not \"auto\"")
     drawn = []
     10.times { sleep 0.2; drawn << fx.call.dig('kms_phases', 'drawn_cells') }
     last = fx.call
@@ -406,9 +413,9 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     ticks = last.dig('effects', 'animation_frames') - first.dig('effects', 'animation_frames')
     rate = ticks / elapsed
     runtime = get('/v1/diagnostics/runtime').to_s[/"frame_rate_missed_deadlines":\s*\d+/] || 'missed deadlines not reported'
-    check(rate >= 15.0 && rate <= 37.5,
-          format('%d animation frames in %.2f s, %.1f/s at 30 Hz (wanted 15 to 37.5/s; %s)',
-                 ticks, elapsed, rate, runtime))
+    check(rate >= refresh * 0.5 && rate <= refresh * 1.25,
+          format('%d animation frames in %.2f s, %.1f/s at %d Hz (wanted %.1f to %.1f/s; %s)',
+                 ticks, elapsed, rate, refresh, refresh * 0.5, refresh * 1.25, runtime))
     check(drawn.all?(&:zero?), "animation frames redrew cells: #{drawn}")
     check(last.dig('effects', 'glow_rebuilds') == first.dig('effects', 'glow_rebuilds'), 'animation rebuilt glow')
     # An animation frame is due when its tick says so: the gap since the
@@ -445,22 +452,52 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
     saved!(output => { '1' => { 'glowing_line' => { 'intensity' => 100 } } })
     flat('pane-display-1-2', B)
     sleep 0.6
-    # The rate setting.
-    settings = get('/v1/settings')
-    document = settings['document']
-    document['server'] = (document['server'] || {}).merge('effects_animation_hz' => 60)
-    code, = request('PUT', '/v1/settings', { document: document }, settings['revision'])
-    check(code == 400, "effects_animation_hz 60 -> #{code}")
-    document['server']['effects_animation_hz'] = 10
-    code, = request('PUT', '/v1/settings', { document: document }, settings['revision'])
-    check(code == 200, "effects_animation_hz 10 -> #{code}")
-    a = fx.call.dig('effects', 'animation_frames')
-    sleep 2
-    slow = fx.call.dig('effects', 'animation_frames') - a
-    check(slow >= 10 && slow <= 28, "#{slow} animation frames in 2 s at 10 Hz")
-    document = get('/v1/settings')['document']
-    document['server'].delete('effects_animation_hz')
-    request('PUT', '/v1/settings', { document: document }, get('/v1/settings')['revision'])
+    # The rate setting: "auto" or 10 to 240 Hz, and never faster than the
+    # display shows.
+    hz_setting = lambda do |value|
+      settings = get('/v1/settings')
+      document = settings['document']
+      document['server'] = document['server'] || {}
+      if value.nil?
+        document['server'].delete('effects_animation_hz')
+      else
+        document['server']['effects_animation_hz'] = value
+      end
+      request('PUT', '/v1/settings', { document: document }, settings['revision']).first
+    end
+    [9, 241, 'fast', 'Auto', true].each do |bad|
+      code = hz_setting.call(bad)
+      check(code == 400, "effects_animation_hz #{bad.inspect} -> #{code}")
+    end
+    tick_rate = lambda do
+      sleep 0.4
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      a0 = fx.call; sleep 2; a1 = fx.call
+      seconds = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+      [a1.dig('effects', 'animation_hz'),
+       (a1.dig('effects', 'animation_frames') - a0.dig('effects', 'animation_frames')) / seconds]
+    end
+    # [setting, the rate it gives on the mock, the setting reported back]:
+    # a number is a ceiling, so 240 on a 60 Hz display ticks at 60.
+    [[30, 30], [10, 10], [240, refresh], ['auto', refresh]].each do |value, want|
+      code = hz_setting.call(value)
+      check(code == 200, "effects_animation_hz #{value.inspect} -> #{code}")
+      settings = get('/v1/settings')
+      check(settings.dig('document', 'server', 'effects_animation_hz') == value,
+            "the document keeps #{settings.dig('document', 'server', 'effects_animation_hz').inspect}, not #{value.inspect}")
+      check(settings.dig('effective', 'effects_animation_hz') == value,
+            "effective effects_animation_hz #{settings.dig('effective', 'effects_animation_hz').inspect}, not #{value.inspect}")
+      hz, measured = tick_rate.call
+      check(hz == want, "effects_animation_hz #{value.inspect}: animation_hz #{hz}, wanted #{want} on a #{refresh} Hz display")
+      check(measured >= want * 0.5 && measured <= want * 1.25,
+            format('effects_animation_hz %s: %.1f animation frames/s, wanted %.1f to %.1f',
+                   value.inspect, measured, want * 0.5, want * 1.25))
+    end
+    code = hz_setting.call(nil)
+    check(code == 200, "removing effects_animation_hz -> #{code}")
+    check(!get('/v1/settings')['document'].fetch('server', {}).key?('effects_animation_hz'),
+          'an unset effects_animation_hz is written back')
+    check(get('/v1/settings').dig('effective', 'effects_animation_hz') == 'auto', 'unset effects_animation_hz is not auto')
     # No clock while it is off: an idle screen presents nothing.
     [{ output => { '1' => {} } },
      { output => { '1' => { 'enabled' => false, 'glowing_line' => { 'intensity' => 100 } } } },

@@ -293,8 +293,25 @@ Dir.mktmpdir('blit-tube-effects') do |root|
     changed = (0...PANE_H).sum { |y| (0...W).count { |x| frames[0][y][x] != frames[1][y][x] } }
     check(changed > W * PANE_H * 9 / 10, "only #{changed} pixels changed between frames")
     ticks = fx.call.dig('effects', 'animation_frames') - ticks0
-    check(fx.call.dig('effects', 'animation_hz') == 30 && ticks >= 10,
-          "static noise is not on the frame clock: #{ticks} ticks at #{fx.call.dig('effects', 'animation_hz')} Hz")
+    # The clock follows the display by default (ADR 0188, "auto"): the DRM
+    # mock's 60 Hz mode.
+    refresh = fx.call['refresh_hz'].round
+    check(refresh == 60, "the DRM mock's refresh is #{fx.call['refresh_hz']} Hz, not 60")
+    check(fx.call.dig('effects', 'animation_hz') == refresh && ticks >= 10,
+          "static noise is not on the frame clock: #{ticks} ticks at " \
+          "#{fx.call.dig('effects', 'animation_hz')} Hz on a #{refresh} Hz display")
+    # A number is a ceiling: 30 ticks at 30, 120 at the display's 60.
+    [[30, 30], [120, refresh], [nil, refresh]].each do |value, want|
+      Timeout.timeout(5) { sleep 0.05 until get('/v1/settings').dig('storage', 'state') == 'clean' }
+      settings = get('/v1/settings')
+      server = (settings['document']['server'] || {}).reject { |k, _| k == 'effects_animation_hz' }
+      server['effects_animation_hz'] = value if value
+      code, reply = request('PUT', '/v1/settings',
+                            { document: settings['document'].merge('server' => server) }, settings['revision'])
+      check(code == 200, "effects_animation_hz #{value.inspect}: #{code} #{reply}")
+      hz = fx.call.dig('effects', 'animation_hz')
+      check(hz == want, "effects_animation_hz #{value.inspect}: animation_hz #{hz}, wanted #{want}")
+    end
     # Under chroma 100 the grain is the phosphor's colour too.
     saved!(output => { '1' => { 'static_noise' => { 'amount' => 100 }, 'chroma' => { 'amount' => 100 },
                                 'phosphor' => { 'color' => AMBER } } })

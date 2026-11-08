@@ -78,6 +78,9 @@ extern char **environ;
 #define BLIT_FONT_SIZE_MAX_PX 64
 
 #define BLIT_MAX_DISPLAYS 16
+/* ADR 0188: the range of a numeric document.server.effects_animation_hz. */
+#define BLIT_ANIMATION_MIN_HZ 10
+#define BLIT_ANIMATION_MAX_HZ 240
 #define BLIT_MAX_PANES 64
 #define BLIT_MAX_SESSIONS 16
 #define BLIT_MAX_NATIVE_CLIENTS 16
@@ -1391,7 +1394,10 @@ typedef struct {
     int kms_frame_timing_configured;
     /* ADR 0188: the frame clock for animated effects. It ticks an output
        only while one of its panes has an animated effect it can draw and
-       the output is presenting; each tick re-presents, never recomposes. */
+       the output is presenting; each tick re-presents, never recomposes.
+       effects_animation_hz is the setting: 0 is "auto" (each output's own
+       refresh), otherwise a ceiling of 10-240 Hz; output_animation_hz
+       turns it into an output's rate. */
     int effects_animation_hz;
     int effects_animation_hz_configured;
     uint32_t animation_due;
@@ -2081,6 +2087,7 @@ static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
 static void destroy_session(BlitRuntime *runtime, BlitSession *session);
 static int output_animated(const BlitRuntime *runtime, int output_index);
+static int output_animation_hz(const BlitRuntime *runtime, int output_index);
 static void cancel_auxiliary_worker(BlitRuntime *runtime);
 static uint32_t hibr_frame_barrier_held(const BlitRuntime *runtime,
                                         uint64_t now);
@@ -4221,7 +4228,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.effects_present_quads : 0ULL,
                 have_kms_info ? kms_info.effects_glow_rebuilds : 0ULL,
                 have_kms_info ? kms_info.presentation_unavailable : "cpu compositor",
-                output_animated(runtime, i) ? runtime->effects_animation_hz : 0,
+                output_animated(runtime, i) ? output_animation_hz(runtime, i) : 0,
                 have_kms_info ? kms_info.effects_animation_frames : 0ULL,
                 have_kms_info ? kms_info.effects_animation_phase : 0.0,
                 have_kms_info ? kms_info.effects_burn_in_panes : 0ULL,
@@ -22489,7 +22496,45 @@ static int output_animated(const BlitRuntime *runtime, int output_index)
     return 0;
 }
 
-/* The frame clock: an animated output is made due at effects_animation_hz.
+/* ADR 0188: the refresh an animated output shows, in Hz, or 0 when it is
+   not known: the mode's (output_refresh_hz), refined by the measured one
+   only when they agree, as kms_aligned_due reads it -- a source whose
+   vblank numbers do not count vblanks measures its own present rate, and
+   the frame clock would then chase its own ticks. With no mode, the
+   measured one alone. */
+static double output_shown_refresh_hz(const BlitRuntime *runtime, int output_index)
+{
+    BlitKmsDisplayInfo info;
+    int display = display_index_for_output(runtime, output_index);
+    double mode;
+
+    if (runtime->kms == NULL || display < 0)
+        return 0.0;
+    mode = output_refresh_hz(runtime, output_index);
+    if (blit_kms_display_info(runtime->kms, display, &info) != 0)
+        return mode >= 1.0 ? mode : 0.0;
+    if (mode < 1.0)
+        return info.observed_refresh_hz >= 1.0 ? info.observed_refresh_hz : 0.0;
+    if (info.observed_refresh_hz > mode * 0.98 && info.observed_refresh_hz < mode * 1.02)
+        return info.observed_refresh_hz;
+    return mode;
+}
+
+/* ADR 0188: the one place an output's animation rate is decided. "auto"
+   (0, the default) is the output's refresh; a number is a ceiling, never
+   faster than the display shows. A refresh not known reads as 60. */
+#define BLIT_ANIMATION_FALLBACK_HZ 60
+static int output_animation_hz(const BlitRuntime *runtime, int output_index)
+{
+    double refresh = output_shown_refresh_hz(runtime, output_index);
+    int display_hz = refresh >= 1.0 ? (int)(refresh + 0.5) : BLIT_ANIMATION_FALLBACK_HZ;
+
+    if (runtime->effects_animation_hz > 0 && runtime->effects_animation_hz < display_hz)
+        return runtime->effects_animation_hz;
+    return display_hz;
+}
+
+/* The frame clock: an animated output is made due at output_animation_hz.
    It owns its own cadence -- render_pending stays 0 between ticks, so the
    loop does not present every refresh -- and the present goes through the
    usual schedule, aligned to the vblank.
@@ -22538,11 +22583,10 @@ static uint64_t animation_after_vblank(BlitRuntime *runtime, int output,
 {
     BlitKmsDisplayInfo info;
     int display = display_index_for_output(runtime, output);
-    double refresh;
+    double refresh = output_shown_refresh_hz(runtime, output);
 
     if (display < 0 || blit_kms_display_info(runtime->kms, display, &info) != 0)
         return target;
-    refresh = info.observed_refresh_hz >= 1.0 ? info.observed_refresh_hz : info.refresh_hz;
     if (refresh < 1.0)
         return target;
     return vblank_aligned_time(target, now, info.vblank_timestamp_us,
@@ -22551,11 +22595,10 @@ static uint64_t animation_after_vblank(BlitRuntime *runtime, int output,
 
 static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
 {
-    uint64_t period = 1000000ULL / (uint64_t)(runtime->effects_animation_hz > 0 ?
-                                              runtime->effects_animation_hz : 30);
     int i;
     for (i = 0; i < runtime->output_count && i < BLIT_MAX_DISPLAYS; ++i) {
         uint32_t bit = 1U << i;
+        uint64_t period;
         if (!output_animated(runtime, i)) {
             runtime->animation_next_us[i] = 0;
             runtime->animation_due &= ~bit;
@@ -22563,6 +22606,7 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
         }
         if (runtime->animation_next_us[i] != 0 && now < runtime->animation_next_us[i])
             continue;
+        period = 1000000ULL / (uint64_t)output_animation_hz(runtime, i);
         /* Three quarters of a period: a tick put on a vblank comes round a
            little under a period after the frame the last tick presented,
            and that frame is not a real one flowing. */
@@ -22837,8 +22881,12 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
         first = 0;
     }
     if (runtime->effects_animation_hz_configured) {
-        json_appendf(out, capacity, &used, "%s\"effects_animation_hz\":%d",
-                     first ? "" : ",", runtime->effects_animation_hz);
+        if (runtime->effects_animation_hz > 0)
+            json_appendf(out, capacity, &used, "%s\"effects_animation_hz\":%d",
+                         first ? "" : ",", runtime->effects_animation_hz);
+        else
+            json_appendf(out, capacity, &used, "%s\"effects_animation_hz\":\"auto\"",
+                         first ? "" : ",");
         first = 0;
     }
     /* ADR 0226: the picture budgets, in MiB, when the document sets them. */
@@ -23396,7 +23444,12 @@ static void settings_apply_server(BlitRuntime *runtime)
         }
         {
             int hz;
-            if (json_int(server, "effects_animation_hz", &hz) && hz >= 10 && hz <= 30) {
+            if (json_string(server, "effects_animation_hz", chord, sizeof(chord)) &&
+                strcmp(chord, "auto") == 0) {
+                runtime->effects_animation_hz = 0;
+                runtime->effects_animation_hz_configured = 1;
+            } else if (json_int(server, "effects_animation_hz", &hz) &&
+                       hz >= BLIT_ANIMATION_MIN_HZ && hz <= BLIT_ANIMATION_MAX_HZ) {
                 runtime->effects_animation_hz = hz;
                 runtime->effects_animation_hz_configured = 1;
             }
@@ -23499,7 +23552,10 @@ static int settings_server_backend_valid(const char *document)
         return 0;
     if (json_key_cursor(server, "effects_animation_hz") != NULL) {
         int hz;
-        if (!json_int(server, "effects_animation_hz", &hz) || hz < 10 || hz > 30)
+        if (!(json_string(server, "effects_animation_hz", backend, sizeof(backend)) &&
+              strcmp(backend, "auto") == 0) &&
+            (!json_int(server, "effects_animation_hz", &hz) ||
+             hz < BLIT_ANIMATION_MIN_HZ || hz > BLIT_ANIMATION_MAX_HZ))
             return 0;
     }
     {
@@ -23659,9 +23715,15 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
     char login[512];
     char environment_value[512];
     char hud[256];
+    char animation_hz[16];
     const char *backend_env = getenv("BLIT_DISPLAY_BACKEND");
     int restart_required;
 
+    /* ADR 0188: the setting; each output's rate is in its diagnostics. */
+    if (runtime->effects_animation_hz > 0)
+        snprintf(animation_hz, sizeof(animation_hz), "%d", runtime->effects_animation_hz);
+    else
+        snprintf(animation_hz, sizeof(animation_hz), "\"auto\"");
     if (backend_env) {
         char escaped[500];
         json_escape(backend_env, escaped, sizeof(escaped));
@@ -23691,7 +23753,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"backend_environment\":%s,\"backend_environment_valid\":%s,"
                  "\"configuration_valid\":%s},"
                  "\"kms_async_pageflip\":%s,\"kms_compositor\":\"%s\","
-                 "\"kms_frame_timing\":\"%s\",\"effects_animation_hz\":%d,"
+                 "\"kms_frame_timing\":\"%s\",\"effects_animation_hz\":%s,"
                  "\"graphics_session_budget_mib\":%llu,"
                  "\"graphics_server_budget_mib\":%llu,"
                  "\"graphics_texture_budget_mib\":%llu,"
@@ -23720,7 +23782,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->kms_async_pageflip ? "true" : "false",
                  runtime->kms_compositor_gles ? "gles" : "cpu",
                  runtime->kms_frame_timing_immediate ? "immediate" : "late",
-                 runtime->effects_animation_hz,
+                 animation_hz,
                  graphics_session_limit() >> 20, graphics_server_limit() >> 20,
                  graphics_texture_limit() >> 20,
                  runtime->restart_after_update_manual ? "manual" : "at-login-screen",
@@ -23833,7 +23895,7 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     runtime->kms_compositor_configured = 0;
     runtime->kms_frame_timing_immediate = runtime->boot_kms_frame_timing_immediate;
     runtime->kms_frame_timing_configured = 0;
-    runtime->effects_animation_hz = 30;
+    runtime->effects_animation_hz = 0;
     runtime->effects_animation_hz_configured = 0;
     graphics_memory.session_limit = 0;
     graphics_memory.server_limit = 0;
@@ -25273,7 +25335,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!settings_server_backend_valid(document)) {
                 send_problem(fd, 400, "Bad Request", "invalid_settings_server",
-                             "server.display_backend must be kms, server.kms_compositor cpu or gles, server.kms_frame_timing late or immediate, server.effects_animation_hz 10 through 30, server.graphics_session_budget_mib, graphics_server_budget_mib and graphics_texture_budget_mib 1 through 65536, and server.restart_after_update at-login-screen or manual.");
+                             "server.display_backend must be kms, server.kms_compositor cpu or gles, server.kms_frame_timing late or immediate, server.effects_animation_hz auto or 10 through 240, server.graphics_session_budget_mib, graphics_server_budget_mib and graphics_texture_budget_mib 1 through 65536, and server.restart_after_update at-login-screen or manual.");
                 return;
             }
             if (!settings_server_layout(document, &requested_columns,
@@ -31396,7 +31458,7 @@ int main(int argc, char **argv)
     runtime.boot_kms_frame_timing_immediate = getenv("BLIT_KMS_FRAME_TIMING") == NULL ||
         strcmp(getenv("BLIT_KMS_FRAME_TIMING"), "late") != 0;
     runtime.kms_frame_timing_immediate = runtime.boot_kms_frame_timing_immediate;
-    runtime.effects_animation_hz = 30;
+    runtime.effects_animation_hz = 0;
     /* ADR 0226: the server budget frees across these sessions. */
     graphics_memory.sessions = runtime.sessions;
     graphics_memory.session_count = BLIT_MAX_SESSIONS;

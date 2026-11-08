@@ -322,6 +322,13 @@ Dir.mktmpdir('blit-zoomed-effects') do |root|
   end
   ticks = output('display-1').dig('effects', 'animation_frames') - ticks0
   check(ticks >= 10, "#{ZOOM}%: the glowing line's clock ticked #{ticks} times")
+  # The clock follows the display by default (ADR 0188, "auto"); zoom does
+  # not change it, and the other display, with nothing animated, has none.
+  zoomed = output('display-1')
+  check(zoomed.dig('effects', 'animation_hz') == zoomed['refresh_hz'].round,
+        "#{ZOOM}%: animation_hz #{zoomed.dig('effects', 'animation_hz')} on a #{zoomed['refresh_hz']} Hz display")
+  check(output('display-2').dig('effects', 'animation_hz').zero?,
+        "#{ZOOM}%: display-2 has a frame clock with nothing animated on it")
   check(lit.count { |l| !l.empty? } >= 3 && lit.uniq.size >= 3,
         "#{ZOOM}%: the glowing line is not drawn and moving: lit rows #{lit.map { |l| l.empty? ? '-' : "#{l.first}..#{l.last}" }}")
   check(lit.all? { |l| l.empty? || (l.first.even? && l.last.odd?) },

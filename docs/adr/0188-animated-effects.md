@@ -1,6 +1,7 @@
 # ADR 0188: Animated effects re-present a held scene on a frame clock that exists only while one is on
 
-- Status: accepted; in use since 0.2.31
+- Status: accepted; in use since 0.2.31; amended in 0.2.33 (ticks only
+  fill gaps) and 0.3.67 (the rate follows the display refresh)
 - Date: 2026-10-26
 - Scope: effects registry, main loop render scheduling, KMS present path,
   GLES presentation pass, diagnostics
@@ -95,6 +96,8 @@ scene; it only makes its outputs due and changed:
 - **Rate:** 30 Hz by default (`document.server.effects_animation_hz`,
   10–30 in this release). At 30 Hz the band moves about 6 px per frame on a
   soft ramp. A higher ceiling waits for a measurement on the owner's GPU.
+  (Since 0.3.67 the rate follows each display's refresh; see the amendment
+  below.)
 - With no due output there is no tick and no present, so an idle screen
   stays free.
 - **The tick owns its own cadence.** After any present,
@@ -201,3 +204,54 @@ frame. So now:
 - With a pane drawing continuously and curvature on in both runs, the
   present rate with the line is at least 85% of the rate without it.
 - At most 3 animation-only frames a second are made.
+
+### Amended in 0.3.67 (2026-11-08): the rate follows the display refresh
+
+Owner-approved. Animated effects follow the display refresh (auto, the
+default) since 0.3.67. A fixed 10–30 Hz made a band or noise visibly
+coarser than the display it was on, and a 30 Hz clock on a 60 Hz display
+shows each animation frame twice.
+
+`document.server.effects_animation_hz` is now `"auto"` or an integer from
+10 to 240:
+- **`"auto"`** (the default, and what an absent key means): each animated
+  output ticks at its own refresh.
+- **A number** is a ceiling: each output ticks at the lower of it and its
+  refresh, so a setting above a display's refresh never ticks faster than
+  the display can show.
+- Anything else is refused, like the other server settings. An unset value
+  is still left out of the stored document.
+
+**One function decides an output's rate,** `output_animation_hz`. Its
+refresh comes from `output_shown_refresh_hz`: the mode's refresh, refined by
+the measured one (`observed_refresh_hz`) only when the two agree within 2%,
+as the render schedule's `kms_aligned_due` already reads it; the measured
+one alone when there is no mode; 60 Hz when neither is known. The 2% guard
+matters: a source whose vblank numbers do not count vblanks (the DRM mock
+without a vblank period, for one) "measures" its own present rate, and a
+clock built on it would chase its own ticks. The vblank alignment of a tick
+reads the same refresh.
+
+**The gap-only rule is unchanged,** per output and at that output's period:
+- An output is ticked only when it has presented nothing for three quarters
+  of its period.
+- No tick fires inside a quiet window or a Hibr frame barrier.
+- Each tick is put just after a vblank.
+At 60 Hz the gap a tick needs is 12.5 ms instead of 25 ms, so content that
+presents at 20–40 frames a second can now leave gaps a tick fills, where at
+30 Hz it left none. `fills_gaps_only` still holds on the mock under auto
+(no animation-only frames while a pane draws continuously); the effect on
+real video is to be measured.
+
+**Diagnostics.** Each output's `effects.animation_hz` is its rate (0 when
+off), so auto on a 60 Hz output reports 60. `GET /v1/settings` reports the
+setting in use as `effective.effects_animation_hz`, `"auto"` or the number.
+
+**Evidence.** `presentation_effects_gate` on gles: auto gives the DRM
+mock's 60 Hz and about 50–57 animation frames a second; 30 and 10 give 30
+and 10; 240 is clamped to 60; invalid values (9, 241, `"fast"`, `"Auto"`,
+`true`) are refused; the document keeps `"auto"` or the number, and an
+unset key stays absent; `fills_gaps_only` passes under auto.
+`tube_effects_gate`, `zoomed_effects_gate` and `burn_in_gate` assert the
+clock at the display's rate. To be measured on the owner's hardware: the
+CPU, GPU and power cost of 60 against 30 Hz, and late flips with video.

@@ -804,11 +804,22 @@ apply live, with no restart, and are saved:
   drawn on the glass, in screen space, rather than bent with the picture.
 - **Animation (ADR 0188):** an effect marked `animated` is driven by a frame
   clock. The clock runs only while such an effect is on, switched on, and
-  drawable on a presenting display, at `document.server.effects_animation_hz`
-  (10–30, default 30). Each tick re-presents the frame without redrawing
-  anything. With no animated effect on, an idle screen presents nothing.
-  Diagnostics: `effects.animation_hz` (0 when off), `animation_frames` and
-  `animation_phase`.
+  drawable on a presenting display. Its rate is per output, from
+  `document.server.effects_animation_hz`:
+  - `"auto"` (the default, also when the key is absent): the output's own
+    refresh, the mode's rate refined by the measured one when they agree,
+    60 when neither is known;
+  - a number from 10 to 240: a ceiling, so the output ticks at the lower of
+    it and its refresh, never faster than the display shows.
+
+  Each tick re-presents the frame without redrawing anything, just after a
+  vblank. A tick only fills a gap: an output that presented within the last
+  three quarters of its period, or is inside a quiet window or a Hibr frame
+  barrier, is not ticked, since real frames carry the animation themselves.
+  With no animated effect on, an idle screen presents nothing.
+  Diagnostics: `effects.animation_hz` (the output's rate, 0 when off),
+  `animation_frames` and `animation_phase`; `effective.effects_animation_hz`
+  in `GET /v1/settings` is the setting in use (`"auto"` or the number).
 - **Names:** `GET /v1/effects` gives each effect a `title` for people
   ("RGB shift") beside its key.
 - **Moving effects (ADR 0190):** flicker, horizontal sync and jitter take
@@ -1138,7 +1149,8 @@ later puts it on disk (that is `storage.saved_revision` catching up), so an
 holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
-`effects_animation_hz`, `graphics_session_budget_mib`,
+`effects_animation_hz` (`"auto"` or 10–240; see "Animation"),
+`graphics_session_budget_mib`,
 `graphics_server_budget_mib`, `graphics_texture_budget_mib` (1–65536; see
 "Picture memory"), `restart_after_update`, `expect_desktop` and
 `shutdown_key`. The other

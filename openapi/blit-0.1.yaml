@@ -2951,10 +2951,14 @@ components:
                     (`immediate`, the default) or a lead before each vblank
                     (`late`) (ADR 0183). Applied live.
                 effects_animation_hz:
-                  type: integer
-                  minimum: 10
-                  maximum: 30
-                  description: Frame rate of animated pane effects (ADR 0188).
+                  oneOf:
+                    - {type: string, enum: [auto]}
+                    - {type: integer, minimum: 10, maximum: 240}
+                  description: >-
+                    Frame rate of animated pane effects (ADR 0188). `auto`,
+                    the default when absent, ticks each animated output at
+                    its own refresh; a number is a ceiling, so each output
+                    ticks at the lower of it and its refresh. Applied live.
                 graphics_session_budget_mib:
                   type: integer
                   minimum: 1
@@ -3025,7 +3029,14 @@ components:
                 The saved or boot compositor choice. What each output really
                 uses is `render.outputs[].compositor` in `/v1/diagnostics`.
             kms_frame_timing: {type: string, enum: [immediate, late]}
-            effects_animation_hz: {type: integer, minimum: 10, maximum: 30}
+            effects_animation_hz:
+              oneOf:
+                - {type: string, enum: [auto]}
+                - {type: integer, minimum: 10, maximum: 240}
+              description: >-
+                The setting in use, `auto` when the document is silent. Each
+                output's resulting rate is `effects.animation_hz` in
+                `/v1/diagnostics`.
             graphics_session_budget_mib: {type: integer, minimum: 1}
             graphics_server_budget_mib: {type: integer, minimum: 1}
             graphics_texture_budget_mib: {type: integer, minimum: 1}
@@ -3333,8 +3344,10 @@ components:
                       panes the presentation pass drew last frame (0 on the
                       plain path); `presentation_unavailable` is empty when
                       this output can draw presentation effects, else the
-                      reason; `animation_hz` is 0 while no animated effect
-                      runs and no burn-in fades. ADR 0208: `burn_in_panes`
+                      reason; `animation_hz` is the output's frame-clock
+                      rate (its refresh under `effects_animation_hz` auto,
+                      else the lower of the setting and the refresh), 0
+                      while no animated effect runs and no burn-in fades. ADR 0208: `burn_in_panes`
                       is the burn-in histories held (one texture per
                       burning pane); `burn_in_faded` the levels (0-255) the
                       freshest trail has faded since its pane changed, 255
@@ -3351,7 +3364,7 @@ components:
                       present_panes: {type: integer, minimum: 0}
                       glow_rebuilds: {type: integer, minimum: 0}
                       presentation_unavailable: {type: string}
-                      animation_hz: {type: integer, minimum: 0, maximum: 30}
+                      animation_hz: {type: integer, minimum: 0, maximum: 240}
                       animation_frames: {type: integer, minimum: 0}
                       animation_phase: {type: number, minimum: 0}
                       burn_in_panes: {type: integer, minimum: 0}

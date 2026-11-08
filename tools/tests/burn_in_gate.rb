@@ -330,7 +330,10 @@ Dir.mktmpdir('blit-burn-in') do |root|
     late = samples.select { |s| s[:tb] > fade100 + LATENCY }
     check(!late.empty? && late.all? { |s| s[:level].zero? },
           "not black #{fade100} s after the move: #{late.map { |s| s[:level] }}")
-    check(samples.any? { |s| s[:after]['animation_hz'] == 30 }, 'the frame clock did not run while fading')
+    # At the display's refresh: "auto", the default (ADR 0188).
+    refresh = fx['refresh_hz'].round
+    check(samples.any? { |s| s[:after]['animation_hz'] == refresh },
+          "the frame clock did not run at the display's #{refresh} Hz while fading")
     # The end: the plain picture, and no clock.
     sleep 0.3
     done = capture

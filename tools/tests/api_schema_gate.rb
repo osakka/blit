@@ -108,6 +108,14 @@ raise 'pointer appearance contract changed' unless
   appearance['additionalProperties'] == false &&
   settings.dig('properties','effective','required').include?('pointer')
 raise 'settings durability receipt missing' unless settings['required'].include?('storage')
+# ADR 0188: the frame clock's rate is "auto" or 10-240 Hz, in the document
+# and in what the server reports using.
+animation_hz = { 'oneOf' => [{ 'type' => 'string', 'enum' => ['auto'] },
+                             { 'type' => 'integer', 'minimum' => 10, 'maximum' => 240 }] }
+raise 'effects_animation_hz schema drift' unless
+  settings.dig('properties','document','properties','server','properties','effects_animation_hz')
+          &.slice('oneOf') == animation_hz &&
+  settings.dig('properties','effective','properties','effects_animation_hz')&.slice('oneOf') == animation_hz
 raise 'login policy schema missing' unless
   settings.dig('properties','document','properties','login','$ref') == '#/components/schemas/LoginPolicy'
 raise 'effective login restart reporting missing' unless

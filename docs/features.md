@@ -139,6 +139,7 @@ Per pane, saved with the settings, changed live from the Blit Effects pane.
 | Screen curvature and glow (GPU only) | 0.2.28 | 0187 | Used |
 | RGB shift | 0.2.30 | 0187 | Tested |
 | Hum bar (animated only while on) | 0.2.31 | 0188 | Used |
+| Animated effects follow each display's refresh (`effects_animation_hz` `"auto"`, the default), or a ceiling of 10–240 Hz that never exceeds the display's refresh; ticks still only fill gaps between real frames | 0.3.67 | 0188 | Tested (`presentation_effects_gate`: auto at the DRM mock's 60 Hz, 30 and 10 as set, 240 clamped to 60, measured rates, settings round trip and refusals, `fills_gaps_only` under auto; `tube_effects_gate`, `zoomed_effects_gate`, `burn_in_gate`: the clock at the display's rate; `api_schema_gate`: the schema); CPU and power cost of 60 against 30 Hz not yet measured on real hardware |
 | Flicker, horizontal sync and jitter | 0.2.32 | 0190 | Tested |
 | Every effect drawn on a zoomed display, the 100% picture enlarged | 0.3.30 | 0204 | Tested |
 | Static noise, chroma with a phosphor colour, brightness and contrast | 0.3.32 | 0207 | Used (cost measured on the mini PC) |
