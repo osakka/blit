@@ -208,9 +208,7 @@ frame. So now:
 ### Amended in 0.3.67 (2026-11-08): the rate follows the display refresh
 
 Owner-approved. Animated effects follow the display refresh (auto, the
-default) since 0.3.67. A fixed 10–30 Hz made a band or noise visibly
-coarser than the display it was on, and a 30 Hz clock on a 60 Hz display
-shows each animation frame twice.
+default) since 0.3.67.
 
 `document.server.effects_animation_hz` is now `"auto"` or an integer from
 10 to 240:
@@ -221,6 +219,12 @@ shows each animation frame twice.
   the display can show.
 - Anything else is refused, like the other server settings. An unset value
   is still left out of the stored document.
+- A ceiling that does not divide the refresh is rounded by the vblank
+  alignment, which is unchanged: each tick goes to the vblank nearest one
+  period on, so 50 on a 60 Hz display ticks every refresh (60 a second) and
+  25 ticks at 30. `animation_hz` reports the setting's rate; the real one is
+  `animation_frames` over time. Not tested: the DRM mock's vblank stamp is
+  the flip's completion, so alignment does almost nothing there.
 
 **One function decides an output's rate,** `output_animation_hz`. Its
 refresh comes from `output_shown_refresh_hz`: the mode's refresh, refined by
