@@ -1,6 +1,6 @@
 # ADR 0226: pictures bounded by memory, not by count
 
-- Status: proposed
+- Status: accepted; in use since 0.3.65
 - Date: 2026-11-07
 - Scope: graphics images and placements (Kitty, sixel, API, frame channel),
   the GPU and CPU compositors' image textures, `/v1/server` graphics limits,
@@ -135,18 +135,24 @@ atlas textures (see Open questions).
 
 ## Open questions
 
-- **An atlas for small pictures.** Pictures with both sides at most 256
-  pixels could share atlas textures as glyphs do, making 500 thumbnails a
-  few textures and draw calls. It is a new subsystem (packing, freeing,
-  fragmentation; the glyph atlas resets when full, which pictures cannot)
-  and rests on an unmeasured cost: any GPU, the HD 515 included, draws 500
-  textured quads a frame without strain, and the real defect today is the
-  32-slot table thrashing, which phase 1 removes. Decided by the phase 1
-  measurement on 10.52.
+- **An atlas for small pictures: not now (measured 2026-11-08).** Pictures
+  with both sides at most 256 pixels could share atlas textures as glyphs
+  do. Measured on 10.52 (Intel HD 515, GLES, the output rendered at 2x),
+  500 thumbnails re-placed every 50 ms (a full scroll at 20 Hz, the worst
+  case; a still grid costs nothing): a typical frame drew 504 quads in 504
+  draw calls in 8.3 ms (4.8 ms on the CPU, 5.6 ms on the GPU, overlapping),
+  inside the 16.7 ms of a 60 Hz frame, with no missed deadline reported and
+  nothing re-uploaded; the worst frame in each half-second was 19-25 ms.
+  The same grid as one picture drew in 1.7 ms. About 10 microseconds a
+  draw on each side is the cost an atlas would remove; it becomes worth its
+  complexity when a real view (Files, Pictures) scrolls hundreds of
+  thumbnails and misses frames on the owner's hardware, which these numbers
+  do not show. The 19-25 ms worst frames are worth finding first, since an
+  atlas would not explain them.
 
 ## Evidence
 
-Phase 1, built 2026-11-08 (not yet run on the owner's machine or 10.52):
+Phase 1, built 2026-11-08, released in 0.3.65 and running on the mini PC and 10.52:
 
 - `graphics_memory_gate` (tools/tests), on the CPU compositor:
   `GRAPHICS_MEMORY_PASS backend=native many=1000 placed=500 drawn=500 upload_bytes=0(flat) pixels=192000 textures=0 session_freed=1,3,4,2(least_recently_shown) kept=4 refused=ENOSPC server_freed=1:1,2:3,1:2 refused=ENOSPC ceiling=4097:ENOSPC`
@@ -181,6 +187,6 @@ Planned:
   the ceiling refuses picture 4097.
 - The existing graphics, frame and input gates unchanged in outcome; full
   set and GLES `renderer`.
-- On 10.52 (Intel HD 515) and the mini PC: memory and frame time with 500
-  thumbnails on screen, against one composited grid; this decides the
-  atlas question.
+- Done on 10.52 (see Open questions): 500 pictures of 64x64 pixels in one
+  session used 16,384,000 bytes, the same as one picture of the grid, with
+  nothing freed or refused; frame times above.
