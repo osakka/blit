@@ -61,7 +61,9 @@ sudo apt install blit hibr
 
 The package installs and starts `blit.service`, generates an API token in
 `/etc/blit/blit.env`, and shows Hibr's login screen on the first monitor.
-`apt upgrade` keeps it current.
+`apt upgrade` keeps it current. For games and Steam in a window,
+`sudo apt install blit-gamescope` adds the gamescope bridge (ADR 0225; on
+Debian 13 gamescope comes from trixie-backports).
 
 ## First steps
 
@@ -126,10 +128,14 @@ and zlib; Mesa's EGL/GLES/GBM are loaded at run time.
 tools/build-tcc.sh                                      # build/blit/blit-server
 tools/build-tcc.sh build/blit/blit-helper helper
 tools/run-gates.sh all                                  # the test suites
-packaging/build-deb.sh build/pkg                        # the .deb
+packaging/build-deb.sh build/pkg                        # the .debs
 ```
 
-Use `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` to build against system
+The package build makes three packages: `blit`, `blit-font-sources` (the
+source archive of the Arabic font, ADR 0217) and `blit-gamescope` (games and
+Steam in a window through a headless gamescope, ADR 0225; built against
+PipeWire 1.4.2 headers, see [toolchain](docs/toolchain.md)). `blit` suggests
+the other two. Use `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` to build against system
 headers. Suites and their requirements are listed by `tools/run-gates.sh
 --help`; the [development workflow](docs/development-workflow.md) has the
 release procedure.

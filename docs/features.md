@@ -208,6 +208,7 @@ Errors are `application/problem+json` with stable codes.
 | Built against Hibr's module ABI 17 | 0.3.31 | 0094 | Used |
 | Debian package on Hibr's apt repository, with a release receipt per version | 0.2.2 | 0091 | Used |
 | Manual pages: `blit(8)`, `blit.env(5)`, `blit-update-helper(8)` | 0.3.10 | — | Tested |
+| `blit-gamescope`, the bridge that shows games and Steam in a window through a headless gamescope, in its own package `blit-gamescope` (suggested by `blit`, not installed by default; needs gamescope from trixie-backports on Debian 13) | 0.3.66 | 0225 | Tested |
 | One copy of the documentation, and FreeMono's source in its own small package `blit-font-sources` (suggested, not installed by default): the package is 17.2 MB, down from 24.6 MB | 0.3.45 | 0217 | Tested |
 | The terminal answers XTGETTCAP for `sgr-framed`, `sgr-framed-bar` and `sgr-shadow` (booleans), so a client that holds only the terminal can detect Blit's SGR extensions | 0.3.46 | - | Tested |
 | `fonts.hinting` (`full`, `light`, `none`; default `full`) sets the FreeType hinting of text glyphs through `PUT /v1/fonts` and the settings document; fitted icons ignore it | 0.3.47 | 0218 | Tested |

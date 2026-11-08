@@ -111,9 +111,11 @@ desktop app** (a module and a window, the shape Boxer has), which:
    show the picture (Hibr's `hold`), the relay sends the producer one
    `RELEASE` per frame, after the last view has let it go.
 3. **Asks Blit for input, carrying none itself:** once gamescope's EIS
-   socket exists, it sends `INPUT eis <path> <image-id>`, and
-   `INPUT on <image-id>` once Blit answers `OK input <image-id>`, on its
-   frame channel, and Blit sends the physical keyboard and mouse to that
+   socket exists, it sends `INPUT eis <path> <image-id>` on its frame
+   channel and, in phase 1 only, `INPUT on <image-id>` once Blit answers
+   `OK input <image-id>` (with `--no-place`, phase 2, the desktop app sends
+   `INPUT on`/`off` itself; see "`--no-place` for phase 2" below), and Blit
+   sends the physical keyboard and mouse to that
    socket (see "Input: Blit feeds gamescope's EIS directly" below; the wire is
    in `docs/api.md`). The bridge has no input parser and never captures the
    mouse; the desktop does, with its Release Pointer, and phase 1 has no
@@ -168,7 +170,8 @@ as its window gains and loses the keyboard; wire text in `docs/api.md`; the name
 authenticated, uid-checked peer, never from the terminal stream, so ADR 0066
 holds). While the route is on and the bridge's session has Blit's focus (inside
 Hibr only the desktop knows which window has the keys, so `on`/`off` come
-from its focus callback through the bridge), Blit sends evdev key codes with
+from the app's focus callback through Hibr's listener, not from the bridge),
+Blit sends evdev key codes with
 real press and release (the compositor repeats), the absolute pointer over
 the picture's drawn rectangle scaled to its latest frame size (so a scaled
 or moved window needs no message), buttons and scroll, and relative motion while the pointer is locked;
@@ -215,7 +218,12 @@ output is for its log, not for pictures. `blit-gamescope --no-place` (with `-W`/
 since it then asks the pane nothing) never writes Kitty `a=p` or `a=d`; with
 `-W`/`-H` the bridge already sends no `CSI 14 t` at start, and with
 `--no-place` none on `SIGWINCH` either. It writes no terminal set-up either:
-its standard output carries only its log.
+its standard output carries only its log. Nor does it send `INPUT on` or
+`INPUT off`: the desktop owns window focus, so the app sends
+`INPUT on <image-id>`/`INPUT off <image-id>` itself from its focus callback,
+through Hibr's listener, and the bridge sends only `INPUT eis <path>
+<image-id>` and logs the answers. Without `--no-place` (phase 1, the pane is
+the window) the bridge sends `INPUT on <image-id>` on `OK input <image-id>`.
 
 **Phases.** (1) The bridge standalone in a plain Blit session on the owner's
 machine: Steam playable in a pane, every Blit-side piece proven and measured
@@ -347,8 +355,8 @@ regresses, a wlroots compositor fits behind the same bridge.
   stream stays at its output size, so the frame is its coordinate space), and a later refusal or drop is told on the wire. The same cases against libeis
   (`tools/tests/eis_receiver.c`, `frame_input_eis_gate`) need libei1 and
   libeis1 and are not run yet: they are for the Debian 13 test host.
-  The bridge's half (`INPUT eis` after the hello, `INPUT on` on `OK input`)
-  is in `gamescope_bridge_gate`.
+  The bridge's half (`INPUT eis` after the hello, `INPUT on` on `OK input`,
+  and under `--no-place` no `INPUT on`) is in `gamescope_bridge_gate`.
 - **Live input, 2026-11-07, mini PC** (the bridge in a bare Blit pane, input
   by the route): keys reached vkcube (Space paused it, Escape closed it, 978
   events). Two design faults were found and fixed in the bridge.
@@ -379,6 +387,17 @@ regresses, a wlroots compositor fits behind the same bridge.
   checked in the gate); run with `-W`/`-H` in a Blit session it wrote no
   `CSI 14 t` (it found no gamescope on the build host, so no frame and no
   `a=p` could have been reached either way). Against libeis, still not run.
+
+- **Packaged, 0.3.66** (`packaging/build-deb.sh`, `package_artifact_gate`):
+  `blit-gamescope_<version>-1_amd64.deb` carries `/usr/bin/blit-gamescope`,
+  a README and a copyright file; `Depends: blit (= <version>-1), libc6,
+  libpipewire-0.3-0, libei1, gamescope`, and `blit` suggests it. It is
+  built against PipeWire 1.4.2's headers (Debian 13's libpipewire-0.3-dev
+  and libspa-0.2-dev, docs/toolchain.md) and is byte-for-byte reproducible
+  from any directory. The gate checks its control fields, its exact file
+  list, and that the binary is the bridge at the package's version. Under
+  `--no-place` the bridge no longer sends `INPUT on`/`off`; the desktop app
+  does (`gamescope_bridge_gate`).
 
 ## Evidence (planned)
 
