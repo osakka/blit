@@ -2325,6 +2325,8 @@ static struct {
     unsigned long long session_limit, server_limit, texture_limit;
     BlitSession *sessions;
     int session_count;
+    BlitFrameClient *frame_clients;
+    int frame_client_count;
     BlitKms *kms;
     unsigned long long clock;
 } graphics_memory;
@@ -11520,6 +11522,22 @@ static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
     graphics_image_release(image);
 }
 
+static int frame_input_holds(const BlitSession *session, unsigned int image_id);
+
+/* ADR 0226: whether a picture counts as shown, and so is never freed for
+   room: placed and not deleted, or with a placement held for its next
+   frame (ADR 0202's `a=p` that arrived first: it is about to appear), or
+   holding an input route (ADR 0225: freeing it would end the route). */
+static int graphics_shown(const BlitSession *session, const BlitGraphicsImage *image)
+{
+    int k;
+    if (kitty_image_has_placement(image)) return 1;
+    for (k = 0; k < BLIT_FRAME_PENDING; ++k)
+        if (session->frame_pending[k].used && session->frame_pending[k].image_id == image->id)
+            return 1;
+    return frame_input_holds(session, image->id);
+}
+
 /* ADR 0226: the picture to free for room -- complete, shown nowhere, least
    recently shown -- in `session`, or in any session when it is NULL (`owner`
    says whose). Nothing on screen, still arriving or held by a synchronized
@@ -11539,7 +11557,7 @@ static BlitGraphicsImage *graphics_least_shown(BlitSession *session,
         for (index = 0; index < in->graphics_count; ++index) {
             BlitGraphicsImage *image = in->graphics[index];
             if (!image->used || !image->complete || image->retired || image == keep ||
-                kitty_image_has_placement(image))
+                graphics_shown(in, image))
                 continue;
             if (freeable != NULL)
                 *freeable += (unsigned long long)image->charged + image->texture_charged;
@@ -31382,6 +31400,9 @@ int main(int argc, char **argv)
     /* ADR 0226: the server budget frees across these sessions. */
     graphics_memory.sessions = runtime.sessions;
     graphics_memory.session_count = BLIT_MAX_SESSIONS;
+    graphics_memory.frame_clients = runtime.frame_clients;
+    graphics_memory.frame_client_count =
+        (int)(sizeof(runtime.frame_clients) / sizeof(runtime.frame_clients[0]));
     runtime.boot_pane_columns = 1;
     runtime.boot_pane_rows = 1;
     {

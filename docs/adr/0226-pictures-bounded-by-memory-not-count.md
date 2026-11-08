@@ -78,13 +78,18 @@ Option 3.
   the producer's memory and counts only its texture bookkeeping. When a new
   picture would exceed a budget, Blit first frees pictures nothing shows,
   least recently shown first, in that session and then across sessions for
-  the server budget; if what is left is all on screen, the new picture is
-  refused (`ENOSPC`). Nothing on screen is ever freed to make room; this
-  is stricter than kitty, which may delete placed images as a last resort,
-  because on a desktop a picture vanishing from a window is worse than a
-  new one refused. "On screen" means placed and not deleted: a client that
-  scrolls through many pictures deletes the placements it scrolls away
-  (`a=d,d=i` lowercase keeps the data), so they become free-able.
+  the server budget. If freeing every unshown picture would still not make
+  room, nothing is freed and the new picture is refused (`ENOSPC`):
+  pictures are not destroyed for a refusal that comes anyway. Nothing
+  shown is ever freed to make room; this is stricter than kitty, which may
+  delete placed images as a last resort, because on a desktop a picture
+  vanishing from a window is worse than a new one refused. "Shown" means
+  placed and not deleted, or with a placement held for its next frame (ADR
+  0202's `a=p` that arrived before the picture: it is about to appear, and
+  Hibr's game windows are made that way), or holding an input route (ADR
+  0225: freeing it would end the route mid-game). A client that scrolls
+  through many pictures deletes the placements it scrolls away (`a=d,d=i`
+  lowercase keeps the data), so they become free-able.
 - **The GPU keeps what it draws.** The per-output texture table becomes a
   byte-budgeted cache (default 512 MiB per GPU, a setting), recycled least
   recently drawn first, so every picture drawn in a frame keeps its
@@ -152,6 +157,12 @@ Phase 1, built 2026-11-08 (not yet run on the owner's machine or 10.52):
   texture; the order of frees is the same. On the GPU the server budget
   refused with B still kept: freeing it alone would not have made room,
   and Blit frees nothing for nothing.
+- `graphics_memory_frames_gate` (against the stand-in libei), both
+  compositors: a frame picture holding an input route, the least recently
+  shown of all, keeps its pixels and its route, and a picture placed by a
+  held `a=p` keeps its placement, while the unshown Kitty picture is freed
+  and the next shown one refused `ENOSPC`. Run against the build before
+  this rule, the routed picture was freed first.
 - The full set (`tools/run-gates.sh all`): `RUN_GATES_FAIL pass=184 skip=12 fail=1 (arabic_kms_ink, whose fixture still used the old picture array; fixed, then passing alone; the baseline's failing hibr_split_capture_gate passed)`;
   GLES `renderer`: `RUN_GATES_FAIL pass=81 skip=1 fail=1 (presentation_effects_gate's animation rate, 14.5/s against a 15/s floor at load 5; passing when run again, as on the baseline tree)`.
 - An idle session's struct shrank from 53,432 to 39,848 bytes (16 picture

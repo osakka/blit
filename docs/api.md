@@ -1719,11 +1719,14 @@ memory and is charged nothing. The budgets are settings in the document's
 | `graphics_server_budget_mib` | a quarter of physical memory, at most 2048, across sessions |
 | `graphics_texture_budget_mib` | 512, the GPU compositor's texture cache |
 
-When a new picture would pass a budget, Blit first frees pictures nothing
-shows (no placement, the default one included, that is not deleted), least
+A picture is shown when it is placed and the placement is not deleted
+(the default placement included), when a placement is held for its next
+frame (an `a=p` that came before the picture's first frame by descriptor),
+or when it holds an input route on the frame channel. When a new picture
+would pass a budget, Blit first frees pictures that are not shown, least
 recently shown first: the session's own, then, for the server budget, any
-session's. A picture on screen is never freed. If what could be freed would
-not make room, nothing is freed and the picture is refused: Kitty answers
+session's. A shown picture is never freed. If freeing every unshown picture
+would still not make room, nothing is freed and the picture is refused: Kitty answers
 `ENOSPC`, a frame by descriptor is refused `ENOSPC` (`frame-budget`), and a
 `pixel_frame_begin` gets `pixel_frame_error` with `image_budget` and
 `"status": 409`. A program that scrolls through many pictures deletes the

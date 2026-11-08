@@ -711,6 +711,22 @@ static void frame_input_refuse(BlitRuntime *runtime, BlitFrameClient *client,
     frame_reply(client->fd, line);
 }
 
+/* ADR 0226: whether any channel of the session holds a route for the
+   image; such a picture is never freed for room. */
+static int frame_input_holds(const BlitSession *session, unsigned int image_id)
+{
+    int i, k;
+    for (i = 0; i < graphics_memory.frame_client_count; ++i) {
+        const BlitFrameClient *client = &graphics_memory.frame_clients[i];
+        if (!client->used || client->session_id != session->id)
+            continue;
+        for (k = 0; k < client->input_capacity; ++k)
+            if (client->inputs[k] != NULL && client->inputs[k]->image_id == image_id)
+                return 1;
+    }
+    return 0;
+}
+
 /* This channel's route for an image: its slot, or -1. */
 static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id)
 {
