@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-08: 0.3.64 input routes per picture; the bridge's --no-place (ADR 0225)
+
+- **INPUT per image** (`docs/api.md`): `INPUT eis <path> <id>`, `INPUT on
+  <id>`, `INPUT off <id>`, answered `OK input <id>` / `ERROR INPUT <id>
+  <code>`. One connection carries the routes of several pictures (Hibr
+  multiplexes every picture of a display over one connection, #486); at most
+  one route is on per session, and turning one on releases what another
+  held first; a compositor going ends only its route.
+- **`blit-gamescope --no-place`** for phase 2: the console places the
+  picture, so the bridge writes no Kitty placement and no terminal set-up.
+- **Agreed with Hibr:** a game picture keeps one image id and one placement
+  for its life; moving, raising and resizing re-place it in place, so held
+  keys survive a window drag.
+- **Gated against a stand-in libei** (`frame_input_gate`: two routes on one
+  connection, the one-on rule within and across connections, release order,
+  late ENOENT and delete per route); the libeis gate still waits for a host.
+- **Suites:** `all` 184 pass, 12 skip, 0 fail; GLES `renderer` 81 pass, 1
+  skip, 0 fail on a quiet machine. Two earlier GLES runs failed
+  `presentation_effects` (12.1–12.4 animation frames a second against a 15
+  floor) and once `burn_in`, both while another build held the 4-core
+  machine at load 10; the effects gate passed 4 of 4 alone at load 3.
+  `package_artifact_gate` passes. Deployed and verified on 10.54 and 10.52.
+
 ## 2026-11-07: 0.3.63 the pointer in gamescope's space; the bridge never captures (ADR 0225)
 
 - **Live test of 0.3.62 on the mini PC** (owner at the keyboard, vkcube
