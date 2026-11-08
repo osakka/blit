@@ -22,3 +22,5 @@ tools/diagnostics/__pycache__/
 tools/fonts/__pycache__/
 server
 build-tcc-ignore
+__pycache__/
+*.pyc
