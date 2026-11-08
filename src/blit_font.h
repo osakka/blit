@@ -52,14 +52,34 @@ void blit_font_free(BlitFont *font);
    scan, scanning once if none was made. */
 const char *blit_font_root(void);
 const char *blit_font_root_file(const char *name);
+/* An outline text font: a .ttf or .otf file, or a directory of masters
+   (ADR 0227). */
 int blit_font_is_outline(const char *path);
 void blit_font_discover(void);
+/* ADR 0227: a pixel-grid font's design cell, in its own pixels: 8x16 for
+   Spleen 8x16. */
+typedef struct { int width, height; } BlitFontGrid;
 /* Reads an outline font: 1 with its family name when it is a usable text
-   font, else 0 with the reason. Set by the native raster's owner; without
-   one, outline files are listed as rejected. */
+   font, else 0 with the reason. With grid, the font must also be drawn on a
+   pixel grid, whose design cell it fills in (a master, ADR 0227); NULL asks
+   nothing of it. Set by the native raster's owner; without one, outline
+   files are listed as rejected. */
 typedef int (*BlitFontOutlineInspector)(const char *path, char *family, size_t family_size,
-                                        char *reason, size_t reason_size);
+                                        BlitFontGrid *grid, char *reason, size_t reason_size);
 void blit_font_set_outline_inspector(BlitFontOutlineInspector inspector);
+/* ADR 0227: a text font made of masters, a directory in text/. Each master
+   is a pixel-grid font crisp at its design cell height and its multiples. */
+#define BLIT_FONT_MAX_MASTERS 8
+typedef struct { const char *path; BlitFontGrid grid; } BlitFontMaster;
+/* The usable masters of the font at path, smallest design cell first; 0
+   when path is not a font of masters. Paths stay valid until the next
+   discovery. */
+int blit_font_masters(const char *path, BlitFontMaster *masters, int capacity);
+/* The one rule for which master draws a cell height (index into masters):
+   1. the largest whose design height divides it (crisp); else
+   2. the largest whose design height is below it (scaled); else
+   3. the smallest. */
+int blit_font_master_choose(const BlitFontMaster *masters, int count, int cell_height);
 const char *blit_font_profile_title(int index);
 int blit_font_profile_local(int index);
 int blit_font_rejected_count(void);

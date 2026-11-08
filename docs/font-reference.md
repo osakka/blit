@@ -38,7 +38,8 @@ The shipped text fonts are unmodified upstream releases:
 | `jetbrains-mono-nl` | JetBrains Mono NL 2.304 | OFL 1.1 |
 | `fira-code` | Fira Code 6.2 | OFL 1.1 |
 | `ibm-plex-mono` | IBM Plex Mono 1.1.0 | OFL 1.1 |
-| `blit-terminus16`, `blit-spleen16` | Bitmap pixel fonts | OFL / BSD |
+| `spleen` | Spleen 2.2.0, five masters (6x12 to 32x64), pixel-exact at their multiples (ADR 0227) | BSD-2-Clause |
+| `blit-terminus16` | Bitmap pixel font | OFL |
 
 **Every outline font draws through one glyph stack.** Arabic letters go
 to Blit Arabic Modern. Every other character takes the first of these that
@@ -61,8 +62,9 @@ Stack glyphs are fitted to the chosen font at draw time, so every font has
 every glyph, including one you add. Native grayscale antialiasing
 rasterizes text at the requested size.
 
-**The pixel fonts** (Blit Terminus 16 and Blit Spleen 16) draw every glyph
-they have themselves, in their own pixels, box drawing included. The stack
+**The pixel font** (Blit Terminus 16; Blit Spleen 16 was retired in 0.3.68
+for `spleen`, ADR 0227) draws every glyph it has itself, in its own pixels,
+box drawing included. The stack
 supplies the rest: Blit's icons, Nerd icons, symbols, emoji and Unifont's
 one-column coverage, fitted to the font's own H (ADR 0199). Wide characters
 come from Blit's wide pixel font. Only a character no face has shows the

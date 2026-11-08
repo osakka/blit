@@ -25,7 +25,8 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
 - **Images:** the Kitty graphics protocol (including in-place edits) and
   Sixel. Hibr's wallpaper and video play through it.
 - **Fonts:** Hack, JetBrains Mono NL, Fira Code, IBM Plex Mono, IBM 3270,
-  Terminus and Spleen, any size from 8 to 64 pixels, changed live. Drop
+  Spleen (pixel-exact at each of its five masters' sizes and their
+  multiples) and Terminus, any size from 8 to 64 pixels, changed live. Drop
   in your own monospaced font. Under every font sits one glyph stack: Nerd
   Fonts, colour emoji, Arabic, Unifont, and Blit's own colour icons.
 - **Input:** keyboards, mice, touchpads and gamepads, found as they are

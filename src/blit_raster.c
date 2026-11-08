@@ -46,6 +46,11 @@ struct BlitRaster {
     char arabic_path[1024];
     /* ADR 0218: how text glyphs are hinted. Zero is full, what text always did. */
     BlitRasterHinting hinting;
+    /* ADR 0227: the master drawing a font of masters (its design cell; zero
+       for a single-file font), and the whole multiple of that cell the cell
+       height is, or zero when it is scaled. */
+    BlitFontGrid master;
+    int master_scale;
     int text_em[2];
     hb_font_t *colour_font;
     hb_buffer_t *shape_buffer;
@@ -171,11 +176,66 @@ static void open_stack(BlitRaster *raster, const char *colour_path)
     if (raster->cap < 1 || raster->cap > raster->height) raster->cap = raster->height * 7 / 10;
 }
 
+/* ADR 0227: a pixel-grid font's design cell. Its outlines are pixel
+   squares: straight segments whose every point, in each printable ASCII
+   glyph, lies on a grid of units_per_EM / H font units, as does its advance.
+   The font's own rounding is allowed, a sixteenth of a pixel: Spleen 6x12
+   keeps a pixel of 85.33 units in whole units (off by up to 0.67), and
+   Spleen 12x24 one of 42.625 (off by up to 1.5). The smallest such H up to
+   64 is the design height, and the advance in those pixels the width.
+   Returns 0, with no grid, for any other font. */
+static double grid_pitch(const FT_Face face, int height)
+{
+    return (double)face->units_per_EM / height;
+}
+
+static int grid_holds(FT_Pos value, double pitch)
+{
+    return fabs(value - floor(value / pitch + 0.5) * pitch) <= pitch / 16;
+}
+
+static int face_pixel_grid(FT_Face face, BlitFontGrid *grid)
+{
+    FT_Fixed advance;
+    FT_UInt zero = FT_Get_Char_Index(face, '0');
+    int height;
+    uint32_t c;
+    if (!zero || FT_Get_Advance(face, zero, FT_LOAD_NO_SCALE, &advance) || advance <= 0)
+        return 0;
+    for (height = 1; height <= 64; ++height) {
+        double pitch = grid_pitch(face, height);
+        int on_grid = grid_holds(advance, pitch);
+        for (c = 0x21; on_grid && c < 0x7f; ++c) {
+            FT_UInt index = FT_Get_Char_Index(face, c);
+            FT_Outline *outline;
+            int i;
+            if (!index) continue;
+            if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING) ||
+                face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
+            outline = &face->glyph->outline;
+            for (i = 0; on_grid && i < outline->n_points; ++i)
+                on_grid = FT_CURVE_TAG(outline->tags[i]) == FT_CURVE_TAG_ON &&
+                    grid_holds(outline->points[i].x, pitch) &&
+                    grid_holds(outline->points[i].y, pitch);
+            /* A curve fails at every height. */
+            for (i = 0; i < outline->n_points; ++i)
+                if (FT_CURVE_TAG(outline->tags[i]) != FT_CURVE_TAG_ON) return 0;
+        }
+        if (on_grid) {
+            grid->height = height;
+            grid->width = (int)floor(advance / pitch + 0.5);
+            return grid->width > 0;
+        }
+    }
+    return 0;
+}
+
 /* ADR 0195: what makes a file a Blit text font -- regular, scalable,
    fixed-width, with a Unicode charmap -- answered with FreeType for the font
-   list (blit_font_set_outline_inspector). */
+   list (blit_font_set_outline_inspector). ADR 0227: a master must also be
+   on a pixel grid, whose design cell this reads. */
 int blit_raster_inspect_outline(const char *path, char *family, size_t family_size,
-                                char *reason, size_t reason_size)
+                                BlitFontGrid *grid, char *reason, size_t reason_size)
 {
     static FT_Library library;
     FT_Face face;
@@ -196,6 +256,8 @@ int blit_raster_inspect_outline(const char *path, char *family, size_t family_si
         snprintf(reason, reason_size, "no Unicode character map");
     else if (!face->family_name || !*face->family_name)
         snprintf(reason, reason_size, "no family name");
+    else if (grid && !face_pixel_grid(face, grid))
+        snprintf(reason, reason_size, "a master not on a pixel grid");
     else {
         snprintf(family, family_size, "%s", face->family_name);
         usable = 1;
@@ -222,11 +284,34 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
     if (!outline_path && !colour_path) return raster;
     if (FT_Init_FreeType(&raster->library)) goto fail;
     if (outline_path) {
-        int em;
-        if (FT_New_Face(raster->library, outline_path, 0, &raster->outline) ||
+        BlitFontMaster masters[BLIT_FONT_MAX_MASTERS];
+        const char *face_path = outline_path;
+        int em, count;
+        /* ADR 0227: a font of masters opens the one its rule picks for this
+           cell height, here, where every text font is opened at a size. Its
+           masters are read with this engine, the font list's own. */
+        blit_font_set_outline_inspector(blit_raster_inspect_outline);
+        count = blit_font_masters(outline_path, masters, BLIT_FONT_MAX_MASTERS);
+        if (count) {
+            const BlitFontMaster *master = &masters[blit_font_master_choose(masters, count, height)];
+            face_path = master->path;
+            raster->master = master->grid;
+            raster->master_scale = height % master->grid.height ? 0 : height / master->grid.height;
+        }
+        if (FT_New_Face(raster->library, face_path, 0, &raster->outline) ||
             !FT_IS_SCALABLE(raster->outline) ||
             !FT_IS_FIXED_WIDTH(raster->outline) ||
             FT_Select_Charmap(raster->outline, FT_ENCODING_UNICODE)) goto fail;
+        /* A master's em is its design cell: drawn at the cell height, its
+           pixels are cell height / design height device pixels each, which
+           is whole at a multiple. Its baseline is its ascender at that
+           scale, on a whole pixel at a multiple. */
+        if (count) {
+            if (FT_Set_Pixel_Sizes(raster->outline, 0, height)) goto fail;
+            raster->em = height;
+            raster->baseline = (int)floor((double)raster->outline->ascender * height /
+                                          raster->outline->units_per_EM + 0.5);
+        }
         /* API height means exact terminal cell height, not em size. Fit both
            ascent/descent and advance; do not stretch an already made bitmap.
            The advance is the font's cell, that of its '0' (ADR 0195): a
@@ -234,7 +319,7 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
            fitting that shrank all its text. An overhanging glyph is fitted
            on its own when drawn. */
         FT_UInt cell_glyph = FT_Get_Char_Index(raster->outline, '0');
-        for (em = height; em >= 1; --em) {
+        for (em = height; !count && em >= 1; --em) {
             int ascent, descent, advance;
             FT_Fixed cell_advance;
             if (FT_Set_Pixel_Sizes(raster->outline, 0, em)) goto fail;
@@ -1248,12 +1333,66 @@ static int draw_blit_icon(BlitRaster *raster, uint32_t scalar, BlitRasterIconPen
     return result;
 }
 
+/* ADR 0227: a master at a whole multiple of its design cell is drawn from
+   its grid. Each outline point is put on its design pixel -- the font keeps
+   its pixel corners in whole font units, which Spleen 6x12 and 12x24 can
+   only round -- then scaled by the multiple, so every device pixel is fully
+   in or out: the author's bitmap, enlarged, with no grey. Hinting has
+   nothing left to do here, and is not asked: FreeType's moves whole glyphs
+   a pixel at some multiples (measured at 48 and 64 px). Returns as
+   draw_outline_face does; 0 for a glyph that would leave the cell. */
+static int draw_master_glyph(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
+{
+    FT_Face face = raster->outline;
+    double pitch = grid_pitch(face, raster->master.height);
+    long scale = raster->master_scale;
+    FT_UInt index = FT_Get_Char_Index(face, scalar);
+    FT_Outline *outline;
+    FT_Bitmap bitmap;
+    FT_BBox box;
+    int i, x, y, left, top, failed;
+    if (!index) return 0;
+    if (FT_Load_Glyph(face, index, FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING) ||
+        face->glyph->format != FT_GLYPH_FORMAT_OUTLINE) return -1;
+    outline = &face->glyph->outline;
+    for (i = 0; i < outline->n_points; ++i) {
+        outline->points[i].x = (FT_Pos)floor(outline->points[i].x / pitch + 0.5) * scale * 64;
+        outline->points[i].y = (FT_Pos)floor(outline->points[i].y / pitch + 0.5) * scale * 64;
+    }
+    FT_Outline_Get_CBox(outline, &box);
+    if (box.xMax <= box.xMin || box.yMax <= box.yMin) return 1;
+    /* The advance is the master's design width, centred in the cell as
+       draw_outline_face centres one: whole pixels, so nothing shifts. */
+    left = (entry->glyph.width - raster->master.width * (int)scale) / 2 + (int)(box.xMin / 64);
+    top = raster->baseline - (int)(box.yMax / 64);
+    memset(&bitmap, 0, sizeof(bitmap));
+    bitmap.width = (unsigned)((box.xMax - box.xMin) / 64);
+    bitmap.rows = (unsigned)((box.yMax - box.yMin) / 64);
+    if (left < 0 || top < 0 || left + (int)bitmap.width > entry->glyph.width ||
+        top + (int)bitmap.rows > entry->glyph.height) return 0;
+    bitmap.pitch = (int)bitmap.width;
+    bitmap.pixel_mode = FT_PIXEL_MODE_GRAY;
+    bitmap.num_grays = 256;
+    bitmap.buffer = calloc(bitmap.rows, bitmap.width);
+    if (!bitmap.buffer) return -1;
+    FT_Outline_Translate(outline, -box.xMin, -box.yMin);
+    failed = FT_Outline_Get_Bitmap(raster->library, outline, &bitmap) != 0;
+    for (y = 0; !failed && y < (int)bitmap.rows; ++y)
+        for (x = 0; x < (int)bitmap.width; ++x)
+            entry->pixels[(top + y) * entry->glyph.stride + left + x] =
+                bitmap.buffer[y * bitmap.pitch + x];
+    free(bitmap.buffer);
+    return failed ? -1 : 1;
+}
+
 /* The text font's glyph at the cell's size; one that would overhang the
    cell (Hack's long arrows, U+27F5-27FF) is shrunk to fit, not dropped to
    the PSF's '?'. */
 static int draw_outline(BlitRaster *raster, uint32_t scalar, RasterEntry *entry)
 {
-    int result = draw_outline_face(raster->outline, raster->baseline, scalar, entry, raster->hinting);
+    int result = raster->master_scale && entry->glyph.format == BLIT_RASTER_COVERAGE ?
+        draw_master_glyph(raster, scalar, entry) :
+        draw_outline_face(raster->outline, raster->baseline, scalar, entry, raster->hinting);
     if (result == 0 && raster->outline && FT_Get_Char_Index(raster->outline, scalar)) {
         result = draw_fitted(raster, raster->outline, FIT_SYMBOL, scalar, entry,
                              entry->glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
@@ -1614,6 +1753,13 @@ const char *blit_raster_arabic_path(const BlitRaster *raster)
 { return raster && raster->arabic ? raster->arabic_path : NULL; }
 const char *blit_raster_arabic_family(const BlitRaster *raster)
 { return raster && raster->arabic ? raster->arabic->family_name : NULL; }
+const BlitFontGrid *blit_raster_master(const BlitRaster *raster, int *crisp)
+{
+    if (!raster || !raster->master.height) return NULL;
+    if (crisp) *crisp = raster->master_scale > 0;
+    return &raster->master;
+}
+
 int blit_raster_baseline(const BlitRaster *raster)
 { return raster ? raster->baseline : 0; }
 unsigned long blit_raster_render_count(const BlitRaster *raster)

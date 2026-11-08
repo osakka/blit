@@ -1,6 +1,8 @@
 # ADR 0195: Text fonts are discovered; every glyph comes from one shipped stack
 
 - Status: accepted; in use since 0.2.36
+- Note: Blit Spleen 16 (`blit-spleen16`) was retired in 0.3.68; Spleen is
+  now the text font `spleen`, five masters in `text/spleen/` (ADR 0227).
 - Date: 2026-10-27
 - Scope: `blit_raster.c` (glyph resolution), `blit_font.c` (the font list),
   font assets and their layout, packaging, the font gates, the outline
@@ -88,7 +90,8 @@ them):
 | Fira Code | tonsky 6.2 | OFL 1.1 |
 | IBM Plex Mono | IBM plex-mono 1.1.0 | OFL 1.1 |
 
-Pixel fonts: Blit Terminus 16 and Blit Spleen 16, as now.
+Pixel fonts: Blit Terminus 16 and Blit Spleen 16, as now. (Spleen 16
+was retired in 0.3.68 for the text font `spleen`: ADR 0227.)
 
 **Retired:**
 - the outline generator's baking: `build-outline-nerd.py`, its symbol

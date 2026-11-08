@@ -23,6 +23,7 @@ same applies to an operator's own fonts in `/usr/local/lib/blit/fonts/text`.
 | `text/JetBrainsMonoNL-Regular.ttf` | JetBrains Mono NL 2.304 | `licenses/JetBrainsMono-OFL.txt` |
 | `text/FiraCode-Regular.ttf` | Fira Code 6.2 | `licenses/FiraCode-OFL.txt` |
 | `text/IBMPlexMono-Regular.ttf` | IBM Plex Mono 1.1.0 | `licenses/IBMPlexMono-OFL.txt` |
+| `text/spleen/spleen-{6x12,8x16,12x24,16x32,32x64}.otf` | Spleen 2.2.0, one font of five masters (ADR 0227) | `licenses/Spleen-LICENSE.txt` |
 
 **Every glyph a text font lacks comes from one stack,** in this directory,
 fitted to the chosen font when drawn:
@@ -84,31 +85,34 @@ A pixel font keeps every glyph it has, box drawing included, and borrows the
 glyph stack for the rest (ADR 0199). Wide characters keep the separate wide
 PSF.
 
-## Pixel font: Blit Spleen16
+## Spleen: one font of five masters (ADR 0227)
 
-`Blit-Spleen16.psf` is an optional 8x16 pixel font based on Spleen 2.2.0
-(id `blit-spleen16`). Default Terminus is unchanged. It provides
-1,575 scalar mappings, retaining all1,181 unique scalar mappings from the
-existing Hibr font, with92 visibly different printable ASCII masks.
-Box/block geometry, combining marks and the fitted control diamond retain
-their canonical bitmaps. Other absent symbols use the checked-in Hibr font
-as build-time fallback; no extra runtime renderer is added.
+`text/spleen/` holds the five OTF masters of Spleen 2.2.0, unmodified, from
+the release tarball
+`https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz`
+(sha256 `ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89`):
 
-Upstream Spleen is BSD2-clause. The combined font contains OFL-covered
-fallback material and is distributed under OFL1.1 with the upstream and
-fallback notices retained in `licenses/` (Terminus, DejaVu, Noto and Droid).
-The respective notices remain authoritative. Build provenance, exact source
-commit and hashes are in `Blit-Spleen16.source.json`. Regenerate using
-the pinned upstream BDF, not arbitrary host fonts:
+| Master | sha256 |
+| --- | --- |
+| `spleen-6x12.otf` | `c7ab7083f6074949892f48cee940ad3c921a1276c8675d7c7e8fc51879a0236b` |
+| `spleen-8x16.otf` | `cadfddb5f4f9a22d7fd879760adfd82dc801993d13d8faf1afaf375c05affe74` |
+| `spleen-12x24.otf` | `9e4b0c1a9706ea4ee27815e473b7bcff4aac33e58210a4f74978fbb6feba5d32` |
+| `spleen-16x32.otf` | `937b5787414ca4976ee7a1553d244a8d71cf232d2da2e5a173b3cc53ba22deed` |
+| `spleen-32x64.otf` | `ae970e820426137d1b0d0bca695d1edfd1c8cd778f964544af3555d21ce3fed5` |
 
-```sh
-python3 tools/fonts/build-retro-font.py /path/to/spleen-8x16.bdf \
-  assets/fonts/Blit-Spleen16.psf
-BLIT_SPLEEN_SOURCE=/path/to/spleen-8x16.bdf python3 tools/tests/retro_font_gate.py
-```
+Each master is an outline font of pixel squares, crisp only at its own cell
+height and whole multiples of it; the larger ones are redrawn by the author,
+not scaled. A directory in `text/` is one font: it is listed once, as
+`spleen`, and the master for each size is the largest whose height divides
+the cell height, else the largest below it, scaled. Each master's design cell
+is read from its own outlines (their pixel grid), not from its name or a
+list. Upstream Spleen is BSD-2-Clause; its licence is
+`licenses/Spleen-LICENSE.txt`, the tarball's `LICENSE` byte for byte.
 
-Pixel size changes use `PUT /v1/fonts` with `size_px`; this bitmap face does
-not become an outline font by resizing it.
+**Retired in 0.3.68:** `Blit-Spleen16.psf` (id `blit-spleen16`), the fixed
+16 px PSF built from the 8x16 BDF with Terminus fallback glyphs, with its
+`Blit-Spleen16.source.json` and its builder and gate. A saved
+`blit-spleen16` falls back to the boot font; there is no alias.
 
 ## Shared outline and colour rendering policy
 
@@ -118,9 +122,10 @@ the stack's earlier faces don't. Font size8–64px means exact cell height;
 the font's em size is fitted inside that cell, not stretched after rendering.
 The default font is not changed by installation. Select a font through the
 same API or Control Panel as the others. Outline fonts scale smoothly.
-Spleen and Terminus keep their intentional bitmap pixels for every glyph
-they have, and take icons, symbols and emoji from the glyph stack, fitted to
-their own H (ADR 0199).
+Terminus keeps its intentional bitmap pixels for every glyph it has, and
+takes icons, symbols and emoji from the glyph stack, fitted to its own H
+(ADR 0199). Spleen, a font of masters, is pixel-exact at the sizes its
+masters divide and scaled smoothly between them (ADR 0227).
 
 `fonts.source.json` pins every file's SHA-256 and licence.
 `licenses/NerdFonts-LICENSE.txt` and `licenses/FontAwesome-LICENSE.txt`

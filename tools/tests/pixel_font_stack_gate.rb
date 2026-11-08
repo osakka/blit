@@ -21,7 +21,7 @@ Dir.chdir(root) do
       'tools/tests/pixel_font_stack_gate.c', 'src/blit_font.c', 'src/blit_raster.c',
       ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-lm', '-o', binary)
-    %w[Blit-Terminus16.psf Blit-Spleen16.psf].each do |face|
+    %w[Blit-Terminus16.psf].each do |face|
       raise "pixel font stack failed: #{face}" unless
         system(binary, "assets/fonts/#{face}", 'assets/fonts/NotoColorEmoji.ttf', input)
     end

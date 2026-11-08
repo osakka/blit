@@ -1,6 +1,9 @@
 # ADR 0199: Pixel fonts keep their own glyphs and borrow the glyph stack for the rest
 
 - Status: accepted
+- Note: Blit Spleen 16 (`blit-spleen16`) was retired in 0.3.68; Spleen is
+  now the text font `spleen`, five masters on the outline path, and Terminus
+  16 is the one pixel font this record covers (ADR 0227).
 - Date: 2026-10-27
 - Scope: `blit_raster.c` (`blit_raster_open_pixel`), `blit_server.c` (font
   preparation), a new gate
@@ -10,7 +13,7 @@
 
 Since 0.2.36, every outline font draws Blit's icons, Nerd icons, symbols
 and emoji from one glyph stack. The two pixel fonts, Blit Terminus 16 and
-Blit Spleen 16, did not. Choosing either turned the menu bar's battery,
+Blit Spleen 16 (retired in 0.3.68, ADR 0227), did not. Choosing either turned the menu bar's battery,
 volume, Wi-Fi, hui and power icons, and every Nerd icon, into `?`.
 
 ## Options considered

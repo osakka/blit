@@ -2129,7 +2129,10 @@ components:
       type: object
       description: >-
         A font Blit found (ADR 0195): an outline text font in the fonts root's
-        text/ or the local text/, or a narrow-cell PSF in the root.
+        text/ or the local text/, or a narrow-cell PSF in the root. A
+        directory in text/ is one text font of masters (ADR 0227), listed
+        once with its directory as its path; its masters are not fonts of
+        their own.
       required: [id, path, available]
       properties:
         id: {$ref: '#/components/schemas/ResourceId'}
@@ -2144,6 +2147,14 @@ components:
             profile has null. An outline profile is available only when the
             companion file is readable.
         rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
+        masters:
+          type: array
+          description: >-
+            Only for a font of masters (ADR 0227): each master's design cell,
+            width x height in its own pixels, smallest first. Each is crisp
+            at its height and every whole multiple of it.
+          items: {type: string, pattern: '^[1-9][0-9]*x[1-9][0-9]*$'}
+          minItems: 1
       additionalProperties: false
     ArabicCompanion:
       type: [object, 'null']
@@ -2206,6 +2217,23 @@ components:
             colour_glyphs: {type: boolean}
             arabic_companion:
               $ref: '#/components/schemas/ArabicCompanion'
+            master:
+              type: [string, 'null']
+              pattern: '^[1-9][0-9]*x[1-9][0-9]*$'
+              description: >-
+                The master a font of masters is drawn with at this size, by its
+                design cell ("8x16"); null for any other font (ADR 0227). The
+                rule: the largest master whose design height divides the cell
+                height, else the largest below it, else the smallest.
+            master_fit:
+              type: [string, 'null']
+              enum: [crisp, scaled, null]
+              description: >-
+                crisp when the cell height is a whole multiple of the master's
+                design height, so each design pixel is a whole square of device
+                pixels, fully on or off, drawn without hinting; scaled
+                otherwise, drawn as any outline font, with the hinting setting.
+                null for a font that is not one of masters.
             raster_cache:
               type: object
               required: [bytes, renders]

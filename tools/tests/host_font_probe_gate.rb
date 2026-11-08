@@ -32,7 +32,7 @@ Dir.mktmpdir('blit-font-probe-gate') do |work|
       end
     end
     original = identity.call(get.call('/v1/fonts').fetch('active'))
-    %w[hack blit-spleen16 unavailable-font].each do |profile|
+    %w[hack blit-terminus16 spleen unavailable-font].each do |profile|
       probe_env = {'BLIT_LIVE'=>base.to_s, 'BLIT_AUTH_TOKEN'=>'', 'BLIT_FONT_ID'=>profile,
         'BLIT_FONT_SIZES'=>'17,23', 'BLIT_EVIDENCE_DIR'=>File.join(work,profile)}
       output,status = Open3.capture2e(probe_env,'ruby',File.join(root,'tools/probes/host_font_size.rb'))
@@ -46,7 +46,7 @@ Dir.mktmpdir('blit-font-probe-gate') do |work|
       raise 'probe did not restore original profile and size policy' unless
         identity.call(get.call('/v1/fonts').fetch('active'))==original
     end
-    puts 'HOST_FONT_PROBE_PASS profiles=modern+retro sizes=17,23 restore=original_profile_and_policy unavailable=no_mutation'
+    puts 'HOST_FONT_PROBE_PASS profiles=hack+terminus+spleen sizes=17,23 restore=original_profile_and_policy unavailable=no_mutation'
   rescue Exception
     warn File.read(File.join(work,'server.log')); raise
   ensure

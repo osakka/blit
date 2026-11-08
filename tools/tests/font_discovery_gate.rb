@@ -4,8 +4,8 @@
 # ADR 0195: the font list is discovered, not written by hand.
 #   * every shipped text font in fonts.source.json is listed, by its family
 #     name in kebab form, source "shipped", available, with an 11x22 cell at
-#     22 px like every other
-#   * the narrow-cell PSFs are pixel profiles; the square wide-cell PSF is
+#     22 px like every other; a directory of masters is one font (ADR 0227)
+#   * the narrow-cell PSF is the pixel profile; the square wide-cell PSF is
 #     listed as rejected, with its reason
 #   * a monospaced font copied into the local text directory appears on the
 #     next listing, source "local", with no restart, and can be selected
@@ -61,8 +61,9 @@ Dir.mktmpdir('blit-font-discovery') do |root|
     Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
     fonts = request('GET', '/v1/fonts')[1]
     outline = fonts['profiles'].select { |p| p['rasterization'] == 'native-antialiased' }
-    check(outline.size == manifest['text'].size,
-          "#{outline.size} outline profiles for #{manifest['text'].size} shipped text fonts")
+    shipped = manifest['text'].map { |t| t['file'].split('/')[1] }.uniq
+    check(outline.size == shipped.size,
+          "#{outline.size} outline profiles for #{shipped.size} shipped text fonts")
     outline.each do |profile|
       check(profile['source'] == 'shipped' && profile['available'], "#{profile['id']}: #{profile}")
       check(profile['id'] == kebab(profile['title']), "#{profile['id']} is not its family name #{profile['title']}")
@@ -71,7 +72,7 @@ Dir.mktmpdir('blit-font-discovery') do |root|
             "#{profile['id']} at 22 px -> #{code} #{reply['active']&.fetch('cell_pixels', nil)}")
     end
     pixel = fonts['profiles'].select { |p| p['rasterization'] == 'bitmap-nearest' }.map { |p| p['id'] }.sort
-    check(pixel == %w[blit-spleen16 blit-terminus16], "pixel profiles #{pixel}")
+    check(pixel == %w[blit-terminus16], "pixel profiles #{pixel}")
     wide = fonts['rejected'].find { |r| r['path'].end_with?('Blit-Unifont16.psf') }
     check(wide && wide['reason'] == 'a wide-cell font', "the wide-cell PSF is not reported: #{fonts['rejected']}")
 

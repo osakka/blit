@@ -24,7 +24,7 @@
 # one probe call inserted into draw_fitted (anchor: the loop that copies the
 # placed bitmap into the glyph, so the probe sees the final placement), so it sees the real bitmap against the real cell. Set
 # BLIT_RASTER_SOURCE to sweep another copy of blit_raster.c (a proposed
-# patch); BLIT_ICON_CLIP_FONTS=all adds Fira, Plex, 3270 and Spleen; BLIT_ICON_CLIP_REPORT=1 prints the per-class table even on a pass.
+# patch); BLIT_ICON_CLIP_FONTS=all adds Fira, Plex, 3270 and Spleen (its masters, ADR 0227); BLIT_ICON_CLIP_REPORT=1 prints the per-class table even on a pass.
 
 require 'json'
 require 'open3'
@@ -39,7 +39,7 @@ FONTS = { 'hack' => ['Blit-Terminus16.psf', 'text/Hack-Regular.ttf'],
           'plex' => ['Blit-Terminus16.psf', 'text/IBMPlexMono-Regular.ttf'],
           '3270' => ['Blit-Terminus16.psf', 'text/3270-Regular.ttf'],
           'terminus' => ['Blit-Terminus16.psf', '-'],
-          'spleen' => ['Blit-Spleen16.psf', '-'] }.freeze
+          'spleen' => ['Blit-Terminus16.psf', 'text/spleen'] }.freeze
 
 def fail!(why)
   abort "ICON_CLIP_FAIL #{why}"

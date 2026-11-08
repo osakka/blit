@@ -48,8 +48,10 @@ Dir.chdir(root) do
       File.write(rows_file, rows.map { |r| r.join(' ') }.join("\n") + "\n")
       names = { 'Hack-Regular.ttf' => 'Hack', 'JetBrainsMonoNL-Regular.ttf' => 'JetBrains Mono',
                 'FiraCode-Regular.ttf' => 'Fira Code', 'IBMPlexMono-Regular.ttf' => 'IBM Plex Mono',
-                '3270-Regular.ttf' => 'IBM 3270' }
+                '3270-Regular.ttf' => 'IBM 3270', 'spleen' => 'Spleen' }
+      # ADR 0227: a directory in text/ is one font, of masters.
       faces = JSON.parse(File.read('assets/fonts/fonts.source.json')).fetch('text').map { |t| t.fetch('file') }
+        .map { |f| File.dirname(f) == 'text' ? f : File.dirname(f) }.uniq
       arguments = ['assets/fonts/Blit-Terminus16.psf', 'assets/fonts/NotoColorEmoji.ttf', rows_file, ppm] +
         faces.map { |f| "#{names.fetch(File.basename(f))}=assets/fonts/#{f}" }
     end

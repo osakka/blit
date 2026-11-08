@@ -17,8 +17,10 @@ text.each do |entry|
   check(root, entry.fetch('file'), entry.fetch('sha256'), 'text font')
   check(root, entry.fetch('license_file'), entry.fetch('license_sha256'), 'text font licence')
 end
-shipped = Dir.children(File.join(root, 'text')).sort
-pinned = text.map { |e| File.basename(e.fetch('file')) }.sort
+# ADR 0227: a directory in text/ is one font of masters; its files are
+# pinned one by one like any text font's.
+shipped = Dir.glob('text/**/*', base: root).select { |f| File.file?(File.join(root, f)) }.sort
+pinned = text.map { |e| e.fetch('file') }.sort
 raise "text/ holds unpinned files: #{shipped - pinned}" unless shipped == pinned
 stack = manifest.fetch('stack')
 check(root, stack.fetch('icons').fetch('file'), stack.fetch('icons').fetch('sha256'), 'Blit icons')

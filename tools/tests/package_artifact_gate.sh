@@ -58,7 +58,10 @@ manifest_hash_matches hibr_adapter_sha256 \
 
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
-test -f "$stage/usr/lib/blit/fonts/Blit-Spleen16.psf"
+# ADR 0227: Spleen is one text font of five masters.
+for master in 6x12 8x16 12x24 16x32 32x64; do
+    test -f "$stage/usr/lib/blit/fonts/text/spleen/spleen-$master.otf"
+done
 test -f "$stage/usr/lib/blit/fonts/text/3270-Regular.ttf"
 test -f "$stage/usr/lib/blit/fonts/nerd-glyphnames-v3.4.0.json"
 test -f "$stage/usr/lib/blit/fonts/licenses/IBM3270-LICENSE.txt"
@@ -97,17 +100,19 @@ test -x "$stage/usr/share/blit/hibr/blit-desktop-place.hibr"
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
 # ADR 0194: the font directory holds Blit's own fonts. The console fonts the
 # old profiles named, a stale build copy among them, and the stray Hack copy
-# must not come back, nor Iosevka Term, dropped in 0.2.37 for its size.
+# must not come back, nor Iosevka Term, dropped in 0.2.37 for its size, nor
+# the fixed 16 px Spleen, replaced by the Spleen masters (ADR 0227).
 for gone in Uni2-Terminus16.psf Lat15-Terminus16.psf Hack-Regular.ttf Hack-LICENSE.txt \
         Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf Blit-Hibr-Unifont16.psf \
         BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitJetBrainlessNerd-Regular.ttf \
-        BlitArabicRetro.ttf modern-fonts.source.json text/IosevkaTerm-Regular.ttf; do
+        BlitArabicRetro.ttf modern-fonts.source.json text/IosevkaTerm-Regular.ttf \
+        Blit-Spleen16.psf Blit-Spleen16.source.json; do
     if [ -e "$stage/usr/lib/blit/fonts/$gone" ]; then
         echo "PACKAGE_ARTIFACT_FAIL retired font shipped: $gone" >&2
         exit 1
     fi
 done
-for font_asset in Blit-Terminus16.psf Blit-Unifont16.psf Blit-Spleen16.psf Blit-Spleen16.source.json licenses/Spleen-LICENSE.txt text/Hack-Regular.ttf text/3270-Regular.ttf text/JetBrainsMonoNL-Regular.ttf text/FiraCode-Regular.ttf text/IBMPlexMono-Regular.ttf licenses/Hack-LICENSE.md licenses/IBM3270-LICENSE.txt licenses/JetBrainsMono-OFL.txt licenses/FiraCode-OFL.txt licenses/IBMPlexMono-OFL.txt BlitIcons-Regular.ttf SymbolsNerdFontMono-Regular.ttf licenses/NerdFontsSymbolsOnly-LICENSE.txt NotoSansSymbols2-Regular.ttf NotoSansSymbols-Regular.ttf NotoSansMath-Regular.ttf Unifont-Regular.otf UnifontUpper-Regular.otf licenses/Unifont-LICENSE.txt NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt fonts.source.json icons/catalogue.json icons/LICENSE.txt icons/blit.svg icons/hibr-pen.svg icons/wifi-bars.svg icons/bluetooth.svg icons/berkanan.svg icons/wired.svg icons/battery.svg icons/battery-charging.svg icons/battery-ac.svg icons/battery-wide.svg icons/battery-wide-charging.svg icons/battery-wide-ac.svg icons/volume.svg icons/volume-muted.svg icons/hui.svg icons/hui-mark.svg icons/wiretap.svg icons/wiretap-off.svg icons/wiretap-1.svg icons/wifi-signal.svg icons/wifi-off.svg icons/power.svg icons/phone-off.svg icons/phone-wait.svg icons/phone-on.svg icons/phone-ring.svg icons/phone-classic-off.svg icons/phone-classic-wait.svg icons/phone-classic-on.svg icons/phone-classic-ring.svg; do
+for font_asset in Blit-Terminus16.psf Blit-Unifont16.psf licenses/Spleen-LICENSE.txt text/spleen/spleen-6x12.otf text/spleen/spleen-8x16.otf text/spleen/spleen-12x24.otf text/spleen/spleen-16x32.otf text/spleen/spleen-32x64.otf text/Hack-Regular.ttf text/3270-Regular.ttf text/JetBrainsMonoNL-Regular.ttf text/FiraCode-Regular.ttf text/IBMPlexMono-Regular.ttf licenses/Hack-LICENSE.md licenses/IBM3270-LICENSE.txt licenses/JetBrainsMono-OFL.txt licenses/FiraCode-OFL.txt licenses/IBMPlexMono-OFL.txt BlitIcons-Regular.ttf SymbolsNerdFontMono-Regular.ttf licenses/NerdFontsSymbolsOnly-LICENSE.txt NotoSansSymbols2-Regular.ttf NotoSansSymbols-Regular.ttf NotoSansMath-Regular.ttf Unifont-Regular.otf UnifontUpper-Regular.otf licenses/Unifont-LICENSE.txt NotoColorEmoji.ttf NotoEmojiText.ttf NotoEmojiText-LICENSE.txt licenses/NerdFonts-LICENSE.txt licenses/FontAwesome-LICENSE.txt NotoColorEmoji-LICENSE.txt fonts.source.json icons/catalogue.json icons/LICENSE.txt icons/blit.svg icons/hibr-pen.svg icons/wifi-bars.svg icons/bluetooth.svg icons/berkanan.svg icons/wired.svg icons/battery.svg icons/battery-charging.svg icons/battery-ac.svg icons/battery-wide.svg icons/battery-wide-charging.svg icons/battery-wide-ac.svg icons/volume.svg icons/volume-muted.svg icons/hui.svg icons/hui-mark.svg icons/wiretap.svg icons/wiretap-off.svg icons/wiretap-1.svg icons/wifi-signal.svg icons/wifi-off.svg icons/power.svg icons/phone-off.svg icons/phone-wait.svg icons/phone-on.svg icons/phone-ring.svg icons/phone-classic-off.svg icons/phone-classic-wait.svg icons/phone-classic-on.svg icons/phone-classic-ring.svg; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL font differs from recorded source: $font_asset" >&2

@@ -418,9 +418,9 @@ suite_font() {
     run_gate glyph_render_gate.rb ruby tools/tests/glyph_render_gate.rb
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
-    run_gate retro_font_gate.py python3 tools/tests/retro_font_gate.py
     run_gate font_assets_gate.rb ruby tools/tests/font_assets_gate.rb
     run_gate font_discovery_gate.rb ruby tools/tests/font_discovery_gate.rb
+    run_gate spleen_master_gate.rb ruby tools/tests/spleen_master_gate.rb
     run_gate font_reference_gate.rb ruby tools/tests/font_reference_gate.rb
     run_gate powerline_geometry_gate.rb ruby tools/tests/powerline_geometry_gate.rb
     run_gate bar_corner_gate.rb ruby tools/tests/bar_corner_gate.rb

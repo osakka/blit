@@ -49,7 +49,7 @@ int main(int argc, char **argv)
             int columns;
             cp = borrowed[i];
             columns = cp == 0x1f600 ? 2 : 1;
-            /* Spleen draws its own Powerline arrow; then it keeps it. */
+            /* A pixel font with its own Powerline arrow keeps it. */
             if (blit_font_has_glyph(&font, cp) && cp < 0x100000) {
                 CHECK(!blit_raster_get(r, cp, columns, 0, &g));
                 continue;

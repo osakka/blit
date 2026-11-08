@@ -1067,7 +1067,8 @@ Fonts are discovered (ADR 0195):
 
 - **What `GET /v1/fonts` lists:** every regular, monospaced TTF or OTF in
   the fonts root's `text/` folder or `/usr/local/lib/blit/fonts/text`, plus
-  the narrow-cell PSFs in the root.
+  the narrow-cell PSFs in the root. A folder inside `text/` is one font of
+  masters (ADR 0227), listed once: see below.
 - **Each profile** has an `id` (its family name in kebab form, for example
   `jetbrains-mono-nl`), a `title`, a `source` (`shipped` or `local`), a
   `path`, `available` and `rasterization`.
@@ -1076,13 +1077,42 @@ Fonts are discovered (ADR 0195):
 - **The list is read fresh on each request,** so a font copied in appears
   without a restart.
 - **Shipped fonts:** `hack`, `ibm-3270`, `jetbrains-mono-nl`, `fira-code`,
-  `ibm-plex-mono`, `blit-terminus16` and `blit-spleen16`. Without a saved
+  `ibm-plex-mono`, `spleen` and `blit-terminus16`. Without a saved
   selection Blit boots with `blit-terminus16`.
 - **Glyph coverage:** every outline font draws icons, symbols, box drawing,
   Braille, blocks, Arabic, emoji and Unifont's coverage from Blit's glyph
   stack, fitted to that font.
-- **Retired ids:** `blit-modern`, `blit-retro`, `blit-jetbrainless` and the
-  console fonts. A saved selection naming one falls back to the boot font.
+- **Retired ids:** `blit-modern`, `blit-retro`, `blit-jetbrainless`, the
+  console fonts, and `blit-spleen16` (0.3.68, replaced by `spleen`, ADR
+  0227). A saved selection naming one falls back to the boot font; there
+  are no aliases.
+
+A font of masters (ADR 0227) is a folder in `text/` whose font files are
+pixel fonts drawn as outlines, each crisp at its own cell height and its
+whole multiples. Spleen is one: `text/spleen/` holds Spleen 2.2.0's 6x12,
+8x16, 12x24, 16x32 and 32x64 masters, the larger ones redrawn by its author
+rather than scaled.
+
+- **Listed once:** its `id` and `title` come from the words its masters'
+  family names share (`Spleen`), its `path` is the folder, and
+  `profiles[].masters` lists each master's design cell, smallest first:
+  `["6x12","8x16","12x24","16x32","32x64"]`. A master is never a font of
+  its own; one that is not on a pixel grid, or repeats another's height,
+  is in `rejected` with its reason.
+- **One master per size.** For a cell height H: the largest master whose
+  height divides H (crisp); else the largest master below H (scaled); else
+  the smallest. 16 px is 8x16, 48 px is 12x24, 20 px is 8x16 scaled.
+  `size_px` and `scale` changes pick again; a display's zoom does not, since
+  it enlarges the composed image (ADR 0204).
+- **`active.master`** names the master in use (`"8x16"`) and
+  **`active.master_fit`** is `crisp` or `scaled`; both are null for any
+  other font.
+- **Crisp is exact:** every design pixel is a whole square of device pixels,
+  fully on or off, and the hinting setting doesn't apply (FreeType's
+  hinter moves whole glyphs a pixel at some multiples). Scaled sizes are
+  drawn as any outline font, with the hinting setting.
+- **Coverage:** what a master lacks (6x12 has no Latin Extended-A, for
+  one) comes from the glyph stack, as for any text font.
 
 Discover available profiles through `GET /v1/fonts`, not a version
 comparison. `colour_glyphs: true` does not imply full emoji-sequence

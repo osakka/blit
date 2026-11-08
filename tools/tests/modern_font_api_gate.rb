@@ -21,7 +21,7 @@ end
 Dir.mktmpdir('blit-modern-api') do |work|
   fonts = File.join(work, 'fonts'); Dir.mkdir(fonts); Dir.mkdir(File.join(fonts, 'text'))
   # ADR 0195: a fonts root holds the stack; text/ holds the text fonts.
-  %w[Blit-Terminus16.psf Blit-Spleen16.psf text/Hack-Regular.ttf text/3270-Regular.ttf BlitArabicModern.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
+  %w[Blit-Terminus16.psf text/Hack-Regular.ttf text/3270-Regular.ttf BlitArabicModern.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
     FileUtils.copy_file(File.join(root, 'assets/fonts', asset), File.join(fonts, asset))
   end
   env = TestProfile.environment.merge('BLIT_SETTINGS'=>'load',
@@ -64,7 +64,7 @@ Dir.mktmpdir('blit-modern-api') do |work|
       raise 'modern legacy scale policy failed' unless active['sizing'] == 'scale' && active['scale'] == scale && active['rasterization'] == 'native-antialiased'
     end
     request.call('PUT', '/v1/fonts', {size_px:23})
-    active = request.call('PUT', '/v1/fonts', {font_id:'blit-spleen16'}).fetch('active')
+    active = request.call('PUT', '/v1/fonts', {font_id:'blit-terminus16'}).fetch('active')
     raise 'retro policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'bitmap-nearest'
     raise 'bitmap misreports Arabic' unless active['arabic_companion'].nil?
     active = request.call('PUT', '/v1/fonts', {font_id:'hack'}).fetch('active')

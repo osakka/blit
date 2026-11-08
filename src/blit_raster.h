@@ -68,6 +68,10 @@ int blit_raster_set_arabic(BlitRaster *raster, const char *path);
 const char *blit_raster_arabic_path(const BlitRaster *raster);
 const char *blit_raster_arabic_family(const BlitRaster *raster);
 int blit_raster_baseline(const BlitRaster *raster);
+/* ADR 0227: the design cell of the master a font of masters is drawn with,
+   and whether the cell height is a whole multiple of it (crisp) or not
+   (scaled); NULL for any other font. */
+const BlitFontGrid *blit_raster_master(const BlitRaster *raster, int *crisp);
 /* pen: the cell's icon pen (above); an unknown pen returns 0. */
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterIconPen pen, BlitRasterGlyph *glyph);
@@ -94,6 +98,6 @@ uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,
                          uint32_t foreground, uint32_t background);
 
 int blit_raster_inspect_outline(const char *path, char *family, size_t family_size,
-                                char *reason, size_t reason_size);
+                                BlitFontGrid *grid, char *reason, size_t reason_size);
 
 #endif

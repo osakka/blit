@@ -262,6 +262,10 @@ typedef struct {
     char reason[96];   /* empty for a usable font */
     int outline;
     int local;
+    /* ADR 0227: a font of masters is a directory in text/, listed once;
+       each master is an entry of its own after it, never a profile. */
+    int family, master;
+    BlitFontGrid grid;
     off_t size;
     time_t mtime;
 } BlitFontFile;
@@ -290,11 +294,19 @@ const char *blit_font_root_file(const char *name)
     return path;
 }
 
+static int font_outline_name(const char *name)
+{
+    size_t length = name ? strlen(name) : 0;
+    return length > 4 && (strcasecmp(name + length - 4, ".ttf") == 0 ||
+                          strcasecmp(name + length - 4, ".otf") == 0);
+}
+
 int blit_font_is_outline(const char *path)
 {
-    size_t length = path ? strlen(path) : 0;
-    return length > 4 && (strcasecmp(path + length - 4, ".ttf") == 0 ||
-                          strcasecmp(path + length - 4, ".otf") == 0);
+    struct stat info;
+    /* ADR 0227: a directory is one text font of several masters. */
+    return font_outline_name(path) ||
+        (path && *path && stat(path, &info) == 0 && S_ISDIR(info.st_mode));
 }
 
 static void font_kebab(const char *name, char *id, size_t capacity)
@@ -330,6 +342,7 @@ static void font_inspect_outline(BlitFontFile *file)
     }
     family[0] = '\0';
     if (!font_outline_inspector(file->path, family, sizeof(family),
+                                file->master ? &file->grid : NULL,
                                 file->reason, sizeof(file->reason)))
         return;
     snprintf(file->title, sizeof(file->title), "%s", family);
@@ -365,10 +378,61 @@ static int font_name_order(const void *a, const void *b)
     return strcmp(*(char *const *)a, *(char *const *)b);
 }
 
-/* One directory's candidate files, sorted, appended to the new list. */
-static void font_scan(const char *directory, int outline, int local,
+static void font_scan(const char *directory, int outline, int local, int master,
                       const BlitFontFile *previous, int previous_count,
-                      BlitFontFile *next, int *count)
+                      BlitFontFile *next, int *count, int capacity);
+
+/* ADR 0227: a directory in text/ is one font of masters, its font files.
+   Each master is a pixel-grid font, its design cell read from its own
+   outlines by the inspector; two masters of one design height are one too
+   many. The font's title is the words its masters' family names share
+   ("Spleen 6x12" ... "Spleen 32x64" make "Spleen"), its id their kebab
+   form, as for any text font. It is listed once, at slot, and its masters
+   follow it in the list, never as profiles. */
+static void font_scan_family(BlitFontFile *family, int slot, const BlitFontFile *previous,
+                             int previous_count, BlitFontFile *next, int *count, int capacity)
+{
+    char title[96] = "";
+    int i, j, usable = 0;
+    font_scan(family->path, 1, family->local, 1, previous, previous_count, next, count, capacity);
+    for (i = slot + 1; i < *count; ++i) {
+        BlitFontFile *master = &next[i];
+        if (master->reason[0]) continue;
+        for (j = slot + 1; j < i; ++j)
+            if (!next[j].reason[0] && next[j].grid.height == master->grid.height) {
+                snprintf(master->reason, sizeof(master->reason), "same design height as %s",
+                         strrchr(next[j].path, '/') + 1);
+                break;
+            }
+        if (master->reason[0]) continue;
+        if (!usable++) snprintf(title, sizeof(title), "%s", master->title);
+        else {
+            /* Keep the leading words this master's family name shares. */
+            size_t k = 0, end = 0;
+            while (title[k] && title[k] == master->title[k]) {
+                if (title[k + 1] == '\0' || title[k + 1] == ' ')
+                    if (master->title[k + 1] == '\0' || master->title[k + 1] == ' ') end = k + 1;
+                ++k;
+            }
+            title[end] = '\0';
+        }
+    }
+    if (!usable)
+        snprintf(family->reason, sizeof(family->reason), "no usable masters");
+    else if (!title[0])
+        snprintf(family->reason, sizeof(family->reason), "masters of different families");
+    else {
+        snprintf(family->title, sizeof(family->title), "%s", title);
+        font_kebab(title, family->id, sizeof(family->id));
+    }
+}
+
+/* One directory's candidate files, sorted, appended to the new list (at
+   most capacity entries). In a text/ directory, a subdirectory is a font of
+   masters (ADR 0227). */
+static void font_scan(const char *directory, int outline, int local, int master,
+                      const BlitFontFile *previous, int previous_count,
+                      BlitFontFile *next, int *count, int capacity)
 {
     DIR *dir = opendir(directory);
     struct dirent *entry;
@@ -377,7 +441,7 @@ static void font_scan(const char *directory, int outline, int local,
     if (!dir) return;
     while ((entry = readdir(dir)) != NULL && found < BLIT_FONT_MAX_FILES) {
         size_t length = strlen(entry->d_name);
-        int wanted = outline ? blit_font_is_outline(entry->d_name) :
+        int wanted = outline ? font_outline_name(entry->d_name) || !master :
             length > 4 && strcmp(entry->d_name + length - 4, ".psf") == 0;
         if (wanted && entry->d_name[0] != '.') names[found++] = strdup(entry->d_name);
     }
@@ -386,31 +450,41 @@ static void font_scan(const char *directory, int outline, int local,
     for (i = 0; i < found; ++i) {
         BlitFontFile file;
         struct stat info;
+        int slot;
         memset(&file, 0, sizeof(file));
         snprintf(file.path, sizeof(file.path), "%s/%s", directory, names[i]);
         free(names[i]);
-        if (*count >= BLIT_FONT_MAX_FILES || stat(file.path, &info) != 0 ||
-            !S_ISREG(info.st_mode)) continue;
+        if (*count >= capacity || stat(file.path, &info) != 0) continue;
         file.outline = outline;
         file.local = local;
-        file.size = info.st_size;
-        file.mtime = info.st_mtime;
-        for (j = 0; j < previous_count; ++j)
-            if (!strcmp(previous[j].path, file.path) && previous[j].size == file.size &&
-                previous[j].mtime == file.mtime) break;
-        if (j < previous_count) file = previous[j];
-        else if (outline) font_inspect_outline(&file);
-        else font_inspect_pixel(&file);
+        file.master = master;
+        if (outline && !master && S_ISDIR(info.st_mode)) {
+            file.family = 1;
+            slot = (*count)++;
+            font_scan_family(&file, slot, previous, previous_count, next, count, capacity);
+        } else {
+            if (!S_ISREG(info.st_mode) || (outline && !font_outline_name(file.path))) continue;
+            file.size = info.st_size;
+            file.mtime = info.st_mtime;
+            for (j = 0; j < previous_count; ++j)
+                if (!strcmp(previous[j].path, file.path) && previous[j].size == file.size &&
+                    previous[j].mtime == file.mtime) break;
+            if (j < previous_count) file = previous[j];
+            else if (outline) font_inspect_outline(&file);
+            else font_inspect_pixel(&file);
+            slot = (*count)++;
+        }
         /* The first font to claim an id keeps it: the shipped set before an
-           operator's own. A later file of the same family is reported. */
-        if (!file.reason[0])
-            for (j = 0; j < *count; ++j)
-                if (!next[j].reason[0] && !strcmp(next[j].id, file.id)) {
+           operator's own. A later file of the same family is reported. A
+           master's family name is its font's, so masters claim none. */
+        if (!file.reason[0] && !master)
+            for (j = 0; j < slot; ++j)
+                if (!next[j].reason[0] && !next[j].master && !strcmp(next[j].id, file.id)) {
                     snprintf(file.reason, sizeof(file.reason), "same family as %s",
                              strrchr(next[j].path, '/') + 1);
                     break;
                 }
-        next[(*count)++] = file;
+        next[slot] = file;
     }
 }
 
@@ -420,23 +494,84 @@ void blit_font_discover(void)
     char directory[1024];
     int count = 0;
     snprintf(directory, sizeof(directory), "%s", blit_font_root());
-    font_scan(directory, 0, 0, font_files, font_file_count, next, &count);
+    font_scan(directory, 0, 0, 0, font_files, font_file_count, next, &count,
+              BLIT_FONT_MAX_FILES);
     snprintf(directory, sizeof(directory), "%s/text", blit_font_root());
-    font_scan(directory, 1, 0, font_files, font_file_count, next, &count);
+    font_scan(directory, 1, 0, 0, font_files, font_file_count, next, &count,
+              BLIT_FONT_MAX_FILES);
     snprintf(directory, sizeof(directory), "%s/text", font_local_root());
-    font_scan(directory, 1, 1, font_files, font_file_count, next, &count);
+    font_scan(directory, 1, 1, 0, font_files, font_file_count, next, &count,
+              BLIT_FONT_MAX_FILES);
     memcpy(font_files, next, sizeof(next[0]) * (size_t)count);
     font_file_count = count;
 }
 
-/* The usable fonts are the profiles; index i is the i-th usable file. */
+/* The usable fonts are the profiles; index i is the i-th usable file. A
+   master is part of its font, not a profile (ADR 0227). */
+static int font_is_profile(const BlitFontFile *file)
+{
+    return !file->reason[0] && !file->master;
+}
+
 static const BlitFontFile *font_profile(int index)
 {
     int i, seen = 0;
     if (!font_file_count) blit_font_discover();
     for (i = 0; i < font_file_count; ++i)
-        if (!font_files[i].reason[0] && seen++ == index) return &font_files[i];
+        if (font_is_profile(&font_files[i]) && seen++ == index) return &font_files[i];
     return NULL;
+}
+
+static int font_master_order(const void *a, const void *b)
+{
+    return ((const BlitFontMaster *)a)->grid.height - ((const BlitFontMaster *)b)->grid.height;
+}
+
+int blit_font_masters(const char *path, BlitFontMaster *masters, int capacity)
+{
+    /* The same reading as the font list's, of this directory alone, so a
+       font of masters opens wherever it is (a gate's copy too); the list's
+       last reading saves inspecting a master again. */
+    static BlitFontFile found[BLIT_FONT_MAX_MASTERS + 1];
+    BlitFontFile family;
+    struct stat info;
+    int i, count = 0, total = 1;
+    if (!path || !masters || capacity < 1 || stat(path, &info) != 0 || !S_ISDIR(info.st_mode))
+        return 0;
+    memset(&family, 0, sizeof(family));
+    snprintf(family.path, sizeof(family.path), "%s", path);
+    family.outline = family.family = 1;
+    font_scan_family(&family, 0, font_files, font_file_count, found, &total,
+                     BLIT_FONT_MAX_MASTERS + 1);
+    if (family.reason[0]) return 0;
+    for (i = 1; i < total && count < capacity; ++i)
+        if (!found[i].reason[0]) {
+            masters[count].path = found[i].path;
+            masters[count++].grid = found[i].grid;
+        }
+    qsort(masters, (size_t)count, sizeof(masters[0]), font_master_order);
+    return count;
+}
+
+/* ADR 0227: the single source of the master rule. A master is crisp at its
+   design height and every whole multiple of it, and the largest such master
+   carries the most of its author's detail. A height no master divides takes
+   the largest master below it, scaled up, and a height below every master
+   the smallest, scaled down. */
+int blit_font_master_choose(const BlitFontMaster *masters, int count, int cell_height)
+{
+    int i, best = -1;
+    for (i = 0; i < count; ++i)
+        if (cell_height % masters[i].grid.height == 0 &&
+            (best < 0 || masters[i].grid.height > masters[best].grid.height)) best = i;
+    if (best >= 0) return best;
+    for (i = 0; i < count; ++i)
+        if (masters[i].grid.height < cell_height &&
+            (best < 0 || masters[i].grid.height > masters[best].grid.height)) best = i;
+    if (best >= 0) return best;
+    for (i = 0; i < count; ++i)
+        if (best < 0 || masters[i].grid.height < masters[best].grid.height) best = i;
+    return best;
 }
 
 /* The 16x16 font for wide cells (ADR 0062). It is a separate artifact because
@@ -461,7 +596,7 @@ int blit_font_profile_count(void)
 {
     int i, count = 0;
     if (!font_file_count) blit_font_discover();
-    for (i = 0; i < font_file_count; ++i) count += !font_files[i].reason[0];
+    for (i = 0; i < font_file_count; ++i) count += font_is_profile(&font_files[i]);
     return count;
 }
 

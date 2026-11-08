@@ -1,5 +1,5 @@
 {
-  "policy": "ADR 0195: text fonts ship unmodified in text/ and are discovered; every glyph they lack comes from the shipped stack, fitted at draw time. Each file here is pinned by SHA-256 to its upstream; package_artifact_gate checks the package against this manifest.",
+  "policy": "ADR 0195: text fonts ship unmodified in text/ and are discovered (a directory there is one font of masters, ADR 0227); every glyph they lack comes from the shipped stack, fitted at draw time. Each file here is pinned by SHA-256 to its upstream; package_artifact_gate checks the package against this manifest.",
   "build": {
     "fonttools_version": "4.60.1",
     "icons_generator": "tools/fonts/build-blit-icons.py"
@@ -64,6 +64,66 @@
       "license_file": "licenses/IBMPlexMono-OFL.txt",
       "license_upstream": "ibm-plex-mono.zip:ibm-plex-mono/LICENSE.txt",
       "license_sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
+    },
+    {
+      "file": "text/spleen/spleen-6x12.otf",
+      "source": "Spleen 2.2.0, master 6x12 (ADR 0227)",
+      "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
+      "upstream_sha256": "ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89",
+      "member": "spleen-2.2.0/spleen-6x12.otf",
+      "sha256": "c7ab7083f6074949892f48cee940ad3c921a1276c8675d7c7e8fc51879a0236b",
+      "license": "BSD-2-Clause",
+      "license_file": "licenses/Spleen-LICENSE.txt",
+      "license_upstream": "spleen-2.2.0.tar.gz:spleen-2.2.0/LICENSE",
+      "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
+    },
+    {
+      "file": "text/spleen/spleen-8x16.otf",
+      "source": "Spleen 2.2.0, master 8x16 (ADR 0227)",
+      "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
+      "upstream_sha256": "ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89",
+      "member": "spleen-2.2.0/spleen-8x16.otf",
+      "sha256": "cadfddb5f4f9a22d7fd879760adfd82dc801993d13d8faf1afaf375c05affe74",
+      "license": "BSD-2-Clause",
+      "license_file": "licenses/Spleen-LICENSE.txt",
+      "license_upstream": "spleen-2.2.0.tar.gz:spleen-2.2.0/LICENSE",
+      "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
+    },
+    {
+      "file": "text/spleen/spleen-12x24.otf",
+      "source": "Spleen 2.2.0, master 12x24 (ADR 0227)",
+      "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
+      "upstream_sha256": "ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89",
+      "member": "spleen-2.2.0/spleen-12x24.otf",
+      "sha256": "9e4b0c1a9706ea4ee27815e473b7bcff4aac33e58210a4f74978fbb6feba5d32",
+      "license": "BSD-2-Clause",
+      "license_file": "licenses/Spleen-LICENSE.txt",
+      "license_upstream": "spleen-2.2.0.tar.gz:spleen-2.2.0/LICENSE",
+      "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
+    },
+    {
+      "file": "text/spleen/spleen-16x32.otf",
+      "source": "Spleen 2.2.0, master 16x32 (ADR 0227)",
+      "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
+      "upstream_sha256": "ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89",
+      "member": "spleen-2.2.0/spleen-16x32.otf",
+      "sha256": "937b5787414ca4976ee7a1553d244a8d71cf232d2da2e5a173b3cc53ba22deed",
+      "license": "BSD-2-Clause",
+      "license_file": "licenses/Spleen-LICENSE.txt",
+      "license_upstream": "spleen-2.2.0.tar.gz:spleen-2.2.0/LICENSE",
+      "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
+    },
+    {
+      "file": "text/spleen/spleen-32x64.otf",
+      "source": "Spleen 2.2.0, master 32x64 (ADR 0227)",
+      "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
+      "upstream_sha256": "ec42925c6b56d2138c862b2f97147c872e472f674bf03423417d827a08d69a89",
+      "member": "spleen-2.2.0/spleen-32x64.otf",
+      "sha256": "ae970e820426137d1b0d0bca695d1edfd1c8cd778f964544af3555d21ce3fed5",
+      "license": "BSD-2-Clause",
+      "license_file": "licenses/Spleen-LICENSE.txt",
+      "license_upstream": "spleen-2.2.0.tar.gz:spleen-2.2.0/LICENSE",
+      "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
     }
   ],
   "stack": {

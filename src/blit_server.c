@@ -18674,12 +18674,19 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_path[512];
     char arabic_json[4096] = "null";
+    char master_json[64] = "null", master_fit_json[16] = "null";
     const char *active_id;
+    const BlitFontGrid *master;
     size_t used = 0;
-    int i;
+    int i, crisp = 0;
     int first = 1;
 
     active_id = blit_font_profile_for_path(runtime->font.path);
+    /* ADR 0227: the master a font of masters is drawn with at this size. */
+    if ((master = blit_raster_master(runtime->font.raster_state, &crisp)) != NULL) {
+        snprintf(master_json, sizeof(master_json), "\"%dx%d\"", master->width, master->height);
+        snprintf(master_fit_json, sizeof(master_fit_json), "\"%s\"", crisp ? "crisp" : "scaled");
+    }
     if (blit_raster_arabic_path(runtime->font.raster_state)) {
         char path[2048],family[512];
         json_escape(blit_raster_arabic_path(runtime->font.raster_state),path,sizeof(path));
@@ -18699,6 +18706,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
            characters as '?' while the released package drew them. */
         "\"glyphs\":%lu,\"mappings\":%lu,"
         "\"rasterization\":\"%s\",\"colour_glyphs\":%s,\"arabic_companion\":%s,"
+        "\"master\":%s,\"master_fit\":%s,"
         "\"raster_cache\":{\"bytes\":%lu,\"renders\":%lu}},"
         "\"profiles\":[",
         active_id, escaped_path, font_scale_value(runtime),
@@ -18711,7 +18719,7 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         (unsigned long)runtime->font.unicode_count,
         blit_font_is_outline(runtime->font.path) ? "native-antialiased" : "bitmap-nearest",
         runtime->font.raster_get ? "true" : "false",
-        arabic_json,
+        arabic_json, master_json, master_fit_json,
         (unsigned long)blit_raster_cached_bytes(runtime->font.raster_state),
         blit_raster_render_count(runtime->font.raster_state));
     /* ADR 0195: the list is what the font directories hold right now. */
@@ -18721,6 +18729,10 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         const char *path = blit_font_profile_path(i);
         char profile_path[1024], title[256];
         char companion_json[2200]="null";
+        char masters_json[160] = "";
+        BlitFontMaster masters[BLIT_FONT_MAX_MASTERS];
+        int master_count, m;
+        size_t masters_used;
         json_escape(blit_font_profile_title(i), title, sizeof(title));
         json_escape(path, profile_path, sizeof(profile_path));
         if (blit_font_arabic_path(path)) {
@@ -18728,13 +18740,21 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
             json_escape(blit_font_arabic_path(path),escaped,sizeof(escaped));
             snprintf(companion_json,sizeof(companion_json),"\"%s\"",escaped);
         }
+        /* ADR 0227: a font of masters lists their design cells. */
+        master_count = blit_font_masters(path, masters, BLIT_FONT_MAX_MASTERS);
+        for (m = 0, masters_used = 0; m < master_count; ++m)
+            masters_used += (size_t)snprintf(masters_json + masters_used,
+                sizeof(masters_json) - masters_used, "%s\"%dx%d\"%s",
+                m ? "," : ",\"masters\":[", masters[m].grid.width, masters[m].grid.height,
+                m + 1 == master_count ? "]" : "");
         used += (size_t)snprintf(body + used, capacity - used,
             "%s{\"id\":\"%s\",\"title\":\"%s\",\"path\":\"%s\",\"source\":\"%s\","
-            "\"available\":%s,\"rasterization\":\"%s\",\"arabic_companion_path\":%s}",
+            "\"available\":%s,\"rasterization\":\"%s\",\"arabic_companion_path\":%s%s}",
             first ? "" : ",", id, title, profile_path,
             blit_font_profile_local(i) ? "local" : "shipped",
             blit_font_profile_available(i) ? "true" : "false",
-            blit_font_is_outline(path) ? "native-antialiased" : "bitmap-nearest",companion_json);
+            blit_font_is_outline(path) ? "native-antialiased" : "bitmap-nearest",companion_json,
+            masters_json);
         first = 0;
     }
     used += (size_t)snprintf(body + used, capacity - used, "],\"rejected\":[");

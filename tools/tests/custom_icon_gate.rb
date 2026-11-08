@@ -77,7 +77,9 @@ Dir.chdir(root) do
       ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     # ADR 0195: every shipped text font, through the glyph stack.
-    source.fetch('text').map { |t| t.fetch('file') }.each do |face|
+    # ADR 0227: a directory in text/ is one font, of masters; it is opened
+    # as one, and its rule picks the master for each size.
+    source.fetch('text').map { |t| File.dirname(t.fetch('file')) == 'text' ? t.fetch('file') : File.dirname(t.fetch('file')) }.uniq.each do |face|
       command = [binary, 'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{face}", 'assets/fonts/NotoColorEmoji.ttf', input, distinct, live, gone]
       command = ['valgrind', '--error-exitcode=99', '--leak-check=full', '--errors-for-leak-kinds=definite,indirect', *command] if ENV['BLIT_FONT_VALGRIND'] == '1'
       raise "custom glyph raster failed: #{face}" unless system(*command)

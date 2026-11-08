@@ -81,7 +81,8 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Feature | Since | ADR | Status |
 | --- | --- | --- | --- |
 | Text fonts: Hack, IBM 3270, JetBrains Mono NL, Fira Code, IBM Plex Mono | 0.2.36 | 0195 | Tested |
-| Pixel fonts: Terminus 16 and Spleen 16 | 0.1; renamed 0.2.35 | 0145, 0194 | Used |
+| Pixel font: Terminus 16 (Spleen 16 retired in 0.3.68 for `spleen`) | 0.1; renamed 0.2.35 | 0145, 0194, 0227 | Used |
+| Spleen at any size, 8–64 px: one font of the five Spleen 2.2.0 masters (6x12, 8x16, 12x24, 16x32, 32x64), the largest whose height divides the cell height drawn pixel-exact, else the largest below it scaled; `GET /v1/fonts` reports `master` and `master_fit` | 0.3.68 | 0227 | Tested (`spleen_master_gate`: listed once with its masters, none as a font of its own; the master at 12, 16, 24, 32, 48, 64 px crisp and 20, 28, 40 px scaled; at every crisp size the text in the screenshot holds only its two colours, and has in-between coverage when scaled; a saved `blit-spleen16` falls back to the boot font; `outline_catalogue_gate`, `custom_icon_gate`: every Nerd icon and Blit glyph through the stack at 8–64 px) |
 | Add your own monospaced TTF/OTF to `/usr/local/lib/blit/fonts/text`: it appears without a restart | 0.2.36 | 0195 | Tested |
 | Font size by cell height, 8–64 px, changed live | 0.1.561 | 0144 | Used |
 | One glyph stack under every font: Blit icons, Nerd Fonts symbols (10,386), Noto symbols and maths, colour emoji, Arabic, Unifont | 0.2.36 | 0195 | Used |

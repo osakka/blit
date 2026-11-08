@@ -17,7 +17,9 @@ Dir.chdir(root) do
       'tools/tests/outline_catalogue_gate.c', 'src/blit_font.c', 'src/blit_raster.c', library,
       ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
     # ADR 0195: every shipped text font, through the glyph stack.
-    manifest.fetch('text').map { |t| t.fetch('file') }.each do |font|
+    # ADR 0227: a directory in text/ is one font, of masters; it is opened
+    # as one, and its rule picks the master for each size.
+    manifest.fetch('text').map { |t| File.dirname(t.fetch('file')) == 'text' ? t.fetch('file') : File.dirname(t.fetch('file')) }.uniq.each do |font|
       raise "raster catalogue failed: #{font}" unless system(binary,
         'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{font}", 'assets/fonts/NotoColorEmoji.ttf', input)
     end
