@@ -344,15 +344,16 @@ Dir.mktmpdir('blit-burn-in') do |root|
     check(idle <= 2, "an idle screen presented #{idle} frames after the fade")
     check(pane2(done) == plain2, 'pane 2 changed during the fade')
     # Unwatched -- the captures above were frames of their own -- the
-    # frame clock alone carries the fade, at 30 Hz, and stops after it.
+    # frame clock alone carries the fade, at the display's refresh ("auto",
+    # ADR 0188), and stops after it.
     frames0 = fx.dig('effects', 'animation_frames')
     move!
     sleep fade100 + LATENCY + 0.3
     ticks = fx.dig('effects', 'animation_frames') - frames0
     # A third of the rate at least: ticks only fill gaps, aligned to the
     # vblank, and llvmpipe is slow; none at all without the clock.
-    check(ticks >= fade100 * 10 && ticks <= (fade100 + LATENCY) * 30 + 3,
-          "#{ticks} animation frames for a #{fade100} s fade at 30 Hz")
+    check(ticks >= fade100 * refresh / 3 && ticks <= (fade100 + LATENCY) * refresh + 3,
+          "#{ticks} animation frames for a #{fade100} s fade at #{refresh} Hz")
     idle = present_calls_idle(1.5)
     check(idle <= 2 && fx.dig('effects', 'animation_hz').zero?,
           "an idle screen presented #{idle} frames after the unwatched fade")
