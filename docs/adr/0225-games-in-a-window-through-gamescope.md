@@ -274,10 +274,13 @@ desktop:
   desktop app as they reach Boxer today (`_mouse`, `dt_pointerlock`).
 - **Pixel size:** a desktop app knows its window's pixels; `hold`'s emulator
   also gains XTWINOPS `CSI 14 t`/`16 t` (it answers only `CSI 18 t` today).
-- **Launch (owner, 2026-11-08):** the desktop side is one generic program
-  window, owned by Hibr and built on X Screen's model: a program list kept
-  by a Control Panel pane, each program a menu entry opening a window that
-  runs `blit-gamescope --no-place [--steam] -W -H -r --log -- <command>`.
+- **Launch (owner, 2026-11-08):** the desktop side is **Screens**, one Hibr
+  app that X Screen folds into: one program list kept by a Control Panel
+  pane, each program a menu entry with an engine of its choosing -- X
+  Screen (Xvfb, the CPU, X11 only) or Wayland Screen, a window that runs
+  `blit-gamescope --no-place [--steam] -W -H -r --log -- <command>` (the GPU,
+  X11 and Wayland); Wayland Screen is the default where blit-gamescope is
+  installed, and nothing is deprecated.
   Per-program options are the bridge's (Steam integration, keys to the
   program, pointer capture on click, close or keep when it ends); size and
   refresh come from the window and the display. Steam is one built-in entry,
@@ -285,7 +288,7 @@ desktop:
   capture Blit hides its pointer and gamescope's own cursor is not in the
   stream, so Big Picture's menus would have no visible pointer (seen live on
   the mini PC). The earlier Steam-only app (Steamer, then steamwin) folds
-  into it. X Screen (Xvfb) stays beside it; people choose.
+  into it.
 
 **Independence.** The bridge talks only PipeWire (frames in) and EIS (input
 out); the two gamescope-specific details (finding the node by name, asking
