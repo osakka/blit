@@ -1,7 +1,7 @@
 /* blit-gamescope: a game or Steam in a Blit pane, through a headless
    gamescope (ADR 0225, phase 1).
 
-     blit-gamescope [-W w -H h] [-r hz] [--steam] [--no-place] [--log path] -- command...
+     blit-gamescope [--no-place] [--steam] [-W w -H h] [-r hz] [--log path] -- command...
 
    It starts `gamescope --backend headless -W -H -r [-e] -- command` in a
    process group of its own, takes gamescope's PipeWire video stream (BGRx,
@@ -16,9 +16,14 @@
    writes is its terminal set-up and its undoing at exit.
 
    Input does not pass through the bridge: it names gamescope's EIS socket
-   to Blit with `INPUT eis <path> <image id>`, turns the route on with
-   `INPUT on <image id>` once Blit answers `OK input <image id>`, and Blit
-   sends the pane's keys and mouse there itself. The bridge never
+   to Blit with `INPUT eis <path> <image id>` and Blit sends the pane's keys
+   and mouse there itself. Without --no-place (phase 1, a plain Blit pane:
+   the pane is the window) the bridge turns the route on with
+   `INPUT on <image id>` once Blit answers `OK input <image id>`. With
+   --no-place (phase 2, inside a Hibr desktop app) the desktop owns window
+   focus: the app sends `INPUT on`/`INPUT off` itself from its focus
+   callback, through Hibr's listener, and the bridge sends neither; it only
+   logs the answers (GsFrames.focus_by_desktop). The bridge never
    captures the mouse (the desktop does, ADR 0225). The terminal is read
    only for the pane's pixel size, focus and the end of a desktop's pointer
    lock (blit_gamescope_tty.h).
@@ -636,7 +641,10 @@ static void on_frame_socket(void *data, int fd, uint32_t mask)
         return;
     }
     if (input != b->frames.input_state) {
-        if (b->frames.input_state == GS_INPUT_OK)
+        if (b->frames.input_state == GS_INPUT_OK && b->frames.focus_by_desktop)
+            logf_(b, "OK input %u: Blit sends the window's input to %s (INPUT on/off by the desktop)",
+                  b->frames.image_id, b->eis_path);
+        else if (b->frames.input_state == GS_INPUT_OK)
             logf_(b, "OK input %u: Blit sends the pane's input to %s (INPUT on %s)",
                   b->frames.image_id, b->eis_path, b->frames.input_on ? "sent" : "not sent");
         else if (b->frames.input_was_ok && strcmp(b->frames.input_error, "ENOENT") == 0)
@@ -688,9 +696,14 @@ static void on_tick(void *data, uint64_t expirations)
     maybe_send_input(b);
 }
 
-static void usage(void)
+static void usage(FILE *out)
 {
-    fprintf(stderr, "usage: blit-gamescope [-W width -H height] [-r hz] [--steam] [--no-place] [--log path] -- command...\n");
+    fprintf(out,
+            "usage: blit-gamescope [--no-place] [--steam] [-W width -H height] [-r hz] [--log path] -- command...\n"
+            "  A game or Steam in a Blit pane through a headless gamescope (ADR 0225).\n"
+            "  --no-place  run inside a desktop app: no placement, no size query, and no\n"
+            "              INPUT on/off (the desktop sends them on focus); needs -W and -H\n"
+            "  --steam     gamescope -e, for Steam\n");
 }
 
 int main(int argc, char **argv)
@@ -717,9 +730,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--no-place")) b->placement.no_place = 1;
         else if (!strcmp(argv[i], "--log") && i + 1 < argc) b->log_path = argv[++i];
         else if (!strcmp(argv[i], "--version")) { printf("blit-gamescope %s\n", BLIT_BUILD_VERSION); return 0; }
-        else { usage(); return 2; }
+        else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) { usage(stdout); return 0; }
+        else { usage(stderr); return 2; }
     }
-    if (!b->command || !b->command[0] || b->refresh <= 0) { usage(); return 2; }
+    if (!b->command || !b->command[0] || b->refresh <= 0) { usage(stderr); return 2; }
     /* With --no-place nothing but the log is written, so the size cannot be
        asked: it is given. */
     if (b->placement.no_place && (b->width <= 0 || b->height <= 0)) {
@@ -732,6 +746,8 @@ int main(int argc, char **argv)
     }
     if (b->log_path) b->log = fopen(b->log_path, "a");
     gs_frames_init(&b->frames, GS_IMAGE_ID, requeue_cb, b);
+    /* Phase 2: the desktop app owns focus and sends INPUT on/off. */
+    b->frames.focus_by_desktop = b->placement.no_place;
     if (gs_frames_connect(&b->frames, socket_name, token) != 0) {
         fprintf(stderr, "blit-gamescope: frame channel: %s\n", b->frames.last_error);
         return 1;

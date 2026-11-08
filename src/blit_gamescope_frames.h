@@ -17,8 +17,12 @@
            that route
        INPUT on <image id>\n   INPUT off <image id>\n
            whether that picture's window has the keyboard; a route starts
-           off. In phase 1 the bridge sends `INPUT on <id>` right after
-           `OK input <id>`.
+           off. In phase 1 (a plain Blit pane) the bridge sends
+           `INPUT on <id>` right after `OK input <id>`. In phase 2
+           (`--no-place`, the bridge inside a Hibr desktop app) the desktop
+           owns window focus: the app sends `INPUT on`/`INPUT off` itself
+           from its focus callback, through Hibr's listener, and the bridge
+           sends only `INPUT eis` and logs the answers (`focus_by_desktop`).
 
    Answers are per image because one channel may carry several pictures'
    routes (a desktop's); the bridge has one picture, and an answer naming
@@ -78,6 +82,8 @@ typedef struct {
     gs_requeue_fn requeue;
     void *context;
     int input_state;
+    int focus_by_desktop;   /* --no-place: the desktop sends INPUT on/off,
+                               so OK input is not followed by INPUT on */
     int input_on;           /* INPUT on sent */
     int input_was_ok;       /* this request was answered OK input: a later
                                ERROR INPUT ends a live route, not a refusal */
@@ -387,7 +393,9 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
         if (image != f->image_id) return 1; /* another picture's route */
         f->input_state = GS_INPUT_OK;
         f->input_was_ok = 1;
-        gs_frames_send_input_focus(f, 1); /* phase 1: the pane is the window */
+        /* Phase 1: the pane is the window. Phase 2: the desktop's focus
+           callback sends INPUT on/off, not the bridge. */
+        if (!f->focus_by_desktop) gs_frames_send_input_focus(f, 1);
         return 1;
     }
     if (sscanf(line, "ERROR INPUT %u %31s", &image, code) == 2) {

@@ -17,6 +17,12 @@ if grep -n 'gs_frames_place\|gs_frames_delete\|_Ga=' src/blit_gamescope.c; then
     echo "GAMESCOPE_BRIDGE_FAIL the bridge writes a placement or delete around GsPlacement" >&2
     exit 1
 fi
+# Phase 2: under --no-place the desktop app sends INPUT on/off, so main
+# hands --no-place to the frames state (the unit case checks the effect).
+grep -q 'frames.focus_by_desktop = b->placement.no_place;' src/blit_gamescope.c || {
+    echo "GAMESCOPE_BRIDGE_FAIL --no-place does not leave INPUT on/off to the desktop" >&2
+    exit 1
+}
 mkdir -p build/tests
 tcc -Wall tools/tests/gamescope_bridge_gate.c -o build/tests/gamescope_bridge_gate
 build/tests/gamescope_bridge_gate unit

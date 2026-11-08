@@ -280,6 +280,24 @@ static void unit_channel(void)
     CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EINVAL") == 0,
           "ERROR INPUT 0 EINVAL not taken");
 
+    /* Under --no-place (phase 2) the desktop app owns focus and sends
+       INPUT on/off itself through Hibr's listener: OK input is followed by
+       nothing from the bridge. Phase 1 (above) still sends INPUT on. */
+    f.focus_by_desktop = 1;
+    CHECK(gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei") == 0, "no-place: INPUT not sent");
+    got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
+    msg[got > 0 ? got : 0] = '\0';
+    CHECK(strcmp((char *)msg, "INPUT eis /run/user/1000/gamescope-0-ei 1\n") == 0 && nfds == 0,
+          "no-place: INPUT message is %s", msg);
+    fake_reply(sv[1], "OK input 1\n");
+    gs_frames_read(&f);
+    CHECK(f.input_state == GS_INPUT_OK && f.input_was_ok && !f.input_on,
+          "no-place: OK input 1: state %d was_ok %d on %d", f.input_state, f.input_was_ok, f.input_on);
+    got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
+    msg[got > 0 ? got : 0] = '\0';
+    CHECK(got < 0 && errno == EAGAIN, "no-place: after OK input the bridge sent %s", msg);
+    f.focus_by_desktop = 0;
+
     /* Blit closing the channel gives every held buffer back. */
     close(sv[1]);
     CHECK(gs_frames_read(&f) == -1 && f.fd == -1, "a closed channel was not noticed");
@@ -478,7 +496,7 @@ int main(int argc, char **argv)
             return 1;
         }
         printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+fallback+memfd+input-per-image+late-enoent+"
-               "placement+no-place+tty-no-capture\n");
+               "no-place-no-input-on+placement+no-place+tty-no-capture\n");
         return 0;
     }
     if (argc >= 3 && strcmp(argv[1], "session") == 0)
