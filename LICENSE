@@ -1,0 +1,25 @@
+Blit
+Copyright (C) 2026 Omar Sakka
+
+Blit is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+Blit is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+details.
+
+The full text of the GNU General Public License, version 3, is in COPYING.
+
+This covers Blit's own source, documentation and tools, and the programs
+built from them (blit-server, blit-update-helper, blit-gamescope). Bundled
+third-party material keeps its own licence, recorded beside it:
+- fonts under assets/fonts/ (assets/fonts/licenses/, the *-LICENSE.txt
+  files, assets/fonts/README.md);
+- the icon artwork under assets/fonts/icons/ (its LICENSE.txt);
+- headers vendored for building, under vendor/ (each with its licence).
+The Hibr adapter shipped in the blit package is built from Hibr's source
+and is distributed under Hibr's licence, the GNU Lesser General Public
+License, version 3 or later.

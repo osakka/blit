@@ -196,6 +196,24 @@ for page in "$ROOT"/man/*.[1-9]; do
         > "$stage/usr/share/man/man$section/${page##*/}.gz"
 done
 cp -a "$ROOT/README.md" "$stage/usr/share/doc/blit/"
+cat > "$stage/usr/share/doc/blit/copyright" <<EOF
+Blit
+Copyright (C) 2026 Omar Sakka
+
+Blit is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. On Debian systems the licence text is in
+/usr/share/common-licenses/GPL-3.
+
+Bundled third-party material keeps its own licence, installed beside it:
+the fonts under /usr/lib/blit/fonts/ (licenses/, the *-LICENSE.txt files,
+README.md) and the icon artwork (MIT, /usr/lib/blit/fonts/icons/LICENSE.txt).
+The Hibr adapter, /usr/lib/blit/hibr/console-blit.so, is built from Hibr's
+source and is distributed under the GNU Lesser General Public License,
+version 3 or later (/usr/share/common-licenses/LGPL-3).
+EOF
+chmod 0644 "$stage/usr/share/doc/blit/copyright"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 # What a running Blit reads to notice it was updated under it (ADR 0205).
 printf '%s\n' "$version" > "$stage/usr/lib/blit/VERSION"
@@ -437,9 +455,13 @@ by the blit package under /usr/share/doc/blit/docs/adr/). On Debian 13
 gamescope comes from trixie-backports.
 EOF
 cat > "$gdoc/copyright" <<EOF
-blit-gamescope is part of Blit (ITD Labs), built from src/blit_gamescope.c,
-src/blit_gamescope_frames.h and src/blit_gamescope_tty.h in the Blit source
-tree, and is distributed under the same terms as the blit package.
+blit-gamescope is part of Blit, Copyright (C) 2026 Omar Sakka, built from
+src/blit_gamescope.c, src/blit_gamescope_frames.h and src/blit_gamescope_tty.h
+in the Blit source tree. It is free software: you can redistribute it and/or
+modify it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. On Debian systems the licence text is in
+/usr/share/common-licenses/GPL-3.
 
 It is compiled against the unmodified public headers of PipeWire 1.4.2
 (Debian 13's libpipewire-0.3-dev and libspa-0.2-dev, Expat licence) and

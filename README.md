@@ -160,3 +160,10 @@ Blit owns the screens, input, terminals and the API. Hibr, or any other
 program, runs inside sessions and owns its own desktop. Blit never edits
 Hibr; it starts Hibr's installed commands and talks to them through the
 API.
+
+## License
+
+Blit is free software under the GNU General Public License, version 3 or
+later (`LICENSE`, `COPYING`). Bundled fonts and icon artwork keep their own
+licences, recorded beside them under `assets/fonts/`; the Hibr adapter is
+under Hibr's licence, the LGPL version 3 or later.
