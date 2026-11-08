@@ -9,6 +9,28 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-08: 0.3.68 Spleen, one scalable font of five masters (ADR 0227)
+
+- **`spleen`** is one text font made of the five unmodified Spleen 2.2.0
+  OTF masters (6x12, 8x16, 12x24, 16x32, 32x64; BSD-2-Clause; tarball and
+  each file pinned in fonts.source.json), in `fonts/text/spleen/`. Each
+  master's pixel grid is read from the font itself; `blit_font_master_choose`
+  takes the largest master whose height divides the cell height (crisp),
+  else the largest smaller one (scaled), else the smallest. At crisp sizes
+  each outline is snapped to its design pixels and rendered without the
+  hinter, which moved pixels by one (measured); `GET /v1/fonts` reports
+  `master` and `master_fit`. The fixed 16 px `blit-spleen16` is retired (a
+  saved id falls back to the boot font, no alias).
+- **Gates:** `spleen_master_gate` (listed once; crisp at 12, 16, 24, 32, 48,
+  64 px with pure on/off pixels; scaled at 20, 28, 40 px; the retired id
+  gone); `all` 190 pass, 8 skip, 0 fail; GLES `renderer` 82 pass, 1 skip,
+  0 fail; font and schema 56 pass; `package_artifact_gate` passes (masters
+  shipped, PSF retired; the .deb grows about 68 KB).
+- **Live:** deployed and verified on 10.54 and 10.52. On the mini PC the
+  owner's desktop runs Spleen at 24 px, master 12x24, crisp.
+- **Mirror:** published to hibr-apt; the public GitHub Pages mirror was still
+  serving hibr 0.99.472 at release, so apt clients see it when it syncs.
+
 ## 2026-11-08: 0.3.67 animated effects follow each display's refresh (ADR 0188)
 
 - **`effects_animation_hz`** takes `"auto"` (the default) or 10-240. Auto
