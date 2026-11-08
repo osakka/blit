@@ -477,9 +477,12 @@ Dir.mktmpdir('blit-presentation-effects') do |root|
       [a1.dig('effects', 'animation_hz'),
        (a1.dig('effects', 'animation_frames') - a0.dig('effects', 'animation_frames')) / seconds]
     end
-    # [setting, the rate it gives on the mock, the setting reported back]:
-    # a number is a ceiling, so 240 on a 60 Hz display ticks at 60.
-    [[30, 30], [10, 10], [240, refresh], ['auto', refresh]].each do |value, want|
+    # [setting, the rate it gives on the mock]: a number is a ceiling, met
+    # by ticking every Nth vblank, N = ceil(refresh / setting), and the rate
+    # reported is the rate measured -- 50 on 60 Hz is every 2nd vblank, 30;
+    # 25 every 3rd, 20; 240 every one, 60.
+    [[30, 30], [50, refresh / 2], [25, refresh / 3], [10, 10], [240, refresh],
+     ['auto', refresh]].each do |value, want|
       code = hz_setting.call(value)
       check(code == 200, "effects_animation_hz #{value.inspect} -> #{code}")
       settings = get('/v1/settings')

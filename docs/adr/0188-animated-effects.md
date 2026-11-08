@@ -214,20 +214,24 @@ default) since 0.3.67.
 10 to 240:
 - **`"auto"`** (the default, and what an absent key means): each animated
   output ticks at its own refresh.
-- **A number** is a ceiling: each output ticks at the lower of it and its
-  refresh, so a setting above a display's refresh never ticks faster than
-  the display can show.
+- **A number** is a ceiling the display can keep: each output ticks every
+  Nth vblank, N = ceil(refresh / setting), so its rate is refresh / N, the
+  largest rate at or below the setting that divides the refresh into whole
+  vblanks. 30 on 60 Hz is 30, 50 on 60 Hz is 30, 25 on 60 Hz is 20, 120 on
+  144 Hz is 72, 240 on 60 Hz is 60. N is taken from the refresh in whole
+  Hz, so a measured 60.02 Hz does not count as above 60 and halve the rate.
+  The tick's period is N refreshes, and the after-vblank alignment, which
+  puts each tick on the vblank nearest one period on, then lands it on
+  every Nth vblank. (A first cut used the lower of the setting and the
+  refresh as the period: 50 on 60 Hz then ticked every refresh, 60 a
+  second, while reporting 50. The coordinator rejected that before merge:
+  a set rate must be one the display keeps, and `animation_hz` what
+  happens.)
 - Anything else is refused, like the other server settings. An unset value
   is still left out of the stored document.
-- A ceiling that does not divide the refresh is rounded by the vblank
-  alignment, which is unchanged: each tick goes to the vblank nearest one
-  period on, so 50 on a 60 Hz display ticks every refresh (60 a second) and
-  25 ticks at 30. `animation_hz` reports the setting's rate; the real one is
-  `animation_frames` over time. Not tested: the DRM mock's vblank stamp is
-  the flip's completion, so alignment does almost nothing there.
 
-**One function decides an output's rate,** `output_animation_hz`. Its
-refresh comes from `output_shown_refresh_hz`: the mode's refresh, refined by
+**One function decides an output's rate and period,**
+`output_animation_hz`. Its refresh comes from `output_shown_refresh_hz`: the mode's refresh, refined by
 the measured one (`observed_refresh_hz`) only when the two agree within 2%,
 as the render schedule's `kms_aligned_due` already reads it; the measured
 one alone when there is no mode; 60 Hz when neither is known. The 2% guard
@@ -253,7 +257,8 @@ setting in use as `effective.effects_animation_hz`, `"auto"` or the number.
 
 **Evidence.** `presentation_effects_gate` on gles: auto gives the DRM
 mock's 60 Hz and about 50–57 animation frames a second; 30 and 10 give 30
-and 10; 240 is clamped to 60; invalid values (9, 241, `"fast"`, `"Auto"`,
+and 10; 50 reports 30 and 25 reports 20, each measured at that rate; 240 is
+clamped to 60; invalid values (9, 241, `"fast"`, `"Auto"`,
 `true`) are refused; the document keeps `"auto"` or the number, and an
 unset key stays absent; `fills_gaps_only` passes under auto.
 `tube_effects_gate`, `zoomed_effects_gate` and `burn_in_gate` assert the

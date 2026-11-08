@@ -300,8 +300,9 @@ Dir.mktmpdir('blit-tube-effects') do |root|
     check(fx.call.dig('effects', 'animation_hz') == refresh && ticks >= 10,
           "static noise is not on the frame clock: #{ticks} ticks at " \
           "#{fx.call.dig('effects', 'animation_hz')} Hz on a #{refresh} Hz display")
-    # A number is a ceiling: 30 ticks at 30, 120 at the display's 60.
-    [[30, 30], [120, refresh], [nil, refresh]].each do |value, want|
+    # A number is a ceiling met every Nth vblank: 30 ticks at 30, 50 every
+    # 2nd vblank at 30, 120 at the display's 60.
+    [[30, 30], [50, refresh / 2], [120, refresh], [nil, refresh]].each do |value, want|
       Timeout.timeout(5) { sleep 0.05 until get('/v1/settings').dig('storage', 'state') == 'clean' }
       settings = get('/v1/settings')
       server = (settings['document']['server'] || {}).reject { |k, _| k == 'effects_animation_hz' }

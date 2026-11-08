@@ -809,8 +809,11 @@ apply live, with no restart, and are saved:
   - `"auto"` (the default, also when the key is absent): the output's own
     refresh, the mode's rate refined by the measured one when they agree,
     60 when neither is known;
-  - a number from 10 to 240: a ceiling, so the output ticks at the lower of
-    it and its refresh, never faster than the display shows.
+  - a number from 10 to 240: a ceiling the display can keep. The output
+    ticks every Nth vblank, N = ceil(refresh / setting), so its rate is the
+    largest at or below the setting that divides the refresh into whole
+    vblanks: 30 on 60 Hz is 30, 50 on 60 Hz is 30, 25 on 60 Hz is 20, 120 on
+    144 Hz is 72, and 240 on 60 Hz is 60.
 
   Each tick re-presents the frame without redrawing anything, just after a
   vblank. A tick only fills a gap: an output that presented within the last

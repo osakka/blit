@@ -1396,7 +1396,8 @@ typedef struct {
        only while one of its panes has an animated effect it can draw and
        the output is presenting; each tick re-presents, never recomposes.
        effects_animation_hz is the setting: 0 is "auto" (each output's own
-       refresh), otherwise a ceiling of 10-240 Hz; output_animation_hz
+       refresh), otherwise a ceiling of 10-240 Hz, met by ticking every
+       Nth vblank; output_animation_hz
        turns it into an output's rate. */
     int effects_animation_hz;
     int effects_animation_hz_configured;
@@ -2087,7 +2088,8 @@ static BlitSession *find_session_id(BlitRuntime *runtime,
                                     unsigned long long session_id);
 static void destroy_session(BlitRuntime *runtime, BlitSession *session);
 static int output_animated(const BlitRuntime *runtime, int output_index);
-static int output_animation_hz(const BlitRuntime *runtime, int output_index);
+static int output_animation_hz(const BlitRuntime *runtime, int output_index,
+                               uint64_t *period_us);
 static void cancel_auxiliary_worker(BlitRuntime *runtime);
 static uint32_t hibr_frame_barrier_held(const BlitRuntime *runtime,
                                         uint64_t now);
@@ -4228,7 +4230,7 @@ static void render_scheduler_json(const BlitRuntime *runtime, char *body,
                 have_kms_info ? kms_info.effects_present_quads : 0ULL,
                 have_kms_info ? kms_info.effects_glow_rebuilds : 0ULL,
                 have_kms_info ? kms_info.presentation_unavailable : "cpu compositor",
-                output_animated(runtime, i) ? output_animation_hz(runtime, i) : 0,
+                output_animated(runtime, i) ? output_animation_hz(runtime, i, NULL) : 0,
                 have_kms_info ? kms_info.effects_animation_frames : 0ULL,
                 have_kms_info ? kms_info.effects_animation_phase : 0.0,
                 have_kms_info ? kms_info.effects_burn_in_panes : 0ULL,
@@ -22520,21 +22522,35 @@ static double output_shown_refresh_hz(const BlitRuntime *runtime, int output_ind
     return mode;
 }
 
-/* ADR 0188: the one place an output's animation rate is decided. "auto"
-   (0, the default) is the output's refresh; a number is a ceiling, never
-   faster than the display shows. A refresh not known reads as 60. */
+/* ADR 0188: the one place an output's animation rate is decided, and the
+   period its ticks keep. A tick lands every Nth vblank, so the rate is the
+   refresh divided by a whole N: "auto" (0, the default) is N = 1, the
+   output's refresh; a number is a ceiling, met by the smallest N that does
+   not exceed it, N = ceil(refresh / requested) -- 50 on 60 Hz is 30, 120 on
+   144 Hz is 72 -- so the rate reported is the rate the display keeps. N is
+   taken from the refresh in whole Hz, so a measured 60.02 Hz is not
+   "faster than 60" and halved. A refresh not known reads as 60. The period
+   (period_us, when asked) is N refreshes of the measured refresh. */
 #define BLIT_ANIMATION_FALLBACK_HZ 60
-static int output_animation_hz(const BlitRuntime *runtime, int output_index)
+static int output_animation_hz(const BlitRuntime *runtime, int output_index,
+                               uint64_t *period_us)
 {
     double refresh = output_shown_refresh_hz(runtime, output_index);
-    int display_hz = refresh >= 1.0 ? (int)(refresh + 0.5) : BLIT_ANIMATION_FALLBACK_HZ;
+    int display_hz, vblanks = 1;
 
+    if (refresh < 1.0)
+        refresh = BLIT_ANIMATION_FALLBACK_HZ;
+    display_hz = (int)(refresh + 0.5);
     if (runtime->effects_animation_hz > 0 && runtime->effects_animation_hz < display_hz)
-        return runtime->effects_animation_hz;
-    return display_hz;
+        vblanks = (display_hz + runtime->effects_animation_hz - 1) /
+                  runtime->effects_animation_hz;
+    if (period_us != NULL)
+        *period_us = (uint64_t)((double)vblanks * 1000000.0 / refresh);
+    return (int)(refresh / vblanks + 0.5);
 }
 
-/* The frame clock: an animated output is made due at output_animation_hz.
+/* The frame clock: an animated output is made due every Nth vblank, at
+   output_animation_hz.
    It owns its own cadence -- render_pending stays 0 between ticks, so the
    loop does not present every refresh -- and the present goes through the
    usual schedule, aligned to the vblank.
@@ -22606,7 +22622,7 @@ static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
         }
         if (runtime->animation_next_us[i] != 0 && now < runtime->animation_next_us[i])
             continue;
-        period = 1000000ULL / (uint64_t)output_animation_hz(runtime, i);
+        output_animation_hz(runtime, i, &period);
         /* Three quarters of a period: a tick put on a vblank comes round a
            little under a period after the frame the last tick presented,
            and that frame is not a real one flowing. */
