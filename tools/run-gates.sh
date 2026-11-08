@@ -530,15 +530,15 @@ suite_renderer() {
     run_gate graphics_band_gate.rb ruby tools/tests/graphics_band_gate.rb
     run_gate pane_effects_gate.rb ruby tools/tests/pane_effects_gate.rb
     run_serial_gate presentation_effects_gate.rb ruby tools/tests/presentation_effects_gate.rb
-    run_gate tube_effects_gate.rb ruby tools/tests/tube_effects_gate.rb
-    run_gate burn_in_gate.rb ruby tools/tests/burn_in_gate.rb
-    run_gate mask_gate.rb ruby tools/tests/mask_gate.rb
-    run_gate performance_panel_gate.rb ruby tools/tests/performance_panel_gate.rb
+    run_serial_gate tube_effects_gate.rb ruby tools/tests/tube_effects_gate.rb
+    run_serial_gate burn_in_gate.rb ruby tools/tests/burn_in_gate.rb
+    run_serial_gate mask_gate.rb ruby tools/tests/mask_gate.rb
+    run_serial_gate performance_panel_gate.rb ruby tools/tests/performance_panel_gate.rb
     run_gate overlay_translucency_gate.rb ruby tools/tests/overlay_translucency_gate.rb
     run_gate under_text_picture_gate.rb ruby tools/tests/under_text_picture_gate.rb
     run_gate display_zoom_gate.rb ruby tools/tests/display_zoom_gate.rb
-    run_gate zoomed_effects_gate.rb ruby tools/tests/zoomed_effects_gate.rb
-    run_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
+    run_serial_gate zoomed_effects_gate.rb ruby tools/tests/zoomed_effects_gate.rb
+    run_serial_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb
     run_gate window_style_gate.rb ruby tools/tests/window_style_gate.rb
