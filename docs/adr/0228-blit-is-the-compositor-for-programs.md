@@ -141,7 +141,10 @@ allows, Xvfb leave.
 **Phases.** Each is its own release with its own gates and one result the
 owner can see.
 
-0. **Baseline, before any code.** Key-to-pixel latency and frame delivery
+0. **Baseline** (deferred by the owner on 2026-11-09 so phase 1 could
+   start; it must be measured before phase 2 starts, since phase 2's
+   criterion needs it; Blit 0.3.71 carries the instrument, `frame_us` and
+   `last_inject_us`). Key-to-pixel latency and frame delivery
    for a game in the gamescope window and in the ADR 0206 hand-over, on the
    mini PC, measured the same way phase 3 will be. The compositor must match
    or beat it.
