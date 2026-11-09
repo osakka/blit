@@ -1959,6 +1959,13 @@ It speaks the frame channel above as a producer, with these additions.
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
   The compositor's first line after `OK` is `WINDOW display <name>`.
+- **Where the id is.** Every `INPUT` and `WINDOW` line, in both directions,
+  and their answers (`OK input`, `ERROR INPUT`, `OK window`, `ERROR WINDOW`)
+  carry the picture id as the third word, so a relay rewrites ids with one
+  rule; `INPUT eis <path> <id>` has it fourth (the path comes first), and
+  `WINDOW popup`/`WINDOW parent` and `INPUT member` carry a second id, the
+  parent's or top-level's, as the fourth word. The frame lines `RELEASE <id>
+  <seq>` and `ERROR <id> <code>` carry it second.
 - **One id space.** A window's id is its picture id: its `FRM1` and `FRM3`
   frames, `RELEASE`s and `INPUT` routes all use it.
 - **Compositor to desktop**, one event a line, UTF-8:
