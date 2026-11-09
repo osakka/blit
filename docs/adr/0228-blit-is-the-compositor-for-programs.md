@@ -217,7 +217,11 @@ stand-in-client build for Blit and Hibr to test against.
   `$XDG_RUNTIME_DIR/blit-<n>` (the first free n), and offers
   `wl_compositor`, `wl_subcompositor` (subsurfaces accepted and logged, not
   composited), `wl_shm` (libwayland's, ARGB8888 and XRGB8888), `wl_output`
-  (one mode, the newest size the desktop asked for), `wl_seat`, `xdg_wm_base`
+  (one mode: 1920x1080 until the desktop's first size, then the newest
+  non-zero `WINDOW size` of any window, so every client sees the mode
+  change on any resize -- one reading of "the window size"; the full-screen
+  size or the first size are the alternatives, to decide with Hibr),
+  `wl_seat`, `xdg_wm_base`
   and `zxdg_decoration_manager_v1` (server-side). A toplevel is announced at
   its initial commit and configured only when the desktop sends its size,
   exactly that size; each committed `wl_shm` buffer is copied into one
@@ -242,11 +246,15 @@ stand-in-client build for Blit and Hibr to test against.
   size 1 320 200` a 320x200 frame; the client's popup as `WINDOW popup 2 1
   12 63` (its positioner's offset in the toplevel's surface pixels) and an
   80x60 frame of picture 2, which `WINDOW close 2` ends through
-  `popup_done` with `WINDOW gone 2`; after `500 300 activated` a 500x300
+  `popup_done` with `WINDOW gone 2`; a second client, given 100x80 and
+  then killed outright as a crashing game is, brings `WINDOW gone 3` and
+  nothing else; after `500 300 activated` a 500x300
   frame, each sealed and equal to the client's pattern pixel for pixel;
   `0 0` gives the client's own 256x160; `WINDOW close 1` ends the client
   and brings `WINDOW gone 1`; the client counts four draws, four releases
-  and four frame callbacks; the compositor ends, status 1, when the desktop's
+  and four frame callbacks, takes a keyboard and a pointer from `wl_seat`,
+  and is told the output's mode 1920x1080, then 320x200 and 500x300; the
+  compositor ends, status 1, when the desktop's
   channel closes. Against a real blit-server on the mock display: version 3
   unchanged, version 4 `OK dmabuf=0 window=0`, `ENOTSUP` for four `WINDOW`
   lines, version 5 `EINVAL`, and blit-compositor reaching Blit directly

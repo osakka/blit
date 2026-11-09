@@ -4,8 +4,10 @@
 
      wl_standin_client [--popup] [title]
 
-   It binds wl_compositor, wl_shm, xdg_wm_base and, when offered,
-   zxdg_decoration_manager_v1 (asking for server-side decorations), creates
+   It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
+   and a pointer, as programs do), wl_output (printing each mode it is
+   told) and, when offered, zxdg_decoration_manager_v1 (asking for
+   server-side decorations), creates
    one xdg_toplevel with the title (default "Blit stand-in"), app id
    "blit.standin" and a minimum size of 64x48, and commits without a buffer.
    On each configure it draws the pattern below at exactly the configured
@@ -43,6 +45,11 @@ struct standin {
     struct wl_shm *shm;
     struct xdg_wm_base *wm_base;
     struct zxdg_decoration_manager_v1 *decoration_manager;
+    struct wl_seat *seat;
+    struct wl_keyboard *keyboard;
+    struct wl_pointer *pointer;
+    struct wl_output *output;
+    int32_t mode_w, mode_h;
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *toplevel;
@@ -258,6 +265,67 @@ static void wm_ping(void *data, struct xdg_wm_base *wm, uint32_t serial)
 
 static const struct xdg_wm_base_listener wm_listener = { wm_ping };
 
+static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps)
+{
+    struct standin *s = data;
+    printf("STANDIN seat capabilities %u\n", caps);
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !s->keyboard) s->keyboard = wl_seat_get_keyboard(seat);
+    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !s->pointer) s->pointer = wl_seat_get_pointer(seat);
+}
+
+static void seat_name(void *data, struct wl_seat *seat, const char *name)
+{
+    (void)data; (void)seat;
+    printf("STANDIN seat name %s\n", name);
+}
+
+static const struct wl_seat_listener seat_listener = { seat_capabilities, seat_name };
+
+static void output_geometry(void *data, struct wl_output *o, int32_t x, int32_t y, int32_t pw,
+                            int32_t ph, int32_t subpixel, const char *make, const char *model,
+                            int32_t transform)
+{
+    (void)data; (void)o; (void)x; (void)y; (void)pw; (void)ph; (void)subpixel; (void)transform;
+    printf("STANDIN output geometry %s %s\n", make, model);
+}
+
+static void output_mode(void *data, struct wl_output *o, uint32_t flags, int32_t w, int32_t h,
+                        int32_t refresh)
+{
+    struct standin *s = data;
+    (void)o; (void)flags; (void)refresh;
+    s->mode_w = w;
+    s->mode_h = h;
+}
+
+static void output_done(void *data, struct wl_output *o)
+{
+    struct standin *s = data;
+    (void)o;
+    printf("STANDIN output mode %dx%d\n", s->mode_w, s->mode_h);
+}
+
+static void output_scale(void *data, struct wl_output *o, int32_t factor)
+{
+    (void)data; (void)o;
+    printf("STANDIN output scale %d\n", factor);
+}
+
+static void output_name(void *data, struct wl_output *o, const char *name)
+{
+    (void)data; (void)o;
+    printf("STANDIN output name %s\n", name);
+}
+
+static void output_description(void *data, struct wl_output *o, const char *description)
+{
+    (void)data; (void)o; (void)description;
+}
+
+static const struct wl_output_listener output_listener = {
+    output_geometry, output_mode, output_done, output_scale, output_name, output_description,
+};
+
 static void global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
                    uint32_t version)
 {
@@ -270,7 +338,13 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
     else if (strcmp(interface, xdg_wm_base_interface.name) == 0)
         s->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
                                       version < 5 ? version : 5);
-    else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0)
+    else if (strcmp(interface, wl_seat_interface.name) == 0) {
+        s->seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 8 ? version : 8);
+        wl_seat_add_listener(s->seat, &seat_listener, s);
+    } else if (strcmp(interface, wl_output_interface.name) == 0) {
+        s->output = wl_registry_bind(registry, name, &wl_output_interface, version < 4 ? version : 4);
+        wl_output_add_listener(s->output, &output_listener, s);
+    } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0)
         s->decoration_manager = wl_registry_bind(registry, name,
                                                  &zxdg_decoration_manager_v1_interface, 1);
 }
@@ -303,6 +377,7 @@ int main(int argc, char **argv)
     registry = wl_display_get_registry(s.display);
     wl_registry_add_listener(registry, &registry_listener, &s);
     wl_display_roundtrip(s.display);
+    wl_display_roundtrip(s.display); /* the seat's and the output's events */
     if (!s.compositor || !s.shm || !s.wm_base) {
         fprintf(stderr, "STANDIN missing wl_compositor, wl_shm or xdg_wm_base\n");
         return 1;
@@ -337,6 +412,10 @@ int main(int argc, char **argv)
     xdg_toplevel_destroy(s.toplevel);
     xdg_surface_destroy(s.xdg_surface);
     wl_surface_destroy(s.surface);
+    if (s.keyboard) wl_keyboard_release(s.keyboard);
+    if (s.pointer) wl_pointer_release(s.pointer);
+    if (s.seat) wl_seat_release(s.seat);
+    if (s.output) wl_output_release(s.output);
     if (s.decoration_manager) zxdg_decoration_manager_v1_destroy(s.decoration_manager);
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);

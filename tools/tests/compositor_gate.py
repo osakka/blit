@@ -193,6 +193,21 @@ def desktop_part(compositor, standin, work):
         desk.frame(80, 60, image_id=2)
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
+
+        # A second program, killed outright as crashing games are: its
+        # window goes with no teardown from the client, and nothing else.
+        second_out = os.path.join(work, 'standin-second.out')
+        second = start([standin, 'Second'], dict(env, WAYLAND_DISPLAY=display), open(second_out, 'w'))
+        for want in ('WINDOW new 3 0', 'WINDOW title 3 Second', 'WINDOW appid 3 blit.standin',
+                     'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
+            desk.line(want)
+        desk.send('WINDOW size 3 100 80')
+        desk.frame(100, 80, image_id=3)
+        wait_for(lambda: 'STANDIN drew 100x80' in open(second_out).read(), 'the second program did not draw')
+        second.kill()
+        second.wait()
+        desk.line('WINDOW gone 3')
+        desk.nothing(0.3)
         desk.send('WINDOW size 1 500 300 activated')
         second = desk.frame(500, 300)
         check(second > first, 'the sequence did not rise: %d then %d' % (first, second))
@@ -219,6 +234,10 @@ def desktop_part(compositor, standin, work):
                      'STANDIN configure 320x200\n', 'STANDIN configure 500x300 activated\n',
                      'STANDIN configure 0x0\n', 'STANDIN close',
                      'STANDIN popup configure 12,63 80x60', 'STANDIN popup done',
+                     'STANDIN seat capabilities 3', 'STANDIN seat name seat0',
+                     'STANDIN output geometry Blit blit-compositor', 'STANDIN output scale 1',
+                     'STANDIN output name BLIT-1', 'STANDIN output mode 1920x1080\n',
+                     'STANDIN output mode 320x200\n', 'STANDIN output mode 500x300\n',
                      'STANDIN done draws=4 releases=4 frames=4'):
             check(want in output, 'the stand-in did not print %r:\n%s' % (want, output))
         desk.nothing(0.3)
@@ -232,9 +251,9 @@ def desktop_part(compositor, standin, work):
         text = open(log).read()
         check(status == 1 and 'the frame channel closed' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('4 frames sent, 0 failed' in text, 'the log does not count 4 frames:\n%s' % text)
+        check('5 frames sent, 0 failed' in text, 'the log does not count 5 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=320x200,500x300,'
-              '0x0->256x160 popup=2@12,63+80x60+done->gone pattern=exact close->gone standin=%s globals=%s'
+              '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
                  ','.join('%s:%s' % kv for kv in sorted(versions.items()))))
     finally:
