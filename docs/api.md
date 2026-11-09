@@ -1959,13 +1959,16 @@ It speaks the frame channel above as a producer, with these additions.
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
   The compositor's first line after `OK` is `WINDOW display <name>`.
-- **Where the id is.** Every `INPUT` and `WINDOW` line, in both directions,
-  and their answers (`OK input`, `ERROR INPUT`, `OK window`, `ERROR WINDOW`)
-  carry the picture id as the third word, so a relay rewrites ids with one
-  rule; `INPUT eis <path> <id>` has it fourth (the path comes first), and
-  `WINDOW popup`/`WINDOW parent` and `INPUT member` carry a second id, the
-  parent's or top-level's, as the fourth word. The frame lines `RELEASE <id>
-  <seq>` and `ERROR <id> <code>` carry it second.
+- **One grammar, version 5 (agreed 2026-11-09; replaces the shapes above
+  when Blit and Hibr ship it together, with no compatibility forms).** Every
+  line on the frame channel that concerns a picture is
+  `<WORD> <verb> <id> [arguments]`, the picture id always the third word:
+  `FRAME release <id> <seq>` and `FRAME error <id> <code>` (were `RELEASE
+  <id> <seq>` and `ERROR <id> <code>`), `INPUT eis <id> <path>` and `INPUT
+  sock <id> <path>`, `INPUT ok <id>` and `INPUT error <id> <code>`, `WINDOW
+  ok <id>` and `WINDOW error <id> <code>`, and every `INPUT` and `WINDOW`
+  line. Further ids (a popup's parent, a member's top-level) are arguments.
+  The hello is `v5 <token>`. A relay rewrites ids with one rule.
 - **One id space.** A window's id is its picture id: its `FRM1` and `FRM3`
   frames, `RELEASE`s and `INPUT` routes all use it.
 - **Compositor to desktop**, one event a line, UTF-8:
@@ -2040,15 +2043,19 @@ It speaks the frame channel above as a producer, with these additions.
     mode, from `/v1/displays`), sent when the window opens and whenever it
     moves to another display; the compositor presents it to the program as
     its `wl_output`.
-- **Input on the channel.** blit-compositor takes its windows' input from
-  Blit over this same channel, not through EIS (libei exists only to feed a
-  foreign compositor, and leaves with gamescope in ADR 0228 phase 4). It asks
-  with `INPUT here <id>` instead of `INPUT eis <path> <id>`; the answers,
-  `EBUSY`/`EINVAL`/`ENOTSUP`, `INPUT on|off|hold|member`, the live rule and
-  the release of everything held when a route stops being live are exactly
-  as for EIS routes. While the route is live, Blit sends, in the picture's
-  own surface pixels (a member's position is mapped into its top-level's,
-  as `INPUT member` defines):
+- **Input straight from Blit.** blit-compositor takes its windows' input
+  from Blit directly, not through EIS (libei exists only to feed a foreign
+  compositor and leaves with gamescope in ADR 0228 phase 4) and not through
+  the desktop's relay. It listens on its own input socket and asks once,
+  through the channel, `INPUT sock <id> <path>`: Blit connects to `path`
+  (an absolute path to a Unix socket owned by the client's uid, checked as
+  for `INPUT eis`), and the answers, `INPUT on|off|hold|member`, the live
+  rule and the release of everything held when a route stops being live are
+  exactly as for EIS routes. A desktop between relays the request and
+  replays it on reconnect, as it does `INPUT eis`, and carries no input.
+  While the route is live, Blit writes to that socket, in the picture's own
+  surface pixels (a member's position mapped into its top-level's, as
+  `INPUT member` defines):
   ```
   INPUT key   <id> <evdev-code> press|release
   INPUT ptr   <id> <x> <y>             absolute
@@ -2058,11 +2065,9 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT frame <id> <monotonic-us>      ends one batch of events
   ```
   Keys are raw evdev codes; the compositor derives modifiers and characters
-  with the keymap below, so there is one source. Input lines are never
-  dropped silently: if the channel cannot take them, Blit counts it in
-  `frames.input` and releases what that route holds. A desktop between Blit
-  and the compositor passes these lines down to the producer that owns the
-  picture unchanged, and replays `INPUT here` on reconnect as it does `eis`.
+  with the keymap below, so there is one source. Input is never dropped
+  silently: if the socket cannot take a line, Blit counts it in
+  `frames.input` and releases what that route holds.
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` (phase 1, milestone B) returns a complete
