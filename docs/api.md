@@ -1964,21 +1964,44 @@ It speaks the frame channel above as a producer, with these additions.
   - `WINDOW limits <id> <minW> <minH> <maxW> <maxH>`: pixels, 0 for none.
   - `WINDOW fullscreen <id> on|off`: the program's own request.
   - `WINDOW popup <id> <parent> <x> <y>`: a popup or menu, its own picture,
-    at an offset in the parent's pixels; the desktop keeps it there when the
-    parent moves.
+    at an offset in the parent's surface pixels (not on-screen pixels: the
+    desktop may show the parent scaled); the desktop keeps it there when the
+    parent moves, and may draw it past the parent's window.
+  - `WINDOW decor <id> server|client`: who draws the frame
+    (`zxdg_decoration`). `client` (a program that insists on its own, such
+    as GTK's client-side decorations) gets a bare window from the desktop,
+    never a frame around a frame.
   - `WINDOW cursor <id> <name>`: the pointer shape the program asks for over
     that window, a CSS cursor name (`default`, `text`, `pointer`, ...) or
-    `hidden`, drawn by Blit as `OSC 22` shapes are.
-  - `WINDOW gone <id>`.
+    `hidden`. The desktop turns it into its own per-window pointer shape
+    (`OSC 22`), so Blit and `hold` gain nothing new for it.
+  - `WINDOW gone <id>`: sent after every buffer of that id is released;
+    no frame follows it for that id.
+  `title`, `appid`, `limits`, `cursor` and `decor` may come again at any
+  time. The compositor strips control characters, newline included, from
+  titles and app ids and bounds them to 256 bytes.
   A line the desktop does not know is answered `ERROR WINDOW <id> EINVAL`.
 - **Desktop to compositor:**
   - `WINDOW size <id> <w> <h> [fullscreen] [activated]`: pixels. The
     compositor configures exactly this size; the frame that follows carries
-    the size the program committed in its header.
+    the size the program committed in its header. `0 0` means the program
+    chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
+    their own size and the desktop sizes its window to the first frame.
   - `WINDOW close <id>`: `xdg_toplevel.close` (in phase 2,
     `WM_DELETE_WINDOW`); what to do if the program lingers is the desktop's.
+    For a popup it is `xdg_popup.popup_done` -- the desktop sends it for a
+    click outside a grabbing popup.
   - `INPUT on|off|hold` as above; focus is `INPUT on`, so there is no
-    separate focus line. Answers are `OK window <id>` or
+    separate focus line. `INPUT on` for one window implies nothing for
+    another: the desktop sends each `off` itself.
+  - **One input route per top-level.** A popup's picture joins its
+    top-level's route with `INPUT member <popup-id> <toplevel-id> <x> <y>`
+    (the popup's offset in the top-level's surface pixels, the same numbers
+    as `WINDOW popup`), sent to Blit by the desktop. Blit maps the pointer
+    over a member picture into the top-level's surface coordinates, so the
+    compositor sees one coordinate space per top-level and hit-tests its
+    own popups; keyboard focus stays the top-level's. The member ends with
+    the popup's picture. Answers are `OK window <id>` or
     `ERROR WINDOW <id> <code>`.
 - **Sizes are the program's to honour.** A Wayland client is told a size
   and commits the buffer it draws; most draw exactly that size, but a
@@ -1993,10 +2016,13 @@ It speaks the frame channel above as a producer, with these additions.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
-- **Open in this draft:** how the keyboard map reaches the compositor (it
-  must give clients an xkb keymap matching Blit's keyboard settings: from
-  Blit's API, or carried with the input route); and the clipboard, which
-  phase 2 decides with the X window manager's selections.
+- **The keyboard map** comes from Blit's API, read by the compositor from
+  Blit's keyboard settings -- one source: `GET /v1/input/keymap` (phase 1)
+  gives the xkb rules, model, layout, variant and options, which the
+  compositor compiles with libxkbcommon and hands to clients; it reads it
+  again when Blit's keyboard settings change.
+- **Open in this draft:** the clipboard, which phase 2 decides with the X
+  window manager's selections.
 
 ## Diagnostics and screenshots
 
