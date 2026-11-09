@@ -9,6 +9,28 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-09: 0.3.70 hold modes: confine and relative (ADR 0225)
+
+- **`INPUT hold <id> relative|confine`** on the frame channel; a new route
+  is `relative` (as before: hidden pointer, raw deltas). `confine`: while
+  the session holds `?7701` and the route is live, Blit's pointer stays
+  visible, moves as an unlocked pointer does, is clamped to the picture's
+  drawn rectangle, and is sent to the compositor as absolute positions, so
+  gamescope's cursor (which its stream does not carry, and which its EIS
+  never reports -- read from gamescope 3.16.22's source) and the drawn one
+  are one point. An older Blit answers `ERROR INPUT 0 EINVAL`. Routes report
+  `hold`. One function (`frame_input_confined`) decides hiding, motion and
+  relative flushing; `session_surface_px` is now shared with the hit test.
+- **Gates:** `frame_input_gate` (shown, clamped at both corners, absolute
+  only, raw deltas still to the holder, buttons, falls back to relative when
+  undrawn, released keeps the pointer; relative hidden and still); `all` 186
+  pass, 12 skip, 0 fail; GLES `renderer` 82 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+- **Deployed:** the mini PC, verified at 21:16:32 -- which restarted Blit
+  while the owner was reporting a Steam input failure on hibr 0.99.477 with
+  Blit 0.3.69, so that state could not be read. 10.52 is offline (it left
+  the network at the 0.3.69 update); not deployed there.
+
 ## 2026-11-09: 0.3.69 the input route's last pointer, for diagnosis (ADR 0225)
 
 - **`frames.input.routes[].pointer`:** the last absolute pointer of each
