@@ -580,6 +580,9 @@ suite_hibr() {
     # desktop with the in-repo stand-in client, then Blit's window=0. Needs
     # libwayland-dev, libwayland-bin and wayland-protocols on the build host.
     run_gate compositor_gate.sh sh "$ROOT"/tools/tests/compositor_gate.sh
+    # ADR 0228 phase 1, milestone B: GET /v1/input/keymap compiles with
+    # libxkbcommon and types what Blit types. Needs libxkbcommon-dev.
+    run_gate keymap_gate.sh sh "$ROOT"/tools/tests/keymap_gate.sh
     # ADR 0225: the INPUT route to EIS. The first runs anywhere (stand-in
     # libei); the second needs libei.so.1 and libeis.so.1 and skips (77)
     # without them.

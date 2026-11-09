@@ -4047,6 +4047,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"audio\":\"/v1/audio\","
              "\"audio_cards\":\"/v1/audio/cards\","
              "\"input_devices\":\"/v1/input/devices\","
+             "\"input_keymap\":\"/v1/input/keymap\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
              "\"fonts\":\"/v1/fonts\",\"login\":\"/v1/login\","
              "\"auxiliary_displays\":\"/v1/auxiliary-displays\","
@@ -24069,6 +24070,10 @@ static void settings_complete_requests(BlitRuntime *runtime, int kind, int ok,
 }
 
 
+/* blit_xkb_keymap.h's endpoint, defined after Blit's key tables. */
+static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
+                                  const char *path, char *body, size_t capacity);
+
 static void handle_request(int fd, BlitRuntime *runtime,
                            BlitHttpClient *client, const char *request)
 {
@@ -26362,6 +26367,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
     } else if (strcmp(path, "/v1/audio") == 0) {
         audio_devices_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strncmp(path, "/v1/input/keymap", 16) == 0 &&
+               (path[16] == '\0' || path[16] == '?')) {
+        input_keymap_response(fd, runtime, request, path, body, sizeof(body));
     } else if (strcmp(path, "/v1/input/devices") == 0) {
         /* Served from the runtime's table (ADR 0064). This route used to run
            the evdev scan -- 32 synchronous open() calls on the event-loop
@@ -29976,6 +29984,68 @@ static int evdev_key_character(const BlitInputDevice *device,
         (device->shift ? shifted_byte : plain_byte);
     out[1] = '\0';
     return 1;
+}
+
+#include "blit_xkb_keymap.h"
+
+/* GET /v1/input/keymap[?device=<id>] (blit_xkb_keymap.h): the keyboard's
+   xkb keymap as text. The keyboard is the one named, else the first
+   enabled device Blit reads as a keyboard, else none: the built-in US
+   table with no overrides. Its ETag is the SHA-256 of the text, so it
+   changes exactly when the keymap does (a PATCH of the device's `keymap`
+   or `modifiers`), and If-None-Match is answered 304. */
+static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
+                                  const char *path, char *body, size_t capacity)
+{
+    static BlitInputDevice builtin;
+    const BlitInputDevice *device = NULL;
+    const char *query = strstr(path, "device=");
+    char revision[65], etag[96], extra[128 + BLIT_INPUT_ID_CAPACITY], match[512];
+    size_t length;
+    int i;
+
+    if (query != NULL) {
+        char id[BLIT_INPUT_ID_CAPACITY];
+        size_t n = strcspn(query + 7, "&");
+        if (n == 0 || n >= sizeof(id)) {
+            send_problem(fd, 404, "Not Found", "input_device_not_found",
+                         "The requested input device does not exist.");
+            return;
+        }
+        memcpy(id, query + 7, n);
+        id[n] = '\0';
+        device = find_input_device_id(runtime, id);
+        if (device == NULL) {
+            send_problem(fd, 404, "Not Found", "input_device_not_found",
+                         "The requested input device does not exist.");
+            return;
+        }
+    } else {
+        for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+            if (runtime->input_devices[i].used && runtime->input_devices[i].enabled &&
+                (runtime->input_devices[i].kinds & BLIT_INPUT_KIND_KEYBOARD)) {
+                device = &runtime->input_devices[i];
+                break;
+            }
+    }
+    if (device == NULL) device = &builtin;
+    length = xkb_keymap_text(device, body, capacity);
+    if (length == 0) {
+        send_problem(fd, 500, "Internal Server Error", "input_keymap_unserialisable",
+                     "The keymap did not fit its response buffer.");
+        return;
+    }
+    blit_sha256_hex(body, length, revision);
+    snprintf(etag, sizeof(etag), "\"%s\"", revision);
+    snprintf(extra, sizeof(extra), "ETag: %s\r\nX-Blit-Keymap-Device: %s\r\n", etag,
+             device == &builtin ? "builtin" : device->id);
+    if ((request_header(request, "If-None-Match:", match, sizeof(match)) ||
+         request_header(request, "if-none-match:", match, sizeof(match))) &&
+        (strcmp(match, "*") == 0 || strstr(match, revision) != NULL)) {
+        send_http_with(fd, 304, "Not Modified", "text/plain; charset=utf-8", "no-cache", extra, "");
+        return;
+    }
+    send_http_with(fd, 200, "OK", "text/plain; charset=utf-8", "no-cache", extra, body);
 }
 
 static int evdev_super_held(const BlitInputDevice *keyboard)

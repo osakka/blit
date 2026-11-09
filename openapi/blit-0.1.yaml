@@ -1196,6 +1196,44 @@ paths:
                   dropped: {type: integer, minimum: 0}
         default:
           $ref: '#/components/responses/Problem'
+  /v1/input/keymap:
+    get:
+      tags: [hardware]
+      operationId: getInputKeymap
+      summary: The keyboard as a complete xkb keymap
+      description: >-
+        ADR 0228 phase 1: the keyboard as an xkb keymap in libxkbcommon's
+        text format (`XKB_KEYMAP_FORMAT_TEXT_V1`), for blit-compositor to hand
+        to its Wayland clients. Generated from Blit's own keyboard tables --
+        each key's levels (plain, Shift, AltGr, Shift+AltGr) are what Blit
+        types with them, the device's `keymap` overrides on the built-in US
+        table, and a code with a `modifiers` role is that modifier -- so it
+        has no second source. Keycodes are evdev codes plus 8. The keyboard
+        is `device` when given, else the first enabled device Blit reads as
+        a keyboard, else the built-in table alone; `X-Blit-Keymap-Device`
+        names it (`builtin` for none). The ETag is the SHA-256 of the text,
+        so it changes exactly when the keymap does; `If-None-Match` is
+        answered 304.
+      parameters:
+        - name: device
+          in: query
+          required: false
+          schema: {type: string}
+          description: An input device id from /v1/input/devices.
+      responses:
+        '200':
+          description: The keymap
+          headers:
+            ETag: {schema: {type: string}}
+            X-Blit-Keymap-Device: {schema: {type: string}}
+          content:
+            text/plain:
+              schema: {type: string}
+        '304': {description: The keymap is the one If-None-Match names}
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/input/devices/{device_id}:
     parameters:
       - name: device_id
@@ -2309,7 +2347,7 @@ components:
         resources:
           type: object
           required: [graphics, displays, audio, audio_cards, input_devices,
-                     input_routes, topology, fonts, login, auxiliary_displays,
+                     input_keymap, input_routes, topology, fonts, login, auxiliary_displays,
                      settings, diagnostics, runtime_diagnostics, observation,
                      effects, overlays]
           properties:
@@ -2317,6 +2355,7 @@ components:
             displays: {type: string}
             audio: {type: string}
             input_devices: {type: string}
+            input_keymap: {type: string}
             input_routes: {type: string}
             topology: {type: string}
             fonts: {type: string}

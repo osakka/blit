@@ -46,7 +46,12 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 50
+raise "unexpected path count #{paths.length}" unless paths.length == 51
+# ADR 0228: the keyboard as an xkb keymap, text, with its ETag.
+raise 'input keymap contract missing' unless
+  paths.dig('/v1/input/keymap','get','operationId') == 'getInputKeymap' &&
+  paths.dig('/v1/input/keymap','get','responses','200','content').key?('text/plain') &&
+  paths.dig('/v1/input/keymap','get','responses','200','headers').key?('ETag')
 raise 'font icon discovery contract missing' unless
   paths.dig('/v1/fonts/icons','get','operationId') == 'getFontIconCatalogue' &&
   schema.dig('components','schemas','FontIconCatalogue','required').sort ==

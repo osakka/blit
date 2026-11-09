@@ -1697,6 +1697,41 @@ An empty `modifiers` object clears the map. Every property is per device: two
 keyboards on one server can carry different layouts, different repeat rates
 and different remaps, which is what makes per-device routing usable.
 
+### Keyboard map (xkb)
+
+`GET /v1/input/keymap` returns a keyboard as a complete xkb keymap, the text
+libxkbcommon compiles (`xkb_keymap_new_from_string`,
+`XKB_KEYMAP_FORMAT_TEXT_V1`), `Content-Type: text/plain`. It is how
+blit-compositor gives its Wayland programs Blit's keyboard (ADR 0228; "Program
+windows" below), and it is generated from Blit's own tables, not from a
+layout name: each key's four levels (plain, Shift, AltGr, Shift+AltGr) are
+what Blit itself types with them -- the built-in US table under the device's
+`keymap` overrides, CapsLock inverting Shift for a lower-case letter only --
+and a code with a `modifiers` role is that modifier (`control` is
+`Control_L`, `altgr` is `ISO_Level3_Shift`, `none` is no key). Keycodes are
+evdev codes plus 8; Shift, Lock, Control, Mod1 (Alt), Mod2 (Num Lock), Mod4
+(Super) and Mod5 (AltGr) are the modifiers. A level of more than one
+character is its first character, since an xkb level is one keysym; the
+keypad is its Num Lock-on keysyms.
+
+The keyboard is `?device=<id>` when given (404 `input_device_not_found` for
+none such), else the first enabled device Blit reads as a keyboard, else
+none, which is the built-in table alone; `X-Blit-Keymap-Device` names it
+(`builtin`). The `ETag` is the SHA-256 of the text, quoted, so it changes
+exactly when the keymap does; `If-None-Match` with it is answered 304 with
+no body. A compositor reads it again on `device_changed` (the event stream's
+input events) and compares the ETag.
+
+```text
+GET /v1/input/keymap
+  -> 200 text/plain  ETag: "<sha-256>"  X-Blit-Keymap-Device: <id>
+     xkb_keymap {
+     xkb_keycodes "blit" { minimum = 8; maximum = 255; <K1> = 9; ... };
+     ...
+     key <K30> { type = "ALPHABETIC", [ a, A ] };
+     ...
+```
+
 ## Original font icon discovery
 
 `GET /v1/fonts/icons` returns the packaged, versioned catalogue of Blit's own
@@ -2094,7 +2129,7 @@ It speaks the frame channel above as a producer, with these additions.
   `frames.input` and releases what that route holds.
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
-  source: `GET /v1/input/keymap` (phase 1, milestone B) returns a complete
+  source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete
   xkb keymap as text (`xkb_v1`), which the compositor compiles with
   libxkbcommon and hands to clients; it reads it again when Blit's keyboard
   settings change. The desktop never touches it.
