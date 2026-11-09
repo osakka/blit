@@ -1,6 +1,6 @@
 # ADR 0228: Blit is the compositor for programs
 
-- Status: proposed
+- Status: proposed (phases 0 and 1 approved by the owner, 2026-11-09)
 - Date: 2026-11-09
 - Scope: a Wayland server and an X window manager inside Blit; programs and
   games in Hibr windows and full screen; supersedes the gamescope path of
