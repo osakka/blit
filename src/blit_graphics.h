@@ -165,6 +165,9 @@ typedef struct {
        frame not newer than the last is dropped. */
     int descriptor;
     unsigned long long descriptor_sequence;
+    /* When the newest frame by descriptor was accepted (monotonic us), for
+       measuring input-to-frame latency (ADR 0228 phase 0). */
+    unsigned long long descriptor_accepted_us;
     /* The last edits, oldest first; cleared by anything that changes the
        image some other way. Empty means renderers refresh it whole. */
     BlitGraphicsEdit edits[BLIT_GRAPHICS_EDIT_HISTORY];

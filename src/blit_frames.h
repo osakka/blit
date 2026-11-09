@@ -445,6 +445,7 @@ static void frame_dmabuf_apply(BlitRuntime *runtime, BlitSession *session,
     image->opaque = !alpha;
     image->complete = 1;
     image->descriptor_sequence = f->sequence;
+    image->descriptor_accepted_us = monotonic_us();
     image->generation = next_graphics_generation();
     image->edit_count = 0;
     ++session->dmabuf_accepted;
@@ -547,6 +548,7 @@ static void frame_apply(BlitRuntime *runtime, BlitSession *session, int client_f
     image->complete = 1;
     image->opaque = f->format == 24;
     image->descriptor_sequence = f->sequence;
+    image->descriptor_accepted_us = monotonic_us();
     from = image->generation;
     image->generation = next_graphics_generation();
     /* An edit is remembered so the GPU uploads only it (ADR 0200); a whole

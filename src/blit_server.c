@@ -1710,6 +1710,9 @@ typedef struct {
     double diagnostic_last_evdev_scan_ms;
     double diagnostic_max_evdev_scan_ms;
     double diagnostic_last_render_ms;
+    /* When the newest synthetic input was injected (monotonic us): with a
+       picture's frame_us, input-to-frame latency (ADR 0228 phase 0). */
+    uint64_t diagnostic_last_inject_us;
     double diagnostic_max_render_ms;
     double diagnostic_last_terminal_ms;
     double diagnostic_max_terminal_ms;
@@ -3815,7 +3818,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"frames\":%llu,\"last_frame_gap_ms\":%.3f,"
         "\"max_frame_gap_ms\":%.3f,\"last_render_ms\":%.3f,"
         "\"max_render_ms\":%.3f,\"missed_deadlines\":%llu,"
-        "\"frame_rate_max_render_ms\":%.3f,"
+        "\"last_inject_us\":%llu,\"frame_rate_max_render_ms\":%.3f,"
         "\"frame_rate_missed_deadlines\":%llu,"
         "\"frame_rate_window_sequence\":%llu,"
         "\"last_terminal_ms\":%.3f,\"max_terminal_ms\":%.3f,"
@@ -3906,6 +3909,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_last_render_ms,
         runtime->diagnostic_max_render_ms,
         diagnostic_missed_deadlines(runtime),
+        (unsigned long long)runtime->diagnostic_last_inject_us,
         runtime->diagnostic_frame_rate_max_render_ms,
         runtime->diagnostic_frame_rate_missed_deadlines,
         runtime->diagnostic_frame_rate_window_sequence,
@@ -16639,7 +16643,8 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                 "\"width\":%d,\"height\":%d,\"format\":%d,"
                 "\"bytes\":%lu,\"pixel_crc32\":%lu,\"x\":%d,\"y\":%d,"
                 "\"placement_width\":%d,\"placement_height\":%d,"
-                "\"z\":%d,\"revision\":%llu,\"dmabuf\":%s,\"sequence\":%llu",
+                "\"z\":%d,\"revision\":%llu,\"dmabuf\":%s,\"sequence\":%llu,"
+                "\"frame_us\":%llu",
                 first_graphics ? "" : ",", image->id, image->protocol,
                 image->complete ? "true" : "false",
                 image->visible ? "true" : "false", image->width,
@@ -16649,7 +16654,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                 image->revision,
                 /* ADR 0223: the picture is a dmabuf frame on the GPU. */
                 image->dmabuf != NULL && image->dmabuf->shown.used ? "true" : "false",
-                image->descriptor_sequence);
+                image->descriptor_sequence, image->descriptor_accepted_us);
             /* The same record carries the placements: the default one as id
                0, then each numbered one, with their source rectangles. A
                placement whose rectangle starts outside the image is listed
@@ -25649,6 +25654,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         strcmp(method, "POST") == 0) {
         uint64_t input_started_us = monotonic_us();
         char kind[64];
+        runtime->diagnostic_last_inject_us = input_started_us;
         char inject_device_id[BLIT_INPUT_ID_CAPACITY];
         BlitInputDevice *inject_device = NULL;
         int x;

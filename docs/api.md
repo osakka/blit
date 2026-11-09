@@ -1844,7 +1844,10 @@ is deleted. A frame it cannot import is refused `ERROR <id> ENOTSUP` and
 should be sent again by memfd; a malformed one is `EINVAL`. Each session's
 `frames.dmabuf` counts frames accepted, released and refused by reason
 (`unavailable`, `format`, `import`, `invalid`), and an image says
-`"dmabuf": true` while it shows one; `/v1/diagnostics` reports
+`"dmabuf": true` while it shows one and `frame_us` when its newest frame
+was accepted (monotonic microseconds; with `/v1/diagnostics/runtime`'s
+`performance.last_inject_us`, the time `POST /v1/input/inject` last ran,
+it measures input-to-frame latency, ADR 0228 phase 0); `/v1/diagnostics` reports
 `graphics.frames.dmabuf`: whether it is offered (or why not), the formats,
 whether fences are waited on, the totals, `fences_waited` and the same
 counts per session.
