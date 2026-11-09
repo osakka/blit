@@ -208,8 +208,12 @@ def main():
         v1 = Client(name, token, 1)
         v3 = Client(name, token, 3)
         check(v3.hello == b'OK dmabuf=0\n', 'a version 3 hello without import was answered %r' % v3.hello)
-        bad = Client(name, token, 4)
-        check(bad.hello.startswith(b'ERROR 0 EINVAL'), 'a version 4 hello was answered %r' % bad.hello)
+        # Version 4 (ADR 0228) is version 3 plus WINDOW lines, a desktop's to
+        # answer: Blit says window=0. Version 5 does not exist.
+        v4 = Client(name, token, 4)
+        check(v4.hello == b'OK dmabuf=0 window=0\n', 'a version 4 hello was answered %r' % v4.hello)
+        bad = Client(name, token, 5)
+        check(bad.hello.startswith(b'ERROR 0 EINVAL'), 'a version 5 hello was answered %r' % bad.hello)
 
         plane = lambda size=64 * 64 * 4: memfd(b'\0' * size)
 

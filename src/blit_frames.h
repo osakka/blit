@@ -21,7 +21,12 @@
    image's texture -- never mapped, read or copied by the CPU -- and keeps
    them until a newer frame of the image has been presented, then answers
    RELEASE so the producer may reuse the buffer. Offered in the hello's
-   answer only while the GPU compositor can import. */
+   answer only while the GPU compositor can import.
+
+   Version 4 (ADR 0228) is version 3 plus the WINDOW lines between
+   blit-compositor and a desktop (docs/api.md, "Program windows"). Blit
+   reached directly answers its hello as version 3's with ` window=0` and
+   every WINDOW line `ERROR WINDOW <id> ENOTSUP`. */
 
 #define BLIT_FRAME_CLIENTS 32
 #define BLIT_FRAME_HELLO_BYTES 16
@@ -739,6 +744,31 @@ static void frame_hud_notify(BlitRuntime *runtime)
     }
 }
 
+/* ADR 0228: `WINDOW <event> <id> ...` is answered `ERROR WINDOW <id>
+   ENOTSUP`: Blit reached directly places no program windows, the desktop
+   does. The id is the line's third word, 0 when it has none or it cannot
+   be read (`WINDOW display <name>`), as for INPUT. */
+static void frame_window_refuse(int fd, const unsigned char *message, ssize_t length)
+{
+    char line[96], reply[64];
+    size_t n = length < (ssize_t)sizeof(line) ? (size_t)length : sizeof(line) - 1;
+    unsigned long id = 0;
+    const char *p;
+    char *end;
+
+    memcpy(line, message, n);
+    line[n] = '\0';
+    p = strchr(line + 7, ' ');
+    if (p != NULL && p[1] >= '0' && p[1] <= '9') {
+        errno = 0;
+        id = strtoul(p + 1, &end, 10);
+        if (errno != 0 || id > 0xffffffffUL || (*end != '\0' && *end != ' ' && *end != '\n'))
+            id = 0;
+    }
+    snprintf(reply, sizeof(reply), "ERROR WINDOW %lu ENOTSUP\n", id);
+    frame_reply(fd, reply);
+}
+
 /* The hello: magic, version, token. On success the client is bound to the
    session the token names, if its uid may send that session frames. */
 static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *message,
@@ -752,7 +782,7 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
     int i;
 
     if (length < BLIT_FRAME_HELLO_BYTES || memcmp(message, "BLITFRM1", 8) != 0 ||
-        frame_u32(message + 8) < 1 || frame_u32(message + 8) > 3) {
+        frame_u32(message + 8) < 1 || frame_u32(message + 8) > 4) {
         frame_reply(client->fd, "ERROR 0 EINVAL\n");
         frame_client_close(runtime, index);
         return;
@@ -782,15 +812,19 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
                 frame_reply(client->fd, "OK\n");
             } else {
                 /* ADR 0223: dmabuf frames are offered only while the GPU
-                   compositor can import them, with what it can import. */
+                   compositor can import them, with what it can import.
+                   ADR 0228: version 4 is version 3 plus the WINDOW lines,
+                   which are the desktop's to answer, not Blit's: Blit says
+                   window=0 and refuses each one (frame_window_refuse). */
                 char answer[1300];
                 int fences = 0;
                 const char *formats = blit_kms_dmabuf_formats(runtime->kms, &fences, NULL);
+                const char *window = client->version >= 4 ? " window=0" : "";
                 if (formats != NULL)
-                    snprintf(answer, sizeof(answer), "OK dmabuf=1 fence=%d formats=%s\n",
-                             fences, formats);
+                    snprintf(answer, sizeof(answer), "OK dmabuf=1 fence=%d formats=%s%s\n",
+                             fences, formats, window);
                 else
-                    snprintf(answer, sizeof(answer), "OK dmabuf=0\n");
+                    snprintf(answer, sizeof(answer), "OK dmabuf=0%s\n", window);
                 frame_reply(client->fd, answer);
             }
             frame_hud_notify(runtime);
@@ -886,6 +920,13 @@ static void frame_client_service(BlitRuntime *runtime, int index)
                 frame_input_request(runtime, client, (const unsigned char *)"", 0);
             else
                 frame_input_request(runtime, client, message, got);
+            continue;
+        }
+        if (got >= 7 && memcmp(message, "WINDOW ", 7) == 0) {
+            /* ADR 0228: a program window's line, which only a desktop
+               answers (docs/api.md, "Program windows"). */
+            for (j = 0; j < fd_count; ++j) close(fds[j]);
+            frame_window_refuse(client->fd, message, got);
             continue;
         }
         if (got >= 4 && memcmp(message, "FRM3", 4) == 0) {

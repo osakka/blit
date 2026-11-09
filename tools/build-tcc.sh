@@ -98,8 +98,40 @@ case "$target" in
         echo "built $output target=$target version $version with ${CC:-cc}"
         exit 0
         ;;
+    compositor)
+        # ADR 0228: blit-compositor, Blit's Wayland compositor for programs,
+        # its own program linked against libwayland-server by SONAME. Its
+        # protocol code is generated here by wayland-scanner from the
+        # system's protocol XML (libwayland-bin, wayland-protocols), never
+        # committed: server code for the compositor and client code for the
+        # in-repo stand-in client (tools/tests/wl_standin_client.c), both in
+        # BLIT_PROTOCOL_DIR (default build/protocol). The XML bounds the
+        # versions offered (blit_compositor.c, BC_VERSION).
+        protocols=${BLIT_WAYLAND_PROTOCOLS:-$(pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null || echo /usr/share/wayland-protocols)}
+        proto=${BLIT_PROTOCOL_DIR:-$ROOT/build/protocol}
+        if ! command -v wayland-scanner >/dev/null 2>&1 ||
+           [ ! -f "$protocols/stable/xdg-shell/xdg-shell.xml" ]; then
+            echo "blit: wayland-scanner or the wayland-protocols XML not found (libwayland-bin, wayland-protocols)" >&2
+            exit 1
+        fi
+        mkdir -p "$proto"
+        for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
+                   "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"; do
+            base=$(basename "$xml" .xml)
+            wayland-scanner server-header "$xml" "$proto/$base-server-protocol.h"
+            wayland-scanner client-header "$xml" "$proto/$base-client-protocol.h"
+            wayland-scanner private-code "$xml" "$proto/$base-protocol.c"
+        done
+        tcc -O2 -g -std=c99 \
+            "-DBLIT_BUILD_VERSION=\"$version\"" \
+            -I"$ROOT/src" -I"$proto" \
+            "$ROOT/src/blit_compositor.c" \
+            "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
+            "${BLIT_WAYLAND_SERVER_LIBRARY:-/lib/x86_64-linux-gnu/libwayland-server.so.0}" \
+            -o "$output"
+        ;;
     *)
-        echo "blit: unknown TCC target '$target' (use server, helper, adapter, or gamescope)" >&2
+        echo "blit: unknown TCC target '$target' (use server, helper, adapter, gamescope, or compositor)" >&2
         exit 1
         ;;
 esac

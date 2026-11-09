@@ -200,7 +200,63 @@ owner can see.
 - A host with Xwayland 24.1 for the phase 2 gates (the mini PC and 10.52
   have 24.1.6; the build host has none).
 
-## Evidence (planned)
+## Evidence
 
-Phase 0's numbers; per phase, the stand-in-client gates, the full and GLES
-suites, and the owner's live check named above.
+Planned: phase 0's numbers; per phase, the stand-in-client gates, the full
+and GLES suites, and the owner's live check named above.
+
+**Phase 1, milestone A (0.3.71, in development, 2026-11-09).** The first
+stand-in-client build for Blit and Hibr to test against.
+
+- `blit-compositor` (`src/blit_compositor.c`, its frame channel in
+  `src/blit_compositor_wire.h`), built by `tools/build-tcc.sh compositor`
+  with tcc against libwayland-server, its protocol code generated at build
+  time into `build/protocol` from the system XML (xdg-shell,
+  xdg-decoration), never committed. It speaks the frame channel as version
+  4 and the `WINDOW` lines exactly as `docs/api.md` drafts them, listens on
+  `$XDG_RUNTIME_DIR/blit-<n>` (the first free n), and offers
+  `wl_compositor`, `wl_subcompositor` (subsurfaces accepted and logged, not
+  composited), `wl_shm` (libwayland's, ARGB8888 and XRGB8888), `wl_output`
+  (one mode, the newest size the desktop asked for), `wl_seat`, `xdg_wm_base`
+  and `zxdg_decoration_manager_v1` (server-side). A toplevel is announced at
+  its initial commit and configured only when the desktop sends its size,
+  exactly that size; each committed `wl_shm` buffer is copied into one
+  sealed FRM1 frame (XRGB8888 as RGB, ARGB8888 un-premultiplied to RGBA,
+  which Blit reads as straight alpha), released at once, and its frame
+  callbacks answered when the frame was sent.
+- **Versions offered on the build host.** The ADR names `wl_compositor` v6
+  and `xdg_wm_base` v6; Debian 12's libwayland 1.21 and wayland-protocols
+  1.31 carry v5 of both, and libwayland refuses a global above its
+  interface's version, so the compositor offers the lower of the two
+  (`BC_VERSION`): `wl_compositor` 5, `xdg_wm_base` 5, `wl_output` 4,
+  `wl_seat` 8, `wl_subcompositor` 1, `zxdg_decoration_manager_v1` 1. Built
+  against Debian 13's XML it offers v6 of both without a change.
+- **blit-server**: a version 4 hello is answered as version 3's plus
+  ` window=0`, and every `WINDOW` line `ERROR WINDOW <id> ENOTSUP` (the id
+  0 when the line has none, as for INPUT) -- the only server change.
+- **Gate** `compositor_gate` (hibr suite): a fake desktop answers the hello
+  `window=1`; with the in-repo stand-in client
+  (`tools/tests/wl_standin_client.c`, libwayland-client) it sees
+  `WINDOW display blit-0`, then `new 1 0`, `title`, `appid`, `limits 1 64
+  48 0 0` and `decor 1 server` and no frame before its size; after `WINDOW
+  size 1 320 200` a 320x200 frame; the client's popup as `WINDOW popup 2 1
+  12 63` (its positioner's offset in the toplevel's surface pixels) and an
+  80x60 frame of picture 2, which `WINDOW close 2` ends through
+  `popup_done` with `WINDOW gone 2`; after `500 300 activated` a 500x300
+  frame, each sealed and equal to the client's pattern pixel for pixel;
+  `0 0` gives the client's own 256x160; `WINDOW close 1` ends the client
+  and brings `WINDOW gone 1`; the client counts four draws, four releases
+  and four frame callbacks; the compositor ends, status 1, when the desktop's
+  channel closes. Against a real blit-server on the mock display: version 3
+  unchanged, version 4 `OK dmabuf=0 window=0`, `ENOTSUP` for four `WINDOW`
+  lines, version 5 `EINVAL`, and blit-compositor reaching Blit directly
+  keeps running, says why it shows nothing and configures no client. The
+  compositor, the client and the wire's unit cases run again under
+  AddressSanitizer and UBSan (without address randomisation: GCC 12's ASan
+  cannot map its shadow under this kernel's at random).
+- **Not in milestone A:** dmabuf frames (`zwp_linux_dmabuf_v1` v4, FRM3),
+  input (`wl_seat` focus and events, the route, `GET /v1/input/keymap` and
+  the xkb keymap, pointer constraints and relative pointer, `WINDOW
+  cursor`), `wp_presentation` and frame pacing, `zxdg_output_manager_v1`,
+  `wl_data_device_manager`, `wp_viewporter`, subsurfaces composited, the
+  package, and the live check with vkcube.
