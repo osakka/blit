@@ -2033,6 +2033,29 @@ It speaks the frame channel above as a producer, with these additions.
     mode, from `/v1/displays`), sent when the window opens and whenever it
     moves to another display; the compositor presents it to the program as
     its `wl_output`.
+- **Input on the channel.** blit-compositor takes its windows' input from
+  Blit over this same channel, not through EIS (libei exists only to feed a
+  foreign compositor, and leaves with gamescope in ADR 0228 phase 4). It asks
+  with `INPUT here <id>` instead of `INPUT eis <path> <id>`; the answers,
+  `EBUSY`/`EINVAL`/`ENOTSUP`, `INPUT on|off|hold|member`, the live rule and
+  the release of everything held when a route stops being live are exactly
+  as for EIS routes. While the route is live, Blit sends, in the picture's
+  own surface pixels (a member's position is mapped into its top-level's,
+  as `INPUT member` defines):
+  ```
+  INPUT key   <id> <evdev-code> press|release
+  INPUT ptr   <id> <x> <y>             absolute
+  INPUT rel   <id> <dx> <dy>           under a relative hold
+  INPUT btn   <id> <BTN_code> press|release
+  INPUT wheel <id> <dx> <dy>           notches
+  INPUT frame <id> <monotonic-us>      ends one batch of events
+  ```
+  Keys are raw evdev codes; the compositor derives modifiers and characters
+  with the keymap below, so there is one source. Input lines are never
+  dropped silently: if the channel cannot take them, Blit counts it in
+  `frames.input` and releases what that route holds. A desktop between Blit
+  and the compositor passes these lines down to the producer that owns the
+  picture unchanged, and replays `INPUT here` on reconnect as it does `eis`.
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` (phase 1, milestone B) returns a complete
