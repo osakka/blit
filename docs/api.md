@@ -1936,6 +1936,68 @@ trailing newline is optional.
   once a position was sent; `other-session`, `no-image` or
   `outside-picture` when the last pointer sent nothing; `none-yet`).
 
+## Program windows (draft, ADR 0228 phase 1)
+
+*Draft for review with Hibr; nothing implements it yet.* `blit-compositor`
+is Blit's Wayland compositor for programs (and, in phase 2, their X window
+manager). It composites nothing: each window is one picture by descriptor.
+It speaks the frame channel above as a producer, with these additions.
+
+- **Who starts it.** The desktop, once per desktop session, with the
+  `BLIT_FRAME_SOCKET`/`BLIT_FRAME_TOKEN` of the socket the desktop serves
+  (Hibr's `frames serve`), so a held desktop's windows reach every display
+  through `hold`. It connects to whatever those variables name, as
+  `blit-gamescope` does. It creates `$XDG_RUNTIME_DIR/<name>`, a Wayland
+  socket owned by the desktop's user, and says its name (below); the
+  desktop puts it in every program's environment as `WAYLAND_DISPLAY`.
+- **Hello.** Version 4: `v4 <token>` (everything in version 3, plus the
+  `WINDOW` lines). A peer that answers a version-4 hello without
+  `window=1` in its `OK` line does not speak `WINDOW`; the compositor then
+  shows nothing and says so in its log. Blit itself, reached directly with
+  no desktop between, answers `window=0`: placing windows is the desktop's.
+  The compositor's first line after `OK` is `WINDOW display <name>`.
+- **One id space.** A window's id is its picture id: its `FRM3` frames,
+  `RELEASE`s and `INPUT` routes all use it.
+- **Compositor to desktop**, one event a line, UTF-8:
+  - `WINDOW new <id> <parent|0>`: a top-level; parent is its transient-for.
+  - `WINDOW title <id> <text>`, `WINDOW appid <id> <text>`.
+  - `WINDOW limits <id> <minW> <minH> <maxW> <maxH>`: pixels, 0 for none.
+  - `WINDOW fullscreen <id> on|off`: the program's own request.
+  - `WINDOW popup <id> <parent> <x> <y>`: a popup or menu, its own picture,
+    at an offset in the parent's pixels; the desktop keeps it there when the
+    parent moves.
+  - `WINDOW cursor <id> <name>`: the pointer shape the program asks for over
+    that window, a CSS cursor name (`default`, `text`, `pointer`, ...) or
+    `hidden`, drawn by Blit as `OSC 22` shapes are.
+  - `WINDOW gone <id>`.
+  A line the desktop does not know is answered `ERROR WINDOW <id> EINVAL`.
+- **Desktop to compositor:**
+  - `WINDOW size <id> <w> <h> [fullscreen] [activated]`: pixels. The
+    compositor configures exactly this size; the frame that follows carries
+    the size the program committed in its header.
+  - `WINDOW close <id>`: `xdg_toplevel.close` (in phase 2,
+    `WM_DELETE_WINDOW`); what to do if the program lingers is the desktop's.
+  - `INPUT on|off|hold` as above; focus is `INPUT on`, so there is no
+    separate focus line. Answers are `OK window <id>` or
+    `ERROR WINDOW <id> <code>`.
+- **Sizes are the program's to honour.** A Wayland client is told a size
+  and commits the buffer it draws; most draw exactly that size, but a
+  client with a fixed size, or one mid-resize, commits another. The
+  compositor never scales or crops: it sends what was committed, and
+  `WINDOW limits` says in advance what a client will not go below or above.
+  The desktop shows a mismatch as it shows any picture, scaled to fit with
+  its shape kept.
+- **Pixels, scale 1.** The desktop computes a window's size from its cells
+  and the cell size of the display it is on; a window moved to a display
+  with a different cell size gets a new `WINDOW size`.
+- **Windows nobody launched through the desktop** -- a program started
+  from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
+  and the desktop opens a window for them.
+- **Open in this draft:** how the keyboard map reaches the compositor (it
+  must give clients an xkb keymap matching Blit's keyboard settings: from
+  Blit's API, or carried with the input route); and the clipboard, which
+  phase 2 decides with the X window manager's selections.
+
 ## Diagnostics and screenshots
 
 `GET /v1/diagnostics/observation` is the canonical incident snapshot. It is
