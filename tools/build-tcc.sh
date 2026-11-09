@@ -130,6 +130,7 @@ case "$target" in
             "$ROOT/src/blit_compositor.c" \
             "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
             "$proto/linux-dmabuf-unstable-v1-protocol.c" "$proto/presentation-time-protocol.c" \
+            "${BLIT_XKBCOMMON_LIBRARY:-/lib/x86_64-linux-gnu/libxkbcommon.so.0}" \
             "${BLIT_WAYLAND_SERVER_LIBRARY:-/lib/x86_64-linux-gnu/libwayland-server.so.0}" \
             -o "$output"
         ;;

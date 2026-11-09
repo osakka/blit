@@ -2139,12 +2139,26 @@ It speaks the frame channel above as a producer, with these additions.
   (`last_error` `sock-disconnected`, or `sock-full`). Each route in
   `frames.input` says its `backend`, `eis` or `sock`. `INPUT member` is not
   implemented in Blit yet.
+  blit-compositor's input socket is `$XDG_RUNTIME_DIR/<display>-input`
+  (mode 0600), and it sends `INPUT sock` for each top-level right after its
+  `WINDOW new` hints. It gives the keyboard to the window whose route sends
+  a line, and takes it away when another window's route sends one, when
+  the desktop's `WINDOW size` for it drops `activated`, or when its route's
+  socket ends (releasing what was down); a popup of the top-level under
+  the pointer gets the pointer in its own pixels, and the surface a button
+  went down on keeps it until the last button is up. Clients are told key
+  repeat 25 a second after 600 ms (Blit's per-device repeat is not on the
+  wire yet).
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete
   xkb keymap as text (`xkb_v1`), which the compositor compiles with
-  libxkbcommon and hands to clients; it reads it again when Blit's keyboard
-  settings change. The desktop never touches it.
+  libxkbcommon and hands to clients; it reads it again, conditionally
+  (`If-None-Match`), whenever the keyboard enters a window, so a change of
+  Blit's keyboard settings reaches the next window focused. It finds Blit
+  by `BLIT_SERVER_PORT` (and `BLIT_API_TOKEN`), which every program in a
+  Blit session has; without a keymap its clients are sent `no_keymap`. The
+  desktop never touches it.
 - **Open in this draft:** the clipboard, which phase 2 decides with the X
   window manager's selections.
 

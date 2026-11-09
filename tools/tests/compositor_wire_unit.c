@@ -111,6 +111,27 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW frobnicate 1", &l) == BC_LINE_UNKNOWN, "unknown");
 }
 
+static void input(void)
+{
+    BcInput in;
+    EXPECT(bc_parse_input("INPUT key 3 30 press\n", &in) == BC_INPUT_KEY && in.id == 3 &&
+           in.code == 30 && in.pressed, "key press");
+    EXPECT(bc_parse_input("INPUT key 3 30 release", &in) == BC_INPUT_KEY && !in.pressed, "key release");
+    EXPECT(bc_parse_input("INPUT key 3 30 down", &in) == BC_INPUT_UNKNOWN, "key, no state");
+    EXPECT(bc_parse_input("INPUT key 0 30 press", &in) == BC_INPUT_UNKNOWN, "id 0");
+    EXPECT(bc_parse_input("INPUT btn 3 272 press", &in) == BC_INPUT_BTN && in.code == 272, "btn");
+    EXPECT(bc_parse_input("INPUT ptr 3 10.50 20.25", &in) == BC_INPUT_PTR && in.x == 10.5 &&
+           in.y == 20.25, "ptr");
+    EXPECT(bc_parse_input("INPUT ptr 3 -1.00 2", &in) == BC_INPUT_UNKNOWN, "ptr negative");
+    EXPECT(bc_parse_input("INPUT ptr 3 1e5 2", &in) == BC_INPUT_UNKNOWN, "ptr exponent");
+    EXPECT(bc_parse_input("INPUT rel 3 -7 3", &in) == BC_INPUT_REL && in.x == -7 && in.y == 3, "rel");
+    EXPECT(bc_parse_input("INPUT wheel 3 0 -1", &in) == BC_INPUT_WHEEL && in.y == -1, "wheel");
+    EXPECT(bc_parse_input("INPUT frame 3 123456789012", &in) == BC_INPUT_FRAME &&
+           in.time_us == 123456789012ull, "frame");
+    EXPECT(bc_parse_input("INPUT frame 3 12x", &in) == BC_INPUT_UNKNOWN, "frame tail");
+    EXPECT(bc_parse_input("INPUT on 3", &in) == BC_INPUT_UNKNOWN, "not an input line");
+}
+
 static void convert(void)
 {
     /* XRGB8888 is B, G, R, X in memory; ARGB8888 the same with alpha,
@@ -245,9 +266,10 @@ int main(void)
     hello();
     text();
     lines();
+    input();
     convert();
     channel();
     if (failures) return 1;
-    printf("COMPOSITOR_WIRE_UNIT_OK hello text lines convert channel\n");
+    printf("COMPOSITOR_WIRE_UNIT_OK hello text lines input convert channel\n");
     return 0;
 }

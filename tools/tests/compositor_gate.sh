@@ -36,7 +36,7 @@ then
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" \
         "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c $protocol_sources \
-        -lwayland-server -o "$out/blit-compositor-asan"
+        -lwayland-server -lxkbcommon -o "$out/blit-compositor-asan"
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -I"$proto" $client_sources -lwayland-client \
         -o "$out/wl_standin_client-asan"
@@ -50,8 +50,12 @@ then
     norand=
     if setarch -R true 2>/dev/null; then norand="setarch -R"; fi
     $norand "$out/compositor_wire_unit-asan"
+    # The mock display is preloaded into blit-server only: AddressSanitizer
+    # must come first in the sanitized programs.
+    BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV" \
     ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1 \
-        $norand python3 tools/tests/compositor_gate.py "$out/blit-compositor-asan" "$out/wl_standin_client-asan"
+        $norand python3 tools/tests/compositor_gate.py "$out/blit-compositor-asan" "$out/wl_standin_client-asan" \
+            "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}"
     echo "COMPOSITOR_SANITIZERS_OK address,undefined"
 else
     echo "COMPOSITOR_SANITIZERS_SKIP ${CC:-cc} has no -fsanitize=address,undefined"

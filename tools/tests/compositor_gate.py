@@ -25,6 +25,7 @@ import os
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -93,9 +94,22 @@ class Desktop:
         check(version == 4, 'the hello says version %d, not 4' % version)
         check(hello[16:16 + length].decode() == TOKEN, 'the hello has the wrong token')
         self.sock.send(answer)
+        # `INPUT sock <path> <id>`, one per toplevel: for Blit, which the
+        # desktop relays it to; recorded, not part of the WINDOW sequence.
+        self.input_socks = {}
 
     def next(self, wait=5.0):
         """('line', text) or ('frame', header fields, fd); None on timeout."""
+        while True:
+            got = self.next_any(wait)
+            if got is None or got[0] != 'line' or not got[1].startswith('INPUT sock '):
+                return got
+            path, image = got[1].split(' ')[2:4]
+            check(path.startswith('/') and path.endswith('-input') and int(image) not in self.input_socks,
+                  'an INPUT sock line %r' % got[1])
+            self.input_socks[int(image)] = path
+
+    def next_any(self, wait):
         self.sock.settimeout(wait)
         try:
             data, fds, _flags, _addr = socket.recv_fds(self.sock, 4096, 4)
@@ -284,6 +298,133 @@ def pacing_part(desk, standin, env, display, work):
             client.kill()
             client.wait()
     return 'shm 10 frames at 20 Hz in %d ms, presented=11 refresh=50ms' % ms
+
+
+def input_part(server, compositor, standin, work):
+    """Blit's input lines on the compositor's input socket as wl_seat
+    events: the gate plays the desktop on the channel and Blit on the input
+    socket (docs/api.md, "Input straight from Blit"), and a real blit-server
+    serves the keymap (GET /v1/input/keymap, BLIT_SERVER_PORT)."""
+    env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+                          BLIT_SETTINGS_PATH=os.path.join(work, 'settings-input.json'),
+                          BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts')))
+    blit = subprocess.Popen([server, str(PORT)], env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    runtime = os.path.join(work, 'run-input')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-input-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    comp = client = None
+    try:
+        wait_for(lambda: api('GET', '/v1/version'), 'the server did not start', 15)
+        keymap = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10).read()
+        cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+                    XDG_RUNTIME_DIR=runtime, BLIT_SERVER_PORT=str(PORT))
+        cenv.pop('WAYLAND_DISPLAY', None)
+        cenv.pop('BLIT_API_TOKEN', None)
+        log = os.path.join(work, 'compositor-input.log')
+        comp = start([compositor, '--log', log], cenv, open(os.path.join(work, 'compositor-input.out'), 'w'))
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        out_path = os.path.join(work, 'standin-input.out')
+        client = start([standin, '--popup', 'Input'], dict(cenv, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Input', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.send('WINDOW size 1 200 100 activated')
+        desk.frame(200, 100)
+        desk.line('WINDOW popup 2 1 12 63')
+        desk.frame(80, 60, image_id=2)
+        check(desk.input_socks.get(1) == os.path.join(runtime, 'blit-0-input'),
+              'INPUT sock for window 1: %s' % desk.input_socks)
+        check(stat.S_IMODE(os.stat(desk.input_socks[1]).st_mode) == 0o600, 'the input socket is not 0600')
+        check('STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
+              lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
+        check('STANDIN repeat 25 600' in printed(), 'no repeat info')
+
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        frame = [0]
+        mark = [0]
+
+        def lines_to(*lines):
+            text = ''
+            for line in lines:
+                frame[0] += 1
+                text += 'INPUT %s\nINPUT frame 1 %d\n' % (line, frame[0])
+            route.sendall(text.encode())
+
+        def seen(*wanted):
+            """The client's next input prints are exactly these."""
+            def events():
+                return [l for l in printed().splitlines()[mark[0]:]
+                        if l.split(' ')[1] in ('keyboard', 'key', 'modifiers', 'pointer', 'button',
+                                               'axis', 'axis120')]
+            wait_for(lambda: len(events()) >= len(wanted),
+                     lambda: 'the client saw %s, expected %s' % (events(), list(wanted)))
+            got = events()[:len(wanted)]
+            check(got == ['STANDIN ' + w for w in wanted], 'the client saw %s, expected %s' % (got, list(wanted)))
+            # Past the last line matched.
+            lines = printed().splitlines()
+            count, i = 0, mark[0]
+            while count < len(wanted):
+                if lines[i] == 'STANDIN ' + wanted[count]:
+                    count += 1
+                i += 1
+            mark[0] = i
+
+        # Keys: the window takes the keyboard; Shift is a modifier the
+        # client is told of, from Blit's keymap.
+        lines_to('key 1 42 press', 'key 1 30 press', 'key 1 30 release', 'key 1 42 release')
+        seen('keyboard enter main', 'modifiers 0 0 0 0', 'key 42 1', 'modifiers 1 0 0 0', 'key 30 1',
+             'key 30 0', 'key 42 0', 'modifiers 0 0 0 0')
+        # The pointer: the toplevel, then the popup over it (at 12,63), a
+        # press there keeping it while the pointer leaves it, the wheel.
+        lines_to('ptr 1 10.50 20.25')
+        seen('pointer enter main 10.50 20.25', 'pointer frame')
+        lines_to('ptr 1 20.00 70.00')
+        seen('pointer leave main', 'pointer frame', 'pointer enter popup 8.00 7.00', 'pointer frame')
+        lines_to('btn 1 272 press', 'ptr 1 150.00 150.00', 'btn 1 272 release', 'ptr 1 30.00 30.00')
+        seen('button 272 1', 'pointer frame', 'pointer motion 138.00 87.00', 'pointer frame',
+             'button 272 0', 'pointer frame', 'pointer leave popup', 'pointer frame',
+             'pointer enter main 30.00 30.00', 'pointer frame')
+        lines_to('wheel 1 0 1')
+        seen('axis source 0', 'axis120 0 120', 'axis 0 15.00', 'pointer frame')
+        desk.send('WINDOW close 2')
+        desk.line('WINDOW gone 2')
+        # The desktop takes the window's focus: the keyboard leaves it.
+        desk.send('WINDOW size 1 200 100')
+        desk.frame(200, 100)
+        seen('keyboard leave main')
+        lines_to('key 1 31 press')
+        seen('keyboard enter main', 'modifiers 0 0 0 0', 'key 31 1')
+        # Blit's route ends with the key down: it is released, the
+        # keyboard leaves.
+        route.close()
+        seen('key 31 0', 'keyboard leave main')
+        desk.send('WINDOW close 1')
+        desk.line('WINDOW gone 1')
+        check(client.wait(5) == 0, 'the input stand-in failed:\n' + printed())
+        desk.sock.close()
+        comp.wait(5)
+        text = open(log).read()
+        check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
+        return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
+                'focus=line,!activated,route-end' % len(keymap))
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+        blit.terminate()
+        try:
+            blit.wait(5)
+        except subprocess.TimeoutExpired:
+            blit.kill()
 
 
 def dmabuf_part(compositor, standin, work):
@@ -499,6 +640,7 @@ def desktop_part(compositor, standin, work):
                      'STANDIN capabilities 2 3 4\n', 'STANDIN enter BLIT-1 1920x1080@60000\n',
                      'STANDIN done draws=4 releases=4 frames=4'):
             check(want in output, 'the stand-in did not print %r:\n%s' % (want, output))
+        check(sorted(desk.input_socks) == [1, 3], 'INPUT sock for the toplevels only: %s' % desk.input_socks)
         # The output is the display's, never a window's size.
         check('STANDIN output mode 320x200' not in output and 'STANDIN output mode 500x300' not in output,
               'a window size reached wl_output:\n%s' % output)
@@ -531,6 +673,17 @@ def desktop_part(compositor, standin, work):
         listener.close()
 
 
+def server_env(extra):
+    """blit-server's environment: ours, plus BLIT_GATE_SERVER_ENV's
+    `NAME=value` words (the mock display, for a sanitized run that must not
+    preload it into everything)."""
+    env = dict(os.environ, **extra)
+    for word in os.environ.get('BLIT_GATE_SERVER_ENV', '').split():
+        k, _, v = word.partition('=')
+        env[k] = v
+    return env
+
+
 def api(method, path, body=None):
     request = urllib.request.Request(BASE + path, method=method,
                                      data=json.dumps(body).encode() if body is not None else None,
@@ -556,9 +709,9 @@ class Peer:
 
 
 def blit_part(server, compositor, standin, work):
-    env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
-               BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
-               BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'))
+    env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+                          BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'),
+                          BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts')))
     blit = subprocess.Popen([server, str(PORT)], env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     comp = client = None
@@ -637,6 +790,8 @@ def main():
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
+            # A server of its own, for its keymap.
+            print('COMPOSITOR_INPUT_OK %s' % input_part(server, compositor, standin, work))
     except SystemExit:
         # A failure shows what each process said before the work goes.
         for name in sorted(os.listdir(work)):

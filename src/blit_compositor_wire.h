@@ -43,6 +43,19 @@
    later dmabuf frame on the connection is copied too (BcWire.refused,
    blit-gamescope's rule).
 
+   Input comes straight from Blit (docs/api.md, "Input straight from
+   Blit"): the compositor asks `INPUT sock <path> <id>` on the channel for
+   each toplevel, Blit connects to that stream socket, and writes
+
+       INPUT key <id> <evdev code> press|release
+       INPUT ptr <id> <x> <y>          the picture's own pixels, decimals
+       INPUT rel <id> <dx> <dy>
+       INPUT btn <id> <BTN code> press|release
+       INPUT wheel <id> <dx> <dy>      notches, positive right and down
+       INPUT frame <id> <monotonic us>
+
+   read by bc_parse_input.
+
    Header-only and static like Blit's other units; C99 plus POSIX/Linux. */
 #ifndef BLIT_COMPOSITOR_WIRE_H
 #define BLIT_COMPOSITOR_WIRE_H
@@ -537,6 +550,89 @@ static int bc_read_u32(const char **p, unsigned long max, uint32_t *out)
     *out = (uint32_t)v;
     *p = s;
     return 0;
+}
+
+/* One line from Blit on an input socket. */
+enum {
+    BC_INPUT_UNKNOWN = 0,
+    BC_INPUT_KEY,           /* code, pressed */
+    BC_INPUT_PTR,           /* x, y */
+    BC_INPUT_REL,           /* dx, dy */
+    BC_INPUT_BTN,           /* code, pressed */
+    BC_INPUT_WHEEL,         /* dx, dy (notches) */
+    BC_INPUT_FRAME          /* time_us */
+};
+
+typedef struct {
+    int kind;
+    uint32_t id;
+    uint32_t code;
+    int pressed;
+    double x, y;            /* ptr: pixels; rel: counts; wheel: notches */
+    uint64_t time_us;
+} BcInput;
+
+/* A decimal number as Blit writes it: an optional '-', digits, and an
+   optional fraction. Advances *p. */
+static int bc_read_number(const char **p, double *out)
+{
+    const char *s = *p;
+    char *end;
+    if (!((*s >= '0' && *s <= '9') || (*s == '-' && s[1] >= '0' && s[1] <= '9'))) return -1;
+    errno = 0;
+    *out = strtod(s, &end);
+    if (errno != 0 || end == s || *out > 1e9 || *out < -1e9) return -1;
+    for (; s < end; ++s)
+        if (!((*s >= '0' && *s <= '9') || *s == '-' || *s == '.')) return -1;
+    *p = end;
+    return 0;
+}
+
+static int bc_parse_input(const char *line, BcInput *out)
+{
+    static const struct { const char *word; int kind; } kinds[] = {
+        { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
+        { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
+    };
+    const char *p;
+    size_t i;
+    memset(out, 0, sizeof(*out));
+    if (strncmp(line, "INPUT ", 6) != 0) return out->kind = BC_INPUT_UNKNOWN;
+    p = line + 6;
+    for (i = 0; i < sizeof(kinds) / sizeof(kinds[0]); ++i)
+        if (strncmp(p, kinds[i].word, strlen(kinds[i].word)) == 0) break;
+    if (i == sizeof(kinds) / sizeof(kinds[0])) return out->kind = BC_INPUT_UNKNOWN;
+    p += strlen(kinds[i].word);
+    if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0 || *p++ != ' ')
+        return out->kind = BC_INPUT_UNKNOWN;
+    switch (kinds[i].kind) {
+    case BC_INPUT_KEY:
+    case BC_INPUT_BTN:
+        if (bc_read_u32(&p, 0x2ff, &out->code) != 0 || *p++ != ' ') return out->kind = BC_INPUT_UNKNOWN;
+        if (strncmp(p, "press", 5) == 0) { out->pressed = 1; p += 5; }
+        else if (strncmp(p, "release", 7) == 0) p += 7;
+        else return out->kind = BC_INPUT_UNKNOWN;
+        break;
+    case BC_INPUT_PTR:
+    case BC_INPUT_REL:
+    case BC_INPUT_WHEEL:
+        if (bc_read_number(&p, &out->x) != 0 || *p++ != ' ' || bc_read_number(&p, &out->y) != 0)
+            return out->kind = BC_INPUT_UNKNOWN;
+        if (kinds[i].kind == BC_INPUT_PTR && (out->x < 0 || out->y < 0))
+            return out->kind = BC_INPUT_UNKNOWN;
+        break;
+    default: {
+        char *end;
+        if (*p < '0' || *p > '9') return out->kind = BC_INPUT_UNKNOWN;
+        errno = 0;
+        out->time_us = strtoull(p, &end, 10);
+        if (errno != 0) return out->kind = BC_INPUT_UNKNOWN;
+        p = end;
+        break;
+    }
+    }
+    if (*p != '\0' && *p != '\n') return out->kind = BC_INPUT_UNKNOWN;
+    return out->kind = kinds[i].kind;
 }
 
 static int bc_parse_line(const char *line, BcLine *out)

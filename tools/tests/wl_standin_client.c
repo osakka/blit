@@ -40,6 +40,16 @@
    the exit line before `done` counts it: `STANDIN presentation
    presented=<n> discarded=<n> refresh=<ns>`.
 
+   It prints its keyboard's and pointer's events: `STANDIN keymap
+   format=<n> size=<bytes> xkb=<1 if the text is an xkb keymap>`,
+   `STANDIN repeat <rate> <delay>`, `STANDIN keyboard enter|leave
+   <main|popup|child>`, `STANDIN key <code> <state>`, `STANDIN modifiers
+   <depressed> <latched> <locked> <group>`, `STANDIN pointer enter <surface>
+   <x> <y>`, `STANDIN pointer leave <surface>`, `STANDIN pointer motion <x>
+   <y>`, `STANDIN button <code> <state>`, `STANDIN axis <axis> <value>`,
+   `STANDIN axis120 <axis> <v120>`, `STANDIN axis source <n>` and `STANDIN
+   pointer frame`.
+
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
    blue = 0x80 | ((x >> 8) & 7) << 3 | ((y >> 8) & 7).
@@ -436,12 +446,145 @@ static void wm_ping(void *data, struct xdg_wm_base *wm, uint32_t serial)
 
 static const struct xdg_wm_base_listener wm_listener = { wm_ping };
 
+static const char *surface_name(struct standin *s, struct wl_surface *surface)
+{
+    return surface == NULL ? "none" : surface == s->surface ? "main" :
+           surface == s->popup_surface ? "popup" : surface == s->child_surface ? "child" : "other";
+}
+
+static void keyboard_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd,
+                            uint32_t size)
+{
+    char *map = size > 0 ? mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0) : MAP_FAILED;
+    (void)data; (void)k;
+    printf("STANDIN keymap format=%u size=%u xkb=%d\n", format, size,
+           map != MAP_FAILED && size > 12 && memcmp(map, "xkb_keymap {", 12) == 0 &&
+               map[size - 1] == '\0');
+    if (map != MAP_FAILED) munmap(map, size);
+    close(fd);
+}
+
+static void keyboard_enter(void *data, struct wl_keyboard *k, uint32_t serial,
+                           struct wl_surface *surface, struct wl_array *keys)
+{
+    (void)k; (void)serial; (void)keys;
+    printf("STANDIN keyboard enter %s\n", surface_name(data, surface));
+}
+
+static void keyboard_leave(void *data, struct wl_keyboard *k, uint32_t serial,
+                           struct wl_surface *surface)
+{
+    (void)k; (void)serial;
+    printf("STANDIN keyboard leave %s\n", surface_name(data, surface));
+}
+
+static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
+                         uint32_t key, uint32_t state)
+{
+    (void)data; (void)k; (void)serial; (void)time;
+    printf("STANDIN key %u %u\n", key, state);
+}
+
+static void keyboard_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t dep,
+                               uint32_t lat, uint32_t lock, uint32_t group)
+{
+    (void)data; (void)k; (void)serial;
+    printf("STANDIN modifiers %u %u %u %u\n", dep, lat, lock, group);
+}
+
+static void keyboard_repeat(void *data, struct wl_keyboard *k, int32_t rate, int32_t delay)
+{
+    (void)data; (void)k;
+    printf("STANDIN repeat %d %d\n", rate, delay);
+}
+
+static const struct wl_keyboard_listener keyboard_listener = {
+    keyboard_keymap, keyboard_enter, keyboard_leave, keyboard_key, keyboard_modifiers,
+    keyboard_repeat,
+};
+
+static void pointer_enter(void *data, struct wl_pointer *p, uint32_t serial,
+                          struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y)
+{
+    (void)p; (void)serial;
+    printf("STANDIN pointer enter %s %.2f %.2f\n", surface_name(data, surface),
+           wl_fixed_to_double(x), wl_fixed_to_double(y));
+}
+
+static void pointer_leave(void *data, struct wl_pointer *p, uint32_t serial,
+                          struct wl_surface *surface)
+{
+    (void)p; (void)serial;
+    printf("STANDIN pointer leave %s\n", surface_name(data, surface));
+}
+
+static void pointer_motion(void *data, struct wl_pointer *p, uint32_t time, wl_fixed_t x,
+                           wl_fixed_t y)
+{
+    (void)data; (void)p; (void)time;
+    printf("STANDIN pointer motion %.2f %.2f\n", wl_fixed_to_double(x), wl_fixed_to_double(y));
+}
+
+static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
+                           uint32_t button, uint32_t state)
+{
+    (void)data; (void)p; (void)serial; (void)time;
+    printf("STANDIN button %u %u\n", button, state);
+}
+
+static void pointer_axis(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis,
+                         wl_fixed_t value)
+{
+    (void)data; (void)p; (void)time;
+    printf("STANDIN axis %u %.2f\n", axis, wl_fixed_to_double(value));
+}
+
+static void pointer_frame(void *data, struct wl_pointer *p)
+{
+    (void)data; (void)p;
+    printf("STANDIN pointer frame\n");
+}
+
+static void pointer_axis_source(void *data, struct wl_pointer *p, uint32_t source)
+{
+    (void)data; (void)p;
+    printf("STANDIN axis source %u\n", source);
+}
+
+static void pointer_axis_stop(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis)
+{
+    (void)data; (void)p; (void)time; (void)axis;
+}
+
+static void pointer_axis_discrete(void *data, struct wl_pointer *p, uint32_t axis, int32_t discrete)
+{
+    (void)data; (void)p;
+    printf("STANDIN axis discrete %u %d\n", axis, discrete);
+}
+
+static void pointer_axis_value120(void *data, struct wl_pointer *p, uint32_t axis, int32_t v120)
+{
+    (void)data; (void)p;
+    printf("STANDIN axis120 %u %d\n", axis, v120);
+}
+
+static const struct wl_pointer_listener pointer_listener = {
+    pointer_enter, pointer_leave, pointer_motion, pointer_button, pointer_axis, pointer_frame,
+    pointer_axis_source, pointer_axis_stop, pointer_axis_discrete, pointer_axis_value120,
+};
+
 static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps)
 {
     struct standin *s = data;
     printf("STANDIN seat capabilities %u\n", caps);
-    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !s->keyboard) s->keyboard = wl_seat_get_keyboard(seat);
-    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !s->pointer) s->pointer = wl_seat_get_pointer(seat);
+    if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !s->keyboard) {
+        s->keyboard = wl_seat_get_keyboard(seat);
+        wl_keyboard_add_listener(s->keyboard, &keyboard_listener, s);
+    }
+    if ((caps & WL_SEAT_CAPABILITY_POINTER) && !s->pointer) {
+        s->pointer = wl_seat_get_pointer(seat);
+        wl_pointer_add_listener(s->pointer, &pointer_listener, s);
+    }
 }
 
 static void seat_name(void *data, struct wl_seat *seat, const char *name)

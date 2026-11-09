@@ -47,7 +47,11 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <linux/dma-buf.h>
+#include <xkbcommon/xkbcommon.h>
 
 #include <wayland-server.h>
 #include <wayland-server-protocol.h>
@@ -146,6 +150,7 @@ struct bc_xdg {
     int size_fullscreen, size_maximized, size_activated;
     struct bc_output *output;         /* the display it is on */
     uint64_t last_copy;               /* the sequence of its newest FRM1 */
+    int32_t buffer_w, buffer_h;       /* its committed buffer's size */
     /* popup */
     struct bc_positioner positioner;
     int32_t px, py;                   /* relative to the parent's geometry */
@@ -162,11 +167,41 @@ struct bc_server {
     struct wl_list holds;             /* bc_hold: FRM3 frames Blit holds */
     int format_table_fd;              /* linux-dmabuf v4's format table */
     dev_t main_device;
+    /* input (the seat section) */
+    char input_path[108];             /* the input socket, "" without one */
+    int input_fd;
+    struct wl_event_source *input_source;
+    struct wl_list input_conns;       /* bc_input_conn: Blit's routes */
+    struct wl_list keyboards, pointers;   /* wl_keyboard, wl_pointer resources */
+    struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
+    struct xkb_context *xkb;
+    struct xkb_keymap *keymap;
+    struct xkb_state *xkb_state;
+    int keymap_fd;
+    uint32_t keymap_size;
+    char keymap_etag[96];
+    int keymap_warned;
+    uint32_t mods[4];
+    int mods_sent;
+    unsigned char keys_down[96];      /* evdev codes down, through KEY_MAX */
+    struct bc_surface *kbd_focus, *ptr_focus;
+    double ptr_x, ptr_y;
+    uint32_t buttons_down;            /* BTN_LEFT + n */
+    int pointer_batch;                /* a pointer event since the last frame */
     FILE *log;
     int status;
 };
 
 static struct bc_server *g_server;
+
+/* The key repeat clients are told (Blit's per-device repeat is not on the
+   wire): 25 a second after 600 ms. */
+#define BC_REPEAT_RATE 25
+#define BC_REPEAT_DELAY 600
+
+static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r);
+static void keyboard_send_modifiers(struct bc_server *s, int force);
+static void keyboard_focus(struct bc_server *s, struct bc_surface *surface);
 
 static void logf_(const char *fmt, ...)
 {
@@ -238,6 +273,10 @@ static void announce_toplevel(struct bc_xdg *x)
     send_decor(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
+    /* Its input, straight from Blit to the input socket (one route per
+       toplevel); the desktop relays the request. */
+    if (x->server->input_path[0])
+        bc_wire_line(w, "INPUT sock %s %u", x->server->input_path, x->id);
     if (x->minimize) bc_wire_line(w, "WINDOW minimize %u", x->id);
     x->minimize = 0;
     logf_("window %u: new parent %d title \"%s\" appid \"%s\"", x->id, xdg_parent_id(x),
@@ -1010,8 +1049,12 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
             }
         }
         if (attached && buffer) {
+            struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
+            struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
             sent = send_buffer(surface, buffer);
             x->mapped = 1;
+            x->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf ? dmabuf->width : 0;
+            x->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf ? dmabuf->height : 0;
         }
     }
     /* Copied or not shown (a subsurface, a cursor): the client's again. An
@@ -1077,6 +1120,11 @@ static void surface_destroyed(struct wl_resource *resource)
     feedback_discard(&surface->pending_feedback);
     feedback_discard(&surface->feedback);
     if (surface->pace) wl_event_source_remove(surface->pace);
+    if (surface->server->kbd_focus == surface) surface->server->kbd_focus = NULL;
+    if (surface->server->ptr_focus == surface) {
+        surface->server->ptr_focus = NULL;
+        surface->server->buttons_down = 0;
+    }
     if (surface->xdg) {
         /* The role object outlived its surface (a client error, or the
            client's teardown order): the window is gone either way. */
@@ -1359,7 +1407,7 @@ static void window_move_output(struct bc_server *s, struct bc_xdg *x, struct bc_
         if (other->popup && other->parent == x && other->id) window_set_output(other, o);
 }
 
-/* ---- wl_seat: advertised; input is milestone B ---- */
+/* ---- wl_seat: keyboard and pointer (their events: the input section) ---- */
 
 static void pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
                                uint32_t serial, struct wl_resource *surface, int32_t x, int32_t y)
@@ -1382,21 +1430,35 @@ static const struct wl_touch_interface touch_impl = {
 
 static void seat_get_pointer(struct wl_client *client, struct wl_resource *resource, uint32_t id)
 {
+    struct bc_server *s = wl_resource_get_user_data(resource);
     struct wl_resource *r = wl_resource_create(client, &wl_pointer_interface,
                                                wl_resource_get_version(resource), id);
     if (r == NULL) { wl_client_post_no_memory(client); return; }
-    wl_resource_set_implementation(r, &pointer_impl, NULL, NULL);
+    wl_resource_set_implementation(r, &pointer_impl, s, unlink_resource);
+    wl_list_insert(&s->pointers, wl_resource_get_link(r));
+    if (s->ptr_focus && wl_resource_get_client(s->ptr_focus->resource) == client)
+        wl_pointer_send_enter(r, wl_display_next_serial(s->display), s->ptr_focus->resource,
+                              wl_fixed_from_double(s->ptr_x), wl_fixed_from_double(s->ptr_y));
 }
 
 static void seat_get_keyboard(struct wl_client *client, struct wl_resource *resource, uint32_t id)
 {
-    /* The xkb keymap (GET /v1/input/keymap), repeat info, focus and keys
-       are milestone B. A keymap is needed only before the first enter,
-       which is never sent yet. */
+    struct bc_server *s = wl_resource_get_user_data(resource);
     struct wl_resource *r = wl_resource_create(client, &wl_keyboard_interface,
                                                wl_resource_get_version(resource), id);
     if (r == NULL) { wl_client_post_no_memory(client); return; }
-    wl_resource_set_implementation(r, &keyboard_impl, NULL, NULL);
+    wl_resource_set_implementation(r, &keyboard_impl, s, unlink_resource);
+    wl_list_insert(&s->keyboards, wl_resource_get_link(r));
+    keyboard_send_keymap(s, r);
+    if (wl_resource_get_version(r) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
+        wl_keyboard_send_repeat_info(r, BC_REPEAT_RATE, BC_REPEAT_DELAY);
+    if (s->kbd_focus && wl_resource_get_client(s->kbd_focus->resource) == client) {
+        struct wl_array keys;
+        wl_array_init(&keys);
+        wl_keyboard_send_enter(r, wl_display_next_serial(s->display), s->kbd_focus->resource, &keys);
+        wl_array_release(&keys);
+        keyboard_send_modifiers(s, 1);
+    }
 }
 
 static void seat_get_touch(struct wl_client *client, struct wl_resource *resource, uint32_t id)
@@ -2084,6 +2146,513 @@ static struct bc_xdg *window_by_id(struct bc_server *s, uint32_t id)
     return NULL;
 }
 
+/* ---- input: Blit's lines on the input socket, as wl_seat events ----
+
+   Blit connects to the compositor's input socket once per toplevel route
+   (`INPUT sock <path> <id>`, sent at WINDOW new) and writes that window's
+   input as lines (blit_compositor_wire.h, bc_parse_input). They become:
+
+   - keys: wl_keyboard.key with the evdev code as it came, the xkb state
+     (the keymap from Blit's GET /v1/input/keymap, compiled here as every
+     client compiles it) giving wl_keyboard.modifiers. The keyboard enters
+     the window whose route sends a line, and leaves it when another
+     window's route sends one, when the desktop's WINDOW size drops
+     `activated` for it, or when its route's socket ends (every key and
+     button still down released first: Blit forgets them when a socket
+     breaks).
+   - the pointer: its position is in the toplevel's surface pixels; a popup
+     of that toplevel under it (WINDOW popup's offset, its buffer's size)
+     gets it instead, in its own pixels. While a button is down the surface
+     it went down on keeps the pointer (an implicit grab). Buttons, the
+     wheel (axis, value120 and discrete by the client's version) and
+     wl_pointer.frame at Blit's INPUT frame.
+   - relative motion: zwp_relative_pointer_v1 (below).
+
+   The keymap is read at start and again, conditionally (If-None-Match),
+   whenever the keyboard enters a window, so a change of Blit's keyboard
+   settings reaches the next window focused; a client is sent the new one
+   at once. It needs BLIT_SERVER_PORT (and BLIT_API_TOKEN when Blit has a
+   token), which every program in a Blit session has; without a keymap the
+   keyboard is sent `no_keymap` and keys are still delivered. Repeat is the
+   client's: 25 a second after 600 ms (Blit's per-device repeat is not on
+   the wire). */
+
+#define BC_KEYMAP_BYTES (512 * 1024)
+
+struct bc_input_conn {
+    struct wl_list link;              /* bc_server.input_conns */
+    struct bc_server *server;
+    int fd;
+    struct wl_event_source *source;
+    uint32_t id;                      /* the window its lines name */
+    char buf[1024];
+    size_t len;
+};
+
+/* A minimal HTTP/1.0 GET of Blit's API on loopback, bounded in time and
+   size. Returns the status (0 when unreachable), the body (NUL ended,
+   malloc'd, the caller frees) and the ETag. */
+static int bc_http_get(const char *path, const char *if_none_match, char **body, size_t *length,
+                       char *etag, size_t etag_cap)
+{
+    const char *port = getenv("BLIT_SERVER_PORT"), *token = getenv("BLIT_API_TOKEN");
+    struct sockaddr_in addr;
+    struct timeval tv = { 1, 0 };
+    char request[1024], *buffer = NULL, *head_end, *p;
+    size_t used = 0, cap = 0;
+    int fd, status = 0, n;
+    *body = NULL;
+    *length = 0;
+    if (port == NULL || atoi(port) <= 0 || atoi(port) > 65535) return 0;
+    fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)atoi(port));
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    n = snprintf(request, sizeof(request),
+                 "GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n%s%s%s%s%s%sConnection: close\r\n\r\n", path,
+                 token && token[0] ? "Authorization: Bearer " : "", token && token[0] ? token : "",
+                 token && token[0] ? "\r\n" : "", if_none_match ? "If-None-Match: " : "",
+                 if_none_match ? if_none_match : "", if_none_match ? "\r\n" : "");
+    if (n <= 0 || (size_t)n >= sizeof(request) ||
+        connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+        send(fd, request, (size_t)n, MSG_NOSIGNAL) != n) {
+        close(fd);
+        return 0;
+    }
+    for (;;) {
+        ssize_t got;
+        if (used + 4096 + 1 > cap) {
+            char *grown;
+            if (cap >= BC_KEYMAP_BYTES) break;
+            cap = cap ? cap * 2 : 65536;
+            if ((grown = realloc(buffer, cap)) == NULL) break;
+            buffer = grown;
+        }
+        got = recv(fd, buffer + used, cap - used - 1, 0);
+        if (got <= 0) break;
+        used += (size_t)got;
+    }
+    close(fd);
+    if (buffer == NULL) return 0;
+    buffer[used] = '\0';
+    if (sscanf(buffer, "HTTP/1.%*d %d", &status) != 1 || (head_end = strstr(buffer, "\r\n\r\n")) == NULL) {
+        free(buffer);
+        return 0;
+    }
+    *head_end = '\0';
+    etag[0] = '\0';
+    if ((p = strstr(buffer, "\r\nETag: ")) != NULL) {
+        size_t m = strcspn(p + 8, "\r\n");
+        if (m < etag_cap) {
+            memcpy(etag, p + 8, m);
+            etag[m] = '\0';
+        }
+    }
+    *length = used - (size_t)(head_end + 4 - buffer);
+    memmove(buffer, head_end + 4, *length + 1);
+    *body = buffer;
+    return status;
+}
+
+/* The keymap to every bound keyboard, or `no_keymap` without one. */
+static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r)
+{
+    if (s->keymap_fd >= 0)
+        wl_keyboard_send_keymap(r, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, s->keymap_fd, s->keymap_size);
+    else {
+        int fd = memfd_create("blit-compositor-no-keymap", MFD_CLOEXEC);
+        wl_keyboard_send_keymap(r, WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP, fd >= 0 ? fd : 0, 0);
+        if (fd >= 0) close(fd);
+    }
+}
+
+/* Blit's keymap, read again if it changed (304 otherwise): compiled, put
+   in a sealed memfd, and sent to every keyboard. */
+static void keymap_refresh(struct bc_server *s)
+{
+    char *body = NULL, etag[96];
+    size_t length = 0;
+    struct xkb_keymap *keymap;
+    struct wl_resource *r;
+    unsigned char *map;
+    int status, fd;
+    if (s->xkb == NULL) return;
+    status = bc_http_get("/v1/input/keymap", s->keymap_etag[0] ? s->keymap_etag : NULL, &body,
+                         &length, etag, sizeof(etag));
+    if (status == 304) {
+        free(body);
+        return;
+    }
+    if (status != 200 || length == 0) {
+        if (!s->keymap_warned)
+            logf_("keymap: GET /v1/input/keymap answered %d (BLIT_SERVER_PORT %s): %s", status,
+                  getenv("BLIT_SERVER_PORT") ? getenv("BLIT_SERVER_PORT") : "unset",
+                  s->keymap_fd >= 0 ? "keeping the last one" : "clients get no_keymap");
+        s->keymap_warned = 1;
+        free(body);
+        return;
+    }
+    keymap = xkb_keymap_new_from_string(s->xkb, body, XKB_KEYMAP_FORMAT_TEXT_V1,
+                                        XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (keymap == NULL) {
+        logf_("keymap: Blit's keymap did not compile (%zu bytes)", length);
+        free(body);
+        return;
+    }
+    fd = memfd_create("blit-compositor-keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0 || ftruncate(fd, (off_t)length + 1) != 0 ||
+        (map = mmap(NULL, length + 1, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0)) == MAP_FAILED) {
+        if (fd >= 0) close(fd);
+        xkb_keymap_unref(keymap);
+        free(body);
+        return;
+    }
+    memcpy(map, body, length + 1);
+    munmap(map, length + 1);
+    fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
+    free(body);
+    if (s->keymap_fd >= 0) close(s->keymap_fd);
+    if (s->xkb_state) xkb_state_unref(s->xkb_state);
+    if (s->keymap) xkb_keymap_unref(s->keymap);
+    s->keymap = keymap;
+    s->xkb_state = xkb_state_new(keymap);
+    s->keymap_fd = fd;
+    s->keymap_size = (uint32_t)length + 1;
+    snprintf(s->keymap_etag, sizeof(s->keymap_etag), "%s", etag);
+    s->mods_sent = 0;
+    logf_("keymap: %zu bytes from Blit, ETag %s", length, etag);
+    wl_resource_for_each(r, &s->keyboards)
+        keyboard_send_keymap(s, r);
+}
+
+/* Every resource in `list` (keyboards, pointers) of the surface's client. */
+#define seat_for_client(r, list, surface) \
+    wl_resource_for_each(r, list) if (wl_resource_get_client(r) == wl_resource_get_client((surface)->resource))
+
+static void keyboard_send_modifiers(struct bc_server *s, int force)
+{
+    struct wl_resource *r;
+    uint32_t dep, lat, lock, group;
+    if (s->kbd_focus == NULL || s->xkb_state == NULL) return;
+    dep = xkb_state_serialize_mods(s->xkb_state, XKB_STATE_MODS_DEPRESSED);
+    lat = xkb_state_serialize_mods(s->xkb_state, XKB_STATE_MODS_LATCHED);
+    lock = xkb_state_serialize_mods(s->xkb_state, XKB_STATE_MODS_LOCKED);
+    group = xkb_state_serialize_layout(s->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
+    if (!force && s->mods_sent && dep == s->mods[0] && lat == s->mods[1] && lock == s->mods[2] &&
+        group == s->mods[3])
+        return;
+    s->mods[0] = dep; s->mods[1] = lat; s->mods[2] = lock; s->mods[3] = group;
+    s->mods_sent = 1;
+    seat_for_client(r, &s->keyboards, s->kbd_focus)
+        wl_keyboard_send_modifiers(r, wl_display_next_serial(s->display), dep, lat, lock, group);
+}
+
+/* Every key still down released, to the focused client and the xkb state. */
+static void keyboard_release_all(struct bc_server *s)
+{
+    struct wl_resource *r;
+    uint32_t code;
+    for (code = 0; code < sizeof(s->keys_down) * 8; ++code) {
+        if (!(s->keys_down[code / 8] & (1u << (code % 8)))) continue;
+        s->keys_down[code / 8] &= (unsigned char)~(1u << (code % 8));
+        if (s->xkb_state) xkb_state_update_key(s->xkb_state, code + 8, XKB_KEY_UP);
+        if (s->kbd_focus)
+            seat_for_client(r, &s->keyboards, s->kbd_focus)
+                wl_keyboard_send_key(r, wl_display_next_serial(s->display), now_ms(), code,
+                                     WL_KEYBOARD_KEY_STATE_RELEASED);
+    }
+    keyboard_send_modifiers(s, 0);
+}
+
+static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
+{
+    struct wl_resource *r;
+    struct wl_array keys;
+    if (s->kbd_focus == surface) return;
+    if (s->kbd_focus) {
+        keyboard_release_all(s);
+        seat_for_client(r, &s->keyboards, s->kbd_focus)
+            wl_keyboard_send_leave(r, wl_display_next_serial(s->display), s->kbd_focus->resource);
+        logf_("keyboard: leave window %u", s->kbd_focus->xdg ? s->kbd_focus->xdg->id : 0);
+    }
+    s->kbd_focus = surface;
+    if (surface == NULL) return;
+    keymap_refresh(s);
+    wl_array_init(&keys);
+    seat_for_client(r, &s->keyboards, surface)
+        wl_keyboard_send_enter(r, wl_display_next_serial(s->display), surface->resource, &keys);
+    wl_array_release(&keys);
+    keyboard_send_modifiers(s, 1);
+    logf_("keyboard: enter window %u", surface->xdg ? surface->xdg->id : 0);
+}
+
+/* The surface under (x, y) of toplevel `x`, in that surface's pixels: a
+   mapped popup of it first, else the toplevel. */
+static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, double px,
+                                         double py, double *lx, double *ly)
+{
+    struct bc_xdg *p;
+    wl_list_for_each(p, &s->windows, link) {
+        double ox, oy;
+        if (!p->popup || p->parent != x || !p->mapped || !p->id || p->surface == NULL) continue;
+        ox = x->gx + p->px - p->gx;
+        oy = x->gy + p->py - p->gy;
+        if (px >= ox && py >= oy && px < ox + p->buffer_w && py < oy + p->buffer_h) {
+            *lx = px - ox;
+            *ly = py - oy;
+            return p->surface;
+        }
+    }
+    *lx = px;
+    *ly = py;
+    return x->surface;
+}
+
+/* A surface's origin in its toplevel's pixels (the toplevel's is 0, 0). */
+static void surface_origin(struct bc_surface *surface, double *ox, double *oy)
+{
+    struct bc_xdg *p = surface->xdg;
+    *ox = *oy = 0;
+    if (p && p->popup && p->parent) {
+        *ox = p->parent->gx + p->px - p->gx;
+        *oy = p->parent->gy + p->py - p->gy;
+    }
+}
+
+static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly)
+{
+    struct wl_resource *r;
+    if (s->ptr_focus == surface) return;
+    if (s->ptr_focus) {
+        seat_for_client(r, &s->pointers, s->ptr_focus) {
+            wl_pointer_send_leave(r, wl_display_next_serial(s->display), s->ptr_focus->resource);
+            if (wl_resource_get_version(r) >= WL_POINTER_FRAME_SINCE_VERSION) wl_pointer_send_frame(r);
+        }
+    }
+    s->ptr_focus = surface;
+    if (surface == NULL) return;
+    seat_for_client(r, &s->pointers, surface)
+        wl_pointer_send_enter(r, wl_display_next_serial(s->display), surface->resource,
+                              wl_fixed_from_double(lx), wl_fixed_from_double(ly));
+}
+
+/* Relative motion under Blit's relative hold: zwp_relative_pointer_v1
+   is not offered yet, so it reaches no client. */
+static void relative_motion(struct bc_server *s, struct bc_xdg *x, double dx, double dy,
+                            uint64_t time_us)
+{
+    (void)s; (void)x; (void)dx; (void)dy; (void)time_us;
+}
+
+static void input_line(struct bc_server *s, struct bc_input_conn *conn, const char *line)
+{
+    BcInput in;
+    struct bc_xdg *x;
+    struct wl_resource *r;
+    if (bc_parse_input(line, &in) == BC_INPUT_UNKNOWN) {
+        logf_("input: a line that is not one: %.80s", line);
+        return;
+    }
+    conn->id = in.id;
+    x = window_by_id(s, in.id);
+    if (x == NULL || x->toplevel == NULL || x->surface == NULL) return;  /* gone meanwhile */
+    switch (in.kind) {
+    case BC_INPUT_KEY: {
+        uint32_t bit = 1u << (in.code % 8);
+        int down = (s->keys_down[in.code / 8] & bit) != 0;
+        keyboard_focus(s, x->surface);
+        if (in.pressed == down) return;  /* a release of a key never pressed here */
+        if (in.pressed) s->keys_down[in.code / 8] |= (unsigned char)bit;
+        else s->keys_down[in.code / 8] &= (unsigned char)~bit;
+        if (s->xkb_state)
+            xkb_state_update_key(s->xkb_state, in.code + 8, in.pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
+        seat_for_client(r, &s->keyboards, x->surface)
+            wl_keyboard_send_key(r, wl_display_next_serial(s->display), now_ms(), in.code,
+                                 in.pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+                                            : WL_KEYBOARD_KEY_STATE_RELEASED);
+        keyboard_send_modifiers(s, 0);
+        return;
+    }
+    case BC_INPUT_PTR: {
+        double lx, ly, ox, oy;
+        struct bc_surface *target;
+        if (s->buttons_down && s->ptr_focus) {
+            /* The implicit grab: the surface a button went down on. */
+            target = s->ptr_focus;
+            surface_origin(target, &ox, &oy);
+            lx = in.x - ox;
+            ly = in.y - oy;
+        } else {
+            target = pointer_target(s, x, in.x, in.y, &lx, &ly);
+        }
+        if (target != s->ptr_focus) {
+            pointer_focus(s, target, lx, ly);
+        } else {
+            seat_for_client(r, &s->pointers, target)
+                wl_pointer_send_motion(r, now_ms(), wl_fixed_from_double(lx), wl_fixed_from_double(ly));
+        }
+        s->ptr_x = lx;
+        s->ptr_y = ly;
+        s->pointer_batch = 1;
+        return;
+    }
+    case BC_INPUT_BTN:
+        if (in.code < 0x110 || in.code >= 0x110 + 32) return;
+        if (in.pressed) s->buttons_down |= 1u << (in.code - 0x110);
+        else s->buttons_down &= ~(1u << (in.code - 0x110));
+        if (s->ptr_focus == NULL) return;
+        seat_for_client(r, &s->pointers, s->ptr_focus)
+            wl_pointer_send_button(r, wl_display_next_serial(s->display), now_ms(), in.code,
+                                   in.pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+                                              : WL_POINTER_BUTTON_STATE_RELEASED);
+        s->pointer_batch = 1;
+        return;
+    case BC_INPUT_WHEEL: {
+        int axis;
+        if (s->ptr_focus == NULL) return;
+        for (axis = 0; axis < 2; ++axis) {
+            double notches = axis == 0 ? in.y : in.x;
+            uint32_t which = axis == 0 ? WL_POINTER_AXIS_VERTICAL_SCROLL : WL_POINTER_AXIS_HORIZONTAL_SCROLL;
+            if (notches == 0) continue;
+            seat_for_client(r, &s->pointers, s->ptr_focus) {
+                int v = wl_resource_get_version(r);
+                if (v >= WL_POINTER_AXIS_SOURCE_SINCE_VERSION)
+                    wl_pointer_send_axis_source(r, WL_POINTER_AXIS_SOURCE_WHEEL);
+                if (v >= WL_POINTER_AXIS_VALUE120_SINCE_VERSION)
+                    wl_pointer_send_axis_value120(r, which, (int32_t)(notches * 120));
+                else if (v >= WL_POINTER_AXIS_DISCRETE_SINCE_VERSION)
+                    wl_pointer_send_axis_discrete(r, which, (int32_t)notches);
+                wl_pointer_send_axis(r, now_ms(), which, wl_fixed_from_double(notches * 15.0));
+            }
+        }
+        s->pointer_batch = 1;
+        return;
+    }
+    case BC_INPUT_REL:
+        relative_motion(s, x, in.x, in.y, in.time_us);
+        s->pointer_batch = 1;
+        return;
+    case BC_INPUT_FRAME:
+        if (s->pointer_batch && s->ptr_focus)
+            seat_for_client(r, &s->pointers, s->ptr_focus)
+                if (wl_resource_get_version(r) >= WL_POINTER_FRAME_SINCE_VERSION)
+                    wl_pointer_send_frame(r);
+        s->pointer_batch = 0;
+        return;
+    default:
+        return;
+    }
+}
+
+static void input_conn_close(struct bc_input_conn *conn)
+{
+    struct bc_server *s = conn->server;
+    struct bc_xdg *x = conn->id ? window_by_id(s, conn->id) : NULL;
+    /* Blit forgets what a broken route held: it is released here. */
+    if (x && x->surface && s->kbd_focus == x->surface) keyboard_focus(s, NULL);
+    if (x && x->surface && s->buttons_down) {
+        struct wl_resource *r;
+        uint32_t b;
+        for (b = 0; b < 32; ++b)
+            if ((s->buttons_down & (1u << b)) && s->ptr_focus)
+                seat_for_client(r, &s->pointers, s->ptr_focus)
+                    wl_pointer_send_button(r, wl_display_next_serial(s->display), now_ms(), 0x110 + b,
+                                           WL_POINTER_BUTTON_STATE_RELEASED);
+        s->buttons_down = 0;
+    }
+    logf_("input: Blit's route for window %u ended", conn->id);
+    wl_event_source_remove(conn->source);
+    close(conn->fd);
+    wl_list_remove(&conn->link);
+    free(conn);
+}
+
+static int on_input_conn(int fd, uint32_t mask, void *data)
+{
+    struct bc_input_conn *conn = data;
+    for (;;) {
+        ssize_t got = recv(fd, conn->buf + conn->len, sizeof(conn->buf) - 1 - conn->len, MSG_DONTWAIT);
+        char *line, *nl;
+        if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) {
+            input_conn_close(conn);
+            return 0;
+        }
+        conn->len += (size_t)got;
+        conn->buf[conn->len] = '\0';
+        line = conn->buf;
+        while ((nl = strchr(line, '\n')) != NULL) {
+            *nl = '\0';
+            input_line(conn->server, conn, line);
+            line = nl + 1;
+        }
+        conn->len -= (size_t)(line - conn->buf);
+        memmove(conn->buf, line, conn->len);
+        if (conn->len == sizeof(conn->buf) - 1) {
+            logf_("input: a line longer than %zu bytes; the route is dropped", sizeof(conn->buf));
+            input_conn_close(conn);
+            return 0;
+        }
+    }
+    if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) input_conn_close(conn);
+    return 0;
+}
+
+static int on_input_listen(int fd, uint32_t mask, void *data)
+{
+    struct bc_server *s = data;
+    struct bc_input_conn *conn;
+    int c;
+    (void)mask;
+    while ((c = accept4(fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC)) >= 0) {
+        conn = calloc(1, sizeof(*conn));
+        if (conn == NULL) {
+            close(c);
+            continue;
+        }
+        conn->server = s;
+        conn->fd = c;
+        conn->source = wl_event_loop_add_fd(s->loop, c, WL_EVENT_READABLE, on_input_conn, conn);
+        wl_list_insert(&s->input_conns, &conn->link);
+    }
+    return 0;
+}
+
+/* $XDG_RUNTIME_DIR/<display>-input, a stream socket only this user (and
+   root) can reach: the directory is the user's alone. */
+static int input_listen(struct bc_server *s)
+{
+    struct sockaddr_un addr;
+    int fd;
+    if (snprintf(s->input_path, sizeof(s->input_path), "%s/%s-input", getenv("XDG_RUNTIME_DIR"),
+                 s->socket_name) >= (int)sizeof(s->input_path)) {
+        s->input_path[0] = '\0';
+        return -1;
+    }
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    memcpy(addr.sun_path, s->input_path, strlen(s->input_path));
+    /* The display's lock is ours: a socket left at this name is a dead
+       compositor's. */
+    unlink(s->input_path);
+    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0 || bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 16) != 0) {
+        logf_("input socket %s: %s", s->input_path, strerror(errno));
+        if (fd >= 0) close(fd);
+        s->input_path[0] = '\0';
+        return -1;
+    }
+    chmod(s->input_path, 0600);
+    s->input_fd = fd;
+    s->input_source = wl_event_loop_add_fd(s->loop, fd, WL_EVENT_READABLE, on_input_listen, s);
+    return 0;
+}
+
 /* `ERROR <id> <code>` for a frame. Replies come in the order frames are
    read and an accepted frame gets none, so a refusal is the newest frame
    of the picture -- an FRM3 still held, unless an FRM1 went after it
@@ -2134,6 +2703,8 @@ static void handle_line(struct bc_server *s, const char *line)
         x->size_fullscreen = l.fullscreen;
         x->size_maximized = l.maximized;
         x->size_activated = l.activated;
+        /* The desktop took the window's focus away: so does the keyboard. */
+        if (!l.activated && x->surface && s->kbd_focus == x->surface) keyboard_focus(s, NULL);
         logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,
               l.fullscreen ? " fullscreen" : "", l.maximized ? " maximized" : "",
               l.activated ? " activated" : "");
@@ -2193,8 +2764,11 @@ static void handle_line(struct bc_server *s, const char *line)
         /* A frame given back already, its picture gone. */
         return;
     }
-    case BC_LINE_OK_WINDOW:
     case BC_LINE_OTHER:
+        if (strncmp(line, "ERROR INPUT ", 12) == 0)
+            logf_("Blit refused or ended an input route: %.60s", line);
+        return;
+    case BC_LINE_OK_WINDOW:
         return;
     default:
         logf_("an unknown line from the channel: %.80s", line);
@@ -2262,6 +2836,12 @@ int main(int argc, char **argv)
     wl_list_init(&server.outputs);
     wl_list_init(&server.holds);
     server.format_table_fd = -1;
+    wl_list_init(&server.input_conns);
+    wl_list_init(&server.keyboards);
+    wl_list_init(&server.pointers);
+    wl_list_init(&server.relative_pointers);
+    server.input_fd = -1;
+    server.keymap_fd = -1;
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             log_path = argv[++i];
@@ -2310,6 +2890,9 @@ int main(int argc, char **argv)
         return 1;
     }
     server.loop = wl_display_get_event_loop(server.display);
+    server.xkb = xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES | XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
+    keymap_refresh(&server);
+    input_listen(&server);
     if (wl_display_init_shm(server.display) != 0 ||
         !wl_global_create(server.display, &wl_compositor_interface,
                           BC_VERSION(6, wl_compositor_interface), &server, bind_compositor) ||
@@ -2358,6 +2941,18 @@ int main(int argc, char **argv)
 
     wl_display_run(server.display);
 
+    while (!wl_list_empty(&server.input_conns)) {
+        struct bc_input_conn *conn = wl_container_of(server.input_conns.next, conn, link);
+        wl_event_source_remove(conn->source);
+        close(conn->fd);
+        wl_list_remove(&conn->link);
+        free(conn);
+    }
+    if (server.input_source) wl_event_source_remove(server.input_source);
+    if (server.input_fd >= 0) {
+        close(server.input_fd);
+        unlink(server.input_path);
+    }
     wl_display_destroy_clients(server.display);
     if (server.frame_source) wl_event_source_remove(server.frame_source);
     if (server.sigterm_source) wl_event_source_remove(server.sigterm_source);
@@ -2369,6 +2964,10 @@ int main(int argc, char **argv)
         free(h);
     }
     if (server.format_table_fd >= 0) close(server.format_table_fd);
+    if (server.keymap_fd >= 0) close(server.keymap_fd);
+    if (server.xkb_state) xkb_state_unref(server.xkb_state);
+    if (server.keymap) xkb_keymap_unref(server.keymap);
+    if (server.xkb) xkb_context_unref(server.xkb);
     while (!wl_list_empty(&server.outputs)) {
         struct bc_output *o = output_default(&server);
         wl_list_remove(&o->link);
