@@ -1984,6 +1984,15 @@ It speaks the frame channel above as a producer, with these additions.
   any other refusal, or one that cannot be mapped, gives the buffer back
   unshown and says so in the compositor's log. The feedback's main device
   is the first DRM render node: the hello does not name Blit's GPU.
+- **Pacing.** A program's frame callback is answered when Blit has taken
+  the frame -- an `FRM1` when it is sent; an `FRM3` at once when it is the
+  only frame of the window Blit holds, else at Blit's `RELEASE` of the
+  frame before it, so a program is never more than one frame ahead of
+  Blit -- and at most once per refresh of the window's `WINDOW output`.
+  `wp_presentation` feedback is `presented` at the same moment
+  (`CLOCK_MONOTONIC`, that output's refresh, no flags: the compositor does
+  not see Blit's vblank), and `discarded` for a frame superseded before
+  Blit took it or never sent.
 - **Compositor to desktop**, one event a line, UTF-8:
   - `WINDOW new <id> <parent|0>`: a top-level; parent is its transient-for.
   - `WINDOW title <id> <text>`, `WINDOW appid <id> <text>`.

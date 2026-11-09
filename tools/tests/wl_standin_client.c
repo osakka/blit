@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -34,6 +34,12 @@
    as `STANDIN dmabuf <w>x<h> file <dev>:<inode>`, what the default
    feedback offered, and each release as `STANDIN release <w>x<h>`.
 
+   With --animate n, it draws again on each of the next n frame callbacks,
+   as games do, and prints `STANDIN animated <n> in <ms> ms` from its first
+   draw. Every draw asks for wp_presentation feedback when it is offered;
+   the exit line before `done` counts it: `STANDIN presentation
+   presented=<n> discarded=<n> refresh=<ns>`.
+
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
    blue = 0x80 | ((x >> 8) & 7) << 3 | ((y >> 8) & 7).
@@ -55,6 +61,8 @@
 #include "xdg-shell-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
+#include "presentation-time-client-protocol.h"
+#include <time.h>
 
 #define FOURCC_XR24 0x34325258u
 
@@ -69,6 +77,12 @@ struct standin {
     int use_dmabuf;
     unsigned feedback_pairs, feedback_tranche;
     int feedback_xr24_linear;
+    struct wp_presentation *presentation;
+    unsigned presented, discarded;
+    uint32_t refresh;
+    int animate, animated;
+    struct wl_callback *callbacks[16];   /* frame callbacks not yet answered */
+    struct timespec first_draw;
     struct wl_seat *seat;
     struct wl_keyboard *keyboard;
     struct wl_pointer *pointer;
@@ -124,15 +138,60 @@ static void buffer_release(void *data, struct wl_buffer *buffer)
 
 static const struct wl_buffer_listener buffer_listener = { buffer_release };
 
+static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_t h);
+
 static void frame_done(void *data, struct wl_callback *cb, uint32_t time)
 {
     struct standin *s = data;
+    size_t i;
     (void)time;
     ++s->frames;
+    for (i = 0; i < sizeof(s->callbacks) / sizeof(s->callbacks[0]); ++i)
+        if (s->callbacks[i] == cb) s->callbacks[i] = NULL;
     wl_callback_destroy(cb);
+    if (s->animate > 0) {
+        struct timespec now;
+        --s->animate;
+        ++s->animated;
+        if (s->animate == 0) {
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            printf("STANDIN animated %d in %ld ms\n", s->animated,
+                   (long)((now.tv_sec - s->first_draw.tv_sec) * 1000 +
+                          (now.tv_nsec - s->first_draw.tv_nsec) / 1000000));
+        }
+        draw(s, s->surface, s->want_w, s->want_h);
+    }
 }
 
 static const struct wl_callback_listener frame_listener = { frame_done };
+
+static void presentation_sync_output(void *data, struct wp_presentation_feedback *f,
+                                     struct wl_output *output)
+{
+    (void)data; (void)f; (void)output;
+}
+
+static void presentation_presented(void *data, struct wp_presentation_feedback *f, uint32_t sec_hi,
+                                   uint32_t sec_lo, uint32_t nsec, uint32_t refresh, uint32_t seq_hi,
+                                   uint32_t seq_lo, uint32_t flags)
+{
+    struct standin *s = data;
+    (void)sec_hi; (void)sec_lo; (void)nsec; (void)seq_hi; (void)seq_lo; (void)flags;
+    ++s->presented;
+    s->refresh = refresh;
+    wp_presentation_feedback_destroy(f);
+}
+
+static void presentation_discarded(void *data, struct wp_presentation_feedback *f)
+{
+    struct standin *s = data;
+    ++s->discarded;
+    wp_presentation_feedback_destroy(f);
+}
+
+static const struct wp_presentation_feedback_listener presentation_feedback_listener = {
+    presentation_sync_output, presentation_presented, presentation_discarded,
+};
 
 static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_t h)
 {
@@ -180,6 +239,15 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     wl_surface_damage_buffer(surface, 0, 0, w, h);
     cb = wl_surface_frame(surface);
     wl_callback_add_listener(cb, &frame_listener, s);
+    for (x = 0; x < (int32_t)(sizeof(s->callbacks) / sizeof(s->callbacks[0])); ++x)
+        if (s->callbacks[x] == NULL) {
+            s->callbacks[x] = cb;
+            break;
+        }
+    if (s->presentation)
+        wp_presentation_feedback_add_listener(wp_presentation_feedback(s->presentation, surface),
+                                              &presentation_feedback_listener, s);
+    if (s->draws == 0) clock_gettime(CLOCK_MONOTONIC, &s->first_draw);
     wl_surface_commit(surface);
     ++s->draws;
     printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" :
@@ -482,6 +550,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         out->output = wl_registry_bind(registry, name, &wl_output_interface,
                                        version < 4 ? version : 4);
         wl_output_add_listener(out->output, &output_listener, out);
+    } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
+        s->presentation = wl_registry_bind(registry, name, &wp_presentation_interface, 1);
     } else if (strcmp(interface, zwp_linux_dmabuf_v1_interface.name) == 0 && version >= 4) {
         s->dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, 4);
         s->feedback = zwp_linux_dmabuf_v1_get_default_feedback(s->dmabuf);
@@ -576,6 +646,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
+        else if (strcmp(argv[i], "--animate") == 0 && i + 1 < argc) s.animate = atoi(argv[++i]);
         else title = argv[i];
     }
     s.display = wl_display_connect(NULL);
@@ -639,11 +710,19 @@ int main(int argc, char **argv)
     if (s.decoration_manager) zxdg_decoration_manager_v1_destroy(s.decoration_manager);
     if (s.feedback) zwp_linux_dmabuf_feedback_v1_destroy(s.feedback);
     if (s.dmabuf) zwp_linux_dmabuf_v1_destroy(s.dmabuf);
+    if (s.presentation) wp_presentation_destroy(s.presentation);
+    /* A callback the compositor never answered (the last frame's, at
+       close) is still the client's to free. */
+    for (i = 0; i < (int)(sizeof(s.callbacks) / sizeof(s.callbacks[0])); ++i)
+        if (s.callbacks[i]) wl_callback_destroy(s.callbacks[i]);
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);
     wl_compositor_destroy(s.compositor);
     wl_registry_destroy(registry);
     wl_display_roundtrip(s.display);
+    if (s.presentation)
+        printf("STANDIN presentation presented=%u discarded=%u refresh=%u\n", s.presented,
+               s.discarded, s.refresh);
     printf("STANDIN done draws=%u releases=%u frames=%u\n", s.draws, s.releases, s.frames);
     wl_display_disconnect(s.display);
     return 0;

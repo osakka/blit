@@ -247,6 +247,45 @@ def states_part(desk, standin, env, display, work):
             'BLIT-1,BLIT-2:800x600@75000')
 
 
+def pacing_part(desk, standin, env, display, work):
+    """A client that draws on every frame callback (milestone A's answered
+    them at once) runs at its output's refresh: 10 more frames at 20 Hz
+    take at least 9 periods, each presented with that refresh."""
+    out_path = os.path.join(work, 'standin-animate.out')
+    client = start([standin, '--animate', '10', 'Animate'], dict(env, WAYLAND_DISPLAY=display),
+                   open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    try:
+        for want in ('WINDOW new 6 0', 'WINDOW title 6 Animate', 'WINDOW appid 6 blit.standin',
+                     'WINDOW limits 6 64 48 0 0', 'WINDOW decor 6 server'):
+            desk.line(want)
+        desk.send('WINDOW output 6 640 480 20000')
+        wait_for(lambda: 'STANDIN enter BLIT-2 640x480@20000' in printed(),
+                 lambda: 'the window did not enter the 20 Hz output:\n' + printed())
+        desk.send('WINDOW size 6 64 48')
+        started = time.time()
+        for _ in range(11):
+            desk.frame(64, 48, image_id=6)
+        took = time.time() - started
+        wait_for(lambda: 'STANDIN animated 10 in' in printed(), 'the client did not animate')
+        ms = int(printed().split('STANDIN animated 10 in ')[1].split()[0])
+        check(ms >= 9 * 50 * 0.9 and took >= 9 * 0.05 * 0.9,
+              'ten frames at 20 Hz took %d ms (the desktop saw %.3f s): not paced' % (ms, took))
+        check(ms < 3000, 'ten frames at 20 Hz took %d ms' % ms)
+        desk.send('WINDOW close 6')
+        desk.line('WINDOW gone 6')
+        check(client.wait(5) == 0, 'the animating stand-in failed: ' + printed())
+        output = printed()
+        check('STANDIN presentation presented=11 discarded=0 refresh=50000000' in output,
+              'presentation feedback:\n' + output)
+        check('STANDIN done draws=11 releases=11 frames=10' in output, 'counts:\n' + output)
+    finally:
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return 'shm 10 frames at 20 Hz in %d ms, presented=11 refresh=50ms' % ms
+
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -305,6 +344,32 @@ def dmabuf_part(compositor, standin, work):
               'STANDIN done draws=1 releases=1 frames=1' in open(held_path).read(),
               'the held buffer was not given back at WINDOW gone:\n' + open(held_path).read())
 
+        # A dmabuf client drawing on every callback is one frame ahead of
+        # Blit: its third frame waits for Blit's RELEASE of its first.
+        paced_path = os.path.join(work, 'standin-paced.out')
+        paced = start([standin, '--dmabuf', '--animate', '2', 'Paced'], cenv, open(paced_path, 'w'))
+        clients.append(paced)
+        for want in ('WINDOW new 3 0', 'WINDOW title 3 Paced', 'WINDOW appid 3 blit.standin',
+                     'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
+            desk.line(want)
+        desk.send('WINDOW size 3 40 30')
+        seq_a, _ = desk.frm3(40, 30, 3)
+        seq_b, _ = desk.frm3(40, 30, 3)
+        desk.nothing(0.4)
+        desk.send('RELEASE 3 %d' % seq_a)
+        seq_c, _ = desk.frm3(40, 30, 3)
+        # RELEASE of the second takes the third: its callback and feedback
+        # come, and the client, done animating, draws no more.
+        desk.send('RELEASE 3 %d' % seq_b)
+        desk.nothing(0.3)
+        desk.send('WINDOW close 3')
+        desk.line('WINDOW gone 3')
+        check(paced.wait(5) == 0, 'the paced stand-in failed: ' + open(paced_path).read())
+        text = open(paced_path).read()
+        check('STANDIN done draws=3 releases=3 frames=3' in text and
+              'STANDIN presentation presented=3 discarded=0 ' in text,
+              'the paced dmabuf client:\n' + text)
+
         # ENOTSUP: the refused (newest held) frame again as FRM1, and every
         # later one copied.
         desk.send('ERROR 1 ENOTSUP')
@@ -326,9 +391,10 @@ def dmabuf_part(compositor, standin, work):
         desk.sock.close()
         comp.wait(5)
         text = open(log).read()
-        check('dmabuf 3 sent, 1 released, 1 refused, 2 copied' in text,
+        check('dmabuf 6 sent, 3 released, 1 refused, 2 copied' in text,
               'the log does not count the dmabuf frames:\n' + text)
-        return 'FRM3=client-file,64x32+80x40 RELEASE->release gone->release ENOTSUP->FRM1 80x40,100x50 feedback=2'
+        return ('FRM3=client-file,64x32+80x40 RELEASE->release gone->release paced=3rd-after-RELEASE-of-1st '
+                'ENOTSUP->FRM1 80x40,100x50 feedback=2')
     finally:
         for p in clients + [comp]:
             if p and p.poll() is None:
@@ -420,6 +486,9 @@ def desktop_part(compositor, standin, work):
         check(int(versions['wl_output']) == 4 and int(versions['wl_seat']) == 8,
               'wl_output or wl_seat at another version: %s' % versions)
         check('zwp_linux_dmabuf_v1' not in versions, 'linux-dmabuf offered without dmabuf=1: %s' % versions)
+        check(versions.get('wp_presentation') == '1', 'no wp_presentation 1: %s' % versions)
+        check('STANDIN presentation presented=4 discarded=0 refresh=16666666' in output,
+              'the stand-in\'s frames were not each presented at 60 Hz:\n%s' % output)
         for want in ('STANDIN decoration server',
                      'STANDIN configure 320x200\n', 'STANDIN configure 500x300 activated\n',
                      'STANDIN configure 0x0\n', 'STANDIN close',
@@ -436,6 +505,7 @@ def desktop_part(compositor, standin, work):
         desk.nothing(0.3)
 
         states = states_part(desk, standin, env, display, work)
+        pacing = pacing_part(desk, standin, env, display, work)
 
         # The desktop goes: the compositor ends, status 1, and says why.
         desk.sock.close()
@@ -446,12 +516,13 @@ def desktop_part(compositor, standin, work):
         text = open(log).read()
         check(status == 1 and 'the frame channel closed' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('8 frames sent, 0 failed' in text, 'the log does not count 8 frames:\n%s' % text)
+        check('19 frames sent, 0 failed' in text, 'the log does not count 19 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
                  ','.join('%s:%s' % kv for kv in sorted(versions.items()))))
         print('COMPOSITOR_STATES_OK %s' % states)
+        print('COMPOSITOR_PACING_OK %s' % pacing)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

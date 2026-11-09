@@ -55,6 +55,7 @@
 #include "xdg-shell-server-protocol.h"
 #include "xdg-decoration-unstable-v1-server-protocol.h"
 #include "linux-dmabuf-unstable-v1-server-protocol.h"
+#include "presentation-time-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -95,7 +96,12 @@ struct bc_surface {
     int pending_attach;               /* attach seen since the last commit */
     struct wl_listener pending_buffer_destroy;
     struct wl_list pending_frames;    /* wl_callback resources */
-    struct wl_list frames;            /* committed, waiting for a frame sent */
+    struct wl_list frames;            /* committed, waiting for Blit to take the frame */
+    struct wl_list due;               /* taken, waiting for the output's next refresh */
+    struct wl_list pending_feedback;  /* wp_presentation_feedback resources */
+    struct wl_list feedback;          /* committed, waiting for Blit to take the frame */
+    struct wl_event_source *pace;     /* the refresh timer for `due` */
+    uint64_t last_done_us;            /* when frame callbacks were last answered */
     int scale_warned;
 };
 
@@ -199,6 +205,7 @@ static void unlink_resource(struct wl_resource *resource)
 
 static void window_set_output(struct bc_xdg *x, struct bc_output *o);
 static struct bc_output *output_default(struct bc_server *s);
+static struct wl_resource *output_resource(struct bc_output *o, struct wl_client *client);
 
 static int xdg_parent_id(struct bc_xdg *x)
 {
@@ -695,6 +702,102 @@ static void callbacks_destroy(struct wl_list *list)
         wl_resource_destroy(cb);
 }
 
+/* ---- frame pacing ----
+
+   A frame callback says "draw the next one now". It is answered when Blit
+   has taken the frame the commit brought, and at most once per refresh of
+   the window's output (WINDOW output; 60 Hz until the first), so a client
+   that draws on every callback runs at the display's rate, not as fast as
+   the copy:
+
+   - wl_shm, or a dmabuf copied: taken when its FRM1 is sent;
+   - a dmabuf sent as FRM3: taken when it is the window's only frame Blit
+     holds, which is at once for the first and, after that, at Blit's
+     RELEASE of the frame before it -- the RELEASE that says Blit drew the
+     newer frame (or let it supersede the older one), so a client is never
+     more than one frame ahead of Blit;
+   - a commit with no new buffer on a shown window: taken at once (a client
+     that only asks for a callback is paced the same way).
+
+   wp_presentation feedback is `presented` when Blit takes the frame,
+   CLOCK_MONOTONIC, with the output's refresh and no flags: the compositor
+   does not see Blit's vblank, so it claims neither vsync nor a hardware
+   clock. It is `discarded` when the next commit with a buffer comes before
+   Blit took the frame, when the frame was not sent, or when the surface
+   goes. */
+
+static uint64_t now_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
+}
+
+static uint32_t surface_refresh_mhz(struct bc_surface *surface)
+{
+    struct bc_xdg *x = surface->xdg;
+    return x && x->output ? x->output->refresh_mhz : 60000u;
+}
+
+static void feedback_discard(struct wl_list *list)
+{
+    struct wl_resource *r, *next;
+    wl_resource_for_each_safe(r, next, list) {
+        wp_presentation_feedback_send_discarded(r);
+        wl_resource_destroy(r);
+    }
+}
+
+static void feedback_presented(struct bc_surface *surface)
+{
+    struct wl_resource *r, *next, *out;
+    struct timespec ts;
+    uint32_t mhz = surface_refresh_mhz(surface);
+    struct bc_output *o = surface->xdg ? surface->xdg->output : NULL;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    wl_resource_for_each_safe(r, next, &surface->feedback) {
+        if (o && (out = output_resource(o, wl_resource_get_client(r))) != NULL)
+            wp_presentation_feedback_send_sync_output(r, out);
+        wp_presentation_feedback_send_presented(r, (uint32_t)((uint64_t)ts.tv_sec >> 32),
+                                                (uint32_t)ts.tv_sec, (uint32_t)ts.tv_nsec,
+                                                (uint32_t)(1000000000000ull / mhz), 0, 0, 0);
+        wl_resource_destroy(r);
+    }
+}
+
+/* Answers the due callbacks if a refresh has passed since the last answer,
+   else arms the timer for the rest of it. */
+static void frames_pace(struct bc_surface *surface)
+{
+    uint64_t period = 1000000000ull / surface_refresh_mhz(surface), now = now_us();
+    if (wl_list_empty(&surface->due)) return;
+    if (now - surface->last_done_us >= period) {
+        surface->last_done_us = now;
+        callbacks_done(&surface->due);
+        return;
+    }
+    if (surface->pace == NULL)
+        return;
+    wl_event_source_timer_update(surface->pace,
+                                 (int)((period - (now - surface->last_done_us) + 999) / 1000));
+}
+
+static int frames_pace_timer(void *data)
+{
+    frames_pace(data);
+    return 0;
+}
+
+/* Blit has taken the surface's committed frame. */
+static void frames_taken(struct bc_surface *surface)
+{
+    if (surface == NULL) return;
+    feedback_presented(surface);
+    wl_list_insert_list(surface->due.prev, &surface->frames);
+    wl_list_init(&surface->frames);
+    frames_pace(surface);
+}
+
 enum { BC_SENT_NONE = 0, BC_SENT_COPY, BC_SENT_HELD };
 
 /* A dmabuf commit: FRM3, held until Blit's RELEASE, unless the peer
@@ -705,6 +808,9 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
     struct bc_hold *h;
     uint64_t seq;
     if (s->wire.dmabuf && !s->wire.refused) {
+        int older = 0;
+        wl_list_for_each(h, &s->holds, link)
+            if (h->id == x->id) older = 1;
         h = calloc(1, sizeof(*h));
         seq = h ? bc_wire_send_dmabuf(&s->wire, x->id, (uint32_t)b->width, (uint32_t)b->height,
                                       b->format, b->modifier, b->planes, b->fds, b->offsets,
@@ -716,6 +822,9 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
             h->buffer = b;
             ++b->holds;
             wl_list_insert(s->holds.prev, &h->link);
+            /* Taken at once when Blit holds nothing else of the window,
+               else at the RELEASE of the frame before it. */
+            if (!older) frames_taken(x->surface);
             return BC_SENT_HELD;
         }
         free(h);
@@ -726,6 +835,7 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
         return BC_SENT_NONE;
     }
     x->last_copy = s->wire.sequence;
+    frames_taken(x->surface);
     return BC_SENT_COPY;
 }
 
@@ -757,6 +867,7 @@ static int send_buffer(struct bc_surface *surface, struct wl_resource *buffer)
         return BC_SENT_NONE;
     }
     x->last_copy = x->server->wire.sequence;
+    frames_taken(surface);
     return BC_SENT_COPY;
 }
 
@@ -829,9 +940,14 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
     int attached = surface->pending_attach, sent = 0;
     (void)client;
 
-    /* Pending frame callbacks wait for the next frame of this surface. */
+    /* Pending frame callbacks and feedback wait for Blit to take the next
+       frame of this surface; feedback for a frame it never took is
+       discarded once a newer buffer comes. */
+    if (attached && buffer) feedback_discard(&surface->feedback);
     wl_list_insert_list(surface->frames.prev, &surface->pending_frames);
     wl_list_init(&surface->pending_frames);
+    wl_list_insert_list(surface->feedback.prev, &surface->pending_feedback);
+    wl_list_init(&surface->pending_feedback);
     set_pending_buffer(surface, NULL);
     surface->pending_attach = 0;
 
@@ -902,8 +1018,10 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
        FRM3 frame is the client's again at Blit's RELEASE. */
     if (attached && buffer && sent != BC_SENT_HELD)
         wl_buffer_send_release(buffer);
-    if (sent)
-        callbacks_done(&surface->frames);
+    if (attached && buffer && sent == BC_SENT_NONE)
+        feedback_discard(&surface->feedback);
+    else if (!attached && x && x->mapped && x->id)
+        frames_taken(surface);
 }
 
 static void surface_set_buffer_transform(struct wl_client *client, struct wl_resource *resource,
@@ -955,6 +1073,10 @@ static void surface_destroyed(struct wl_resource *resource)
     set_pending_buffer(surface, NULL);
     callbacks_destroy(&surface->pending_frames);
     callbacks_destroy(&surface->frames);
+    callbacks_destroy(&surface->due);
+    feedback_discard(&surface->pending_feedback);
+    feedback_discard(&surface->feedback);
+    if (surface->pace) wl_event_source_remove(surface->pace);
     if (surface->xdg) {
         /* The role object outlived its surface (a client error, or the
            client's teardown order): the window is gone either way. */
@@ -997,6 +1119,10 @@ static void compositor_create_surface(struct wl_client *client, struct wl_resour
     }
     wl_list_init(&surface->pending_frames);
     wl_list_init(&surface->frames);
+    wl_list_init(&surface->due);
+    wl_list_init(&surface->pending_feedback);
+    wl_list_init(&surface->feedback);
+    surface->pace = wl_event_loop_add_timer(surface->server->loop, frames_pace_timer, surface);
     surface->pending_buffer_destroy.notify = pending_buffer_gone;
     wl_list_init(&surface->pending_buffer_destroy.link);
     wl_resource_set_implementation(surface->resource, &surface_impl, surface, surface_destroyed);
@@ -1922,6 +2048,32 @@ static void bind_decoration_manager(struct wl_client *client, void *data, uint32
     wl_resource_set_implementation(r, &decoration_manager_impl, data, NULL);
 }
 
+/* ---- wp_presentation ---- */
+
+static void presentation_feedback(struct wl_client *client, struct wl_resource *resource,
+                                  struct wl_resource *surface_resource, uint32_t id)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(surface_resource);
+    struct wl_resource *r = wl_resource_create(client, &wp_presentation_feedback_interface, 1, id);
+    (void)resource;
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, NULL, NULL, unlink_resource);
+    wl_list_insert(surface->pending_feedback.prev, wl_resource_get_link(r));
+}
+
+static const struct wp_presentation_interface presentation_impl = {
+    .destroy = bc_destroy_request,
+    .feedback = presentation_feedback,
+};
+
+static void bind_presentation(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &wp_presentation_interface, (int)version, id);
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &presentation_impl, data, NULL);
+    wp_presentation_send_clock_id(r, CLOCK_MONOTONIC);
+}
+
 /* ---- the desktop's lines ---- */
 
 static struct bc_xdg *window_by_id(struct bc_server *s, uint32_t id)
@@ -1961,6 +2113,8 @@ static void frame_refused(struct bc_server *s, uint32_t id, const char *code)
         logf_("window %u: a dmabuf frame was refused %s, not shown", id, code);
     }
     hold_end(newest);
+    /* The newest frame is settled either way: the client may draw again. */
+    if (x) frames_taken(x->surface);
 }
 
 static void handle_line(struct bc_server *s, const char *line)
@@ -2024,8 +2178,16 @@ static void handle_line(struct bc_server *s, const char *line)
         struct bc_hold *h;
         wl_list_for_each(h, &s->holds, link)
             if (h->id == l.id && h->sequence == l.sequence) {
+                struct bc_hold *other;
                 ++s->wire.dmabuf_released;
                 hold_end(h);
+                /* Blit drew a newer frame of the window: it is taken. */
+                wl_list_for_each(other, &s->holds, link)
+                    if (other->id == l.id && other->sequence > l.sequence) {
+                        x = window_by_id(s, l.id);
+                        if (x) frames_taken(x->surface);
+                        break;
+                    }
                 return;
             }
         /* A frame given back already, its picture gone. */
@@ -2160,7 +2322,9 @@ int main(int argc, char **argv)
                           BC_VERSION(6, xdg_wm_base_interface), &server, bind_wm_base) ||
         !wl_global_create(server.display, &zxdg_decoration_manager_v1_interface,
                           BC_VERSION(1, zxdg_decoration_manager_v1_interface), &server,
-                          bind_decoration_manager)) {
+                          bind_decoration_manager) ||
+        !wl_global_create(server.display, &wp_presentation_interface,
+                          BC_VERSION(1, wp_presentation_interface), &server, bind_presentation)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
