@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -27,6 +27,13 @@
    second frame clears its parent. Every surface prints the outputs it
    enters and leaves (`STANDIN [child ]enter <name> <w>x<h>@<mHz>`).
 
+   With --dmabuf, every buffer is a zwp_linux_dmabuf_v1 one: XRGB8888,
+   LINEAR, one plane. This host has no DRM device and no /dev/udmabuf, so
+   the plane is a memfd -- descriptor passing and the wire are what is
+   tested; a GPU's dmabuf is the live check. It prints each buffer's plane
+   as `STANDIN dmabuf <w>x<h> file <dev>:<inode>`, what the default
+   feedback offered, and each release as `STANDIN release <w>x<h>`.
+
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
    blue = 0x80 | ((x >> 8) & 7) << 3 | ((y >> 8) & 7).
@@ -42,9 +49,14 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <sys/stat.h>
+
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
+#include "linux-dmabuf-unstable-v1-client-protocol.h"
+
+#define FOURCC_XR24 0x34325258u
 
 struct standin {
     struct wl_display *display;
@@ -52,6 +64,11 @@ struct standin {
     struct wl_shm *shm;
     struct xdg_wm_base *wm_base;
     struct zxdg_decoration_manager_v1 *decoration_manager;
+    struct zwp_linux_dmabuf_v1 *dmabuf;
+    struct zwp_linux_dmabuf_feedback_v1 *feedback;
+    int use_dmabuf;
+    unsigned feedback_pairs, feedback_tranche;
+    int feedback_xr24_linear;
     struct wl_seat *seat;
     struct wl_keyboard *keyboard;
     struct wl_pointer *pointer;
@@ -86,6 +103,7 @@ struct standin_buffer {
     struct wl_buffer *buffer;
     void *data;
     size_t size;
+    int32_t w, h;
 };
 
 static uint32_t pattern(uint32_t x, uint32_t y)
@@ -98,6 +116,7 @@ static void buffer_release(void *data, struct wl_buffer *buffer)
 {
     struct standin_buffer *b = data;
     ++b->s->releases;
+    if (b->s->use_dmabuf) printf("STANDIN release %dx%d\n", b->w, b->h);
     wl_buffer_destroy(buffer);
     munmap(b->data, b->size);
     free(b);
@@ -124,6 +143,8 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     int fd;
     if (b == NULL) return -1;
     b->s = s;
+    b->w = w;
+    b->h = h;
     b->size = (size_t)stride * (size_t)h;
     fd = memfd_create("wl-standin", MFD_CLOEXEC);
     if (fd < 0 || ftruncate(fd, (off_t)b->size) != 0) {
@@ -139,9 +160,20 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
         uint32_t *row = (uint32_t *)((char *)b->data + (size_t)y * stride);
         for (x = 0; x < w; ++x) row[x] = pattern((uint32_t)x, (uint32_t)y);
     }
-    pool = wl_shm_create_pool(s->shm, fd, (int32_t)b->size);
-    b->buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_XRGB8888);
-    wl_shm_pool_destroy(pool);
+    if (s->use_dmabuf) {
+        struct zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params(s->dmabuf);
+        struct stat st;
+        fstat(fd, &st);
+        zwp_linux_buffer_params_v1_add(params, fd, 0, 0, (uint32_t)stride, 0, 0);
+        b->buffer = zwp_linux_buffer_params_v1_create_immed(params, w, h, FOURCC_XR24, 0);
+        zwp_linux_buffer_params_v1_destroy(params);
+        printf("STANDIN dmabuf %dx%d file %lu:%lu\n", w, h, (unsigned long)st.st_dev,
+               (unsigned long)st.st_ino);
+    } else {
+        pool = wl_shm_create_pool(s->shm, fd, (int32_t)b->size);
+        b->buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_XRGB8888);
+        wl_shm_pool_destroy(pool);
+    }
     close(fd);
     wl_buffer_add_listener(b->buffer, &buffer_listener, b);
     wl_surface_attach(surface, b->buffer, 0, 0);
@@ -427,6 +459,8 @@ static void surface_leave(void *data, struct wl_surface *surface, struct wl_outp
 
 static const struct wl_surface_listener surface_listener = { surface_enter, surface_leave };
 
+static const struct zwp_linux_dmabuf_feedback_v1_listener feedback_listener;
+
 static void global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
                    uint32_t version)
 {
@@ -448,10 +482,80 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         out->output = wl_registry_bind(registry, name, &wl_output_interface,
                                        version < 4 ? version : 4);
         wl_output_add_listener(out->output, &output_listener, out);
+    } else if (strcmp(interface, zwp_linux_dmabuf_v1_interface.name) == 0 && version >= 4) {
+        s->dmabuf = wl_registry_bind(registry, name, &zwp_linux_dmabuf_v1_interface, 4);
+        s->feedback = zwp_linux_dmabuf_v1_get_default_feedback(s->dmabuf);
+        zwp_linux_dmabuf_feedback_v1_add_listener(s->feedback, &feedback_listener, s);
     } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0)
         s->decoration_manager = wl_registry_bind(registry, name,
                                                  &zxdg_decoration_manager_v1_interface, 1);
 }
+
+/* The default feedback: the table's pairs, the tranche's, and whether
+   XRGB8888 LINEAR is among them. */
+static void feedback_done(void *data, struct zwp_linux_dmabuf_feedback_v1 *f)
+{
+    struct standin *s = data;
+    (void)f;
+    printf("STANDIN dmabuf feedback pairs=%u tranche=%u xr24-linear=%d\n", s->feedback_pairs,
+           s->feedback_tranche, s->feedback_xr24_linear);
+}
+
+static void feedback_format_table(void *data, struct zwp_linux_dmabuf_feedback_v1 *f, int32_t fd,
+                                  uint32_t size)
+{
+    struct standin *s = data;
+    unsigned char *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    uint32_t i;
+    (void)f;
+    s->feedback_pairs = size / 16;
+    if (map != MAP_FAILED) {
+        for (i = 0; i < size / 16; ++i) {
+            uint32_t format;
+            uint64_t modifier;
+            memcpy(&format, map + 16 * i, 4);
+            memcpy(&modifier, map + 16 * i + 8, 8);
+            if (format == FOURCC_XR24 && modifier == 0) s->feedback_xr24_linear = 1;
+        }
+        munmap(map, size);
+    }
+    close(fd);
+}
+
+static void feedback_main_device(void *data, struct zwp_linux_dmabuf_feedback_v1 *f,
+                                 struct wl_array *device)
+{
+    (void)data; (void)f; (void)device;
+}
+
+static void feedback_tranche_done(void *data, struct zwp_linux_dmabuf_feedback_v1 *f)
+{
+    (void)data; (void)f;
+}
+
+static void feedback_tranche_target_device(void *data, struct zwp_linux_dmabuf_feedback_v1 *f,
+                                           struct wl_array *device)
+{
+    (void)data; (void)f; (void)device;
+}
+
+static void feedback_tranche_formats(void *data, struct zwp_linux_dmabuf_feedback_v1 *f,
+                                     struct wl_array *indices)
+{
+    struct standin *s = data;
+    (void)f;
+    s->feedback_tranche += (unsigned)(indices->size / sizeof(uint16_t));
+}
+
+static void feedback_tranche_flags(void *data, struct zwp_linux_dmabuf_feedback_v1 *f, uint32_t flags)
+{
+    (void)data; (void)f; (void)flags;
+}
+
+static const struct zwp_linux_dmabuf_feedback_v1_listener feedback_listener = {
+    feedback_done, feedback_format_table, feedback_main_device, feedback_tranche_done,
+    feedback_tranche_target_device, feedback_tranche_formats, feedback_tranche_flags,
+};
 
 static void global_remove(void *data, struct wl_registry *registry, uint32_t name)
 {
@@ -471,6 +575,7 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
+        else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else title = argv[i];
     }
     s.display = wl_display_connect(NULL);
@@ -485,6 +590,10 @@ int main(int argc, char **argv)
     wl_display_roundtrip(s.display); /* the seat's and the output's events */
     if (!s.compositor || !s.shm || !s.wm_base) {
         fprintf(stderr, "STANDIN missing wl_compositor, wl_shm or xdg_wm_base\n");
+        return 1;
+    }
+    if (s.use_dmabuf && !s.dmabuf) {
+        fprintf(stderr, "STANDIN --dmabuf: no zwp_linux_dmabuf_v1 version 4\n");
         return 1;
     }
     xdg_wm_base_add_listener(s.wm_base, &wm_listener, &s);
@@ -528,6 +637,8 @@ int main(int argc, char **argv)
     if (s.seat) wl_seat_release(s.seat);
     for (i = 0; i < s.output_count; ++i) wl_output_release(s.outputs[i].output);
     if (s.decoration_manager) zxdg_decoration_manager_v1_destroy(s.decoration_manager);
+    if (s.feedback) zwp_linux_dmabuf_feedback_v1_destroy(s.feedback);
+    if (s.dmabuf) zwp_linux_dmabuf_v1_destroy(s.dmabuf);
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);
     wl_compositor_destroy(s.compositor);

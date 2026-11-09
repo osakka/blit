@@ -28,12 +28,20 @@
    `window=0`) does not speak WINDOW: the compositor sends it no WINDOW line
    and no frame, and says so in its log.
 
-   Frames are FRM1 (ADR 0202): a wl_shm buffer's pixels copied into a fresh
+   A wl_shm buffer is FRM1 (ADR 0202): its pixels copied into a fresh
    memfd sealed against shrinking, growing and writing, so the client's
    buffer is released as soon as the frame is sent. XRGB8888 becomes format
    24 (RGB); ARGB8888, premultiplied in Wayland, becomes format 32 (RGBA),
-   which Blit reads as straight alpha, so it is un-premultiplied here. FRM3
-   (dmabuf) is milestone B.
+   which Blit reads as straight alpha, so it is un-premultiplied here.
+
+   A linux-dmabuf buffer is FRM3 (ADR 0223), zero copy: the client's plane
+   descriptors themselves go in SCM_RIGHTS, and the buffer is held until
+   Blit's `RELEASE <id> <seq>`. Only the formats and modifiers the hello's
+   `formats=` list names are offered to clients (bc_formats_parse). A frame
+   Blit refuses `ERROR <id> ENOTSUP` (it cannot import now) is sent again
+   as a copy, FRM1, when its one linear plane can be mapped, and every
+   later dmabuf frame on the connection is copied too (BcWire.refused,
+   blit-gamescope's rule).
 
    Header-only and static like Blit's other units; C99 plus POSIX/Linux. */
 #ifndef BLIT_COMPOSITOR_WIRE_H
@@ -50,6 +58,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -63,15 +72,36 @@
 /* wl_shm.format's wire values for the two formats every compositor offers. */
 #define BC_SHM_ARGB8888 0u
 #define BC_SHM_XRGB8888 1u
+/* DRM fourccs (drm_fourcc.h; wl_shm uses them too past 0 and 1). */
+#define BC_FOURCC(a, b, c, d) ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | \
+                               (uint32_t)(d) << 24)
+#define BC_FOURCC_XR24 BC_FOURCC('X', 'R', '2', '4')
+#define BC_FOURCC_AR24 BC_FOURCC('A', 'R', '2', '4')
+#define BC_FOURCC_XB24 BC_FOURCC('X', 'B', '2', '4')
+#define BC_FOURCC_AB24 BC_FOURCC('A', 'B', '2', '4')
+#define BC_MODIFIER_LINEAR 0ull
+/* ADR 0223: an FRM3 frame carries at most four planes; the hello lists at
+   most 16 modifiers per format. */
+#define BC_PLANES_MAX 4
+#define BC_FORMATS_MAX 64
+
+typedef struct {
+    uint32_t fourcc;
+    uint64_t modifier;
+} BcFormat;
 
 typedef struct {
     int fd;                 /* the frame socket, -1 when not connected */
     int window;             /* the peer answered window=1 */
-    int dmabuf;             /* the peer answered dmabuf=1 (milestone B) */
+    int dmabuf;             /* the peer answered dmabuf=1 with a formats= list */
+    int refused;            /* an FRM3 was refused ENOTSUP: dmabuf copied from now on */
     char answer[128];       /* the hello's answer, for the log */
+    BcFormat formats[BC_FORMATS_MAX];   /* the hello's formats= list */
+    int format_count;
     uint32_t next_id;       /* the next picture id; ids start at 1 */
     uint64_t sequence;      /* the last frame sequence sent, all ids */
     unsigned long frames_sent, frames_failed, lines_sent, lines_failed;
+    unsigned long dmabuf_sent, dmabuf_released, dmabuf_refused, dmabuf_copied;
     char last_error[96];
 } BcWire;
 
@@ -104,20 +134,73 @@ static int bc_answer_has(const char *answer, const char *word)
     return 0;
 }
 
+/* The formats= word of a hello's answer, `XR24/0/100000000000001,AR24/0`
+   (ADR 0223): each fourcc with each modifier, in lowercase hex. Returns the
+   pairs read, at most `max`; a malformed modifier ends its entry. */
+static int bc_formats_parse(const char *answer, BcFormat *out, int max)
+{
+    const char *p = answer;
+    int n = 0;
+    while ((p = strstr(p, "formats=")) != NULL && p != answer && p[-1] != ' ') p += 8;
+    if (p == NULL) return 0;
+    p += 8;
+    while (*p && *p != ' ' && *p != '\n') {
+        const char *end = p + strcspn(p, ", \n");
+        if (end - p >= 6 && p[4] == '/') {
+            const char *m = p + 5;
+            uint32_t fourcc = BC_FOURCC(p[0], p[1], p[2], p[3]);
+            while (m < end) {
+                uint64_t v = 0;
+                int digits = 0;
+                while (m < end && *m != '/') {
+                    int d = *m >= '0' && *m <= '9' ? *m - '0' : *m >= 'a' && *m <= 'f' ? *m - 'a' + 10 : -1;
+                    if (d < 0 || digits == 16) { digits = -1; break; }
+                    v = v << 4 | (uint64_t)d;
+                    ++digits;
+                    ++m;
+                }
+                if (digits <= 0) break;
+                if (n < max) {
+                    out[n].fourcc = fourcc;
+                    out[n].modifier = v;
+                    ++n;
+                }
+                if (m < end) ++m;
+            }
+        }
+        p = *end == ',' ? end + 1 : end;
+    }
+    return n;
+}
+
+/* Whether the peer imports `fourcc` with `modifier`. */
+static int bc_wire_format_ok(const BcWire *w, uint32_t fourcc, uint64_t modifier)
+{
+    int i;
+    for (i = 0; i < w->format_count; ++i)
+        if (w->formats[i].fourcc == fourcc && w->formats[i].modifier == modifier) return 1;
+    return 0;
+}
+
 /* The hello's answer: "OK ..." with window=1 when the peer is a desktop. */
 static int bc_wire_parse_hello(BcWire *w, const char *answer)
 {
     size_t n;
     w->window = 0;
     w->dmabuf = 0;
+    w->refused = 0;
+    w->format_count = 0;
     n = strcspn(answer, "\n");
     if (n >= sizeof(w->answer)) n = sizeof(w->answer) - 1;
     memcpy(w->answer, answer, n);
     w->answer[n] = '\0';
     if (strncmp(answer, "OK", 2) != 0 || (answer[2] != '\0' && answer[2] != ' ' && answer[2] != '\n'))
         return -1;
-    w->window = bc_answer_has(w->answer, "window=1");
-    w->dmabuf = bc_answer_has(w->answer, "dmabuf=1");
+    /* From the whole answer, not the logged copy: a formats= list is long. */
+    w->window = bc_answer_has(answer, "window=1");
+    w->dmabuf = bc_answer_has(answer, "dmabuf=1");
+    if (w->dmabuf) w->format_count = bc_formats_parse(answer, w->formats, BC_FORMATS_MAX);
+    if (w->format_count == 0) w->dmabuf = 0;
     return 0;
 }
 
@@ -179,28 +262,34 @@ static int bc_wire_connect(BcWire *w, const char *name, const char *token)
     return 0;
 }
 
-static int bc_wire_sendmsg(int sock, const void *data, size_t size, int fd)
+/* One message with `count` descriptors (0 to BC_PLANES_MAX) in SCM_RIGHTS. */
+static int bc_wire_sendmsg_fds(int sock, const void *data, size_t size, const int *fds, int count)
 {
     struct msghdr msg;
     struct iovec iov;
-    union { struct cmsghdr align; char buf[CMSG_SPACE(sizeof(int))]; } control;
+    union { struct cmsghdr align; char buf[CMSG_SPACE(sizeof(int) * BC_PLANES_MAX)]; } control;
     memset(&msg, 0, sizeof(msg));
     iov.iov_base = (void *)data;
     iov.iov_len = size;
     msg.msg_iov = &iov;
     msg.msg_iovlen = 1;
-    if (fd >= 0) {
+    if (count > 0) {
         struct cmsghdr *c;
         memset(&control, 0, sizeof(control));
         msg.msg_control = control.buf;
-        msg.msg_controllen = sizeof(control.buf);
+        msg.msg_controllen = CMSG_SPACE(sizeof(int) * (size_t)count);
         c = CMSG_FIRSTHDR(&msg);
         c->cmsg_level = SOL_SOCKET;
         c->cmsg_type = SCM_RIGHTS;
-        c->cmsg_len = CMSG_LEN(sizeof(int));
-        memcpy(CMSG_DATA(c), &fd, sizeof(int));
+        c->cmsg_len = CMSG_LEN(sizeof(int) * (size_t)count);
+        memcpy(CMSG_DATA(c), fds, sizeof(int) * (size_t)count);
     }
     return sendmsg(sock, &msg, MSG_NOSIGNAL | MSG_DONTWAIT) == (ssize_t)size ? 0 : -1;
+}
+
+static int bc_wire_sendmsg(int sock, const void *data, size_t size, int fd)
+{
+    return bc_wire_sendmsg_fds(sock, data, size, &fd, fd >= 0 ? 1 : 0);
 }
 
 /* Copies `in` into `out` (BC_TEXT_BYTES + 1 bytes) as a title or app id:
@@ -260,24 +349,27 @@ static int bc_wire_line(BcWire *w, const char *fmt, ...)
 }
 
 /* Converts `height` rows of a wl_shm buffer to FRM1 pixels: XRGB8888 (B, G,
-   R, X in memory) to RGB, ARGB8888 (premultiplied) to straight RGBA. */
+   R, X in memory) to RGB, ARGB8888 (premultiplied) to straight RGBA; and,
+   for a dmabuf copied, XBGR8888 and ABGR8888 (R, G, B, X/A in memory). */
 static void bc_convert_rows(unsigned char *out, uint32_t out_stride, const unsigned char *in,
                             uint32_t in_stride, uint32_t width, uint32_t height, uint32_t format)
 {
     uint32_t x, y;
+    int ri = format == BC_FOURCC_XB24 || format == BC_FOURCC_AB24 ? 0 : 2, bi = 2 - ri;
+    int opaque = format == BC_SHM_XRGB8888 || format == BC_FOURCC_XB24;
     for (y = 0; y < height; ++y) {
         const unsigned char *s = in + (size_t)y * in_stride;
         unsigned char *d = out + (size_t)y * out_stride;
-        if (format == BC_SHM_XRGB8888) {
+        if (opaque) {
             for (x = 0; x < width; ++x) {
-                d[x * 3 + 0] = s[x * 4 + 2];
+                d[x * 3 + 0] = s[x * 4 + ri];
                 d[x * 3 + 1] = s[x * 4 + 1];
-                d[x * 3 + 2] = s[x * 4 + 0];
+                d[x * 3 + 2] = s[x * 4 + bi];
             }
         } else {
             for (x = 0; x < width; ++x) {
                 unsigned a = s[x * 4 + 3];
-                unsigned r = s[x * 4 + 2], g = s[x * 4 + 1], b = s[x * 4 + 0];
+                unsigned r = s[x * 4 + ri], g = s[x * 4 + 1], b = s[x * 4 + bi];
                 if (a != 0 && a != 255) {
                     r = (r * 255 + a / 2) / a; if (r > 255) r = 255;
                     g = (g * 255 + a / 2) / a; if (g > 255) g = 255;
@@ -302,7 +394,7 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
                             uint32_t height, uint32_t stride, uint32_t format)
 {
     unsigned char h[48];
-    uint32_t bpp = format == BC_SHM_XRGB8888 ? 3 : 4;
+    uint32_t bpp = format == BC_SHM_XRGB8888 || format == BC_FOURCC_XB24 ? 3 : 4;
     uint32_t fmt = bpp == 3 ? 24 : 32, out_stride, zero = 0;
     uint64_t seq;
     size_t bytes;
@@ -311,7 +403,8 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
 
     if (w->fd < 0 || !w->window) return -1;
     if (width == 0 || height == 0 || width > BC_SIZE_MAX || height > BC_SIZE_MAX ||
-        (format != BC_SHM_XRGB8888 && format != BC_SHM_ARGB8888) || stride < width * 4) {
+        (format != BC_SHM_XRGB8888 && format != BC_SHM_ARGB8888 && format != BC_FOURCC_XB24 &&
+         format != BC_FOURCC_AB24) || stride < width * 4) {
         snprintf(w->last_error, sizeof(w->last_error), "frame %ux%u format %u stride %u",
                  width, height, format, stride);
         ++w->frames_failed;
@@ -363,6 +456,49 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
     return 0;
 }
 
+/* One dmabuf frame of picture `id` as FRM3 (ADR 0223, "Wire format,
+   version 3"): the planes' own descriptors, no copy, no fence. The caller
+   holds the buffer until RELEASE <id> <sequence>. Returns the sequence
+   sent, or 0 with last_error set. */
+static uint64_t bc_wire_send_dmabuf(BcWire *w, uint32_t id, uint32_t width, uint32_t height,
+                                    uint32_t fourcc, uint64_t modifier, int planes, const int *fds,
+                                    const uint32_t *offsets, const uint32_t *pitches)
+{
+    unsigned char h[72];
+    uint32_t count = (uint32_t)planes;
+    uint64_t seq;
+    int i;
+    if (w->fd < 0 || !w->window || !w->dmabuf) return 0;
+    if (planes < 1 || planes > BC_PLANES_MAX) {
+        snprintf(w->last_error, sizeof(w->last_error), "dmabuf with %d planes", planes);
+        ++w->frames_failed;
+        return 0;
+    }
+    seq = w->sequence + 1;
+    memset(h, 0, sizeof(h));
+    memcpy(h, "FRM3", 4);
+    memcpy(h + 4, &id, 4);
+    memcpy(h + 8, &seq, 8);
+    memcpy(h + 16, &width, 4);
+    memcpy(h + 20, &height, 4);
+    memcpy(h + 24, &fourcc, 4);
+    memcpy(h + 28, &count, 4);
+    memcpy(h + 32, &modifier, 8);
+    for (i = 0; i < planes; ++i) {
+        memcpy(h + 40 + 8 * i, &offsets[i], 4);
+        memcpy(h + 44 + 8 * i, &pitches[i], 4);
+    }
+    if (bc_wire_sendmsg_fds(w->fd, h, sizeof(h), fds, planes) != 0) {
+        snprintf(w->last_error, sizeof(w->last_error), "send FRM3: %s", strerror(errno));
+        ++w->frames_failed;
+        return 0;
+    }
+    w->sequence = seq;
+    ++w->frames_sent;
+    ++w->dmabuf_sent;
+    return seq;
+}
+
 /* One line from the desktop (or from Blit) on the channel. */
 enum {
     BC_LINE_UNKNOWN = 0,
@@ -371,7 +507,7 @@ enum {
     BC_LINE_CLOSE,          /* WINDOW close <id> */
     BC_LINE_OK_WINDOW,      /* OK window <id> */
     BC_LINE_ERROR_WINDOW,   /* ERROR WINDOW <id> <code> */
-    BC_LINE_RELEASE,        /* RELEASE <id> <sequence>: FRM3 only, milestone B */
+    BC_LINE_RELEASE,        /* RELEASE <id> <sequence>: an FRM3 frame's buffer is free */
     BC_LINE_ERROR,          /* ERROR <id> <code>: a refused frame */
     BC_LINE_OTHER           /* understood, nothing to do (HUD1, OK input, ...) */
 };
@@ -382,6 +518,7 @@ typedef struct {
     int32_t width, height;
     int fullscreen, maximized, activated;
     uint32_t refresh_mhz;   /* WINDOW output */
+    uint64_t sequence;      /* RELEASE */
     char code[32];
 } BcLine;
 
@@ -464,8 +601,13 @@ static int bc_parse_line(const char *line, BcLine *out)
         return out->kind = BC_LINE_ERROR_WINDOW;
     }
     if (strncmp(line, "RELEASE ", 8) == 0) {
+        char *end;
         p = line + 8;
-        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0) return out->kind = BC_LINE_UNKNOWN;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' || *p < '0' || *p > '9')
+            return out->kind = BC_LINE_UNKNOWN;
+        errno = 0;
+        out->sequence = strtoull(p, &end, 10);
+        if (errno != 0 || (*end != '\0' && *end != '\n')) return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_RELEASE;
     }
     if (strncmp(line, "ERROR ", 6) == 0) {

@@ -12,7 +12,11 @@ out=build/tests/compositor
 proto=$out/protocol
 mkdir -p "$out"
 BLIT_PROTOCOL_DIR=$proto sh tools/build-tcc.sh "$out/blit-compositor" compositor >/dev/null
-client_sources="tools/tests/wl_standin_client.c $proto/xdg-shell-protocol.c $proto/xdg-decoration-unstable-v1-protocol.c"
+# The protocol code build-tcc.sh generated, for the client and the
+# sanitized builds alike.
+protocol_sources="$proto/xdg-shell-protocol.c $proto/xdg-decoration-unstable-v1-protocol.c
+    $proto/linux-dmabuf-unstable-v1-protocol.c $proto/presentation-time-protocol.c"
+client_sources="tools/tests/wl_standin_client.c $protocol_sources"
 # shellcheck disable=SC2086
 tcc -std=c99 -Wall -I"$proto" $client_sources -lwayland-client -o "$out/wl_standin_client"
 tcc -Wall -Isrc tools/tests/compositor_wire_unit.c -o "$out/compositor_wire_unit"
@@ -31,8 +35,7 @@ PROBE
 then
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" \
-        "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c \
-        "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
+        "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c $protocol_sources \
         -lwayland-server -o "$out/blit-compositor-asan"
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -I"$proto" $client_sources -lwayland-client \

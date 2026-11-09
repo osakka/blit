@@ -46,12 +46,15 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/dma-buf.h>
 
 #include <wayland-server.h>
 #include <wayland-server-protocol.h>
 
 #include "xdg-shell-server-protocol.h"
 #include "xdg-decoration-unstable-v1-server-protocol.h"
+#include "linux-dmabuf-unstable-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -136,6 +139,7 @@ struct bc_xdg {
     int32_t size_w, size_h;
     int size_fullscreen, size_maximized, size_activated;
     struct bc_output *output;         /* the display it is on */
+    uint64_t last_copy;               /* the sequence of its newest FRM1 */
     /* popup */
     struct bc_positioner positioner;
     int32_t px, py;                   /* relative to the parent's geometry */
@@ -149,6 +153,9 @@ struct bc_server {
     char socket_name[32];
     struct wl_list windows;           /* bc_xdg */
     struct wl_list outputs;           /* bc_output */
+    struct wl_list holds;             /* bc_hold: FRM3 frames Blit holds */
+    int format_table_fd;              /* linux-dmabuf v4's format table */
+    dev_t main_device;
     FILE *log;
     int status;
 };
@@ -232,12 +239,16 @@ static void announce_toplevel(struct bc_xdg *x)
     window_set_output(x, output_default(x->server));
 }
 
-/* `WINDOW gone`, once, after everything of the id is released: frames are
-   copied, so nothing of it is held when its role object goes. */
+/* `WINDOW gone`, once, after everything of the id is released: copied
+   frames hold nothing, and the dmabuf frames Blit still holds are given
+   back to the client first. */
+static void holds_end_id(struct bc_server *s, uint32_t id);
+
 static void window_gone(struct bc_xdg *x)
 {
     window_set_output(x, NULL);
     if (x->id) {
+        holds_end_id(x->server, x->id);
         bc_wire_line(&x->server->wire, "WINDOW gone %u", x->id);
         logf_("window %u: gone", x->id);
     }
@@ -274,6 +285,397 @@ static void configure_if_ready(struct bc_xdg *x)
         send_toplevel_configure(x);
 }
 
+/* ---- zwp_linux_dmabuf_v1: FRM3, zero copy ---- */
+
+/* A wl_buffer made from dmabuf planes. The planes' descriptors are the
+   client's, kept open for the buffer's life: each frame sends them as they
+   are, and Blit imports them (ADR 0223). */
+struct bc_dmabuf {
+    struct wl_resource *resource;
+    int32_t width, height;
+    uint32_t format;
+    uint64_t modifier;
+    int planes;
+    int fds[BC_PLANES_MAX];
+    uint32_t offsets[BC_PLANES_MAX], strides[BC_PLANES_MAX];
+    int holds;                        /* frames of it Blit still holds */
+};
+
+/* A frame sent as FRM3 and not yet released by Blit. */
+struct bc_hold {
+    struct wl_list link;              /* bc_server.holds */
+    uint32_t id;
+    uint64_t sequence;
+    struct bc_dmabuf *buffer;         /* NULL once the client destroyed it */
+};
+
+struct bc_params {
+    struct wl_resource *resource;
+    int used;
+    int fds[BC_PLANES_MAX];
+    uint32_t offsets[BC_PLANES_MAX], strides[BC_PLANES_MAX];
+    uint64_t modifier;
+};
+
+static void dmabuf_buffer_destroyed(struct wl_resource *resource)
+{
+    struct bc_dmabuf *b = wl_resource_get_user_data(resource);
+    struct bc_hold *h;
+    int i;
+    wl_list_for_each(h, &g_server->holds, link)
+        if (h->buffer == b) h->buffer = NULL;
+    for (i = 0; i < b->planes; ++i) close(b->fds[i]);
+    free(b);
+}
+
+static const struct wl_buffer_interface dmabuf_buffer_impl = {
+    .destroy = bc_destroy_request,
+};
+
+static struct bc_dmabuf *dmabuf_from_buffer(struct wl_resource *buffer)
+{
+    if (buffer == NULL || !wl_resource_instance_of(buffer, &wl_buffer_interface, &dmabuf_buffer_impl))
+        return NULL;
+    return wl_resource_get_user_data(buffer);
+}
+
+/* The client may reuse a buffer when no frame of it is held. */
+static void hold_end(struct bc_hold *h)
+{
+    if (h->buffer && --h->buffer->holds == 0)
+        wl_buffer_send_release(h->buffer->resource);
+    wl_list_remove(&h->link);
+    free(h);
+}
+
+/* Every frame of picture `id` still held, given back to its client: the
+   picture is going, and WINDOW gone follows only once nothing of it is
+   held (docs/api.md). Blit's later RELEASEs for them are stale. */
+static void holds_end_id(struct bc_server *s, uint32_t id)
+{
+    struct bc_hold *h, *next;
+    wl_list_for_each_safe(h, next, &s->holds, link)
+        if (h->id == id) hold_end(h);
+}
+
+/* A dmabuf's pixels copied as FRM1, for a peer that cannot import it:
+   only one linear plane of an 8-bit RGB format can be mapped and read. */
+static int dmabuf_copy(struct bc_server *s, uint32_t id, struct bc_dmabuf *b)
+{
+    struct dma_buf_sync sync;
+    size_t bytes;
+    unsigned char *map;
+    uint32_t shm_format;
+    int rc;
+    if (b->planes != 1 || b->modifier != BC_MODIFIER_LINEAR) {
+        snprintf(s->wire.last_error, sizeof(s->wire.last_error),
+                 "a dmabuf of %d planes, modifier %#llx, cannot be copied", b->planes,
+                 (unsigned long long)b->modifier);
+        return -1;
+    }
+    switch (b->format) {
+    case BC_FOURCC_XR24: shm_format = BC_SHM_XRGB8888; break;
+    case BC_FOURCC_AR24: shm_format = BC_SHM_ARGB8888; break;
+    case BC_FOURCC_XB24: case BC_FOURCC_AB24: shm_format = b->format; break;
+    default:
+        snprintf(s->wire.last_error, sizeof(s->wire.last_error), "format %.4s cannot be copied",
+                 (const char *)&b->format);
+        return -1;
+    }
+    bytes = (size_t)b->offsets[0] + (size_t)b->strides[0] * (size_t)b->height;
+    map = mmap(NULL, bytes, PROT_READ, MAP_SHARED, b->fds[0], 0);
+    if (map == MAP_FAILED) {
+        snprintf(s->wire.last_error, sizeof(s->wire.last_error), "the dmabuf cannot be mapped: %s",
+                 strerror(errno));
+        return -1;
+    }
+    /* A dmabuf is read between the CPU-access fences; a memfd has none. */
+    sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
+    ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+    rc = bc_wire_send_shm(&s->wire, id, map + b->offsets[0], (uint32_t)b->width,
+                          (uint32_t)b->height, b->strides[0], shm_format);
+    sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+    ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+    munmap(map, bytes);
+    if (rc == 0) ++s->wire.dmabuf_copied;
+    return rc;
+}
+
+static void params_destroyed(struct wl_resource *resource)
+{
+    struct bc_params *p = wl_resource_get_user_data(resource);
+    int i;
+    for (i = 0; i < BC_PLANES_MAX; ++i)
+        if (p->fds[i] >= 0) close(p->fds[i]);
+    free(p);
+}
+
+static void params_add(struct wl_client *client, struct wl_resource *resource, int32_t fd,
+                       uint32_t plane, uint32_t offset, uint32_t stride, uint32_t mod_hi,
+                       uint32_t mod_lo)
+{
+    struct bc_params *p = wl_resource_get_user_data(resource);
+    (void)client;
+    if (p->used) {
+        close(fd);
+        wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED, "used");
+        return;
+    }
+    if (plane >= BC_PLANES_MAX) {
+        close(fd);
+        wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_IDX, "plane %u", plane);
+        return;
+    }
+    if (p->fds[plane] >= 0) {
+        close(fd);
+        wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_SET, "plane %u set", plane);
+        return;
+    }
+    p->fds[plane] = fd;
+    p->offsets[plane] = offset;
+    p->strides[plane] = stride;
+    p->modifier = (uint64_t)mod_hi << 32 | mod_lo;
+}
+
+/* Checks the planes against what Blit imports; on success the buffer
+   takes the descriptors. Returns 0, or the protocol error with `why`. */
+static int params_check(struct bc_params *p, int32_t width, int32_t height, uint32_t format,
+                        uint32_t flags, struct bc_dmabuf *b, char *why, size_t cap)
+{
+    int planes = 0, i;
+    off_t size;
+    while (planes < BC_PLANES_MAX && p->fds[planes] >= 0) ++planes;
+    for (i = planes; i < BC_PLANES_MAX; ++i)
+        if (p->fds[i] >= 0) {
+            snprintf(why, cap, "plane %d without plane %d", i, planes);
+            return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE;
+        }
+    if (planes == 0) {
+        snprintf(why, cap, "no planes");
+        return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE;
+    }
+    if (width <= 0 || height <= 0) {
+        snprintf(why, cap, "size %dx%d", width, height);
+        return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_DIMENSIONS;
+    }
+    if (!bc_wire_format_ok(&g_server->wire, format, p->modifier) || flags != 0) {
+        snprintf(why, cap, "format %.4s modifier %#llx flags %u is not one Blit imports",
+                 (const char *)&format, (unsigned long long)p->modifier, flags);
+        return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT;
+    }
+    /* Plane 0 holds its rows (ADR 0223's own check); a descriptor that
+       cannot say its size is left to Blit's import. */
+    size = lseek(p->fds[0], 0, SEEK_END);
+    if (size >= 0 && (uint64_t)p->offsets[0] + (uint64_t)p->strides[0] * (uint64_t)(height - 1) +
+                         4ull * (uint64_t)width > (uint64_t)size) {
+        snprintf(why, cap, "plane 0 of %lld bytes cannot hold %dx%d at stride %u",
+                 (long long)size, width, height, p->strides[0]);
+        return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS;
+    }
+    b->width = width;
+    b->height = height;
+    b->format = format;
+    b->modifier = p->modifier;
+    b->planes = planes;
+    for (i = 0; i < planes; ++i) {
+        b->fds[i] = p->fds[i];
+        b->offsets[i] = p->offsets[i];
+        b->strides[i] = p->strides[i];
+        p->fds[i] = -1;
+    }
+    return -1;
+}
+
+static struct wl_resource *params_make(struct wl_client *client, struct wl_resource *resource,
+                                       uint32_t buffer_id, int32_t width, int32_t height,
+                                       uint32_t format, uint32_t flags, int immediate)
+{
+    struct bc_params *p = wl_resource_get_user_data(resource);
+    struct bc_dmabuf *b;
+    char why[160];
+    int error;
+    if (p->used) {
+        wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED, "used");
+        return NULL;
+    }
+    p->used = 1;
+    b = calloc(1, sizeof(*b));
+    if (b == NULL) {
+        wl_client_post_no_memory(client);
+        return NULL;
+    }
+    error = params_check(p, width, height, format, flags, b, why, sizeof(why));
+    if (error >= 0) {
+        free(b);
+        logf_("a dmabuf buffer refused: %s", why);
+        if (immediate || error == ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE ||
+            error == ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_DIMENSIONS)
+            wl_resource_post_error(resource, immediate && error == ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT
+                                                 ? ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER
+                                                 : (uint32_t)error, "%s", why);
+        else
+            zwp_linux_buffer_params_v1_send_failed(resource);
+        return NULL;
+    }
+    b->resource = wl_resource_create(client, &wl_buffer_interface, 1, buffer_id);
+    if (b->resource == NULL) {
+        int i;
+        for (i = 0; i < b->planes; ++i) close(b->fds[i]);
+        free(b);
+        wl_client_post_no_memory(client);
+        return NULL;
+    }
+    wl_resource_set_implementation(b->resource, &dmabuf_buffer_impl, b, dmabuf_buffer_destroyed);
+    return b->resource;
+}
+
+static void params_create(struct wl_client *client, struct wl_resource *resource, int32_t width,
+                          int32_t height, uint32_t format, uint32_t flags)
+{
+    struct wl_resource *buffer = params_make(client, resource, 0, width, height, format, flags, 0);
+    if (buffer) zwp_linux_buffer_params_v1_send_created(resource, buffer);
+}
+
+static void params_create_immed(struct wl_client *client, struct wl_resource *resource,
+                                uint32_t buffer_id, int32_t width, int32_t height, uint32_t format,
+                                uint32_t flags)
+{
+    params_make(client, resource, buffer_id, width, height, format, flags, 1);
+}
+
+static const struct zwp_linux_buffer_params_v1_interface params_impl = {
+    .destroy = bc_destroy_request,
+    .add = params_add,
+    .create = params_create,
+    .create_immed = params_create_immed,
+};
+
+static void dmabuf_create_params(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    struct bc_params *p = calloc(1, sizeof(*p));
+    int i;
+    if (p == NULL) { wl_client_post_no_memory(client); return; }
+    for (i = 0; i < BC_PLANES_MAX; ++i) p->fds[i] = -1;
+    p->resource = wl_resource_create(client, &zwp_linux_buffer_params_v1_interface,
+                                     wl_resource_get_version(resource), id);
+    if (p->resource == NULL) { free(p); wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(p->resource, &params_impl, p, params_destroyed);
+}
+
+static const struct zwp_linux_dmabuf_feedback_v1_interface feedback_impl = {
+    .destroy = bc_destroy_request,
+};
+
+/* Version 4's feedback, one tranche: every pair Blit listed, on the main
+   device. The same for every surface: Blit imports any window's frames
+   alike. */
+static void dmabuf_feedback(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct wl_resource *r = wl_resource_create(client, &zwp_linux_dmabuf_feedback_v1_interface,
+                                               wl_resource_get_version(resource), id);
+    struct wl_array device, indices;
+    uint16_t *index;
+    dev_t *dev;
+    int i;
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &feedback_impl, NULL, NULL);
+    zwp_linux_dmabuf_feedback_v1_send_format_table(r, s->format_table_fd,
+                                                   (uint32_t)(s->wire.format_count * 16));
+    wl_array_init(&device);
+    if ((dev = wl_array_add(&device, sizeof(*dev))) != NULL) *dev = s->main_device;
+    zwp_linux_dmabuf_feedback_v1_send_main_device(r, &device);
+    zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(r, &device);
+    wl_array_init(&indices);
+    for (i = 0; i < s->wire.format_count; ++i)
+        if ((index = wl_array_add(&indices, sizeof(*index))) != NULL) *index = (uint16_t)i;
+    zwp_linux_dmabuf_feedback_v1_send_tranche_formats(r, &indices);
+    zwp_linux_dmabuf_feedback_v1_send_tranche_flags(r, 0);
+    zwp_linux_dmabuf_feedback_v1_send_tranche_done(r);
+    zwp_linux_dmabuf_feedback_v1_send_done(r);
+    wl_array_release(&indices);
+    wl_array_release(&device);
+}
+
+static void dmabuf_get_surface_feedback(struct wl_client *client, struct wl_resource *resource,
+                                        uint32_t id, struct wl_resource *surface)
+{
+    (void)surface;
+    dmabuf_feedback(client, resource, id);
+}
+
+static const struct zwp_linux_dmabuf_v1_interface dmabuf_impl = {
+    .destroy = bc_destroy_request,
+    .create_params = dmabuf_create_params,
+    .get_default_feedback = dmabuf_feedback,
+    .get_surface_feedback = dmabuf_get_surface_feedback,
+};
+
+static void bind_dmabuf(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct bc_server *s = data;
+    struct wl_resource *r = wl_resource_create(client, &zwp_linux_dmabuf_v1_interface, (int)version, id);
+    int i, j;
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &dmabuf_impl, s, NULL);
+    if (version >= ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) return;
+    /* Before version 4: the formats, each once, and from version 3 each
+       modifier. */
+    for (i = 0; i < s->wire.format_count; ++i) {
+        const BcFormat *f = &s->wire.formats[i];
+        for (j = 0; j < i; ++j)
+            if (s->wire.formats[j].fourcc == f->fourcc) break;
+        if (j == i) zwp_linux_dmabuf_v1_send_format(r, f->fourcc);
+        if (version >= ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION)
+            zwp_linux_dmabuf_v1_send_modifier(r, f->fourcc, (uint32_t)(f->modifier >> 32),
+                                              (uint32_t)f->modifier);
+    }
+}
+
+/* The format table of version 4's feedback: 16 bytes a pair (format,
+   padding, modifier), sealed, shared read-only by every client. */
+static int dmabuf_format_table(const BcWire *w)
+{
+    size_t bytes = (size_t)w->format_count * 16;
+    unsigned char *map;
+    int fd = memfd_create("blit-compositor-formats", MFD_CLOEXEC | MFD_ALLOW_SEALING), i;
+    if (fd < 0 || ftruncate(fd, (off_t)bytes) != 0) {
+        if (fd >= 0) close(fd);
+        return -1;
+    }
+    map = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) {
+        close(fd);
+        return -1;
+    }
+    memset(map, 0, bytes);
+    for (i = 0; i < w->format_count; ++i) {
+        memcpy(map + 16 * i, &w->formats[i].fourcc, 4);
+        memcpy(map + 16 * i + 8, &w->formats[i].modifier, 8);
+    }
+    munmap(map, bytes);
+    fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
+    return fd;
+}
+
+/* The device clients allocate on: the first DRM render node. The hello
+   does not name Blit's GPU, so one GPU is assumed; with none, 0. */
+static dev_t dmabuf_main_device(void)
+{
+    char path[32];
+    struct stat st;
+    int i;
+    for (i = 128; i < 192; ++i) {
+        snprintf(path, sizeof(path), "/dev/dri/renderD%d", i);
+        if (stat(path, &st) == 0 && S_ISCHR(st.st_mode)) {
+            logf_("dmabuf main device %s", path);
+            return st.st_rdev;
+        }
+    }
+    logf_("no DRM render node: the dmabuf feedback names device 0");
+    return 0;
+}
+
 /* ---- frames ---- */
 
 static void callbacks_done(struct wl_list *list)
@@ -293,20 +695,56 @@ static void callbacks_destroy(struct wl_list *list)
         wl_resource_destroy(cb);
 }
 
-/* The committed buffer as one FRM1 frame of the window's picture. Returns
-   1 when a frame was sent. */
+enum { BC_SENT_NONE = 0, BC_SENT_COPY, BC_SENT_HELD };
+
+/* A dmabuf commit: FRM3, held until Blit's RELEASE, unless the peer
+   refused dmabuf on this connection, when it is copied as FRM1. */
+static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
+{
+    struct bc_server *s = x->server;
+    struct bc_hold *h;
+    uint64_t seq;
+    if (s->wire.dmabuf && !s->wire.refused) {
+        h = calloc(1, sizeof(*h));
+        seq = h ? bc_wire_send_dmabuf(&s->wire, x->id, (uint32_t)b->width, (uint32_t)b->height,
+                                      b->format, b->modifier, b->planes, b->fds, b->offsets,
+                                      b->strides)
+                : 0;
+        if (seq != 0) {
+            h->id = x->id;
+            h->sequence = seq;
+            h->buffer = b;
+            ++b->holds;
+            wl_list_insert(s->holds.prev, &h->link);
+            return BC_SENT_HELD;
+        }
+        free(h);
+        logf_("window %u: FRM3 not sent (%s); copying", x->id, s->wire.last_error);
+    }
+    if (dmabuf_copy(s, x->id, b) != 0) {
+        logf_("window %u: a dmabuf frame not shown: %s", x->id, s->wire.last_error);
+        return BC_SENT_NONE;
+    }
+    x->last_copy = s->wire.sequence;
+    return BC_SENT_COPY;
+}
+
+/* The committed buffer as one frame of the window's picture: BC_SENT_HELD
+   for an FRM3 Blit now holds, BC_SENT_COPY for a copy (the buffer is the
+   client's again), BC_SENT_NONE when nothing was sent. */
 static int send_buffer(struct bc_surface *surface, struct wl_resource *buffer)
 {
     struct bc_xdg *x = surface->xdg;
     struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
+    struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
     int rc;
-    if (shm == NULL) {
-        logf_("window %u: a buffer that is not wl_shm, not shown (dmabuf is milestone B)",
-              x ? x->id : 0);
-        return 0;
+    if (shm == NULL && dmabuf == NULL) {
+        logf_("window %u: a buffer of an unknown kind, not shown", x ? x->id : 0);
+        return BC_SENT_NONE;
     }
     if (x == NULL || x->id == 0 || !x->server->wire.window)
-        return 0;
+        return BC_SENT_NONE;
+    if (dmabuf) return send_dmabuf(x, dmabuf);
     wl_shm_buffer_begin_access(shm);
     rc = bc_wire_send_shm(&x->server->wire, x->id, wl_shm_buffer_get_data(shm),
                           (uint32_t)wl_shm_buffer_get_width(shm),
@@ -316,9 +754,10 @@ static int send_buffer(struct bc_surface *surface, struct wl_resource *buffer)
     wl_shm_buffer_end_access(shm);
     if (rc != 0) {
         logf_("window %u: frame not sent: %s", x->id, x->server->wire.last_error);
-        return 0;
+        return BC_SENT_NONE;
     }
-    return 1;
+    x->last_copy = x->server->wire.sequence;
+    return BC_SENT_COPY;
 }
 
 /* ---- wl_surface ---- */
@@ -459,8 +898,9 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
             x->mapped = 1;
         }
     }
-    /* Copied or not shown (a subsurface, a cursor): the client's again. */
-    if (attached && buffer)
+    /* Copied or not shown (a subsurface, a cursor): the client's again. An
+       FRM3 frame is the client's again at Blit's RELEASE. */
+    if (attached && buffer && sent != BC_SENT_HELD)
         wl_buffer_send_release(buffer);
     if (sent)
         callbacks_done(&surface->frames);
@@ -1492,6 +1932,37 @@ static struct bc_xdg *window_by_id(struct bc_server *s, uint32_t id)
     return NULL;
 }
 
+/* `ERROR <id> <code>` for a frame. Replies come in the order frames are
+   read and an accepted frame gets none, so a refusal is the newest frame
+   of the picture -- an FRM3 still held, unless an FRM1 went after it
+   (blit-gamescope's rule). ENOTSUP (Blit cannot import now) copies that
+   frame as FRM1 and every later dmabuf frame of the connection (ADR
+   0223); any other code gives the buffer back unshown. */
+static void frame_refused(struct bc_server *s, uint32_t id, const char *code)
+{
+    struct bc_hold *h, *newest = NULL;
+    struct bc_xdg *x = window_by_id(s, id);
+    wl_list_for_each(h, &s->holds, link)
+        if (h->id == id && (newest == NULL || h->sequence > newest->sequence)) newest = h;
+    if (newest == NULL || (x && newest->sequence < x->last_copy)) {
+        logf_("a frame of %u was refused: %s", id, code);
+        return;
+    }
+    ++s->wire.dmabuf_refused;
+    if (strcmp(code, "ENOTSUP") == 0) {
+        if (!s->wire.refused)
+            logf_("Blit cannot import dmabuf frames now (ENOTSUP): copying them from here on");
+        s->wire.refused = 1;
+        if (x && newest->buffer) {
+            if (dmabuf_copy(s, id, newest->buffer) == 0) x->last_copy = s->wire.sequence;
+            else logf_("window %u: the refused dmabuf frame is not shown: %s", id, s->wire.last_error);
+        }
+    } else {
+        logf_("window %u: a dmabuf frame was refused %s, not shown", id, code);
+    }
+    hold_end(newest);
+}
+
 static void handle_line(struct bc_server *s, const char *line)
 {
     BcLine l;
@@ -1547,10 +2018,20 @@ static void handle_line(struct bc_server *s, const char *line)
         logf_("the desktop refused a WINDOW line for %u: %s", l.id, l.code);
         return;
     case BC_LINE_ERROR:
-        logf_("a frame of %u was refused: %s", l.id, l.code);
+        frame_refused(s, l.id, l.code);
         return;
+    case BC_LINE_RELEASE: {
+        struct bc_hold *h;
+        wl_list_for_each(h, &s->holds, link)
+            if (h->id == l.id && h->sequence == l.sequence) {
+                ++s->wire.dmabuf_released;
+                hold_end(h);
+                return;
+            }
+        /* A frame given back already, its picture gone. */
+        return;
+    }
     case BC_LINE_OK_WINDOW:
-    case BC_LINE_RELEASE:
     case BC_LINE_OTHER:
         return;
     default:
@@ -1617,6 +2098,8 @@ int main(int argc, char **argv)
     bc_wire_init(&server.wire);
     wl_list_init(&server.windows);
     wl_list_init(&server.outputs);
+    wl_list_init(&server.holds);
+    server.format_table_fd = -1;
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             log_path = argv[++i];
@@ -1682,6 +2165,21 @@ int main(int argc, char **argv)
         wl_display_destroy(server.display);
         return 1;
     }
+    /* linux-dmabuf only for a peer that imports: dmabuf=1 and its list. */
+    if (server.wire.dmabuf) {
+        server.format_table_fd = dmabuf_format_table(&server.wire);
+        server.main_device = dmabuf_main_device();
+        if (server.format_table_fd < 0 ||
+            !wl_global_create(server.display, &zwp_linux_dmabuf_v1_interface,
+                              BC_VERSION(4, zwp_linux_dmabuf_v1_interface), &server, bind_dmabuf)) {
+            logf_("could not offer linux-dmabuf: frames by wl_shm only");
+        } else {
+            logf_("zwp_linux_dmabuf_v1 %d: %d format and modifier pairs from the hello",
+                  BC_VERSION(4, zwp_linux_dmabuf_v1_interface), server.wire.format_count);
+        }
+    } else {
+        logf_("no linux-dmabuf: the peer imports no dmabuf (no dmabuf=1 in its answer)");
+    }
     logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
@@ -1701,13 +2199,21 @@ int main(int argc, char **argv)
     if (server.sigterm_source) wl_event_source_remove(server.sigterm_source);
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
     wl_display_destroy(server.display);
+    while (!wl_list_empty(&server.holds)) {
+        struct bc_hold *h = wl_container_of(server.holds.next, h, link);
+        wl_list_remove(&h->link);
+        free(h);
+    }
+    if (server.format_table_fd >= 0) close(server.format_table_fd);
     while (!wl_list_empty(&server.outputs)) {
         struct bc_output *o = output_default(&server);
         wl_list_remove(&o->link);
         free(o);
     }
-    logf_("stopped: %lu frames sent, %lu failed, %lu WINDOW lines", server.wire.frames_sent,
-          server.wire.frames_failed, server.wire.lines_sent);
+    logf_("stopped: %lu frames sent, %lu failed, %lu WINDOW lines; dmabuf %lu sent, %lu released, "
+          "%lu refused, %lu copied", server.wire.frames_sent, server.wire.frames_failed,
+          server.wire.lines_sent, server.wire.dmabuf_sent, server.wire.dmabuf_released,
+          server.wire.dmabuf_refused, server.wire.dmabuf_copied);
     if (server.wire.fd >= 0) close(server.wire.fd);
     if (server.log) fclose(server.log);
     return server.status;

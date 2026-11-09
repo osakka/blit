@@ -1971,6 +1971,19 @@ It speaks the frame channel above as a producer, with these additions.
   The hello is `v5 <token>`. A relay rewrites ids with one rule.
 - **One id space.** A window's id is its picture id: its `FRM1` and `FRM3`
   frames, `RELEASE`s and `INPUT` routes all use it.
+- **Frames.** A `wl_shm` buffer is copied into one `FRM1` and given back to
+  the program at once. A `zwp_linux_dmabuf_v1` buffer is one `FRM3` of the
+  program's own planes, no copy, given back at Blit's `RELEASE` for it (or
+  when its window goes: `WINDOW gone` follows only after every buffer of
+  the id is given back, and Blit's later `RELEASE`s for them are stale).
+  `zwp_linux_dmabuf_v1` (version 4, default feedback in one tranche) is
+  offered only when the hello was answered `dmabuf=1` with a `formats=`
+  list, and offers exactly those formats and modifiers. A frame refused
+  `ERROR <id> ENOTSUP` is sent again as an `FRM1` copy when its one linear
+  plane can be mapped, as is every later dmabuf frame of the connection;
+  any other refusal, or one that cannot be mapped, gives the buffer back
+  unshown and says so in the compositor's log. The feedback's main device
+  is the first DRM render node: the hello does not name Blit's GPU.
 - **Compositor to desktop**, one event a line, UTF-8:
   - `WINDOW new <id> <parent|0>`: a top-level; parent is its transient-for.
   - `WINDOW title <id> <text>`, `WINDOW appid <id> <text>`.

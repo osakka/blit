@@ -37,6 +37,7 @@ PORT = (int(os.environ.get('BLIT_GATE_PORT', '19823')) +
         int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0')))
 BASE = 'http://127.0.0.1:%d' % PORT
 SEALS = 0x0002 | 0x0004 | 0x0008  # F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE
+XR24 = 0x34325258
 F_GET_SEALS = 1034
 TOKEN = 'compositor-gate-token'
 
@@ -82,7 +83,7 @@ def pattern(width, height):
 class Desktop:
     """The desktop's end of a frame channel: one accepted connection."""
 
-    def __init__(self, listener):
+    def __init__(self, listener, answer=b'OK dmabuf=0 window=1\n'):
         listener.settimeout(10)
         self.sock, _ = listener.accept()
         self.sock.settimeout(5)
@@ -91,7 +92,7 @@ class Desktop:
         version, length = struct.unpack_from('<II', hello, 8)
         check(version == 4, 'the hello says version %d, not 4' % version)
         check(hello[16:16 + length].decode() == TOKEN, 'the hello has the wrong token')
-        self.sock.send(b'OK dmabuf=0 window=1\n')
+        self.sock.send(answer)
 
     def next(self, wait=5.0):
         """('line', text) or ('frame', header fields, fd); None on timeout."""
@@ -100,6 +101,12 @@ class Desktop:
             data, fds, _flags, _addr = socket.recv_fds(self.sock, 4096, 4)
         except socket.timeout:
             return None
+        if data[:4] == b'FRM3':
+            check(len(data) == 72 and 1 <= len(fds) <= 4, 'FRM3 of %d bytes with %d fds' % (len(data), len(fds)))
+            image, sequence, w, h, fourcc, planes, modifier = struct.unpack_from('<IQIIIIQ', data, 4)
+            check(planes == len(fds), 'FRM3 of %d planes with %d fds' % (planes, len(fds)))
+            layout = struct.unpack_from('<8I', data, 40)
+            return ('frm3', (image, sequence, w, h, fourcc, planes, modifier, layout), fds)
         if data[:4] == b'FRM1':
             check(len(data) == 48 and len(fds) == 1, 'FRM1 of %d bytes with %d fds' % (len(data), len(fds)))
             fields = struct.unpack_from('<IQIIIIIIII', data, 4)
@@ -139,6 +146,29 @@ class Desktop:
         finally:
             os.close(fd)
         return sequence
+
+    def frm3(self, width, height, image_id, wait=5.0):
+        """An FRM3 of the stand-in's pattern, XRGB8888 LINEAR, one plane:
+        (sequence, (st_dev, st_ino) of its plane)."""
+        got = self.next(wait)
+        check(got is not None and got[0] == 'frm3', 'got %r, expected a %dx%d FRM3' % (got, width, height))
+        (image, sequence, w, h, fourcc, planes, modifier, layout), fds = got[1], got[2]
+        try:
+            check(image == image_id and (w, h) == (width, height),
+                  'FRM3 %d %dx%d, expected %d %dx%d' % (image, w, h, image_id, width, height))
+            check(fourcc == XR24 and planes == 1 and modifier == 0 and layout[:2] == (0, width * 4)
+                  and layout[2:] == (0,) * 6, 'FRM3 fourcc %#x planes %d modifier %#x layout %s'
+                  % (fourcc, planes, modifier, layout))
+            pixels = os.pread(fds[0], width * 4 * height, 0)
+            rgb = pattern(width, height)
+            expected = bytearray(width * height * 4)
+            expected[0::4], expected[1::4], expected[2::4] = rgb[2::3], rgb[1::3], rgb[0::3]
+            check(pixels == bytes(expected), 'the FRM3 plane is not the pattern')
+            st = os.fstat(fds[0])
+            return sequence, (st.st_dev, st.st_ino)
+        finally:
+            for fd in fds:
+                os.close(fd)
 
     def nothing(self, wait=0.4):
         got = self.next(wait)
@@ -215,6 +245,96 @@ def states_part(desk, standin, env, display, work):
             client.wait()
     return ('maximize+minimize+parent(5->4,->0)+hide->frame maximized output=BLIT-2:1280x720@30000,'
             'BLIT-1,BLIT-2:800x600@75000')
+
+
+def dmabuf_part(compositor, standin, work):
+    """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
+    list: each commit an FRM3 of the client's own plane (the same file, no
+    copy), its buffer released only at Blit's RELEASE, given back when its
+    window goes; ERROR ENOTSUP copies that frame as FRM1 and every later
+    one. This host has no GPU: the stand-in's planes are memfds."""
+    runtime = os.path.join(work, 'run-dmabuf')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-dmabuf-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-dmabuf.log')
+    comp = start([compositor, '--log', log], env, open(os.path.join(work, 'compositor-dmabuf.out'), 'w'))
+    clients = []
+    try:
+        desk = Desktop(listener, b'OK dmabuf=1 fence=0 formats=XR24/0,AR24/0 window=1\n')
+        desk.line('WINDOW display blit-0')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        out_path = os.path.join(work, 'standin-dmabuf.out')
+        client = start([standin, '--dmabuf', 'Dmabuf'], cenv, open(out_path, 'w'))
+        clients.append(client)
+        printed = lambda: open(out_path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Dmabuf', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.send('WINDOW size 1 64 32')
+        seq1, file1 = desk.frm3(64, 32, 1)
+        check('STANDIN dmabuf 64x32 file %d:%d' % file1 in printed(),
+              lambda: 'the FRM3 plane is not the client\'s own file %s:\n%s' % (file1, printed()))
+        desk.send('WINDOW size 1 80 40')
+        seq2, file2 = desk.frm3(80, 40, 1)
+        check(seq2 > seq1 and file2 != file1, 'the second FRM3: sequence %d file %s' % (seq2, file2))
+        desk.nothing(0.3)
+        check('STANDIN release' not in printed(), lambda: 'released before RELEASE:\n' + printed())
+        desk.send('RELEASE 1 %d' % seq1)
+        wait_for(lambda: 'STANDIN release 64x32' in printed(), 'RELEASE did not release the buffer')
+        check('STANDIN release 80x40' not in printed(), 'the held 80x40 buffer was released too')
+
+        # A window that goes while Blit holds its frame gives the buffer back.
+        held_path = os.path.join(work, 'standin-held.out')
+        held = start([standin, '--dmabuf', 'Held'], cenv, open(held_path, 'w'))
+        clients.append(held)
+        for want in ('WINDOW new 2 0', 'WINDOW title 2 Held', 'WINDOW appid 2 blit.standin',
+                     'WINDOW limits 2 64 48 0 0', 'WINDOW decor 2 server'):
+            desk.line(want)
+        desk.send('WINDOW size 2 30 20')
+        desk.frm3(30, 20, 2)
+        desk.send('WINDOW close 2')
+        desk.line('WINDOW gone 2')
+        check(held.wait(5) == 0, 'the held stand-in failed: ' + open(held_path).read())
+        check('STANDIN release 30x20' in open(held_path).read() and
+              'STANDIN done draws=1 releases=1 frames=1' in open(held_path).read(),
+              'the held buffer was not given back at WINDOW gone:\n' + open(held_path).read())
+
+        # ENOTSUP: the refused (newest held) frame again as FRM1, and every
+        # later one copied.
+        desk.send('ERROR 1 ENOTSUP')
+        desk.frame(80, 40)
+        wait_for(lambda: 'STANDIN release 80x40' in printed(), 'the refused buffer was not released')
+        desk.send('WINDOW size 1 100 50')
+        desk.frame(100, 50)
+        wait_for(lambda: 'STANDIN release 100x50' in printed(), 'the copied buffer was not released')
+        desk.send('RELEASE 1 %d' % seq2)  # stale: nothing
+        desk.nothing(0.3)
+        desk.send('WINDOW close 1')
+        desk.line('WINDOW gone 1')
+        check(client.wait(5) == 0, 'the dmabuf stand-in failed: ' + printed())
+        output = printed()
+        for want in ('STANDIN global zwp_linux_dmabuf_v1 4',
+                     'STANDIN dmabuf feedback pairs=2 tranche=2 xr24-linear=1',
+                     'STANDIN done draws=3 releases=3 frames=3'):
+            check(want in output, 'the dmabuf stand-in did not print %r:\n%s' % (want, output))
+        desk.sock.close()
+        comp.wait(5)
+        text = open(log).read()
+        check('dmabuf 3 sent, 1 released, 1 refused, 2 copied' in text,
+              'the log does not count the dmabuf frames:\n' + text)
+        return 'FRM3=client-file,64x32+80x40 RELEASE->release gone->release ENOTSUP->FRM1 80x40,100x50 feedback=2'
+    finally:
+        for p in clients + [comp]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
 
 
 def start(argv, env, out):
@@ -299,6 +419,7 @@ def desktop_part(compositor, standin, work):
             check(global_ in versions, 'no global %s: %s' % (global_, versions))
         check(int(versions['wl_output']) == 4 and int(versions['wl_seat']) == 8,
               'wl_output or wl_seat at another version: %s' % versions)
+        check('zwp_linux_dmabuf_v1' not in versions, 'linux-dmabuf offered without dmabuf=1: %s' % versions)
         for want in ('STANDIN decoration server',
                      'STANDIN configure 320x200\n', 'STANDIN configure 500x300 activated\n',
                      'STANDIN configure 0x0\n', 'STANDIN close',
@@ -442,6 +563,7 @@ def main():
     work = tempfile.mkdtemp(prefix='blit-compositor-gate-')
     try:
         desktop_part(compositor, standin, work)
+        print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
     except SystemExit:

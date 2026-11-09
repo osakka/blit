@@ -23,6 +23,22 @@ static void hello(void)
     EXPECT(bc_wire_parse_hello(&w, "ERROR 0 EACCES\n") != 0, "refused");
     EXPECT(bc_wire_parse_hello(&w, "OKAY\n") != 0, "OKAY is not OK");
     EXPECT(bc_wire_new_id(&w) == 1 && bc_wire_new_id(&w) == 2, "ids count from 1");
+    /* The formats= list, read from the whole answer (longer than the log's copy). */
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=1 fence=1 formats=XR24/0/100000000000001,AR24/0,"
+                                   "XB24/0,AB24/0,AR30/0/200000000000002/300000000000003 window=1\n") == 0 &&
+           w.dmabuf && w.window && w.format_count == 8, "formats: %d", w.format_count);
+    EXPECT(w.formats[0].fourcc == BC_FOURCC_XR24 && w.formats[0].modifier == 0 &&
+           w.formats[1].fourcc == BC_FOURCC_XR24 && w.formats[1].modifier == 0x100000000000001ull &&
+           w.formats[2].fourcc == BC_FOURCC_AR24 && w.formats[7].modifier == 0x300000000000003ull,
+           "format pairs");
+    EXPECT(bc_wire_format_ok(&w, BC_FOURCC_AB24, 0) && !bc_wire_format_ok(&w, BC_FOURCC_AB24, 1),
+           "format lookup");
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=1 fence=0 window=1") == 0 && !w.dmabuf,
+           "dmabuf=1 without formats offers none");
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=0 formats=XR24/0 window=1") == 0 && !w.dmabuf,
+           "formats without dmabuf=1");
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=1 formats=XR24/0/zz,AR24/0 window=1") == 0 &&
+           w.format_count == 2 && w.formats[1].fourcc == BC_FOURCC_AR24, "a bad modifier ends its entry");
 }
 
 static void text(void)
@@ -86,6 +102,10 @@ static void lines(void)
            strcmp(l.code, "EINVAL") == 0, "ERROR WINDOW");
     EXPECT(bc_parse_line("OK window 3", &l) == BC_LINE_OK_WINDOW && l.id == 3, "OK window");
     EXPECT(bc_parse_line("ERROR 5 ENOMEM", &l) == BC_LINE_ERROR && l.id == 5, "a refused frame");
+    EXPECT(bc_parse_line("RELEASE 5 18446744073709551615\n", &l) == BC_LINE_RELEASE && l.id == 5 &&
+           l.sequence == 18446744073709551615ull, "RELEASE");
+    EXPECT(bc_parse_line("RELEASE 5", &l) == BC_LINE_UNKNOWN, "RELEASE without a sequence");
+    EXPECT(bc_parse_line("RELEASE 5 7x", &l) == BC_LINE_UNKNOWN, "RELEASE with a tail");
     EXPECT(bc_parse_line("ERROR INPUT 5 ENOTSUP", &l) == BC_LINE_OTHER, "an input route's answer");
     EXPECT(bc_parse_line("HUD1 on", &l) == BC_LINE_OTHER, "HUD1");
     EXPECT(bc_parse_line("WINDOW frobnicate 1", &l) == BC_LINE_UNKNOWN, "unknown");
@@ -107,6 +127,11 @@ static void convert(void)
            "ARGB half alpha un-premultiplied: %02x %02x %02x %02x", out[0], out[1], out[2], out[3]);
     EXPECT(out[4] == 0 && out[5] == 0 && out[6] == 0 && out[7] == 0, "transparent");
     EXPECT(out[8] == 0x33 && out[9] == 0x22 && out[10] == 0x11 && out[11] == 0xff, "opaque");
+    /* XBGR8888 (a dmabuf copied) is R, G, B, X in memory. */
+    bc_convert_rows(out, 6, xrgb, 8, 2, 1, BC_FOURCC_XB24);
+    EXPECT(out[0] == 0x30 && out[1] == 0xa0 && out[2] == 0xd0 && out[3] == 1, "XBGR to RGB");
+    bc_convert_rows(out, 12, argb, 12, 3, 1, BC_FOURCC_AB24);
+    EXPECT(out[0] == 0x80 && out[1] == 0x40 && out[2] == 0x20 && out[3] == 0x80, "ABGR un-premultiplied");
 }
 
 static void channel(void)
@@ -168,6 +193,49 @@ static void channel(void)
         close(fd);
     }
     EXPECT(w.frames_sent == 1 && w.frames_failed == 1 && w.lines_sent == 1, "counters");
+
+    /* FRM3: two planes' own descriptors, no copy. */
+    {
+        int planes[2], got_fds[2] = { -1, -1 };
+        uint32_t offsets[2] = { 0, 4096 }, pitches[2] = { 64, 128 }, fourcc, count, po[4];
+        uint64_t modifier;
+        unsigned char h3[96];
+        union { struct cmsghdr align; char buf[CMSG_SPACE(sizeof(int) * 4)]; } control3;
+        struct stat a, b;
+        planes[0] = memfd_create("plane0", MFD_CLOEXEC);
+        planes[1] = memfd_create("plane1", MFD_CLOEXEC);
+        EXPECT(bc_wire_send_dmabuf(&w, 9, 16, 8, BC_FOURCC_XR24, 0x100000000000001ull, 2, planes,
+                                   offsets, pitches) == 0, "FRM3 without dmabuf=1");
+        w.dmabuf = 1;
+        EXPECT(bc_wire_send_dmabuf(&w, 9, 16, 8, BC_FOURCC_XR24, 0x100000000000001ull, 2, planes,
+                                   offsets, pitches) == 2, "FRM3 sequence 2: %s", w.last_error);
+        iov.iov_base = h3;
+        iov.iov_len = sizeof(h3);
+        msg.msg_control = control3.buf;
+        msg.msg_controllen = sizeof(control3.buf);
+        n = recvmsg(sv[1], &msg, MSG_DONTWAIT);
+        EXPECT(n == 72 && memcmp(h3, "FRM3", 4) == 0, "FRM3 header: %zd", n);
+        c = CMSG_FIRSTHDR(&msg);
+        EXPECT(c && c->cmsg_type == SCM_RIGHTS && c->cmsg_len == CMSG_LEN(sizeof(int) * 2), "two fds");
+        if (c) memcpy(got_fds, CMSG_DATA(c), sizeof(got_fds));
+        memcpy(&v[0], h3 + 4, 4);
+        memcpy(&seq, h3 + 8, 8);
+        memcpy(&v[1], h3 + 16, 8);
+        memcpy(&fourcc, h3 + 24, 4);
+        memcpy(&count, h3 + 28, 4);
+        memcpy(&modifier, h3 + 32, 8);
+        memcpy(po, h3 + 40, 16);
+        EXPECT(v[0] == 9 && seq == 2 && v[1] == 16 && v[2] == 8 && fourcc == BC_FOURCC_XR24 &&
+               count == 2 && modifier == 0x100000000000001ull && po[0] == 0 && po[1] == 64 &&
+               po[2] == 4096 && po[3] == 128, "FRM3 fields");
+        for (i = 0; i < 2; ++i) {
+            EXPECT(got_fds[i] >= 0 && fstat(got_fds[i], &a) == 0 && fstat(planes[i], &b) == 0 &&
+                   a.st_ino == b.st_ino && a.st_dev == b.st_dev, "plane %d is the same file", i);
+            if (got_fds[i] >= 0) close(got_fds[i]);
+            close(planes[i]);
+        }
+        EXPECT(w.dmabuf_sent == 1, "dmabuf counted");
+    }
     close(sv[0]);
     close(sv[1]);
 }
