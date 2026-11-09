@@ -14,9 +14,13 @@
            WINDOW fullscreen <id> on|off
            WINDOW popup <id> <parent> <x> <y>
            WINDOW decor <id> server|client
+           WINDOW maximize <id> on|off    WINDOW minimize <id>
+           WINDOW parent <id> <parent|0>
+           WINDOW hide <id>
            WINDOW gone <id>
        desktop to compositor
-           WINDOW size <id> <w> <h> [fullscreen] [activated]
+           WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
+           WINDOW output <id> <w> <h> <mHz>
            WINDOW close <id>
            OK window <id>                 ERROR WINDOW <id> <code>
 
@@ -362,7 +366,8 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
 /* One line from the desktop (or from Blit) on the channel. */
 enum {
     BC_LINE_UNKNOWN = 0,
-    BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [activated] */
+    BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] */
+    BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
     BC_LINE_OK_WINDOW,      /* OK window <id> */
     BC_LINE_ERROR_WINDOW,   /* ERROR WINDOW <id> <code> */
@@ -375,7 +380,8 @@ typedef struct {
     int kind;
     uint32_t id;
     int32_t width, height;
-    int fullscreen, activated;
+    int fullscreen, maximized, activated;
+    uint32_t refresh_mhz;   /* WINDOW output */
     char code[32];
 } BcLine;
 
@@ -414,12 +420,29 @@ static int bc_parse_line(const char *line, BcLine *out)
             out->fullscreen = 1;
             p += 11;
         }
+        if (strncmp(p, " maximized", 10) == 0 && (p[10] == '\0' || p[10] == ' ' || p[10] == '\n')) {
+            out->maximized = 1;
+            p += 10;
+        }
         if (strncmp(p, " activated", 10) == 0 && (p[10] == '\0' || p[10] == ' ' || p[10] == '\n')) {
             out->activated = 1;
             p += 10;
         }
         if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_SIZE;
+    }
+    if (strncmp(line, "WINDOW output ", 14) == 0) {
+        /* A display's mode: at least 1x1, a refresh of 1 mHz to 1000 Hz. */
+        p = line + 14;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, BC_SIZE_MAX, &a) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, BC_SIZE_MAX, &b) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, 1000000UL, &out->refresh_mhz) != 0 || out->id == 0 || a == 0 ||
+            b == 0 || out->refresh_mhz == 0 || (*p != '\0' && *p != '\n'))
+            return out->kind = BC_LINE_UNKNOWN;
+        out->width = (int32_t)a;
+        out->height = (int32_t)b;
+        return out->kind = BC_LINE_OUTPUT;
     }
     if (strncmp(line, "WINDOW close ", 13) == 0) {
         p = line + 13;

@@ -148,6 +148,75 @@ class Desktop:
         self.sock.send(line.encode() + b'\n')
 
 
+def states_part(desk, standin, env, display, work):
+    """maximize/minimize/parent/hide, the maximized state and WINDOW output
+    (docs/api.md, "Program windows"), with `--states`: window 4 and its
+    child 5."""
+    out_path = os.path.join(work, 'standin-states.out')
+    client = start([standin, '--states', 'States'], dict(env, WAYLAND_DISPLAY=display),
+                   open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    try:
+        for want in ('WINDOW new 4 0', 'WINDOW title 4 States', 'WINDOW appid 4 blit.standin',
+                     'WINDOW limits 4 64 48 0 0', 'WINDOW decor 4 server'):
+            desk.line(want)
+        wait_for(lambda: 'STANDIN enter BLIT-1 1920x1080@60000' in printed(),
+                 lambda: 'the window did not enter the first output:\n' + printed())
+        desk.send('WINDOW output 4 1280 720 30000')
+        desk.send('WINDOW size 4 200 100 maximized')
+        desk.frame(200, 100, image_id=4)
+        for want in ('WINDOW maximize 4 on', 'WINDOW minimize 4', 'WINDOW maximize 4 off',
+                     'WINDOW new 5 0', 'WINDOW title 5 Child', 'WINDOW decor 5 client',
+                     'WINDOW parent 5 4'):
+            desk.line(want)
+        desk.send('WINDOW size 5 50 40')
+        desk.frame(50, 40, image_id=5)
+        desk.line('WINDOW hide 5')
+        desk.frame(50, 40, image_id=5)
+        desk.line('WINDOW parent 5 0')
+        desk.nothing(0.3)
+        # A mode another window's output already has, then a new one: the
+        # idle output takes it rather than a third global.
+        wait_for(lambda: 'STANDIN enter BLIT-2 1280x720@30000' in printed(),
+                 lambda: 'the window did not enter the 1280x720 output:\n' + printed())
+        desk.send('WINDOW output 4 1920 1080 60000')
+        wait_for(lambda: printed().count('STANDIN enter BLIT-1 1920x1080@60000') == 2,
+                 lambda: 'the window did not go back to BLIT-1:\n' + printed())
+        desk.send('WINDOW output 4 800 600 75000')
+        wait_for(lambda: 'STANDIN enter BLIT-2 800x600@75000' in printed(),
+                 lambda: 'the idle output did not take the new mode:\n' + printed())
+        desk.send('WINDOW close 4')
+        desk.line('WINDOW gone 5')
+        desk.line('WINDOW gone 4')
+        try:
+            status = client.wait(5)
+        except subprocess.TimeoutExpired:
+            fail('the states stand-in did not exit after WINDOW close')
+        output = printed()
+        check(status == 0, 'the states stand-in exited %d: %s' % (status, output))
+        moves = [l for l in output.splitlines() if l.startswith(('STANDIN enter', 'STANDIN leave',
+                                                                  'STANDIN output BLIT-2'))]
+        check(moves == ['STANDIN enter BLIT-1 1920x1080@60000', 'STANDIN leave BLIT-1',
+                        'STANDIN output BLIT-2 mode 1280x720@30000',
+                        'STANDIN enter BLIT-2 1280x720@30000', 'STANDIN leave BLIT-2',
+                        'STANDIN enter BLIT-1 1920x1080@60000',
+                        'STANDIN output BLIT-2 mode 800x600@75000', 'STANDIN leave BLIT-1',
+                        'STANDIN enter BLIT-2 800x600@75000'],
+              'the outputs entered and left:\n%s' % '\n'.join(moves))
+        check('STANDIN child enter BLIT-1 1920x1080@60000' in output, 'the child is on no output')
+        for want in ('STANDIN configure 200x100 maximized\n', 'STANDIN capabilities 2 3 4\n',
+                     'STANDIN child configure 50x40\n', 'STANDIN child hidden',
+                     'STANDIN child orphaned', 'STANDIN done draws=3 releases=3 frames=3'):
+            check(want in output, 'the states stand-in did not print %r:\n%s' % (want, output))
+        check(output.count('STANDIN child configure 50x40') == 2, 'the child was not configured again')
+    finally:
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('maximize+minimize+parent(5->4,->0)+hide->frame maximized output=BLIT-2:1280x720@30000,'
+            'BLIT-1,BLIT-2:800x600@75000')
+
+
 def start(argv, env, out):
     return subprocess.Popen(argv, env=env, stdout=out, stderr=subprocess.STDOUT)
 
@@ -237,10 +306,15 @@ def desktop_part(compositor, standin, work):
                      'STANDIN seat capabilities 3', 'STANDIN seat name seat0',
                      'STANDIN output geometry Blit blit-compositor', 'STANDIN output scale 1',
                      'STANDIN output name BLIT-1', 'STANDIN output mode 1920x1080\n',
-                     'STANDIN output mode 320x200\n', 'STANDIN output mode 500x300\n',
+                     'STANDIN capabilities 2 3 4\n', 'STANDIN enter BLIT-1 1920x1080@60000\n',
                      'STANDIN done draws=4 releases=4 frames=4'):
             check(want in output, 'the stand-in did not print %r:\n%s' % (want, output))
+        # The output is the display's, never a window's size.
+        check('STANDIN output mode 320x200' not in output and 'STANDIN output mode 500x300' not in output,
+              'a window size reached wl_output:\n%s' % output)
         desk.nothing(0.3)
+
+        states = states_part(desk, standin, env, display, work)
 
         # The desktop goes: the compositor ends, status 1, and says why.
         desk.sock.close()
@@ -251,11 +325,12 @@ def desktop_part(compositor, standin, work):
         text = open(log).read()
         check(status == 1 and 'the frame channel closed' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('5 frames sent, 0 failed' in text, 'the log does not count 5 frames:\n%s' % text)
+        check('8 frames sent, 0 failed' in text, 'the log does not count 8 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
                  ','.join('%s:%s' % kv for kv in sorted(versions.items()))))
+        print('COMPOSITOR_STATES_OK %s' % states)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

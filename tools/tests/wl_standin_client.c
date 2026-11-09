@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [title]
+     wl_standin_client [--popup] [--states] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -19,6 +19,13 @@
    (anchor rectangle 10,20 30x40, anchor bottom-left, gravity bottom-right,
    offset 2,3: at 12,63 of the toplevel), draws the same pattern in it on
    its configure, and destroys it on popup_done.
+
+   With --states, after its first frame it asks to be maximized, minimized
+   and unmaximized, then opens a second toplevel, "Child", gives it this
+   one as its transient parent after its initial commit, unmaps it after
+   its first frame (attach NULL) and maps it again at once, and after that
+   second frame clears its parent. Every surface prints the outputs it
+   enters and leaves (`STANDIN [child ]enter <name> <w>x<h>@<mHz>`).
 
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
@@ -48,8 +55,12 @@ struct standin {
     struct wl_seat *seat;
     struct wl_keyboard *keyboard;
     struct wl_pointer *pointer;
-    struct wl_output *output;
-    int32_t mode_w, mode_h;
+    struct standin_output {
+        struct wl_output *output;
+        char name[32];
+        int32_t mode_w, mode_h, refresh;
+    } outputs[8];
+    int output_count;
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *toplevel;
@@ -60,6 +71,13 @@ struct standin {
     struct wl_surface *popup_surface;
     struct xdg_surface *popup_xdg;
     struct xdg_popup *popup;
+    /* --states: maximize/minimize requests, a child toplevel that is given
+       a parent, hidden, shown again and orphaned */
+    int states, states_step;
+    struct wl_surface *child_surface;
+    struct xdg_surface *child_xdg;
+    struct xdg_toplevel *child;
+    int32_t child_w, child_h;
     unsigned draws, releases, frames;
 };
 
@@ -132,7 +150,8 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     wl_callback_add_listener(cb, &frame_listener, s);
     wl_surface_commit(surface);
     ++s->draws;
-    printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" : "popup ", w, h);
+    printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" :
+           surface == s->child_surface ? "child " : "popup ", w, h);
     fflush(stdout);
     return 0;
 }
@@ -142,14 +161,20 @@ static void toplevel_configure(void *data, struct xdg_toplevel *t, int32_t w, in
 {
     struct standin *s = data;
     uint32_t *state;
-    int fullscreen = 0, activated = 0;
-    (void)t;
+    int fullscreen = 0, maximized = 0, activated = 0;
     wl_array_for_each(state, states) {
         if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN) fullscreen = 1;
+        if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED) maximized = 1;
         if (*state == XDG_TOPLEVEL_STATE_ACTIVATED) activated = 1;
     }
-    printf("STANDIN configure %dx%d%s%s\n", w, h, fullscreen ? " fullscreen" : "",
+    printf("STANDIN %sconfigure %dx%d%s%s%s\n", t == s->child ? "child " : "", w, h,
+           fullscreen ? " fullscreen" : "", maximized ? " maximized" : "",
            activated ? " activated" : "");
+    if (t == s->child) {
+        s->child_w = w > 0 ? w : 50;
+        s->child_h = h > 0 ? h : 40;
+        return;
+    }
     s->want_w = w > 0 ? w : 256;
     s->want_h = h > 0 ? h : 160;
 }
@@ -235,6 +260,51 @@ static void open_popup(struct standin *s)
     printf("STANDIN popup opened\n");
 }
 
+static const struct xdg_toplevel_listener toplevel_listener;
+static const struct wl_surface_listener surface_listener;
+
+static void child_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
+{
+    struct standin *s = data;
+    xdg_surface_ack_configure(xs, serial);
+    draw(s, s->child_surface, s->child_w, s->child_h);
+    if (s->states_step == 1) {
+        /* Unmapped (WINDOW hide), then an initial commit again: configured
+           at the desktop's last size, it draws and shows again. */
+        s->states_step = 2;
+        wl_surface_attach(s->child_surface, NULL, 0, 0);
+        wl_surface_commit(s->child_surface);
+        printf("STANDIN child hidden\n");
+        wl_surface_commit(s->child_surface);
+    } else if (s->states_step == 2) {
+        s->states_step = 3;
+        xdg_toplevel_set_parent(s->child, NULL);
+        printf("STANDIN child orphaned\n");
+    }
+}
+
+static const struct xdg_surface_listener child_surface_listener = { child_surface_configure };
+
+/* --states, after the first frame: the window-state requests, then a
+   child toplevel given this one as its parent after its WINDOW new. */
+static void run_states(struct standin *s)
+{
+    xdg_toplevel_set_maximized(s->toplevel);
+    xdg_toplevel_set_minimized(s->toplevel);
+    xdg_toplevel_unset_maximized(s->toplevel);
+    s->child_surface = wl_compositor_create_surface(s->compositor);
+    wl_surface_add_listener(s->child_surface, &surface_listener, s);
+    s->child_xdg = xdg_wm_base_get_xdg_surface(s->wm_base, s->child_surface);
+    xdg_surface_add_listener(s->child_xdg, &child_surface_listener, s);
+    s->child = xdg_surface_get_toplevel(s->child_xdg);
+    xdg_toplevel_add_listener(s->child, &toplevel_listener, s);
+    xdg_toplevel_set_title(s->child, "Child");
+    wl_surface_commit(s->child_surface);
+    xdg_toplevel_set_parent(s->child, s->toplevel);
+    s->states_step = 1;
+    printf("STANDIN states requested\n");
+}
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
     struct standin *s = data;
@@ -244,6 +314,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
         s->want_popup = 0;
         open_popup(s);
     }
+    if (s->states && s->states_step == 0) run_states(s);
 }
 
 static const struct xdg_surface_listener xdg_surface_listener = { xdg_surface_configure };
@@ -292,17 +363,19 @@ static void output_geometry(void *data, struct wl_output *o, int32_t x, int32_t 
 static void output_mode(void *data, struct wl_output *o, uint32_t flags, int32_t w, int32_t h,
                         int32_t refresh)
 {
-    struct standin *s = data;
-    (void)o; (void)flags; (void)refresh;
-    s->mode_w = w;
-    s->mode_h = h;
+    struct standin_output *out = data;
+    (void)o; (void)flags;
+    out->mode_w = w;
+    out->mode_h = h;
+    out->refresh = refresh;
 }
 
 static void output_done(void *data, struct wl_output *o)
 {
-    struct standin *s = data;
+    struct standin_output *out = data;
     (void)o;
-    printf("STANDIN output mode %dx%d\n", s->mode_w, s->mode_h);
+    printf("STANDIN output mode %dx%d\n", out->mode_w, out->mode_h);
+    printf("STANDIN output %s mode %dx%d@%d\n", out->name, out->mode_w, out->mode_h, out->refresh);
 }
 
 static void output_scale(void *data, struct wl_output *o, int32_t factor)
@@ -313,7 +386,9 @@ static void output_scale(void *data, struct wl_output *o, int32_t factor)
 
 static void output_name(void *data, struct wl_output *o, const char *name)
 {
-    (void)data; (void)o;
+    struct standin_output *out = data;
+    (void)o;
+    snprintf(out->name, sizeof(out->name), "%s", name);
     printf("STANDIN output name %s\n", name);
 }
 
@@ -325,6 +400,32 @@ static void output_description(void *data, struct wl_output *o, const char *desc
 static const struct wl_output_listener output_listener = {
     output_geometry, output_mode, output_done, output_scale, output_name, output_description,
 };
+
+static struct standin_output *find_output(struct standin *s, struct wl_output *o)
+{
+    int i;
+    for (i = 0; i < s->output_count; ++i)
+        if (s->outputs[i].output == o) return &s->outputs[i];
+    return NULL;
+}
+
+static void surface_enter(void *data, struct wl_surface *surface, struct wl_output *o)
+{
+    struct standin *s = data;
+    struct standin_output *out = find_output(s, o);
+    printf("STANDIN %senter %s %dx%d@%d\n", surface == s->surface ? "" : "child ",
+           out ? out->name : "?", out ? out->mode_w : 0, out ? out->mode_h : 0,
+           out ? out->refresh : 0);
+}
+
+static void surface_leave(void *data, struct wl_surface *surface, struct wl_output *o)
+{
+    struct standin *s = data;
+    struct standin_output *out = find_output(s, o);
+    printf("STANDIN %sleave %s\n", surface == s->surface ? "" : "child ", out ? out->name : "?");
+}
+
+static const struct wl_surface_listener surface_listener = { surface_enter, surface_leave };
 
 static void global(void *data, struct wl_registry *registry, uint32_t name, const char *interface,
                    uint32_t version)
@@ -341,9 +442,12 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
     else if (strcmp(interface, wl_seat_interface.name) == 0) {
         s->seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 8 ? version : 8);
         wl_seat_add_listener(s->seat, &seat_listener, s);
-    } else if (strcmp(interface, wl_output_interface.name) == 0) {
-        s->output = wl_registry_bind(registry, name, &wl_output_interface, version < 4 ? version : 4);
-        wl_output_add_listener(s->output, &output_listener, s);
+    } else if (strcmp(interface, wl_output_interface.name) == 0 &&
+               s->output_count < (int)(sizeof(s->outputs) / sizeof(s->outputs[0]))) {
+        struct standin_output *out = &s->outputs[s->output_count++];
+        out->output = wl_registry_bind(registry, name, &wl_output_interface,
+                                       version < 4 ? version : 4);
+        wl_output_add_listener(out->output, &output_listener, out);
     } else if (strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0)
         s->decoration_manager = wl_registry_bind(registry, name,
                                                  &zxdg_decoration_manager_v1_interface, 1);
@@ -366,6 +470,7 @@ int main(int argc, char **argv)
     memset(&s, 0, sizeof(s));
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
+        else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else title = argv[i];
     }
     s.display = wl_display_connect(NULL);
@@ -384,6 +489,7 @@ int main(int argc, char **argv)
     }
     xdg_wm_base_add_listener(s.wm_base, &wm_listener, &s);
     s.surface = wl_compositor_create_surface(s.compositor);
+    wl_surface_add_listener(s.surface, &surface_listener, &s);
     s.xdg_surface = xdg_wm_base_get_xdg_surface(s.wm_base, s.surface);
     xdg_surface_add_listener(s.xdg_surface, &xdg_surface_listener, &s);
     s.toplevel = xdg_surface_get_toplevel(s.xdg_surface);
@@ -408,6 +514,11 @@ int main(int argc, char **argv)
         return 1;
     }
     if (s.popup) popup_done(&s, s.popup);
+    if (s.child) {
+        xdg_toplevel_destroy(s.child);
+        xdg_surface_destroy(s.child_xdg);
+        wl_surface_destroy(s.child_surface);
+    }
     if (s.decoration) zxdg_toplevel_decoration_v1_destroy(s.decoration);
     xdg_toplevel_destroy(s.toplevel);
     xdg_surface_destroy(s.xdg_surface);
@@ -415,7 +526,7 @@ int main(int argc, char **argv)
     if (s.keyboard) wl_keyboard_release(s.keyboard);
     if (s.pointer) wl_pointer_release(s.pointer);
     if (s.seat) wl_seat_release(s.seat);
-    if (s.output) wl_output_release(s.output);
+    for (i = 0; i < s.output_count; ++i) wl_output_release(s.outputs[i].output);
     if (s.decoration_manager) zxdg_decoration_manager_v1_destroy(s.decoration_manager);
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);

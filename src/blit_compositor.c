@@ -21,7 +21,9 @@
 
    Globals: wl_compositor, wl_subcompositor (subsurfaces accepted and
    logged, not composited), wl_shm (ARGB8888, XRGB8888, libwayland's own),
-   wl_output (one mode: the newest window size the desktop asked for),
+   wl_output (one global per display mode the desktop names with `WINDOW
+   output`; a window is on the first, 1920x1080 at 60 Hz, until then, and
+   its surface enters and leaves them as the desktop moves it),
    xdg_wm_base, zxdg_decoration_manager_v1 (server-side: the desktop draws
    frames; a client that insists on its own gets `WINDOW decor <id>
    client`) and wl_seat (keyboard and pointer advertised; input is
@@ -65,6 +67,20 @@ enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE };
 
 struct bc_server;
 struct bc_xdg;
+
+/* One wl_output global per display mode the desktop has named with
+   `WINDOW output` (the line carries the mode, not the display, so two
+   displays with one mode are one output). An output no window is on is
+   given the next new mode, so globals never come and go. */
+struct bc_output {
+    struct wl_list link;              /* bc_server.outputs */
+    struct wl_global *global;
+    struct wl_list resources;         /* wl_output resources */
+    int32_t width, height;
+    uint32_t refresh_mhz;
+    int windows;                      /* windows on it */
+    int number;                       /* its name, BLIT-<number>, from 1 */
+};
 
 struct bc_surface {
     struct wl_resource *resource;
@@ -111,12 +127,15 @@ struct bc_xdg {
     int32_t pmin_w, pmin_h, pmax_w, pmax_h;       /* pending */
     int limits_sent;
     int fullscreen;                   /* the client's own request */
+    int maximize;                     /* the client's own request */
+    int minimize;                     /* asked before WINDOW new */
     uint32_t decor_mode;              /* 0 none (client draws), else zxdg mode */
     int decor_dropped;                /* the decoration object went: the
                                          client draws from its next commit */
     int have_size;
     int32_t size_w, size_h;
-    int size_fullscreen, size_activated;
+    int size_fullscreen, size_maximized, size_activated;
+    struct bc_output *output;         /* the display it is on */
     /* popup */
     struct bc_positioner positioner;
     int32_t px, py;                   /* relative to the parent's geometry */
@@ -129,8 +148,7 @@ struct bc_server {
     BcWire wire;
     char socket_name[32];
     struct wl_list windows;           /* bc_xdg */
-    struct wl_list outputs;           /* wl_output resources */
-    int32_t output_w, output_h;
+    struct wl_list outputs;           /* bc_output */
     FILE *log;
     int status;
 };
@@ -172,6 +190,9 @@ static void unlink_resource(struct wl_resource *resource)
 
 /* ---- WINDOW lines ---- */
 
+static void window_set_output(struct bc_xdg *x, struct bc_output *o);
+static struct bc_output *output_default(struct bc_server *s);
+
 static int xdg_parent_id(struct bc_xdg *x)
 {
     return x->parent && x->parent->id ? (int)x->parent->id : 0;
@@ -202,14 +223,20 @@ static void announce_toplevel(struct bc_xdg *x)
     if (x->min_w || x->min_h || x->max_w || x->max_h) send_limits(x);
     send_decor(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
+    if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
+    if (x->minimize) bc_wire_line(w, "WINDOW minimize %u", x->id);
+    x->minimize = 0;
     logf_("window %u: new parent %d title \"%s\" appid \"%s\"", x->id, xdg_parent_id(x),
           x->title, x->appid);
+    /* On the first output until the desktop says which display it is on. */
+    window_set_output(x, output_default(x->server));
 }
 
 /* `WINDOW gone`, once, after everything of the id is released: frames are
    copied, so nothing of it is held when its role object goes. */
 static void window_gone(struct bc_xdg *x)
 {
+    window_set_output(x, NULL);
     if (x->id) {
         bc_wire_line(&x->server->wire, "WINDOW gone %u", x->id);
         logf_("window %u: gone", x->id);
@@ -227,6 +254,8 @@ static void send_toplevel_configure(struct bc_xdg *x)
     wl_array_init(&states);
     if (x->size_fullscreen && (s = wl_array_add(&states, sizeof(*s))) != NULL)
         *s = XDG_TOPLEVEL_STATE_FULLSCREEN;
+    if (x->size_maximized && (s = wl_array_add(&states, sizeof(*s))) != NULL)
+        *s = XDG_TOPLEVEL_STATE_MAXIMIZED;
     if (x->size_activated && (s = wl_array_add(&states, sizeof(*s))) != NULL)
         *s = XDG_TOPLEVEL_STATE_ACTIVATED;
     if (x->decoration)
@@ -244,8 +273,6 @@ static void configure_if_ready(struct bc_xdg *x)
     if (x->toplevel && x->initial && x->have_size)
         send_toplevel_configure(x);
 }
-
-static void output_set_mode(struct bc_server *s, int32_t w, int32_t h);
 
 /* ---- frames ---- */
 
@@ -394,9 +421,10 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
         }
         if (attached && buffer == NULL && x->mapped) {
             /* Unmapped: it starts again from an initial commit, configured
-               again at the desktop's last size. The draft has no line for
-               it; the picture keeps its id and its last frame. */
+               again at the desktop's last size; the picture keeps its id,
+               and its next frame shows it again. */
             logf_("window %u: unmapped by its client", x->id);
+            if (x->id) bc_wire_line(&x->server->wire, "WINDOW hide %u", x->id);
             x->mapped = 0;
             x->initial = 0;
             x->acked = 0;
@@ -417,6 +445,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
                                  p->gx + x->px, p->gy + x->py);
                     logf_("popup %u: parent %u at %d,%d %dx%d", x->id, p->id, p->gx + x->px,
                           p->gy + x->py, x->positioner.width, x->positioner.height);
+                    window_set_output(x, p->output);
                 }
                 xdg_popup_send_configure(x->popup, x->px, x->py, x->positioner.width,
                                          x->positioner.height);
@@ -625,24 +654,51 @@ static void bind_subcompositor(struct wl_client *client, void *data, uint32_t ve
     wl_resource_set_implementation(r, &subcompositor_impl, data, NULL);
 }
 
-/* ---- wl_output: one mode, the newest window size ---- */
+/* ---- wl_output: one per display mode (WINDOW output) ---- */
 
-static void output_send_state(struct bc_server *s, struct wl_resource *r)
+static void output_send_mode(struct bc_output *o, struct wl_resource *r)
 {
-    wl_output_send_mode(r, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED, s->output_w,
-                        s->output_h, 60000);
+    wl_output_send_mode(r, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED, o->width,
+                        o->height, (int32_t)o->refresh_mhz);
     if (wl_resource_get_version(r) >= WL_OUTPUT_DONE_SINCE_VERSION)
         wl_output_send_done(r);
 }
 
-static void output_set_mode(struct bc_server *s, int32_t w, int32_t h)
+/* The client's resource for output `o`, or NULL if it has not bound it. */
+static struct wl_resource *output_resource(struct bc_output *o, struct wl_client *client)
 {
     struct wl_resource *r;
-    if (w <= 0 || h <= 0 || (w == s->output_w && h == s->output_h)) return;
-    s->output_w = w;
-    s->output_h = h;
-    wl_resource_for_each(r, &s->outputs)
-        output_send_state(s, r);
+    wl_resource_for_each(r, &o->resources)
+        if (wl_resource_get_client(r) == client) return r;
+    return NULL;
+}
+
+/* wl_surface.enter or leave for every output resource the surface's client
+   holds of `o` (a client may bind one global more than once). */
+static void output_surface_event(struct bc_output *o, struct bc_surface *surface, int enter)
+{
+    struct wl_client *client = wl_resource_get_client(surface->resource);
+    struct wl_resource *r;
+    wl_resource_for_each(r, &o->resources) {
+        if (wl_resource_get_client(r) != client) continue;
+        if (enter) wl_surface_send_enter(surface->resource, r);
+        else wl_surface_send_leave(surface->resource, r);
+    }
+}
+
+/* Moves a window (and so its surface) onto output `o`, NULL for none. */
+static void window_set_output(struct bc_xdg *x, struct bc_output *o)
+{
+    if (x->output == o) return;
+    if (x->output) {
+        if (x->surface) output_surface_event(x->output, x->surface, 0);
+        --x->output->windows;
+    }
+    x->output = o;
+    if (o) {
+        ++o->windows;
+        if (x->surface) output_surface_event(o, x->surface, 1);
+    }
 }
 
 static const struct wl_output_interface output_impl = {
@@ -651,23 +707,90 @@ static const struct wl_output_interface output_impl = {
 
 static void bind_output(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
-    struct bc_server *s = data;
+    struct bc_output *o = data;
+    struct bc_xdg *x;
     struct wl_resource *r = wl_resource_create(client, &wl_output_interface, (int)version, id);
     if (r == NULL) {
         wl_client_post_no_memory(client);
         return;
     }
-    wl_resource_set_implementation(r, &output_impl, s, unlink_resource);
-    wl_list_insert(&s->outputs, wl_resource_get_link(r));
+    wl_resource_set_implementation(r, &output_impl, o, unlink_resource);
+    wl_list_insert(&o->resources, wl_resource_get_link(r));
     wl_output_send_geometry(r, 0, 0, 0, 0, WL_OUTPUT_SUBPIXEL_UNKNOWN, "Blit", "blit-compositor",
                             WL_OUTPUT_TRANSFORM_NORMAL);
     if (version >= WL_OUTPUT_SCALE_SINCE_VERSION)
         wl_output_send_scale(r, 1);
-    if (version >= WL_OUTPUT_NAME_SINCE_VERSION)
-        wl_output_send_name(r, "BLIT-1");
+    if (version >= WL_OUTPUT_NAME_SINCE_VERSION) {
+        char name[32];
+        snprintf(name, sizeof(name), "BLIT-%d", o->number);
+        wl_output_send_name(r, name);
+    }
     if (version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
         wl_output_send_description(r, "Blit desktop");
-    output_send_state(s, r);
+    output_send_mode(o, r);
+    /* The client's windows already on this output enter it now. */
+    wl_list_for_each(x, &g_server->windows, link)
+        if (x->output == o && x->surface && wl_resource_get_client(x->surface->resource) == client)
+            wl_surface_send_enter(x->surface->resource, r);
+}
+
+static struct bc_output *output_create(struct bc_server *s, int32_t w, int32_t h, uint32_t mhz)
+{
+    struct bc_output *o = calloc(1, sizeof(*o));
+    if (o == NULL) return NULL;
+    wl_list_init(&o->resources);
+    o->width = w;
+    o->height = h;
+    o->refresh_mhz = mhz;
+    o->number = wl_list_length(&s->outputs) + 1;
+    /* At the tail: the first is BLIT-1, the default output. */
+    wl_list_insert(s->outputs.prev, &o->link);
+    o->global = wl_global_create(s->display, &wl_output_interface,
+                                 BC_VERSION(4, wl_output_interface), o, bind_output);
+    if (o->global == NULL) {
+        wl_list_remove(&o->link);
+        free(o);
+        return NULL;
+    }
+    return o;
+}
+
+/* The output of mode w x h at mhz: one that has it, else one no window is
+   on given it (its clients see the mode change), else a new global. */
+static struct bc_output *output_for_mode(struct bc_server *s, int32_t w, int32_t h, uint32_t mhz)
+{
+    struct bc_output *o, *idle = NULL;
+    struct wl_resource *r;
+    wl_list_for_each(o, &s->outputs, link) {
+        if (o->width == w && o->height == h && o->refresh_mhz == mhz) return o;
+        if (o->windows == 0 && idle == NULL) idle = o;
+    }
+    if (idle == NULL) return output_create(s, w, h, mhz);
+    idle->width = w;
+    idle->height = h;
+    idle->refresh_mhz = mhz;
+    wl_resource_for_each(r, &idle->resources)
+        output_send_mode(idle, r);
+    return idle;
+}
+
+/* The first output: a window the desktop has not yet placed on a display
+   is on it. */
+static struct bc_output *output_default(struct bc_server *s)
+{
+    struct bc_output *o;
+    wl_list_for_each(o, &s->outputs, link)
+        return o;
+    return NULL;
+}
+
+/* A window and the popups opened from it go to output `o`. */
+static void window_move_output(struct bc_server *s, struct bc_xdg *x, struct bc_output *o)
+{
+    struct bc_xdg *other;
+    window_set_output(x, o);
+    wl_list_for_each(other, &s->windows, link)
+        if (other->popup && other->parent == x && other->id) window_set_output(other, o);
 }
 
 /* ---- wl_seat: advertised; input is milestone B ---- */
@@ -894,9 +1017,14 @@ static void toplevel_set_parent(struct wl_client *client, struct wl_resource *re
     struct bc_xdg *x = toplevel_xdg(resource);
     (void)client;
     if (x == NULL) return;
-    x->parent = parent ? toplevel_xdg(parent) : NULL;
-    if (x->id)
-        logf_("window %u: a new transient parent after WINDOW new is not on the wire", x->id);
+    {
+        struct bc_xdg *p = parent ? toplevel_xdg(parent) : NULL;
+        int before = xdg_parent_id(x);
+        if (p == x) p = NULL;
+        x->parent = p;
+        if (x->id && xdg_parent_id(x) != before)
+            bc_wire_line(&x->server->wire, "WINDOW parent %u %d", x->id, xdg_parent_id(x));
+    }
 }
 
 static void toplevel_set_title(struct wl_client *client, struct wl_resource *resource,
@@ -973,15 +1101,37 @@ static void toplevel_set_min_size(struct wl_client *client, struct wl_resource *
     x->pmin_h = h;
 }
 
-/* Maximize and minimize are not in the draft: answered with the current
-   configure, as xdg-shell asks, and logged. */
-static void toplevel_unsupported_state(struct wl_client *client, struct wl_resource *resource)
+/* Maximize and minimize are the program's requests: the desktop decides,
+   and answers with WINDOW size (xdg-shell lets a compositor ignore them).
+   Until the desktop answers, the current configure stands. */
+static void toplevel_maximize(struct bc_xdg *x, int on)
+{
+    if (x->maximize == on) return;
+    x->maximize = on;
+    if (x->id) bc_wire_line(&x->server->wire, "WINDOW maximize %u %s", x->id, on ? "on" : "off");
+}
+
+static void toplevel_set_maximized(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_xdg *x = toplevel_xdg(resource);
+    (void)client;
+    if (x) toplevel_maximize(x, 1);
+}
+
+static void toplevel_unset_maximized(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_xdg *x = toplevel_xdg(resource);
+    (void)client;
+    if (x) toplevel_maximize(x, 0);
+}
+
+static void toplevel_set_minimized(struct wl_client *client, struct wl_resource *resource)
 {
     struct bc_xdg *x = toplevel_xdg(resource);
     (void)client;
     if (x == NULL) return;
-    logf_("window %u: maximize and minimize are the desktop's (not on the wire)", x->id);
-    if (x->configured) configure_if_ready(x);
+    if (x->id) bc_wire_line(&x->server->wire, "WINDOW minimize %u", x->id);
+    else x->minimize = 1;
 }
 
 static void toplevel_set_fullscreen(struct wl_client *client, struct wl_resource *resource,
@@ -1013,11 +1163,11 @@ static const struct xdg_toplevel_interface toplevel_impl = {
     .resize = toplevel_resize,
     .set_max_size = toplevel_set_max_size,
     .set_min_size = toplevel_set_min_size,
-    .set_maximized = toplevel_unsupported_state,
-    .unset_maximized = toplevel_unsupported_state,
+    .set_maximized = toplevel_set_maximized,
+    .unset_maximized = toplevel_unset_maximized,
     .set_fullscreen = toplevel_set_fullscreen,
     .unset_fullscreen = toplevel_unset_fullscreen,
-    .set_minimized = toplevel_unsupported_state,
+    .set_minimized = toplevel_set_minimized,
 };
 
 static void toplevel_destroyed(struct wl_resource *resource)
@@ -1094,10 +1244,14 @@ static void xdg_get_toplevel(struct wl_client *client, struct wl_resource *resou
     }
     wl_resource_set_implementation(x->toplevel, &toplevel_impl, x, toplevel_destroyed);
     if (wl_resource_get_version(x->toplevel) >= XDG_TOPLEVEL_WM_CAPABILITIES_SINCE_VERSION) {
-        /* Full screen is the only window state the draft carries. */
+        /* The window states the draft carries to the desktop. */
         wl_array_init(&caps);
         if ((cap = wl_array_add(&caps, sizeof(*cap))) != NULL)
+            *cap = XDG_TOPLEVEL_WM_CAPABILITIES_MAXIMIZE;
+        if ((cap = wl_array_add(&caps, sizeof(*cap))) != NULL)
             *cap = XDG_TOPLEVEL_WM_CAPABILITIES_FULLSCREEN;
+        if ((cap = wl_array_add(&caps, sizeof(*cap))) != NULL)
+            *cap = XDG_TOPLEVEL_WM_CAPABILITIES_MINIMIZE;
         xdg_toplevel_send_wm_capabilities(x->toplevel, &caps);
         wl_array_release(&caps);
     }
@@ -1353,11 +1507,29 @@ static void handle_line(struct bc_server *s, const char *line)
         x->size_w = l.width;
         x->size_h = l.height;
         x->size_fullscreen = l.fullscreen;
+        x->size_maximized = l.maximized;
         x->size_activated = l.activated;
-        logf_("window %u: size %dx%d%s%s", l.id, l.width, l.height,
-              l.fullscreen ? " fullscreen" : "", l.activated ? " activated" : "");
-        output_set_mode(s, l.width, l.height);
+        logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,
+              l.fullscreen ? " fullscreen" : "", l.maximized ? " maximized" : "",
+              l.activated ? " activated" : "");
         configure_if_ready(x);
+        return;
+    case BC_LINE_OUTPUT:
+        x = window_by_id(s, l.id);
+        if (x == NULL || x->toplevel == NULL) {
+            logf_("WINDOW output for %u, which is no toplevel here", l.id);
+            return;
+        }
+        {
+            struct bc_output *o = output_for_mode(s, l.width, l.height, l.refresh_mhz);
+            if (o == NULL) {
+                logf_("window %u: no output for %dx%d at %u mHz", l.id, l.width, l.height,
+                      l.refresh_mhz);
+                return;
+            }
+            logf_("window %u: output %dx%d at %u mHz", l.id, l.width, l.height, l.refresh_mhz);
+            window_move_output(s, x, o);
+        }
         return;
     case BC_LINE_CLOSE:
         x = window_by_id(s, l.id);
@@ -1445,8 +1617,6 @@ int main(int argc, char **argv)
     bc_wire_init(&server.wire);
     wl_list_init(&server.windows);
     wl_list_init(&server.outputs);
-    server.output_w = 1920;
-    server.output_h = 1080;
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             log_path = argv[++i];
@@ -1500,8 +1670,7 @@ int main(int argc, char **argv)
                           BC_VERSION(6, wl_compositor_interface), &server, bind_compositor) ||
         !wl_global_create(server.display, &wl_subcompositor_interface,
                           BC_VERSION(1, wl_subcompositor_interface), &server, bind_subcompositor) ||
-        !wl_global_create(server.display, &wl_output_interface,
-                          BC_VERSION(4, wl_output_interface), &server, bind_output) ||
+        output_create(&server, 1920, 1080, 60000) == NULL ||
         !wl_global_create(server.display, &wl_seat_interface,
                           BC_VERSION(8, wl_seat_interface), &server, bind_seat) ||
         !wl_global_create(server.display, &xdg_wm_base_interface,
@@ -1532,6 +1701,11 @@ int main(int argc, char **argv)
     if (server.sigterm_source) wl_event_source_remove(server.sigterm_source);
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
     wl_display_destroy(server.display);
+    while (!wl_list_empty(&server.outputs)) {
+        struct bc_output *o = output_default(&server);
+        wl_list_remove(&o->link);
+        free(o);
+    }
     logf_("stopped: %lu frames sent, %lu failed, %lu WINDOW lines", server.wire.frames_sent,
           server.wire.frames_failed, server.wire.lines_sent);
     if (server.wire.fd >= 0) close(server.wire.fd);

@@ -2010,6 +2010,12 @@ It speaks the frame channel above as a producer, with these additions.
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
     their own size and the desktop sizes its window to the first frame.
+  - `WINDOW output <id> <w> <h> <mHz>`: the display the window is on (its
+    mode, from `/v1/displays`), sent when the window opens and whenever it
+    moves to another display; the compositor presents it to the program as
+    its `wl_output`: one `wl_output` per distinct mode, which the window's
+    surface enters (and leaves the one before). Until the first, a window
+    is on a 1920x1080 60 Hz output.
   - `WINDOW close <id>`: `xdg_toplevel.close` (in phase 2,
     `WM_DELETE_WINDOW`); what to do if the program lingers is the desktop's.
     For a popup it is `xdg_popup.popup_done` -- the desktop sends it for a
@@ -2039,10 +2045,6 @@ It speaks the frame channel above as a producer, with these additions.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
-  - `WINDOW output <id> <w> <h> <mHz>`: the display the window is on (its
-    mode, from `/v1/displays`), sent when the window opens and whenever it
-    moves to another display; the compositor presents it to the program as
-    its `wl_output`.
 - **Input straight from Blit.** blit-compositor takes its windows' input
   from Blit directly, not through EIS (libei exists only to feed a foreign
   compositor and leaves with gamescope in ADR 0228 phase 4) and not through

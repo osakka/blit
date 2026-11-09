@@ -65,7 +65,19 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW size 2 40000 10", &l) == BC_LINE_UNKNOWN, "too wide");
     EXPECT(bc_parse_line("WINDOW size 2 -1 10", &l) == BC_LINE_UNKNOWN, "negative");
     EXPECT(bc_parse_line("WINDOW size 0 10 10", &l) == BC_LINE_UNKNOWN, "id 0");
-    EXPECT(bc_parse_line("WINDOW size 2 10 10 maximized", &l) == BC_LINE_UNKNOWN, "unknown flag");
+    EXPECT(bc_parse_line("WINDOW size 2 10 10 maximized", &l) == BC_LINE_SIZE && l.maximized &&
+           !l.fullscreen && !l.activated, "maximized");
+    EXPECT(bc_parse_line("WINDOW size 2 10 10 fullscreen maximized activated", &l) == BC_LINE_SIZE &&
+           l.fullscreen && l.maximized && l.activated, "all three flags");
+    EXPECT(bc_parse_line("WINDOW size 2 10 10 activated maximized", &l) == BC_LINE_UNKNOWN,
+           "maximized after activated");
+    EXPECT(bc_parse_line("WINDOW size 2 10 10 zoomed", &l) == BC_LINE_UNKNOWN, "unknown flag");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 59951\n", &l) == BC_LINE_OUTPUT && l.id == 3 &&
+           l.width == 2560 && l.height == 1440 && l.refresh_mhz == 59951, "output");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 0", &l) == BC_LINE_UNKNOWN, "output, 0 mHz");
+    EXPECT(bc_parse_line("WINDOW output 3 0 1440 60000", &l) == BC_LINE_UNKNOWN, "output, 0 wide");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440", &l) == BC_LINE_UNKNOWN, "output, no refresh");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000 x", &l) == BC_LINE_UNKNOWN, "output, tail");
     EXPECT(bc_parse_line("WINDOW size 2 10 10 activated fullscreen", &l) == BC_LINE_UNKNOWN,
            "flags out of the draft's order");
     EXPECT(bc_parse_line("WINDOW close 9\n", &l) == BC_LINE_CLOSE && l.id == 9, "close");
