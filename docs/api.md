@@ -1938,7 +1938,10 @@ trailing newline is optional.
 
 ## Program windows (draft, ADR 0228 phase 1)
 
-*Draft for review with Hibr; nothing implements it yet.* `blit-compositor`
+*Draft for review with Hibr.* `blit-compositor` implements the compositor's
+side from 0.3.71 (ADR 0228 phase 1, milestone A: `wl_shm` windows as FRM1,
+no input yet), and Blit's own `window=0` answer; no desktop implements its
+side yet. `blit-compositor`
 is Blit's Wayland compositor for programs (and, in phase 2, their X window
 manager). It composites nothing: each window is one picture by descriptor.
 It speaks the frame channel above as a producer, with these additions.
@@ -1956,8 +1959,8 @@ It speaks the frame channel above as a producer, with these additions.
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
   The compositor's first line after `OK` is `WINDOW display <name>`.
-- **One id space.** A window's id is its picture id: its `FRM3` frames,
-  `RELEASE`s and `INPUT` routes all use it.
+- **One id space.** A window's id is its picture id: its `FRM1` and `FRM3`
+  frames, `RELEASE`s and `INPUT` routes all use it.
 - **Compositor to desktop**, one event a line, UTF-8:
   - `WINDOW new <id> <parent|0>`: a top-level; parent is its transient-for.
   - `WINDOW title <id> <text>`, `WINDOW appid <id> <text>`.
