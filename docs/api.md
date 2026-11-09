@@ -1902,8 +1902,13 @@ trailing newline is optional.
   scroll notches and motions sent, all routes of the session), `last_error`
   (an INPUT code, or `eis-refused`/`eis-disconnected`), and `routes`, one
   per route: its `image`, `state` (`off`, `on` while on but not live, or
-  `live`) and the compositor's absolute `region` (`WxH+X+Y`, empty until it
-  offers one).
+  `live`), the compositor's absolute `region` (`WxH+X+Y`, empty until it
+  offers one), and `pointer`, the last absolute pointer for diagnosing its
+  mapping: `surface` (where it was on the session's surface, in pixels),
+  `draw` (the picture's drawn rectangle it was mapped through, x, y, width,
+  height), `sent` (the position sent to the compositor), and `miss` (empty
+  once a position was sent; `other-session`, `no-image` or
+  `outside-picture` when the last pointer sent nothing; `none-yet`).
 
 ## Diagnostics and screenshots
 

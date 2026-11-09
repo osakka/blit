@@ -125,6 +125,13 @@ struct BlitFrameInput {
     unsigned char keys[(KEY_MAX + 8) / 8];  /* pressed through this route */
     unsigned int buttons;   /* Blit's buttons 0..2 pressed through it */
     char region[48];        /* the absolute device's first region, WxH+X+Y */
+    /* The last absolute pointer, for diagnostics: where it was on the
+       session's surface, the drawn rectangle it was mapped through, what
+       was sent, or why nothing was ("" once something was sent). */
+    int last_surface[2];
+    int last_draw[4];
+    double last_sent[2];
+    const char *last_miss;
 };
 
 /* Every symbol or none: a libei without one of them is not one Blit can
@@ -627,11 +634,16 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
     under = mouse_target_px(runtime, runtime->pointer_output, runtime->pointer_x,
                             runtime->pointer_y, &column, &row, &px, &py);
     image = graphics_image_find(session, in->image_id);
-    if (under != session || image == NULL)
+    if (under != session || image == NULL) {
+        in->last_miss = under != session ? "other-session" : "no-image";
         return;
+    }
     /* Surface pixels, zero-based; the topmost draw under them wins. */
     --px;
     --py;
+    in->last_surface[0] = px;
+    in->last_surface[1] = py;
+    in->last_miss = "outside-picture";
     count = blit_graphics_collect(&image, 1, &list);
     draws = list.draws;
     for (k = count - 1; k >= 0; --k) {
@@ -653,6 +665,11 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
             rh = blit_ei.region_get_height(r);
         }
         blit_ei.pointer_motion_absolute(device, rx + fx * rw, ry + fy * rh);
+        in->last_draw[0] = d->x; in->last_draw[1] = d->y;
+        in->last_draw[2] = d->width; in->last_draw[3] = d->height;
+        in->last_sent[0] = rx + fx * rw;
+        in->last_sent[1] = ry + fy * rh;
+        in->last_miss = "";
         frame_input_sent(session, device);
         break;
     }
@@ -966,13 +983,18 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            char entry[128];
+            char entry[320];
             if (in == NULL)
                 continue;
-            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"state\":\"%s\",\"region\":\"%s\"}",
+            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"state\":\"%s\",\"region\":\"%s\","
+                         "\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
+                         "\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
                          first ? "" : ",", in->image_id,
                          !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
-                         in->region);
+                         in->region, in->last_surface[0], in->last_surface[1],
+                         in->last_draw[0], in->last_draw[1], in->last_draw[2], in->last_draw[3],
+                         in->last_sent[0], in->last_sent[1],
+                         in->last_miss != NULL ? in->last_miss : "none-yet");
             if (n < 0 || (size_t)n >= sizeof(entry) || used + (size_t)n + 3 > capacity)
                 continue;
             memcpy(out + used, entry, (size_t)n);

@@ -358,7 +358,9 @@ def local():
         got = ch.ask('INPUT eis %s 7\n' % own)
         check(got == b'OK input 7\n', 'a well-formed INPUT was answered %r' % got)
         info = server.input(a.id)
-        check(info['routes'] == [{'image': 7, 'state': 'off', 'region': ''}] and info['last_error'] == '',
+        check([{k: r[k] for k in ('image', 'state', 'region')} for r in info['routes']] ==
+              [{'image': 7, 'state': 'off', 'region': ''}] and info['last_error'] == '' and
+              info['routes'][0]['pointer']['miss'] == 'none-yet',
               'frames.input after OK %s' % info)
         got = ch.ask('INPUT eis %s 7\n' % own)
         check(got == b'ERROR INPUT 7 EBUSY\n', 'the same image twice was answered %r' % got)
@@ -704,6 +706,12 @@ def eis(stub=False):
             server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
                            'y': origin[1] + at['y'] + sy})
             receiver.expect(['abs %.2f %.2f' % (sx * REGION_W / at['width'], sy * REGION_H / at['height'])], why)
+            # The diagnostic says the same as what the compositor received.
+            ptr = [r for r in server.input(a.id)['routes'] if r['image'] == 7][0]['pointer']
+            check(ptr['miss'] == '' and ptr['draw'][2:] == [at['width'], at['height']] and
+                  abs(ptr['sent'][0] - sx * REGION_W / at['width']) < 0.06 and
+                  abs(ptr['sent'][1] - sy * REGION_H / at['height']) < 0.06,
+                  'frames.input pointer diagnostic for %s: %s' % (why, ptr))
 
         cases = []
         for row, column, columns, rows, sx, sy in ((3, 5, 20, 5, 40, 20), (1, 1, 40, 10, 100, 50)):
@@ -726,6 +734,8 @@ def eis(stub=False):
         cases.append('resized:%dx%d' % (at['width'], at['height']))
         server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 200, 'y': origin[1] + at['y'] + 100})
         receiver.nothing('the pointer outside the picture')
+        miss = [r for r in server.input(a.id)['routes'] if r['image'] == 7][0]['pointer']['miss']
+        check(miss == 'outside-picture', 'the diagnostic for a pointer outside the picture: %r' % miss)
 
         # Pointer lock: relative motion, the raw sum, and no absolute.
         a.write('\033[?7701h')
