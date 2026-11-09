@@ -1978,6 +1978,14 @@ It speaks the frame channel above as a producer, with these additions.
     that window, a CSS cursor name (`default`, `text`, `pointer`, ...) or
     `hidden`. The desktop turns it into its own per-window pointer shape
     (`OSC 22`), so Blit and `hold` gain nothing new for it.
+  - `WINDOW maximize <id> on|off`, `WINDOW minimize <id>`: the program's
+    requests; the desktop decides and answers with `WINDOW size`. xdg has
+    no restore event: a minimized window stops being drawn, and its next
+    `WINDOW size` comes when the desktop restores it.
+  - `WINDOW parent <id> <parent|0>`: a transient parent set or cleared after
+    `WINDOW new`.
+  - `WINDOW hide <id>`: the program unmapped the window; the id stays, and
+    its next frame shows it again where the desktop kept it.
   - `WINDOW gone <id>`: sent after every buffer of that id is released;
     no frame follows it for that id.
   `title`, `appid`, `limits`, `cursor` and `decor` may come again at any
@@ -1985,7 +1993,9 @@ It speaks the frame channel above as a producer, with these additions.
   titles and app ids and bounds them to 256 bytes.
   A line the desktop does not know is answered `ERROR WINDOW <id> EINVAL`.
 - **Desktop to compositor:**
-  - `WINDOW size <id> <w> <h> [fullscreen] [activated]`: pixels. The
+  - `WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]`:
+    pixels, with the xdg states the desktop has given the window (so a
+    window it zooms on its own still tells the program it is maximized). The
     compositor configures exactly this size; the frame that follows carries
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
@@ -2019,11 +2029,16 @@ It speaks the frame channel above as a producer, with these additions.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
-- **The keyboard map** comes from Blit's API, read by the compositor from
-  Blit's keyboard settings -- one source: `GET /v1/input/keymap` (phase 1)
-  gives the xkb rules, model, layout, variant and options, which the
-  compositor compiles with libxkbcommon and hands to clients; it reads it
-  again when Blit's keyboard settings change.
+  - `WINDOW output <id> <w> <h> <mHz>`: the display the window is on (its
+    mode, from `/v1/displays`), sent when the window opens and whenever it
+    moves to another display; the compositor presents it to the program as
+    its `wl_output`.
+- **The keyboard map** comes from Blit's API, generated from Blit's own
+  keyboard tables (its evdev-to-character maps and modifier roles) -- one
+  source: `GET /v1/input/keymap` (phase 1, milestone B) returns a complete
+  xkb keymap as text (`xkb_v1`), which the compositor compiles with
+  libxkbcommon and hands to clients; it reads it again when Blit's keyboard
+  settings change. The desktop never touches it.
 - **Open in this draft:** the clipboard, which phase 2 decides with the X
   window manager's selections.
 
