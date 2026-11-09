@@ -9,6 +9,20 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-09: 0.3.69 the input route's last pointer, for diagnosis (ADR 0225)
+
+- **`frames.input.routes[].pointer`:** the last absolute pointer of each
+  route -- `surface` (where it was on the session's surface), `draw` (the
+  picture's drawn rectangle it was mapped through), `sent` (the position sent
+  to the compositor), `miss` (`""` once sent, else `other-session`,
+  `no-image`, `outside-picture`, `none-yet`). Added for Hibr's report that
+  Steam's pointer is wrong after Full Screen, so one reading shows the
+  mapping. `frame_input_gate` checks it equals what the compositor received.
+- **Suites:** `all` 186 pass, 12 skip, 0 fail; GLES `renderer` 82 pass, 1
+  skip, 0 fail; `package_artifact_gate` passes. Published to hibr-apt.
+  Deployed and verified on the mini PC (10.54). 10.52 left the network as
+  its update finished, as it did for 0.3.65: not yet verified there.
+
 ## 2026-11-08: 0.3.68 Spleen, one scalable font of five masters (ADR 0227)
 
 - **`spleen`** is one text font made of the five unmodified Spleen 2.2.0
