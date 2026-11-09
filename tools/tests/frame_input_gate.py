@@ -951,9 +951,199 @@ def eis(stub=False):
           % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), confine, sent, frames, names, several))
 
 
+class LineReceiver:
+    """blit-compositor's end of an `INPUT sock` route: a stream socket whose
+    connection carries `INPUT <kind> <id> ...` lines, each event followed by
+    `INPUT frame <id> <us>`."""
+
+    def __init__(self, work, name='input-0'):
+        self.path = os.path.join(work, name)
+        self.listener = listening_socket(self.path)
+        self.listener.settimeout(5)
+        self.conn = None
+        self.buffer = b''
+        self.events = []      # the lines, frames apart
+        self.frames = 0
+        self.total = 0        # every event line read
+
+    def accept(self):
+        self.conn, _ = self.listener.accept()
+
+    def read(self, wait):
+        self.conn.settimeout(wait)
+        try:
+            data = self.conn.recv(65536)
+        except socket.timeout:
+            return False
+        if not data:
+            return False
+        self.buffer += data
+        while b'\n' in self.buffer:
+            line, self.buffer = self.buffer.split(b'\n', 1)
+            words = line.decode().split(' ')
+            check(len(words) >= 3 and words[0] == 'INPUT', 'not an input line: %r' % line)
+            if words[1] == 'frame':
+                check(len(words) == 4 and int(words[3]) > 0, 'a frame line %r' % line)
+                self.frames += 1
+            else:
+                check(self.total == self.frames, 'an event before the last one\'s frame: %r' % line)
+                self.total += 1
+                self.events.append(' '.join(words[1:]))
+        return True
+
+    def expect(self, wanted, why):
+        deadline = time.time() + 5
+        while len(self.events) < len(wanted) and time.time() < deadline:
+            self.read(0.2)
+        got, self.events = self.events[:len(wanted)], self.events[len(wanted):]
+        check(got == wanted, '%s: got %s, expected %s' % (why, got, wanted))
+
+    def nothing(self, why):
+        self.read(0.4)
+        check(self.events == [], '%s: got %s' % (why, self.events))
+
+
+def sock():
+    """`INPUT sock`: the same route, its events as lines on blit-compositor's
+    own input socket (docs/api.md, "Program windows", "Input straight from
+    Blit"): the answers and the uid-checked connect, the live rule (off,
+    unfocused, console away), release-all on off and on a focus change, the
+    wheel, the absolute pointer in the picture's own frame pixels, relative
+    motion under ?7701, the compositor's end (ERROR INPUT ENOENT,
+    sock-disconnected) and a line it would not take (dropped, ENOENT)."""
+    work = tempfile.mkdtemp(prefix='blit-input-sock-gate-')
+    server = Server(19837 + OFFSET, work)
+    try:
+        a = Session(server, work, 'a')
+        b = Session(server, work, 'b')
+        server.focus(a.id)
+        ch = Channel(a)
+        ch.frame(7, 1)
+        wait_for(lambda: a.graphics(7), 'image 7 did not land')
+        place(a, 7, 3, 5, 20, 5)
+        check(ch.ask('INPUT sock %s 7\n' % os.path.join(work, 'missing')) == b'ERROR INPUT 7 ENOENT\n',
+              'a missing input socket was not ENOENT')
+        check(ch.ask('INPUT sock relative 7\n') == b'ERROR INPUT 7 EINVAL\n', 'a relative path was not EINVAL')
+        receiver = LineReceiver(work)
+        got = ch.ask('INPUT sock %s 7\n' % receiver.path)
+        check(got == b'OK input 7\n', 'INPUT sock was answered %r' % got)
+        receiver.accept()
+        check(ch.ask('INPUT sock %s 7\n' % receiver.path) == b'ERROR INPUT 7 EBUSY\n', 'a second route was not EBUSY')
+        r = route(server.input(a.id), 7)
+        check(r['backend'] == 'sock' and r['state'] == 'off', 'frames.input %s' % r)
+        receiver.nothing('a route that starts off')
+        ch.line('INPUT on 7\n')
+        wait_for(lambda: state(server, a.id, 7) == 'live', 'the route did not go live')
+
+        def key(code, *values):
+            for v in values:
+                server.inject({'kind': 'key', 'code': code, 'value': v})
+
+        key(30, 1, 2, 2, 0)
+        receiver.expect(['key 7 30 press', 'key 7 30 release'], 'a key with repeats')
+        ch.line('INPUT off 7\n')
+        key(31, 1, 0)
+        receiver.nothing('keys while off')
+        ch.line('INPUT on 7\n')
+        server.focus(b.id)
+        key(31, 1, 0)
+        receiver.nothing('keys while unfocused')
+        server.focus(a.id)
+        # Release-all, on INPUT off and on a focus change.
+        key(32, 1)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+        receiver.expect(['key 7 32 press', 'btn 7 272 press'], 'a key and a button held')
+        ch.line('INPUT off 7\n')
+        receiver.expect(['key 7 32 release', 'btn 7 272 release'], 'release-all on INPUT off')
+        key(32, 0)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+        receiver.nothing('the physical releases after INPUT off')
+        ch.line('INPUT on 7\n')
+        key(33, 1)
+        receiver.expect(['key 7 33 press'], 'held before the focus change')
+        server.focus(b.id)
+        receiver.expect(['key 7 33 release'], 'release-all on focus change')
+        key(33, 0)
+        server.focus(a.id)
+        server.inject({'kind': 'pointer_wheel', 'delta': 1})
+        server.inject({'kind': 'pointer_wheel', 'delta': -1})
+        receiver.expect(['wheel 7 0 -1', 'wheel 7 0 1'], 'wheel up then down')
+
+        # The absolute pointer, in the picture's own pixels (its 320x160
+        # frame), wherever and however large it is drawn.
+        server.inject({'kind': 'pointer_motion', 'x': 301, 'y': 101})
+        report = wait_for(lambda: re.findall(rb'\x1b\[<35;(\d+);(\d+)M', a.sent()),
+                          'no pixel report: %r' % a.sent()[-200:])[-1]
+        origin = (301 - (int(report[0]) - 1), 101 - (int(report[1]) - 1))
+        receiver.read(0.3)
+        receiver.events = []
+        g = wait_for(lambda: a.graphics(7), 'image 7 is gone')
+        at = [p for p in g['placements'] if p['id'] == 1][0]
+        for sx, sy in ((40, 20), (0, 0), (at['width'] - 1, at['height'] - 1)):
+            server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
+                           'y': origin[1] + at['y'] + sy})
+            receiver.expect(['ptr 7 %.2f %.2f' % (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])],
+                            'the pointer at %d,%d of %dx%d' % (sx, sy, at['width'], at['height']))
+
+        # Relative motion under the lock, the raw sum.
+        a.write('\033[?7701h')
+        wait_for(lambda: server.locked(a.id), 'the lock was not engaged')
+        for _ in range(10):
+            server.inject({'kind': 'pointer_relative', 'dx': 7, 'dy': -3})
+        deadline = time.time() + 5
+        total = [0, 0]
+        while total != [70, -30] and time.time() < deadline:
+            receiver.read(0.2)
+            for e in receiver.events:
+                w = e.split(' ')
+                check(w[0] == 'rel' and w[1] == '7', 'under the lock: %s' % e)
+                total[0] += int(w[2])
+                total[1] += int(w[3])
+            receiver.events = []
+        check(total == [70, -30], 'relative motion summed to %s' % total)
+        a.write('\033[?7701l')
+        wait_for(lambda: not server.locked(a.id), 'the lock was not released')
+        check(receiver.frames == receiver.total and receiver.total >= 15,
+              'events and frames: %d events, %d frames' % (receiver.total, receiver.frames))
+
+        # A line the compositor will not take: written into a socket whose
+        # reader shut down, it is counted, and the route ends.
+        receiver.read(0.2)
+        receiver.events = []
+        before = server.input(a.id)['dropped']
+        receiver.conn.shutdown(socket.SHUT_RD)
+        key(35, 1)
+        got = ch.reply(5.0)
+        check(got == b'ERROR INPUT 7 ENOENT\n', 'a socket that took no line was answered %r' % got)
+        info = server.input(a.id)
+        check(info['dropped'] == before + 1 and info['last_error'] == 'sock-disconnected' and
+              route(info, 7) is None, 'frames.input after a line was not taken %s' % info)
+        key(35, 0)
+
+        # The compositor's end: a new route, its socket closed.
+        receiver2 = LineReceiver(work, 'input-1')
+        check(ch.ask('INPUT sock %s 7\n' % receiver2.path) == b'OK input 7\n', 'a route again')
+        receiver2.accept()
+        receiver2.conn.close()
+        got = ch.reply(5.0)
+        check(got == b'ERROR INPUT 7 ENOENT\n', 'a closed input socket was answered %r' % got)
+        info = wait_for(lambda: (lambda i: i if route(i, 7) is None else None)(server.input(a.id)),
+                        'the route outlived its compositor')
+        check(info['last_error'] == 'sock-disconnected', 'frames.input after the close %s' % info)
+        ch.close()
+    finally:
+        server.stop()
+    print('FRAME_INPUT_SOCK_PASS answers=OK,ENOENT,EINVAL,EBUSY backend=sock keys=ordered,repeats-dropped '
+          'off+unfocused=silent release_all=off,focus wheel=0,-1/0,1 ptr=frame-pixels rel=70,-30 '
+          'not-taken=dropped+ENOENT closed=ENOENT frames=%d' % receiver.frames)
+
+
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else 'local'
-    if mode == 'eis':
+    if mode == 'sock':
+        TAG = 'FRAME_INPUT_SOCK'
+        sock()
+    elif mode == 'eis':
         TAG = 'FRAME_INPUT_EIS'
         eis()
     elif mode == 'stub':

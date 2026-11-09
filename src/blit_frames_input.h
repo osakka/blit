@@ -1,12 +1,14 @@
-/* ADR 0225: the physical keyboard and mouse to a compositor's EIS socket.
+/* ADR 0225: the physical keyboard and mouse to a compositor's EIS socket;
+   ADR 0228: or, as lines, to blit-compositor's own input socket.
 
    A version 3 frame client (blit-gamescope, or a desktop relaying its
    windows' pictures) asks, on its authenticated channel, for the input of
    its session to go to the EIS socket of the compositor whose output one of
    its images shows. The wire text is docs/api.md, "Picture frames by
-   descriptor", and only that:
+   descriptor" and "Program windows", and only that:
 
        INPUT eis <absolute path> <image id>\n
+       INPUT sock <absolute path> <image id>\n
            OK input <image id> / ERROR INPUT <image id> <code>
        INPUT on <image id>\n   INPUT off <image id>\n
            whether that picture's window has the keys
@@ -30,6 +32,25 @@
    credentials (SO_PEERCRED) on the connected socket, so a socket swapped
    between the two checks is refused too. Blit never connects to another
    user's compositor.
+
+   Two backends behind one route. `eis` drives libei, below. `sock` (Blit's
+   own compositor, which has no libei) writes lines on the stream socket it
+   connected to, the same events in the picture's own surface pixels:
+
+       INPUT key <id> <evdev code> press|release
+       INPUT ptr <id> <x> <y>          absolute, pixels, two decimals
+       INPUT rel <id> <dx> <dy>        under a relative hold
+       INPUT btn <id> <BTN code> press|release
+       INPUT wheel <id> <dx> <dy>      notches, positive right and down
+       INPUT frame <id> <monotonic us> after each event
+
+   Everything else -- the checks on the socket, the live rule, focus,
+   holds, release of everything held, diagnostics -- is the route's, shared.
+   A line the socket cannot take (full, or the compositor gone) is never
+   dropped silently: the route is broken, counted in frames.input
+   `dropped`, what it held is forgotten (the compositor releases all on the
+   socket's end), and at the next reconcile it ends with `ERROR INPUT <id>
+   ENOENT`, as an EIS route whose compositor went.
 
    libei is loaded at run time, so `blit` has no dependency on it; there are
    no libei headers on the build host, so the few functions used are
@@ -121,7 +142,9 @@ typedef struct BlitFrameInput BlitFrameInput;
 
 struct BlitFrameInput {
     struct ei *ei;          /* the libei context, for the route's life */
-    int fd;                 /* ei_get_fd, polled in Blit's loop */
+    int sock;               /* INPUT sock: the compositor's input socket, else -1 */
+    const char *broken;     /* a line the socket did not take: why; ended at reconcile */
+    int fd;                 /* ei_get_fd or the input socket, polled in Blit's loop */
     unsigned int image_id;
     int on;                 /* INPUT on / INPUT off */
     int confine;            /* INPUT hold: 0 relative (the default), 1 confine */
@@ -238,6 +261,47 @@ static void frame_input_error(BlitSession *session, const char *code)
         snprintf(session->frame_input_error, sizeof(session->frame_input_error), "%s", code);
 }
 
+/* Whether the route still reaches its compositor. */
+static int frame_input_open_backend(const BlitFrameInput *in)
+{
+    return in->broken == NULL && (in->ei != NULL || in->sock >= 0);
+}
+
+/* One event on a `sock` route: its line and the frame after it, in one
+   write. A socket that cannot take all of it breaks the route (see the top
+   of this file). Returns 0 when written. */
+static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
+{
+    char text[160];
+    va_list ap;
+    int n, m;
+    ssize_t sent;
+    if (in->sock < 0 || in->broken != NULL)
+        return -1;
+    va_start(ap, fmt);
+    n = vsnprintf(text, sizeof(text), fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= sizeof(text) - 48)
+        return -1;
+    m = snprintf(text + n, sizeof(text) - (size_t)n, "INPUT frame %u %llu\n", in->image_id,
+                 (unsigned long long)monotonic_us());
+    sent = send(in->sock, text, (size_t)(n + m), MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (sent == (ssize_t)(n + m)) {
+        if (session != NULL)
+            ++session->frame_input_events;
+        return 0;
+    }
+    in->broken = sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) ? "sock-full"
+                                                                       : "sock-disconnected";
+    memset(in->keys, 0, sizeof(in->keys));
+    in->buttons = 0;
+    if (session != NULL) {
+        ++session->frame_input_dropped;
+        frame_input_error(session, in->broken);
+    }
+    return -1;
+}
+
 /* Whether the image the route names is gone: deleted by Kitty, or no longer
    held after it was. */
 static int frame_input_image_gone(BlitSession *session, BlitFrameInput *in)
@@ -255,7 +319,8 @@ static int frame_input_image_gone(BlitSession *session, BlitFrameInput *in)
 static int frame_input_live(BlitRuntime *runtime, const BlitFrameClient *client, BlitFrameInput *in)
 {
     BlitSession *session;
-    if (in == NULL || in->ei == NULL || !in->on || runtime->console_away || !blit_vt_active())
+    if (in == NULL || !frame_input_open_backend(in) || !in->on || runtime->console_away ||
+        !blit_vt_active())
         return 0;
     session = find_session_id(runtime, client->session_id);
     return session != NULL && session->focused && !frame_input_image_gone(session, in);
@@ -284,6 +349,8 @@ static void frame_input_end(BlitRuntime *runtime, const BlitFrameClient *client,
             if (device != NULL) {
                 blit_ei.keyboard_key(device, code, false);
                 frame_input_sent(session, device);
+            } else if (in->sock >= 0) {
+                frame_input_line(session, in, "INPUT key %u %u release\n", in->image_id, code);
             }
         }
     device = in->ei != NULL ? frame_input_device(in, BLIT_EI_CAP_BUTTON) : NULL;
@@ -293,6 +360,9 @@ static void frame_input_end(BlitRuntime *runtime, const BlitFrameClient *client,
             if (device != NULL) {
                 blit_ei.button_button(device, frame_input_button_code(i), false);
                 frame_input_sent(session, device);
+            } else if (in->sock >= 0) {
+                frame_input_line(session, in, "INPUT btn %u %u release\n", in->image_id,
+                                 frame_input_button_code(i));
             }
         }
     for (i = 0; i < BLIT_EI_DEVICES; ++i)
@@ -314,6 +384,8 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
         frame_input_end(runtime, client, in);
         return 0;
     }
+    if (in->sock >= 0)
+        return 1;  /* lines need nothing started */
     for (i = 0; i < BLIT_EI_DEVICES; ++i)
         if (in->devices[i].device != NULL && in->devices[i].resumed &&
             !in->devices[i].emulating) {
@@ -349,14 +421,20 @@ static void frame_input_free(BlitFrameClient *client, int slot)
         frame_input_forget_devices(in);
         blit_ei.unref(in->ei);
     }
+    if (in->sock >= 0)
+        close(in->sock);
     free(in);
     client->inputs[slot] = NULL;
     --frame_input_routes;
 }
 
+static void frame_input_disconnected(BlitRuntime *runtime, BlitFrameClient *client, int slot,
+                                     const char *why);
+
 /* Every route brought in line, and a route whose image has gone ended: it
    is stopped and its keys released by the sync, then it is freed. The
-   channel is not told; its image is gone. */
+   channel is not told; its image is gone. A broken `sock` route ends as a
+   disconnected one. */
 static void frame_input_reconcile(BlitRuntime *runtime)
 {
     int i, k;
@@ -372,6 +450,12 @@ static void frame_input_reconcile(BlitRuntime *runtime)
             BlitFrameInput *in = client->inputs[k];
             if (in == NULL)
                 continue;
+            if (in->broken != NULL) {
+                /* A line it could not take: what it held is forgotten,
+                   and the channel told the route has ended. */
+                frame_input_disconnected(runtime, client, k, in->broken);
+                continue;
+            }
             frame_input_sync(runtime, client, in);
             if (session != NULL && frame_input_image_gone(session, in)) {
                 frame_input_end(runtime, client, in);
@@ -513,7 +597,7 @@ static void frame_input_select(const BlitRuntime *runtime, fd_set *readable, int
             continue;
         for (k = 0; k < runtime->frame_clients[i].input_capacity; ++k) {
             const BlitFrameInput *in = runtime->frame_clients[i].inputs[k];
-            if (in != NULL && in->ei != NULL && in->fd >= 0) {
+            if (in != NULL && (in->ei != NULL || in->sock >= 0) && in->fd >= 0) {
                 FD_SET(in->fd, readable);
                 if (in->fd > *max_fd) *max_fd = in->fd;
             }
@@ -532,8 +616,19 @@ static void frame_input_service(BlitRuntime *runtime, const fd_set *readable)
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            if (in != NULL && in->ei != NULL && in->fd >= 0 && FD_ISSET(in->fd, readable))
+            if (in == NULL || in->fd < 0 || !FD_ISSET(in->fd, readable))
+                continue;
+            if (in->ei != NULL) {
                 frame_input_dispatch(runtime, client, k);
+            } else if (in->sock >= 0) {
+                /* The compositor says nothing on its input socket: what is
+                   readable is its end, or bytes that mean nothing. */
+                char drain[256];
+                ssize_t got = recv(in->sock, drain, sizeof(drain), MSG_DONTWAIT);
+                if (got == 0 || (got < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+                                 errno != EINTR))
+                    frame_input_disconnected(runtime, client, k, "sock-disconnected");
+            }
         }
     }
 }
@@ -554,12 +649,18 @@ static void frame_input_key(BlitRuntime *runtime, unsigned int code, int pressed
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
                 continue;
-            device = frame_input_device(in, BLIT_EI_CAP_KEYBOARD);
+            device = in->ei != NULL ? frame_input_device(in, BLIT_EI_CAP_KEYBOARD) : NULL;
             /* A release only for a key pressed here: one pressed before the
                route went live was never the compositor's. */
-            if (device == NULL || (!pressed && !frame_input_key_held(in, code)))
+            if ((device == NULL && in->sock < 0) || (!pressed && !frame_input_key_held(in, code)))
                 continue;
             frame_input_key_mark(in, code, pressed);
+            if (in->sock >= 0) {
+                frame_input_line(find_session_id(runtime, client->session_id), in,
+                                 "INPUT key %u %u %s\n", in->image_id, code,
+                                 pressed ? "press" : "release");
+                continue;
+            }
             blit_ei.keyboard_key(device, code, pressed != 0);
             frame_input_sent(find_session_id(runtime, client->session_id), device);
         }
@@ -580,13 +681,19 @@ static void frame_input_button(BlitRuntime *runtime, int button, int pressed)
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
                 continue;
-            device = frame_input_device(in, BLIT_EI_CAP_BUTTON);
-            if (device == NULL || (!pressed && !(in->buttons & (1u << button))))
+            device = in->ei != NULL ? frame_input_device(in, BLIT_EI_CAP_BUTTON) : NULL;
+            if ((device == NULL && in->sock < 0) || (!pressed && !(in->buttons & (1u << button))))
                 continue;
             if (pressed)
                 in->buttons |= 1u << button;
             else
                 in->buttons &= ~(1u << button);
+            if (in->sock >= 0) {
+                frame_input_line(find_session_id(runtime, client->session_id), in,
+                                 "INPUT btn %u %u %s\n", in->image_id,
+                                 frame_input_button_code(button), pressed ? "press" : "release");
+                continue;
+            }
             blit_ei.button_button(device, frame_input_button_code(button), pressed != 0);
             frame_input_sent(find_session_id(runtime, client->session_id), device);
         }
@@ -605,10 +712,18 @@ static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int directi
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
             struct ei_device *device;
-            if (in == NULL || !frame_input_sync(runtime, client, in))
+            if (in == NULL || !frame_input_sync(runtime, client, in) || direction == 0)
                 continue;
+            if (in->sock >= 0) {
+                /* Notches as Wayland and EIS count them: right and down. */
+                frame_input_line(find_session_id(runtime, client->session_id), in,
+                                 "INPUT wheel %u %d %d\n", in->image_id,
+                                 horizontal ? (direction > 0 ? 1 : -1) : 0,
+                                 horizontal ? 0 : (direction > 0 ? -1 : 1));
+                continue;
+            }
             device = frame_input_device(in, BLIT_EI_CAP_SCROLL);
-            if (device == NULL || direction == 0)
+            if (device == NULL)
                 continue;
             if (horizontal)
                 blit_ei.scroll_discrete(device, direction > 0 ? BLIT_EI_SCROLL_NOTCH : -BLIT_EI_SCROLL_NOTCH, 0);
@@ -634,9 +749,9 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
     BlitGraphicsDraw *draws;
     struct ei_device *device;
     int column, row, px = 0, py = 0, count, k;
-    device = frame_input_device(in, BLIT_EI_CAP_POINTER_ABSOLUTE);
+    device = in->ei != NULL ? frame_input_device(in, BLIT_EI_CAP_POINTER_ABSOLUTE) : NULL;
     session = find_session_id(runtime, client->session_id);
-    if (device == NULL || session == NULL || !runtime->pointer_valid)
+    if ((device == NULL && in->sock < 0) || session == NULL || !runtime->pointer_valid)
         return;
     under = mouse_target_px(runtime, runtime->pointer_output, runtime->pointer_x,
                             runtime->pointer_y, &column, &row, &px, &py);
@@ -663,6 +778,17 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
         /* Where in the frame, as a fraction of it. */
         fx = (d->src_x + (double)(px - d->x) * d->src_w / d->width) / image->width;
         fy = (d->src_y + (double)(py - d->y) * d->src_h / d->height) / image->height;
+        in->last_draw[0] = d->x; in->last_draw[1] = d->y;
+        in->last_draw[2] = d->width; in->last_draw[3] = d->height;
+        if (in->sock >= 0) {
+            /* Lines: the picture's own surface pixels, its latest frame. */
+            in->last_sent[0] = fx * rw;
+            in->last_sent[1] = fy * rh;
+            in->last_miss = "";
+            frame_input_line(session, in, "INPUT ptr %u %.2f %.2f\n", in->image_id,
+                             in->last_sent[0], in->last_sent[1]);
+            break;
+        }
         r = blit_ei.device_get_region(device, 0);
         if (r != NULL && blit_ei.region_get_width(r) > 0 && blit_ei.region_get_height(r) > 0 &&
             blit_ei.region_get_width(r) < INT32_MAX && blit_ei.region_get_height(r) < INT32_MAX) {
@@ -672,8 +798,6 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
             rh = blit_ei.region_get_height(r);
         }
         blit_ei.pointer_motion_absolute(device, rx + fx * rw, ry + fy * rh);
-        in->last_draw[0] = d->x; in->last_draw[1] = d->y;
-        in->last_draw[2] = d->width; in->last_draw[3] = d->height;
         in->last_sent[0] = rx + fx * rw;
         in->last_sent[1] = ry + fy * rh;
         in->last_miss = "";
@@ -781,6 +905,10 @@ static void frame_input_relative(BlitRuntime *runtime, int dx, int dy)
             struct ei_device *device;
             if (in == NULL || !frame_input_sync(runtime, client, in))
                 continue;
+            if (in->sock >= 0) {
+                frame_input_line(holder, in, "INPUT rel %u %d %d\n", in->image_id, dx, dy);
+                continue;
+            }
             device = frame_input_device(in, BLIT_EI_CAP_POINTER);
             if (device == NULL)
                 continue;
@@ -837,10 +965,12 @@ static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id
     return -1;
 }
 
-/* `INPUT eis <path> <image-id>`: the checks that need nothing come first,
-   then libei, then the socket's owner, the connection and its peer. */
+/* `INPUT eis|sock <path> <image-id>`: the checks that need nothing come
+   first, then libei (for eis), then the socket's owner, the connection and
+   its peer -- the same for both -- and last the backend: a libei sender on
+   the connection, or the connection itself for lines. */
 static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
-                             const char *path, unsigned int image_id)
+                             const char *path, unsigned int image_id, int lines)
 {
     BlitSession *session = find_session_id(runtime, client->session_id);
     BlitGraphicsImage *image = session != NULL ? graphics_image_find(session, image_id) : NULL;
@@ -886,7 +1016,7 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
         client->inputs = grown;
         client->input_capacity = capacity;
     }
-    if (!frame_input_load()) {
+    if (!lines && !frame_input_load()) {
         frame_input_refuse(runtime, client, image_id, "ENOTSUP");
         return;
     }
@@ -917,6 +1047,23 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
         return;
     }
     in = (BlitFrameInput *)calloc(1, sizeof(*in));
+    if (in != NULL) in->sock = -1;
+    if (lines) {
+        if (in == NULL) {
+            close(fd);
+            frame_input_refuse(runtime, client, image_id, "ENOMEM");
+            return;
+        }
+        in->sock = fd;
+        in->fd = fd;
+        in->image_id = image_id;
+        in->image_seen = image != NULL;
+        client->inputs[slot] = in;
+        ++frame_input_routes;
+        frame_input_error(session, "");
+        frame_input_accept(client, image_id);
+        return;
+    }
     ei = blit_ei.new_sender(NULL);
     if (in == NULL || ei == NULL) {
         free(in);
@@ -987,7 +1134,7 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     const char *id_text = NULL, *path_text = NULL;
     size_t path_length = 0;
     unsigned int id;
-    int kind = 0;  /* 'e' eis, 'n' on, 'f' off, 'h' hold */
+    int kind = 0;  /* 'e' eis, 's' sock, 'n' on, 'f' off, 'h' hold */
     int confine = -1;  /* INPUT hold's mode: 0 relative, 1 confine */
     ssize_t i;
 
@@ -1017,9 +1164,9 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
             *mode++ = '\0';
             confine = strcmp(mode, "confine") == 0 ? 1 : strcmp(mode, "relative") == 0 ? 0 : -1;
         }
-    } else if (strncmp(line, "INPUT eis ", 10) == 0) {
-        kind = 'e';
-        path_text = line + 10;
+    } else if (strncmp(line, "INPUT eis ", 10) == 0 || strncmp(line, "INPUT sock ", 11) == 0) {
+        kind = line[6];
+        path_text = line + (kind == 'e' ? 10 : 11);
         path_length = strcspn(path_text, " ");
         if (path_text[path_length] == ' ')
             id_text = path_text + path_length + 1;
@@ -1055,7 +1202,7 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     }
     memcpy(path, path_text, path_length);
     path[path_length] = '\0';
-    frame_input_open(runtime, client, path, id);
+    frame_input_open(runtime, client, path, id, kind == 's');
 }
 
 /* frames.input: the session's counts and every route of its channels, with
@@ -1067,8 +1214,9 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
 {
     size_t used;
     int i, k, n, first = 1;
-    n = snprintf(out, capacity, ",\"input\":{\"events\":%lu,\"last_error\":\"%s\",\"routes\":[",
-                 session->frame_input_events, session->frame_input_error);
+    n = snprintf(out, capacity, ",\"input\":{\"events\":%lu,\"dropped\":%lu,\"last_error\":\"%s\","
+                 "\"routes\":[", session->frame_input_events, session->frame_input_dropped,
+                 session->frame_input_error);
     if (n < 0 || (size_t)n + 3 > capacity)
         return 0;
     used = (size_t)n;
@@ -1078,13 +1226,14 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            char entry[352];
+            char entry[400];
             if (in == NULL)
                 continue;
-            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"state\":\"%s\",\"hold\":\"%s\","
+            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"backend\":\"%s\",\"state\":\"%s\","
+                         "\"hold\":\"%s\","
                          "\"region\":\"%s\",\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
                          "\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
-                         first ? "" : ",", in->image_id,
+                         first ? "" : ",", in->image_id, in->sock >= 0 ? "sock" : "eis",
                          !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
                          in->confine ? "confine" : "relative", in->region,
                          in->last_surface[0], in->last_surface[1],

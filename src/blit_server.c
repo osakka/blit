@@ -1123,6 +1123,7 @@ typedef struct {
     /* ADR 0225: events this session's input routes sent to EIS, and the
        last thing that went wrong with one (kept after the route ends). */
     unsigned long frame_input_events;
+    unsigned long frame_input_dropped;  /* lines an INPUT sock route could not write */
     char frame_input_error[32];
     int frame_connections;
     BlitPendingPlacement frame_pending[BLIT_FRAME_PENDING];

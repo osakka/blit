@@ -14,3 +14,4 @@ gate_display_setup
 trap gate_display_cleanup EXIT
 env $GATE_DISPLAY_ENV python3 tools/tests/frame_input_gate.py local
 env $GATE_DISPLAY_ENV python3 tools/tests/frame_input_gate.py stub
+env $GATE_DISPLAY_ENV python3 tools/tests/frame_input_gate.py sock

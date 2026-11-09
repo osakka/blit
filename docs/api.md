@@ -2105,10 +2105,13 @@ It speaks the frame channel above as a producer, with these additions.
 - **Input straight from Blit.** blit-compositor takes its windows' input
   from Blit directly, not through EIS (libei exists only to feed a foreign
   compositor and leaves with gamescope in ADR 0228 phase 4) and not through
-  the desktop's relay. It listens on its own input socket and asks once,
-  through the channel, `INPUT sock <id> <path>`: Blit connects to `path`
+  the desktop's relay. It listens on its own input socket (`SOCK_STREAM`)
+  and asks once per top-level, through the channel, `INPUT sock <path>
+  <id>` -- the shape of `INPUT eis` until version 5 makes it `INPUT sock
+  <id> <path>` -- : Blit connects to `path`
   (an absolute path to a Unix socket owned by the client's uid, checked as
-  for `INPUT eis`), and the answers, `INPUT on|off|hold|member`, the live
+  for `INPUT eis`; `ENOTSUP` does not apply, no libei is involved), and the
+  answers, `INPUT on|off|hold|member`, the live
   rule and the release of everything held when a route stops being live are
   exactly as for EIS routes. A desktop between relays the request and
   replays it on reconnect, as it does `INPUT eis`, and carries no input.
@@ -2124,9 +2127,18 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT frame <id> <monotonic-us>      ends one batch of events
   ```
   Keys are raw evdev codes; the compositor derives modifiers and characters
-  with the keymap below, so there is one source. Input is never dropped
-  silently: if the socket cannot take a line, Blit counts it in
-  `frames.input` and releases what that route holds.
+  with the keymap below, so there is one source. `ptr` is in pixels of the
+  picture's latest frame, a decimal with two fractional digits; `rel` the
+  raw counts; `wheel` whole notches, positive right and down (as Wayland
+  and EIS count them); each event is one batch, its `frame` after it. Input
+  is never dropped silently: if the socket cannot take a line (full, or its
+  reader gone), Blit counts it in `frames.input` `dropped`, forgets what
+  that route held -- the compositor releases every key and button of a
+  route whose socket ends -- and ends the route with `ERROR INPUT <id>
+  ENOENT`, as when the compositor closes the socket itself
+  (`last_error` `sock-disconnected`, or `sock-full`). Each route in
+  `frames.input` says its `backend`, `eis` or `sock`. `INPUT member` is not
+  implemented in Blit yet.
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete
