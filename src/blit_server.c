@@ -2034,6 +2034,7 @@ static void frame_input_button(BlitRuntime *runtime, int button, int pressed);
 static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int direction);
 static void frame_input_pointer(BlitRuntime *runtime);
 static void frame_input_relative(BlitRuntime *runtime, int dx, int dy);
+static int frame_input_confined(BlitRuntime *runtime, BlitRect *box);
 static void frame_input_reconcile(BlitRuntime *runtime);
 static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
                                char *out, size_t capacity);
@@ -28255,11 +28256,48 @@ static int mouse_output_index(const BlitRuntime *runtime)
     return -1;
 }
 
+/* ADR 0061: where a session's surface is on an output, in that display's
+   pixels, its origin and its size; 0 when it is not shown there. The hit
+   test's rule, and the confined pointer's (ADR 0225). */
+static int session_surface_px(BlitRuntime *runtime, const BlitSession *session,
+                              int output_index, BlitRect *rect)
+{
+    char display_id[128];
+    BlitSurface *surface;
+    int cell_width = runtime_terminal_cell_width(runtime);
+    int cell_height = runtime_terminal_cell_height(runtime);
+
+    if (output_index < 0 || output_index >= runtime->output_count)
+        return 0;
+    snprintf(display_id, sizeof(display_id), "display-%llu",
+             runtime->outputs[output_index].display_id);
+    if (session->pane_id[0] != '\0') {
+        BlitPane *pane = find_pane_id(runtime, session->pane_id);
+        /* A pane can remain in the topology after its session is
+           released; it is free layout, not an input sink. */
+        if (pane == NULL || strcmp(pane->display_id, display_id) != 0)
+            return 0;
+    } else if (session->display_id[0] == '\0') {
+        /* A session with no display is rendered on the first one. */
+        if (output_index != 0)
+            return 0;
+    } else if (strcmp(session->display_id, display_id) != 0) {
+        return 0;
+    }
+    surface = find_surface_id(runtime, session->id);
+    if (surface == NULL || !surface->used)
+        return 0;
+    surface_origin_px(runtime, surface, session, output_index,
+                      cell_width, cell_height, &rect->x, &rect->y);
+    rect->w = surface->width * cell_width;
+    rect->h = surface->height * cell_height;
+    return 1;
+}
+
 static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
                                    float pixel_x, float pixel_y,
                                    int *column, int *row, int *px, int *py)
 {
-    char display_id[128];
     int cell_width;
     int cell_height;
     int pass;
@@ -28275,8 +28313,6 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
     }
     cell_width = runtime_terminal_cell_width(runtime);
     cell_height = runtime_terminal_cell_height(runtime);
-    snprintf(display_id, sizeof(display_id), "display-%llu",
-             runtime->outputs[output_index].display_id);
     /* Surfaces in a pane are tested first.  A pane-less surface stacks from
        the same corner as pane (0,0), so without this a desktop could shadow
        a pane that is drawn on top of it. */
@@ -28285,7 +28321,7 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
         for (session_index = 0; session_index < BLIT_MAX_SESSIONS;
              ++session_index) {
             BlitSession *session = &runtime->sessions[session_index];
-            BlitSurface *surface;
+            BlitRect at;
             int paned;
             int origin_x;
             int origin_y;
@@ -28297,13 +28333,10 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
             paned = session->pane_id[0] != '\0';
             if (paned != (pass == 0))
                 continue;
+            if (!session_surface_px(runtime, session, output_index, &at))
+                continue;
             if (paned) {
                 BlitPane *pane = find_pane_id(runtime, session->pane_id);
-                /* A pane can remain in the topology after its session is
-                   released; it is free layout, not an input sink. */
-                if (pane == NULL ||
-                    strcmp(pane->display_id, display_id) != 0)
-                    continue;
                 /* ADR 0187: under curvature the screen shows the content of
                    the warped point, so a click goes where the user sees it.
                    The same registry warp the shader draws with; the black
@@ -28327,20 +28360,11 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
                         hit_y = (float)(pane->pixel_region_y + (sy + 1.0) * 0.5 * h);
                     }
                 }
-            } else if (session->display_id[0] == '\0') {
-                /* A session with no display is rendered on the first one. */
-                if (output_index != 0)
-                    continue;
-            } else if (strcmp(session->display_id, display_id) != 0) {
-                continue;
             }
-            surface = find_surface_id(runtime, session->id);
-            if (surface == NULL || !surface->used)
-                continue;
-            surface_origin_px(runtime, surface, session, output_index,
-                              cell_width, cell_height, &origin_x, &origin_y);
-            width = surface->width * cell_width;
-            height = surface->height * cell_height;
+            origin_x = at.x;
+            origin_y = at.y;
+            width = at.w;
+            height = at.h;
             /* The inset belongs to the surface it surrounds: a click in it
                reports the nearest edge cell rather than being discarded. */
             if (hit_x < origin_x - BLIT_SURFACE_INSET_PX ||
@@ -28352,8 +28376,8 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
             *row = (int)((hit_y - origin_y) / (float)cell_height) + 1;
             if (*column < 1) *column = 1;
             if (*row < 1) *row = 1;
-            if (*column > surface->width) *column = surface->width;
-            if (*row > surface->height) *row = surface->height;
+            if (*column > width / cell_width) *column = width / cell_width;
+            if (*row > height / cell_height) *row = height / cell_height;
             if (px != NULL && py != NULL) {
                 /* One-based like a cell, and clamped to the surface the
                    same way, so the inset reports the nearest edge pixel. */
@@ -28396,8 +28420,9 @@ static void update_pointer_shape(BlitRuntime *runtime)
                 shape = BLIT_POINTER_SHAPE_DEFAULT;
         }
     }
-    /* A locked pointer is hidden wherever it is (ADR 0198). */
-    if (pointer_lock_session(runtime) != NULL)
+    /* A locked pointer is hidden wherever it is (ADR 0198), unless a route
+       confines it to its picture, where it stays shown (ADR 0225). */
+    if (pointer_lock_session(runtime) != NULL && !frame_input_confined(runtime, NULL))
         shape = BLIT_POINTER_SHAPE_HIDDEN;
     hidden = shape == BLIT_POINTER_SHAPE_HIDDEN;
     if (shape >= 0)
@@ -28652,8 +28677,9 @@ static void flush_mouse_motion(BlitRuntime *runtime)
         snprintf(report, sizeof(report), "\033[<%d;%d;%dM",
                  active_mouse_button(runtime) + mouse_modifier_bits(runtime) + 32,
                  runtime->pointer_lock_dx, runtime->pointer_lock_dy);
-        /* ADR 0225: the same raw sum, as relative motion, to a live route. */
-        if (frame_input_routes)
+        /* ADR 0225: the same raw sum, as relative motion, to a live route;
+           a confined one is sent the pointer's position instead. */
+        if (frame_input_routes && !frame_input_confined(runtime, NULL))
             frame_input_relative(runtime, runtime->pointer_lock_dx, runtime->pointer_lock_dy);
         runtime->pointer_lock_dx = 0;
         runtime->pointer_lock_dy = 0;
@@ -28978,23 +29004,37 @@ static void update_pointer_position(BlitRuntime *runtime,
     int old_output;
     int old_valid;
     int changed;
+    BlitRect box;
+    int confined = 0;
     if (runtime->output_count <= 0)
         return;
     /* ADR 0198: a locked pointer does not move. What moved is the raw count
        already summed for the program; the visible pointer's own motion is
-       undone, and nothing else hears of it. */
+       undone, and nothing else hears of it. ADR 0225: unless a route
+       confines it, when it moves as an unlocked pointer does, kept inside
+       the picture, and only that route hears of it, as a position. */
     if (pointer_lock_session(runtime) != NULL && runtime->pointer_valid) {
-        runtime->evdev_mouse_x = runtime->pointer_x;
-        runtime->evdev_mouse_y = runtime->pointer_y;
         if (runtime->pointer_lock_dx != 0 || runtime->pointer_lock_dy != 0) {
             runtime->motion_pending = 1;
             if (monotonic_us() >= runtime->motion_sent_us + BLIT_MOTION_PIXEL_US)
                 flush_mouse_motion(runtime);
         }
-        return;
+        confined = frame_input_confined(runtime, &box);
+        if (!confined) {
+            runtime->evdev_mouse_x = runtime->pointer_x;
+            runtime->evdev_mouse_y = runtime->pointer_y;
+            return;
+        }
+        if (runtime->evdev_mouse_x < box.x) runtime->evdev_mouse_x = (float)box.x;
+        if (runtime->evdev_mouse_y < box.y) runtime->evdev_mouse_y = (float)box.y;
+        if (runtime->evdev_mouse_x > box.x + box.w - 1)
+            runtime->evdev_mouse_x = (float)(box.x + box.w - 1);
+        if (runtime->evdev_mouse_y > box.y + box.h - 1)
+            runtime->evdev_mouse_y = (float)(box.y + box.h - 1);
+    } else {
+        runtime->pointer_lock_dx = 0;
+        runtime->pointer_lock_dy = 0;
     }
-    runtime->pointer_lock_dx = 0;
-    runtime->pointer_lock_dy = 0;
     old_x = runtime->pointer_x;
     old_y = runtime->pointer_y;
     old_output = runtime->pointer_output;
@@ -29044,6 +29084,10 @@ static void update_pointer_position(BlitRuntime *runtime,
     /* ADR 0225: over a routed picture, its position to the compositor. */
     if (frame_input_routes)
         frame_input_pointer(runtime);
+    /* Confined, the holder is sent its raw counts as before, and nothing
+       else hears of the motion: a pixel report would read as a delta. */
+    if (confined)
+        return;
     {
         char input_event[512];
         int target_col = 0;

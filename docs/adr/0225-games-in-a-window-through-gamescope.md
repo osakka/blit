@@ -287,8 +287,50 @@ desktop:
   shown when Steam is installed, with pointer capture off by default: under
   capture Blit hides its pointer and gamescope's own cursor is not in the
   stream, so Big Picture's menus would have no visible pointer (seen live on
-  the mini PC). The earlier Steam-only app (Steamer, then steamwin) folds
+  the mini PC; lifted by "Hold modes", below). The earlier Steam-only app (Steamer, then steamwin) folds
   into it.
+
+**Hold modes, owner 2026-11-09 (0.3.70).** Under capture (the desktop's
+`?7701`) Blit hid its pointer and sent gamescope raw relative motion, and
+gamescope's stream carries no cursor, so in Steam's menus there was no
+pointer to be seen. Drawing a pointer of Blit's own driven by the same
+relative stream was considered and rejected: checked against gamescope
+3.16.22's source, the two would drift apart, and nothing tells Blit where
+gamescope's pointer has got to. So each route has a hold mode,
+set by the desktop with `INPUT hold <image-id> relative|confine` (wire text
+in `docs/api.md`):
+
+- `relative`, the default, is the behaviour above: for games that turn with
+  the mouse and want endless motion.
+- `confine`, for menus and pointer-driven games: while the session holds
+  `?7701`, the route is live and its picture is drawn on the pointer's
+  output, Blit's pointer stays shown with its usual shape, moves as an
+  unlocked pointer does and is kept inside the picture's drawn rectangle
+  (its topmost placement, the one the absolute mapping tries first), and
+  the route is sent that point as an **absolute** position through the
+  same mapping, never relative motion. Absolute positions are the one way
+  to make gamescope's pointer and the drawn one the same point: gamescope
+  warps its pointer to what it is sent (`wlserver_mousewarp`), so there is
+  nothing to drift. What the lock adds over no lock is that the pointer
+  cannot leave the window and that the desktop's other windows hear
+  nothing, which is what capture is for.
+- Buttons and the wheel go to the route as in either mode, and the
+  session still gets the lock's raw delta reports, which the desktop
+  ignores for this window; nothing else about the lock changes. Where the
+  picture is not drawn, or the pointer is on another output, the lock is
+  `relative`, so a hold never strands the pointer.
+- The hold is still the desktop's to take and release (ADR 0198):
+  `INPUT hold` takes and gives back nothing, and Release Pointer, a focus
+  change, a VT switch, the image deleted or the route ending end the lock
+  exactly as before. The pointer then stays where it was, inside the
+  picture.
+- One function, `frame_input_confined` (`src/blit_frames_input.h`),
+  answers "is this lock confined, and to which rectangle"; the pointer's
+  visibility (`update_pointer_shape`) and its motion
+  (`update_pointer_position`, `flush_mouse_motion`) both ask it.
+
+With `confine`, the Screens app can leave pointer capture on for Steam,
+which "Launch" above had to turn off.
 
 **Independence.** The bridge talks only PipeWire (frames in) and EIS (input
 out); the two gamescope-specific details (finding the node by name, asking
@@ -411,6 +453,20 @@ regresses, a wlroots compositor fits behind the same bridge.
   list, and that the binary is the bridge at the package's version. Under
   `--no-place` the bridge no longer sends `INPUT on`/`off`; the desktop app
   does (`gamescope_bridge_gate`).
+
+- **Hold modes, 2026-11-09** (0.3.70, `src/blit_frames_input.h`,
+  `frame_input_gate`): `INPUT hold` answered `OK input 7` for `confine` and
+  `relative` and `ERROR INPUT <id> EINVAL` for an unknown or missing mode,
+  an image with no route and a malformed line; each route's `hold` in
+  `frames.input`, `relative` by default. Against the recording stand-in
+  libei: under `relative` the pointer hidden and still and the raw sum sent
+  as relative motion, as before; under `confine` the pointer shown, moved
+  by the motion, held at both far corners of a 160x80 picture, the
+  compositor sent exactly the matching absolute positions and no relative
+  motion, the holder its raw deltas, a click sent; the picture's placement
+  removed, the pointer hidden and relative motion sent, and placed again,
+  confined again; after `?7701l` the pointer where it was and ordinary
+  absolute motion. Not yet run against libeis or gamescope.
 
 ## Evidence (planned)
 

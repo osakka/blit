@@ -22,7 +22,9 @@ local (frame_input_gate.sh): what needs no libeis, on any host.
     `OK input 12` for a second image on the same channel; `frames.input`
     routes going off, on, live and back with INPUT on/off and focus; one
     route on per session, on one channel and across two; and none left
-    when the channel closes.
+    when the channel closes. `INPUT hold`: `EINVAL` for an image with no
+    route, a missing or unknown mode; `OK input 7` for `confine` and
+    `relative`, the route's `hold` saying so, `relative` by default.
 
 eis (frame_input_eis_gate.sh): what reaches a compositor, against
   tools/tests/eis_receiver.c (libeis.so.1) and the system's libei.so.1;
@@ -41,7 +43,15 @@ eis (frame_input_eis_gate.sh): what reaches a compositor, against
     reaching the region's, and nothing outside it;
   - the compositor dropping the connection: `ERROR INPUT 10 ENOENT` on the
     channel at once, the route ended (`INPUT on 10` is then EINVAL);
-  - relative motion, summed exactly, while the session holds ?7701;
+  - relative motion, summed exactly, while the session holds ?7701, the
+    pointer hidden and still (hold `relative`, the default);
+  - hold `confine` under ?7701: the pointer shown, moved by the motion and
+    kept inside the picture's drawn rectangle (both far corners), the
+    compositor sent the same point as absolute positions and no relative
+    motion, the holder still sent its raw deltas, buttons sent; the picture
+    no longer drawn, the lock is relative again (hidden, raw motion); after
+    `?7701l` the pointer stays where it was and moves as an ordinary
+    absolute pointer over the picture;
   - several routes, a compositor each: two images on one channel each get
     a route; `INPUT on B` releases what A held and stops A before B starts
     (checked in the stand-in's cross-route order, EI_STUB_ORDER); a late
@@ -128,6 +138,17 @@ class Server:
 
     def input(self, session):
         return self.api('GET', '/v1/terminal-sessions/%s' % session)['frames']['input']
+
+    def hidden(self):
+        """Whether Blit's pointer is hidden, as drawn."""
+        return self.api('GET', '/v1/settings')['effective']['pointer_shown']['hidden']
+
+    def pointer(self):
+        p = self.api('GET', '/v1/diagnostics')['render']['pointer']
+        return (p['x'], p['y'])
+
+    def locked(self, session):
+        return self.api('GET', '/v1/terminal-sessions/%s' % session)['mouse_reporting']['pointer_lock']
 
     def stop(self):
         self.process.terminate()
@@ -303,6 +324,8 @@ def local():
             ('INPUT on\n', 0), ('INPUT off\n', 0), ('INPUT on 0\n', 0), ('INPUT on 7 7\n', 0),
             ('INPUT eis relative/eis 7\n', 7), ('INPUT eis /%s 7\n' % ('x' * 120), 7),
             ('INPUT on 7\n', 7), ('INPUT off 7', 7),
+            ('INPUT hold 7 confine\n', 7), ('INPUT hold 7 relative', 7), ('INPUT hold\n', 0),
+            ('INPUT hold 0 confine\n', 0), ('INPUT hold confine 7\n', 0), ('INPUT hold 07 confine\n', 0),
         ]
         for text, image in malformed:
             got = ch.ask(text)
@@ -358,12 +381,24 @@ def local():
         got = ch.ask('INPUT eis %s 7\n' % own)
         check(got == b'OK input 7\n', 'a well-formed INPUT was answered %r' % got)
         info = server.input(a.id)
-        check([{k: r[k] for k in ('image', 'state', 'region')} for r in info['routes']] ==
-              [{'image': 7, 'state': 'off', 'region': ''}] and info['last_error'] == '' and
+        check([{k: r[k] for k in ('image', 'state', 'hold', 'region')} for r in info['routes']] ==
+              [{'image': 7, 'state': 'off', 'hold': 'relative', 'region': ''}] and info['last_error'] == '' and
               info['routes'][0]['pointer']['miss'] == 'none-yet',
               'frames.input after OK %s' % info)
         got = ch.ask('INPUT eis %s 7\n' % own)
         check(got == b'ERROR INPUT 7 EBUSY\n', 'the same image twice was answered %r' % got)
+        # The hold mode: answered, shown, and refused for an unknown mode.
+        holds = []
+        for text, answer, hold in (('INPUT hold 7 confine\n', b'OK input 7\n', 'confine'),
+                                   ('INPUT hold 7 sideways\n', b'ERROR INPUT 7 EINVAL\n', 'confine'),
+                                   ('INPUT hold 7\n', b'ERROR INPUT 7 EINVAL\n', 'confine'),
+                                   ('INPUT hold 7 confine \n', b'ERROR INPUT 7 EINVAL\n', 'confine'),
+                                   ('INPUT hold 7 relative', b'OK input 7\n', 'relative')):
+            got = ch.ask(text)
+            check(got == answer, '%r was answered %r' % (text, got))
+            check(route(server.input(a.id), 7)['hold'] == hold,
+                  'after %r the hold is %s' % (text, route(server.input(a.id), 7)))
+            holds.append(got.split()[0].decode())
         got = ch.ask('INPUT eis %s 12\n' % own)
         check(got == b'OK input 12\n', 'a second image on the channel was answered %r' % got)
         check(sorted(r['image'] for r in server.input(a.id)['routes']) == [7, 12],
@@ -400,7 +435,7 @@ def local():
         ch.close()
         wait_for(lambda: server.input(a.id)['routes'] == [], 'the routes outlived their channel')
         results.append('ok=OK ebusy=same_image two_images=two_routes states=off,on,live,off,live,none '
-                       'one_on=channel+session')
+                       'one_on=channel+session hold=%s' % ','.join(holds))
     finally:
         server.stop()
         for s in keep:
@@ -465,6 +500,89 @@ class Receiver:
             self.process.terminate()
             self.process.wait(5)
         return open(self.log).read() if os.path.exists(self.log) else ''
+
+
+def confined(server, a, ch, receiver, place, placement, point, origin):
+    """Hold `confine` (ADR 0225, hold modes): under ?7701 the pointer stays
+    shown, moves inside the picture and is sent as a position."""
+    place(a, 7, 3, 5, 20, 5)
+    at = wait_for(lambda: (lambda p: p if p['width'] == 160 else None)(placement()),
+                  'placement 160x80 was not drawn')
+    check(ch.ask('INPUT hold 7 confine\n') == b'OK input 7\n', 'INPUT hold confine was refused')
+    check(route(server.input(a.id), 7)['hold'] == 'confine', 'hold %s' % server.input(a.id))
+    point(at, 10, 10, 'absolute before the confined lock')
+
+    def at_point(sx, sy):
+        return (origin[0] + at['x'] + sx, origin[1] + at['y'] + sy)
+
+    def abs_line(sx, sy):
+        return 'abs %.2f %.2f' % (sx * REGION_W / at['width'], sy * REGION_H / at['height'])
+
+    def deltas():
+        return re.findall(rb'\x1b\[<35;(-?\d+);(-?\d+)M', a.sent())
+
+    a.write('\033[?7701h')
+    wait_for(lambda: server.locked(a.id), 'the confined lock was not engaged')
+    time.sleep(0.3)
+    check(not server.hidden(), 'the confined lock hid the pointer')
+    check(server.pointer() == at_point(10, 10), 'the pointer moved when the lock engaged: %s' % (server.pointer(),))
+
+    # Motion moves the pointer, and the compositor is sent the same point;
+    # the holder is still sent its raw deltas.
+    before = len(deltas())
+    server.inject({'kind': 'pointer_relative', 'dx': 5, 'dy': 3})
+    receiver.expect([abs_line(15, 13)], 'confined motion')
+    check(server.pointer() == at_point(15, 13), 'the confined pointer is at %s' % (server.pointer(),))
+    wait_for(lambda: deltas()[before:] == [(b'5', b'3')], lambda: 'the holder was sent %r' % deltas()[before:])
+    # Clamped at the far corner, then the near one.
+    server.inject({'kind': 'pointer_relative', 'dx': 10000, 'dy': 10000})
+    receiver.expect([abs_line(at['width'] - 1, at['height'] - 1)], 'confined to the far corner')
+    check(server.pointer() == at_point(at['width'] - 1, at['height'] - 1),
+          'the pointer past the far corner is at %s' % (server.pointer(),))
+    server.inject({'kind': 'pointer_relative', 'dx': 3, 'dy': 0})
+    receiver.nothing('motion against the far edge')
+    server.inject({'kind': 'pointer_relative', 'dx': -10000, 'dy': -10000})
+    receiver.expect([abs_line(0, 0)], 'confined to the top-left corner')
+    check(server.pointer() == at_point(0, 0), 'the pointer past the top-left is at %s' % (server.pointer(),))
+    ptr = route(server.input(a.id), 7)['pointer']
+    check(ptr['miss'] == '' and ptr['sent'] == [0.0, 0.0] and ptr['draw'][2:] == [at['width'], at['height']],
+          'the diagnostic under confine: %s' % ptr)
+    # Buttons still go to the compositor, and to the holder in the lock's form.
+    server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+    server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+    receiver.expect(['button 272 press', 'button 272 release'], 'a click under confine')
+    wait_for(lambda: b'\x1b[<0;0;0m' in a.sent(), 'the holder was not sent the click')
+    check(not server.hidden(), 'the pointer was hidden under confine')
+
+    # The picture no longer drawn: the lock is relative again, hidden and
+    # raw, and the pointer does not move; drawn again, confined again.
+    a.write('\033_Ga=d,d=i,i=7,q=2\033\\')
+    wait_for(lambda: a.graphics(7) is not None and not a.graphics(7)['placements'],
+             'the placement was not removed')
+    wait_for(lambda: server.hidden(), 'an undrawn confined picture did not hide the pointer')
+    server.inject({'kind': 'pointer_relative', 'dx': 4, 'dy': 2})
+    receiver.expect(['rel 4 2'], 'relative motion with the picture not drawn')
+    check(server.pointer() == at_point(0, 0), 'the pointer moved with the picture not drawn')
+    place(a, 7, 3, 5, 20, 5)
+    wait_for(lambda: (lambda p: p if p['width'] == 160 else None)(placement()), 'the picture was not drawn again')
+    wait_for(lambda: not server.hidden(), 'the picture drawn again did not show the pointer')
+    server.inject({'kind': 'pointer_relative', 'dx': 30, 'dy': 20})
+    receiver.expect([abs_line(30, 20)], 'confined again')
+
+    # Given back: the pointer stays where it was, and later motion is an
+    # ordinary absolute pointer over the picture.
+    a.write('\033[?7701l')
+    wait_for(lambda: not server.locked(a.id), 'the confined lock was not given back')
+    time.sleep(0.2)
+    check(server.pointer() == at_point(30, 20), 'the pointer moved when the lock ended: %s' % (server.pointer(),))
+    check(not server.hidden(), 'the pointer was hidden after the lock')
+    receiver.nothing('the lock ending')
+    server.inject({'kind': 'pointer_relative', 'dx': 20, 'dy': 10})
+    receiver.expect([abs_line(50, 30)], 'ordinary motion after the confined lock')
+    check(server.pointer() == at_point(50, 30), 'the pointer after the lock is at %s' % (server.pointer(),))
+    check(ch.ask('INPUT hold 7 relative\n') == b'OK input 7\n', 'INPUT hold relative was refused')
+    return 'confine=shown,clamped@0,0+%d,%d,absolute_only,raw_to_holder,buttons,undrawn=relative,released=absolute' % (
+        at['width'] - 1, at['height'] - 1)
 
 
 def multi(server, a, work, stub):
@@ -737,10 +855,14 @@ def eis(stub=False):
         miss = [r for r in server.input(a.id)['routes'] if r['image'] == 7][0]['pointer']['miss']
         check(miss == 'outside-picture', 'the diagnostic for a pointer outside the picture: %r' % miss)
 
-        # Pointer lock: relative motion, the raw sum, and no absolute.
+        # Pointer lock: relative motion, the raw sum, and no absolute; the
+        # pointer hidden and still (hold relative, the default).
+        check(route(server.input(a.id), 7)['hold'] == 'relative', 'the default hold %s' % server.input(a.id))
+        check(not server.hidden(), 'the pointer was hidden before the lock')
         a.write('\033[?7701h')
-        wait_for(lambda: server.api('GET', '/v1/terminal-sessions/%s' % a.id)['mouse_reporting']['pointer_lock'],
-                 'the lock was not engaged')
+        wait_for(lambda: server.locked(a.id), 'the lock was not engaged')
+        wait_for(lambda: server.hidden(), 'the relative lock did not hide the pointer')
+        still = server.pointer()
         for _ in range(10):
             server.inject({'kind': 'pointer_relative', 'dx': 7, 'dy': -3})
 
@@ -755,9 +877,12 @@ def eis(stub=False):
             return moves if sums == [70, -30] else None
         moves = wait_for(summed, 'relative motion did not sum to 70,-30: %s' % receiver.lines()[receiver.seen:])
         receiver.seen += len(moves)
+        check(server.pointer() == still, 'the relative lock moved the pointer: %s -> %s' % (still, server.pointer()))
         a.write('\033[?7701l')
-        wait_for(lambda: not server.api('GET', '/v1/terminal-sessions/%s' % a.id)['mouse_reporting']['pointer_lock'],
-                 'the lock was not given back')
+        wait_for(lambda: not server.locked(a.id), 'the lock was not given back')
+        wait_for(lambda: not server.hidden(), 'the pointer was not shown after the lock')
+
+        confine = confined(server, a, ch, receiver, place, placement, point, origin)
 
         # The channel closed: released, stopped, disconnected.
         key(36, 1)
@@ -822,8 +947,8 @@ def eis(stub=False):
     print('%s_PASS keys=ordered repeats=dropped off+unfocused+console=silent '
           'release_all=off,focus,console,close,delete scroll=discrete region=%dx%d absolute=%s '
           'far_corner=region_far_corner outside=silent dropped=ERROR_INPUT_10_ENOENT '
-          'relative=70,-30_in_%d events=%d frames=%d names=%s %s'
-          % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), sent, frames, names, several))
+          'relative=70,-30_in_%d,hidden,still %s events=%d frames=%d names=%s %s'
+          % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), confine, sent, frames, names, several))
 
 
 if __name__ == '__main__':

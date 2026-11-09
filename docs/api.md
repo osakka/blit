@@ -1884,6 +1884,28 @@ trailing newline is optional.
   only while it is on, its connection's session is Blit's focused session,
   the console is Blit's and its image exists; the desktop, which alone
   knows which of its windows has focus, sends these.
+- `INPUT hold <image-id> relative|confine` says what the route does while
+  its session holds pointer lock (`?7701`); it may be sent any time after
+  `INPUT eis`, and neither takes nor gives back the lock, which stays the
+  desktop's (ADR 0198). A new route is `relative`. Answered
+  `OK input <image-id>`, or `ERROR INPUT <image-id> EINVAL` for an unknown
+  mode, an image with no route on this connection, or a malformed line (id
+  0 when it has no readable one). An older Blit answers every `INPUT hold`
+  `ERROR INPUT 0 EINVAL`.
+  - `relative`: Blit's pointer is hidden and still, and the route is sent
+    relative motion, the raw counts.
+  - `confine`: while the route is live and its picture is drawn on the
+    output the pointer is on, Blit's pointer stays shown with its usual
+    shape and moves as an unlocked pointer does, kept inside the picture's
+    drawn rectangle (its topmost placement), and the route is sent that
+    point as an absolute position, mapped as below, so the compositor's
+    pointer and the drawn one are the same point; it is sent no relative
+    motion. Buttons and the wheel go to the route as always, and the
+    session gets the lock's reports as it does under `relative`. When the
+    picture is not drawn, or the pointer is on another output, the route
+    behaves as `relative`, so a hold never strands the pointer. When the
+    lock ends (`?7701l`, focus, the console, the image or the route gone),
+    the pointer stays where it was, inside the picture.
 - While live, Blit sends evdev key codes as they happen, press and release
   (the compositor makes its own repeats); buttons and scroll; the pointer
   as an absolute position while it is over the image's drawn rectangle,
@@ -1891,8 +1913,9 @@ trailing newline is optional.
   and size, or the image's latest frame size when the device reports no
   bounded region: gamescope offers one 2147483647 pixels square, meaning
   its own output's pixels, which its stream matches), wherever and however
-  large the picture is placed; and relative motion instead while the
-  session holds pointer lock (`?7701`). Keys still reach the session as
+  large the picture is placed; and, while the session holds pointer lock
+  (`?7701`), relative motion instead, or under `INPUT hold ... confine` the
+  confined pointer's position. Keys still reach the session as
   before, so the desktop's own keys (Release Pointer, Leave Full Screen)
   keep working.
 - When a route stops being live (`INPUT off`, another route turned on, the
@@ -1902,8 +1925,8 @@ trailing newline is optional.
   scroll notches and motions sent, all routes of the session), `last_error`
   (an INPUT code, or `eis-refused`/`eis-disconnected`), and `routes`, one
   per route: its `image`, `state` (`off`, `on` while on but not live, or
-  `live`), the compositor's absolute `region` (`WxH+X+Y`, empty until it
-  offers one), and `pointer`, the last absolute pointer for diagnosing its
+  `live`), `hold` (`relative` or `confine`), the compositor's absolute
+  `region` (`WxH+X+Y`, empty until it offers one), and `pointer`, the last absolute pointer for diagnosing its
   mapping: `surface` (where it was on the session's surface, in pixels),
   `draw` (the picture's drawn rectangle it was mapped through, x, y, width,
   height), `sent` (the position sent to the compositor), and `miss` (empty

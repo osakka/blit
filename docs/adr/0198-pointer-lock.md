@@ -28,7 +28,9 @@ behaviour.
   - The visible pointer does not move and is hidden. Every motion source
     (evdev mouse, touchpad, API injection) still adds into the pointer, and
     that motion is undone at the one place the pointer is moved,
-    `update_pointer_position`.
+    `update_pointer_position`. (Since 0.3.70 a frame channel's input route
+    in hold `confine` keeps the pointer shown and moving inside its picture
+    instead; ADR 0225, "Hold modes".)
   - The program is sent **raw counts**, before sensitivity and
     acceleration, as Boxer asked: aim must not depend on hand speed. The
     form is SGR-Pixels with signed deltas, `CSI < b ; dx ; dy M`, summed

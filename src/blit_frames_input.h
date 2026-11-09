@@ -10,6 +10,9 @@
            OK input <image id> / ERROR INPUT <image id> <code>
        INPUT on <image id>\n   INPUT off <image id>\n
            whether that picture's window has the keys
+       INPUT hold <image id> relative|confine\n
+           OK input <image id> / ERROR INPUT <image id> EINVAL
+           what the route does while its session holds the pointer
 
    Each route is one image's, so one channel carries the routes of several
    pictures (a desktop multiplexes its windows over one channel per display,
@@ -40,6 +43,9 @@
    release, no repeats), buttons, wheel notches, and either the absolute
    pointer over the image's drawn rectangle or, under pointer lock (?7701),
    the raw relative motion, are sent; the session gets its keys as before.
+   A route in hold `confine` keeps the pointer instead, under the lock:
+   Blit's pointer stays shown, moves inside the picture's drawn rectangle,
+   and is sent as an absolute position (frame_input_confined).
    When it stops being live, every key and button pressed through it is
    released first, then emulation stops. Included at the end of
    blit_frames.h. */
@@ -118,6 +124,7 @@ struct BlitFrameInput {
     int fd;                 /* ei_get_fd, polled in Blit's loop */
     unsigned int image_id;
     int on;                 /* INPUT on / INPUT off */
+    int confine;            /* INPUT hold: 0 relative (the default), 1 confine */
     int image_seen;         /* the image has existed: its absence is a delete */
     int connected;          /* EI_EVENT_CONNECT seen */
     BlitEiDevice devices[BLIT_EI_DEVICES];
@@ -689,6 +696,74 @@ static void frame_input_pointer(BlitRuntime *runtime)
     }
 }
 
+/* ADR 0225, hold modes: whether the pointer lock is confined, and to which
+   rectangle. It is while the holder's live route is in hold `confine`, its
+   picture is drawn and the pointer is on the output that shows it. `box`,
+   when asked for, is the picture's topmost draw (the one the mapping above
+   tries first) in the pointer's coordinates, cut to the session's surface
+   and its display, so a pointer kept inside it always maps. Otherwise the
+   lock is relative, as ADR 0198 has it: hidden, still, raw motion sent. The
+   pointer's visibility and its motion both ask this, and nothing else. */
+static int frame_input_confined(BlitRuntime *runtime, BlitRect *box)
+{
+    static BlitGraphicsDrawList list;
+    BlitSession *holder;
+    int i, k;
+    if (!frame_input_routes || !runtime->pointer_valid ||
+        (holder = pointer_lock_session(runtime)) == NULL)
+        return 0;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        if (!client->used || client->session_id != holder->id)
+            continue;
+        for (k = 0; k < client->input_capacity; ++k) {
+            BlitFrameInput *in = client->inputs[k];
+            BlitGraphicsImage *image;
+            const BlitGraphicsDraw *d;
+            const BlitRect *bounds;
+            BlitRect surface;
+            int count, display_index, x0, y0, x1, y1;
+            if (in == NULL || !frame_input_live(runtime, client, in))
+                continue;
+            /* The live route is the only one: its hold decides. */
+            image = graphics_image_find(holder, in->image_id);
+            display_index = display_index_for_output(runtime, runtime->pointer_output);
+            if (!in->confine || image == NULL || display_index < 0 ||
+                !session_surface_px(runtime, holder, runtime->pointer_output, &surface))
+                return 0;
+            count = blit_graphics_collect(&image, 1, &list);
+            if (count < 1)
+                return 0;
+            d = &list.draws[count - 1];
+            bounds = &runtime->displays[display_index].bounds;
+            /* The draw, in the surface's pixels, cut to the surface; then on
+               the display, cut to it. */
+            x0 = d->x > 0 ? d->x : 0;
+            y0 = d->y > 0 ? d->y : 0;
+            x1 = d->x + d->width < surface.w ? d->x + d->width : surface.w;
+            y1 = d->y + d->height < surface.h ? d->y + d->height : surface.h;
+            x0 += bounds->x + surface.x;
+            x1 += bounds->x + surface.x;
+            y0 += bounds->y + surface.y;
+            y1 += bounds->y + surface.y;
+            if (x0 < bounds->x) x0 = bounds->x;
+            if (y0 < bounds->y) y0 = bounds->y;
+            if (x1 > bounds->x + bounds->w) x1 = bounds->x + bounds->w;
+            if (y1 > bounds->y + bounds->h) y1 = bounds->y + bounds->h;
+            if (x1 <= x0 || y1 <= y0)
+                return 0;
+            if (box != NULL) {
+                box->x = x0;
+                box->y = y0;
+                box->w = x1 - x0;
+                box->h = y1 - y0;
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Under pointer lock: the raw sum the locked program is sent, as relative
    motion, to the live route only (one of the lock holder's). */
 static void frame_input_relative(BlitRuntime *runtime, int dx, int dy)
@@ -742,6 +817,14 @@ static int frame_input_holds(const BlitSession *session, unsigned int image_id)
                 return 1;
     }
     return 0;
+}
+
+/* `OK input <image id>`. */
+static void frame_input_accept(BlitFrameClient *client, unsigned int image_id)
+{
+    char line[48];
+    snprintf(line, sizeof(line), "OK input %u\n", image_id);
+    frame_reply(client->fd, line);
 }
 
 /* This channel's route for an image: its slot, or -1. */
@@ -858,11 +941,7 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
     client->inputs[slot] = in;
     ++frame_input_routes;
     frame_input_error(session, "");
-    {
-        char line[48];
-        snprintf(line, sizeof(line), "OK input %u\n", image_id);
-        frame_reply(client->fd, line);
-    }
+    frame_input_accept(client, image_id);
 }
 
 /* `INPUT on <image-id>`: every other route of the session, on any of its
@@ -908,7 +987,8 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     const char *id_text = NULL, *path_text = NULL;
     size_t path_length = 0;
     unsigned int id;
-    int kind = 0;  /* 'e' eis, 'n' on, 'f' off */
+    int kind = 0;  /* 'e' eis, 'n' on, 'f' off, 'h' hold */
+    int confine = -1;  /* INPUT hold's mode: 0 relative, 1 confine */
     ssize_t i;
 
     if (length > 0 && message[length - 1] == '\n')
@@ -928,6 +1008,15 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     } else if (strncmp(line, "INPUT off ", 10) == 0) {
         kind = 'f';
         id_text = line + 10;
+    } else if (strncmp(line, "INPUT hold ", 11) == 0) {
+        /* The id, then the mode: the id is cut out so it reads alone. */
+        char *mode = strchr(line + 11, ' ');
+        kind = 'h';
+        id_text = line + 11;
+        if (mode != NULL) {
+            *mode++ = '\0';
+            confine = strcmp(mode, "confine") == 0 ? 1 : strcmp(mode, "relative") == 0 ? 0 : -1;
+        }
     } else if (strncmp(line, "INPUT eis ", 10) == 0) {
         kind = 'e';
         path_text = line + 10;
@@ -941,13 +1030,18 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
         frame_input_refuse(runtime, client, 0, "EINVAL");
         return;
     }
-    if (kind == 'n' || kind == 'f') {
+    if (kind == 'n' || kind == 'f' || kind == 'h') {
         int slot = frame_input_slot(client, id);
-        if (slot < 0) {
+        if (slot < 0 || (kind == 'h' && confine < 0)) {
             frame_input_refuse(runtime, client, id, "EINVAL");
             return;
         }
-        if (kind == 'n') {
+        if (kind == 'h') {
+            /* Takes and gives back nothing: the hold is the desktop's
+               (ADR 0198). A lock held now follows the new mode at once. */
+            client->inputs[slot]->confine = confine;
+            frame_input_accept(client, id);
+        } else if (kind == 'n') {
             frame_input_turn_on(runtime, client, client->inputs[slot]);
         } else {
             client->inputs[slot]->on = 0;
@@ -965,8 +1059,9 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
 }
 
 /* frames.input: the session's counts and every route of its channels, with
-   its image, its state (off, on but not live, live) and the compositor's
-   region. Routes that do not fit are left out; the object stays whole. */
+   its image, its state (off, on but not live, live), its hold (relative or
+   confine) and the compositor's region. Routes that do not fit are left
+   out; the object stays whole. */
 static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
                                char *out, size_t capacity)
 {
@@ -983,15 +1078,16 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            char entry[320];
+            char entry[352];
             if (in == NULL)
                 continue;
-            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"state\":\"%s\",\"region\":\"%s\","
-                         "\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
+            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"state\":\"%s\",\"hold\":\"%s\","
+                         "\"region\":\"%s\",\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
                          "\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
                          first ? "" : ",", in->image_id,
                          !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
-                         in->region, in->last_surface[0], in->last_surface[1],
+                         in->confine ? "confine" : "relative", in->region,
+                         in->last_surface[0], in->last_surface[1],
                          in->last_draw[0], in->last_draw[1], in->last_draw[2], in->last_draw[3],
                          in->last_sent[0], in->last_sent[1],
                          in->last_miss != NULL ? in->last_miss : "none-yet");
