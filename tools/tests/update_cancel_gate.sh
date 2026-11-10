@@ -29,7 +29,8 @@ cleanup()
 trap cleanup EXIT INT TERM
 
 printf '%s\n' test-token >"$token_file"
-BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="${TMPDIR:-/tmp}" env $GATE_DISPLAY_ENV \
+env $GATE_SERVER_ENV $GATE_DISPLAY_ENV \
+    BLIT_UPDATE_TOKEN_FILE="$token_file" BLIT_UPDATE_DIRECTORY="${TMPDIR:-/tmp}" \
     "$binary" "$port" >"$log" 2>&1 &
 pid=$!
 ready=0

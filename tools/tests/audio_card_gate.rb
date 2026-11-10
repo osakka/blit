@@ -163,7 +163,7 @@ ELEMENTS
 # mixer is not, and the two have to be reported separately.
 card_fixture(dev, proc_root, 2, 'USB', %w[0c], nil)
 
-server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'BLIT_SND_ROOT' => dev, 'BLIT_ASOUND_ROOT' => proc_root,
                  },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

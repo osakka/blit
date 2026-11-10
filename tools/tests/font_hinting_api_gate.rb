@@ -53,7 +53,7 @@ end
 
 $server = nil
 def start(env)
-  $server = spawn({ **gate_display_env, 'BLIT_BIND_ADDRESS' => '127.0.0.1',
+  $server = gate_spawn({ **gate_display_env, 'BLIT_BIND_ADDRESS' => '127.0.0.1',
                     'BLIT_AUTH_TOKEN' => '', 'BLIT_LOGIN_AUTOSTART' => '0',
                     'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_FONT_SCALE' => '1',
                     'BLIT_FONT_ROOT' => File.join(ROOT, 'assets/fonts') }.merge(env),

@@ -82,7 +82,7 @@ def json(method, path, body = nil)
   JSON.parse(response.body) rescue {}
 end
 
-server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do

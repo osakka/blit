@@ -51,7 +51,7 @@ def get(path)
   JSON.parse(response.body)
 end
 
-server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do

@@ -105,7 +105,7 @@ Dir.mktmpdir('blit-auxiliary') do |root|
     'BLIT_GATE_RESULT'=>result,'BLIT_GATE_OWNER_FILE'=>owner,
     'BLIT_HIBR_OBSERVER'=>observer,'BLIT_HIBR_PLACER'=>placer,'BLIT_AUXILIARY_LAUNCHER'=>launcher}
   begin
-    $pid = spawn('sudo','-n','env',*env.map { |k,v| "#{k}=#{v}" },BINARY,PORT.to_s,out:log,err:[:child,:out])
+    $pid = spawn(*gate_sudo_argv(env,BINARY,PORT.to_s),out:log,err:[:child,:out])
     await('server') { request('GET','/v1/version') }
     display = request('GET','/v1/displays')['displays'].first
     output = display.dig('state','connector') || display['name']
@@ -165,7 +165,7 @@ Dir.mktmpdir('blit-auxiliary') do |root|
     request('POST','/v1/auxiliary-displays/apply',{'bindings'=>[]})
     check(status['bindings'].empty?,'clear did not replace live intent')
     stop
-    $pid=spawn('sudo','-n','env',*env.map { |k,v| "#{k}=#{v}" },BINARY,PORT.to_s,out:log,err:[:child,:out])
+    $pid=spawn(*gate_sudo_argv(env,BINARY,PORT.to_s),out:log,err:[:child,:out])
     restored=await('restart defaults') { q=status; q if q['source']=='startup' }
     check(restored.dig('bindings',0,'output')=='disconnected-connector','restart did not load saved defaults')
     stop

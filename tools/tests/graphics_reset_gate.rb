@@ -41,7 +41,7 @@ def json(path)
   JSON.parse(response.body)
 end
 
-server = spawn({ **gate_display_env,
+server = gate_spawn({ **gate_display_env,
                  'BLIT_PSF_FONT' => FONT,
                  'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
                  },

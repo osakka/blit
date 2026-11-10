@@ -119,7 +119,7 @@ DEVICE_A = 'input-node-event0'
 DEVICE_B = 'input-node-event1'
 at_exit { FileUtils.remove_entry(INPUT_ROOT) rescue nil }
 
-server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  'BLIT_INPUT_ROOT' => INPUT_ROOT,
                  },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

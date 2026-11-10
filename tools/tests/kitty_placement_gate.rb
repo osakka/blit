@@ -74,7 +74,7 @@ def check(condition, message)
   warn "kitty-placement gate: FAIL #{message}"
 end
 
-server = spawn({ **gate_display_env,
+server = gate_spawn({ **gate_display_env,
                  'BLIT_PSF_FONT' => FONT,
                  },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

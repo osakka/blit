@@ -15,7 +15,7 @@ req=lambda do |method,path,body=nil|
   r.body.to_s.empty? ? nil : JSON.parse(r.body)
 end
 Dir.mktmpdir('blit-session-log-gate') do |work|
-  pid=spawn(TestProfile.environment.merge('DT_LOG'=>nil),TestProfile.binary,base.port.to_s,
+  pid=gate_spawn(TestProfile.environment.merge('DT_LOG'=>nil),TestProfile.binary,base.port.to_s,
     out:File.join(work,'server.log'),err:[:child,:out])
   paths=[]
   begin

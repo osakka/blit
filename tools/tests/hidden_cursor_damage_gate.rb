@@ -17,7 +17,7 @@ env = {
   **gate_display_env,
   
 }
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+pid = gate_spawn(env, 'build/blit/blit-server', port.to_s,
                     out: log, err: [:child, :out])
 
 at_exit do

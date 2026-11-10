@@ -125,7 +125,7 @@ Dir.mktmpdir('blit-under-text-picture') do |root|
         esac
     done
   SH
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   code, created = request('POST', '/v1/terminal-sessions',
                           { command: '/bin/sh', arguments: [script], pane_id: 'pane-display-1-1',

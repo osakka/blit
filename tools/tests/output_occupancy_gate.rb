@@ -39,7 +39,7 @@ failures = []
 
 def with_server(port, environment)
   base = URI("http://127.0.0.1:#{port}")
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
                    }
                    .merge(environment),

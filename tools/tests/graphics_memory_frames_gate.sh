@@ -7,4 +7,4 @@ cd "$ROOT"
 . tools/tests/gate_display.sh
 gate_display_setup
 trap gate_display_cleanup EXIT
-env $GATE_DISPLAY_ENV python3 tools/tests/graphics_memory_frames_gate.py
+BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools/tests/graphics_memory_frames_gate.py

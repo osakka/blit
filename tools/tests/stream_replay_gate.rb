@@ -16,7 +16,7 @@ env = {
   **gate_display_env,
   'BLIT_COMMAND_ALLOWLIST' => '/bin/sh'
 }
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+pid = gate_spawn(env, 'build/blit/blit-server', port.to_s,
                     out: log_path, err: [:child, :out])
 
 def http_request(base, method, path, body = nil)

@@ -25,6 +25,7 @@ import urllib.request
 sys.dont_write_bytecode = True  # importing the input gate leaves its tracked .pyc alone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import frame_input_gate as fig  # noqa: E402
+import gate_env  # noqa: E402
 
 fig.TAG = 'GRAPHICS_MEMORY_FRAMES'
 check, wait_for = fig.check, fig.wait_for
@@ -111,7 +112,7 @@ def main():
         check(memory['freed']['budget'] == 1 and memory['refused']['budget'] == 1, 'reported %s' % memory)
         ch.close()
         print('%s_PASS route=kept(30) held_placement=kept(20) freed=kitty-41 refused=%d:ENOSPC backend=%s'
-              % (fig.TAG, refused, os.environ.get('BLIT_KMS_COMPOSITOR', 'cpu')))
+              % (fig.TAG, refused, gate_env.server_env().get('BLIT_KMS_COMPOSITOR', 'cpu')))
     finally:
         server.stop()
         for s in keep:

@@ -110,7 +110,7 @@ def with_server(root, settings)
   env = gate_display_env.merge(
     'BLIT_PSF_FONT' => FONT, 'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0',
     'BLIT_AUTH_TOKEN' => '', 'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'))
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   begin
     Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
     if settings

@@ -45,7 +45,7 @@ gcc -std=gnu99 -O1 -Wall -Wextra -Wno-format-truncation \
     -I"$hibr_root/include" -I"$hibr_root/mods" -I"$ROOT/hibr" \
     -o "$PROBE" "$ROOT/tools/tests/adapter_coalesce_gate.c"
 
-env $GATE_DISPLAY_ENV \
+env $GATE_SERVER_ENV $GATE_DISPLAY_ENV \
     BLIT_PSF_FONT="$FONT" "$BINARY" "$PORT" >"$LOG" 2>&1 &
 server_pid=$!
 ready=0

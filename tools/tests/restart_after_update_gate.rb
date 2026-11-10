@@ -182,8 +182,7 @@ Dir.mktmpdir('blit-restart-after-update') do |root|
             'BLIT_LOGIN_SCRIPT' => '', 'BLIT_AUTH_TOKEN' => TOKEN,
             'BLIT_GATE_IDENTITY_MODE' => mode, 'BLIT_GATE_TARGET' => target,
             'BLIT_GATE_RESULT' => result, 'BLIT_GATE_HOOK' => hook }
-    pid = spawn('sudo', '-n', 'env', *env.map { |k, v| "#{k}=#{v}" },
-                "#{install}/bin/blit-server", PORT.to_s, out: log, err: log)
+    pid = spawn(*gate_sudo_argv(env, "#{install}/bin/blit-server", PORT.to_s), out: log, err: log)
     wait_for('the server did not start', 15) { get('/v1/version') }
     check(update['running_version'] == OLD, "started as #{update['running_version']}, not #{OLD}")
     wait_for("the login screen (#{mode}) did not come up") do

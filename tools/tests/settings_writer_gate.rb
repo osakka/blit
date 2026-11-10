@@ -65,7 +65,7 @@ Dir.mktmpdir('blit-settings-writer') do |root|
     'BLIT_SETTINGS_PATH' => File.join(store, 'settings.json'),
     'BLIT_SETTINGS_WRITE_DELAY_MS' => DELAY_MS.to_s)
   log = File.join(root, 'server.log')
-  pid = spawn(env, BINARY, PORT.to_s, out: log, err: [:child, :out])
+  pid = gate_spawn(env, BINARY, PORT.to_s, out: log, err: [:child, :out])
   begin
     Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
     # A pane that draws all the time, so presents can be counted.

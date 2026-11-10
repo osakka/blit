@@ -38,7 +38,7 @@ trap cleanup EXIT
 trap 'exit 143' HUP INT TERM
 
 gate_display_setup || { echo "gate_with_server: display setup failed" >&2; exit 1; }
-env BLIT_PSF_FONT="$FONT" $GATE_DISPLAY_ENV "$BINARY" "$port" >"$tmpdir/server.log" 2>&1 &
+env $GATE_SERVER_ENV BLIT_PSF_FONT="$FONT" $GATE_DISPLAY_ENV "$BINARY" "$port" >"$tmpdir/server.log" 2>&1 &
 server_pid=$!
 i=0
 while [ "$i" -lt 50 ]; do

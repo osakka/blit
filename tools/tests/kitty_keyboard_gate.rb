@@ -23,7 +23,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
   File.write(File.join(work,'input/event0.identity'),"bustype=3\nvendor=1234\nproduct=5678\nversion=1\nphys=usb-kitty-test/input0\nname=Kitty fixture\nkinds=keyboard\ncapabilities=keys\n")
   # BLIT_TEST_VT_SIGNALS: SIGUSR1/SIGUSR2 drive the console release/acquire
   # path with no VT, so focus on input hand-over can be checked.
-  pid=spawn(TestProfile.environment.merge('BLIT_INPUT_ROOT'=>File.join(work,'input'),
+  pid=gate_spawn(TestProfile.environment.merge('BLIT_INPUT_ROOT'=>File.join(work,'input'),
     'BLIT_TEST_MODE'=>'1','BLIT_TEST_VT_SIGNALS'=>'1'),
     TestProfile.binary,base.port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
   begin

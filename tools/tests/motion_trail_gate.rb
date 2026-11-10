@@ -84,7 +84,7 @@ def pixel(bmp, x, y)
   [bmp.getbyte(offset + 2), bmp.getbyte(offset + 1), bmp.getbyte(offset)]
 end
 
-server = spawn(TestProfile.environment.merge('BLIT_PSF_FONT' => FONT),
+server = gate_spawn(TestProfile.environment.merge('BLIT_PSF_FONT' => FONT),
                BINARY, PORT.to_s, out: '/dev/null',
                err: ENV.fetch('BLIT_GATE_SERVER_LOG', '/dev/null'))
 at_exit do

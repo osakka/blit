@@ -18,7 +18,7 @@ env = {
   
   'BLIT_PSF_FONT' => 'assets/fonts/Blit-Terminus16.psf'
 }
-pid = Process.spawn(env, 'build/blit/blit-server', port.to_s,
+pid = gate_spawn(env, 'build/blit/blit-server', port.to_s,
                     out: "/tmp/blit-pane-split-gate-#{Process.pid}.log", err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil

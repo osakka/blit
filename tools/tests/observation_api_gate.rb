@@ -53,7 +53,7 @@ def delete(path)
     response.code == '204'
 end
 
-server = Process.spawn({
+server = gate_spawn({
   **gate_display_env,
   'BLIT_LOGIN_AUTOSTART' => '0',
   'BLIT_EXPECT_DESKTOP' => '0',
