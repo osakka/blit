@@ -1570,6 +1570,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TerminalSession'
+        '400':
+          description: >-
+            The request cannot start a session. `invalid_session_strings`:
+            the arguments or environment break their limits;
+            `session_create_failed`: the surface is missing or the PTY or
+            process could not be created.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '403':
           description: The executable is not permitted by the server policy
           content:
@@ -5259,10 +5269,22 @@ components:
             exec. Omitting this field preserves the service identity.
         arguments:
           type: array
+          maxItems: 32
           items: {type: string}
+          description: >-
+            Passed to the executable after its path. No string has a length
+            limit of its own: the request (8192 bytes) bounds them all.
+            More than 32, or a non-string, is `invalid_session_strings`.
         environment:
           type: object
+          maxProperties: 32
+          propertyNames: {minLength: 1, pattern: '^[^=]+$'}
           additionalProperties: {type: string}
+          description: >-
+            Applied over the inherited environment in the child. Names and
+            values are bounded only by the request size. More than 32, an
+            empty name, a name with `=` or a non-string value is
+            `invalid_session_strings`.
         surface:
           type: object
           required: [width, height]
