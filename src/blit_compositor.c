@@ -1,14 +1,19 @@
 /* blit-compositor: Blit's Wayland compositor for programs (ADR 0228,
    phase 1, milestones A, B and C).
 
-     blit-compositor [--log path]
+     blit-compositor [--display name] [--log path]
 
    One per desktop session, started by the desktop with the
    BLIT_FRAME_SOCKET/BLIT_FRAME_TOKEN of the frame channel it serves. It
    connects there as a version 4 producer (blit_compositor_wire.h), listens
-   on $XDG_RUNTIME_DIR/blit-<n> (the first free n) and says that name with
-   `WINDOW display <name>`; the desktop puts it in its programs'
-   environment as WAYLAND_DISPLAY.
+   on $XDG_RUNTIME_DIR/<name> (--display's, else blit-<n>, the first free n)
+   and says that name with `WINDOW display <name>`; the desktop puts it in
+   its programs' environment as WAYLAND_DISPLAY.
+
+   Its programs survive a desktop restart (the restart section): when the
+   channel closes, the compositor keeps every client and window, reconnects
+   to the same socket and token with backoff for a bounded time, and
+   announces every window again to the desktop that answers.
 
    It composites nothing. Each xdg_toplevel and each xdg_popup is one
    picture by descriptor whose id is a WINDOW id (docs/api.md, "Program
@@ -80,6 +85,7 @@
 #define BC_SOCKETS 32
 
 enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE };
+enum { BC_LINK_UP = 0, BC_LINK_DOWN };
 
 struct bc_server;
 struct bc_xdg;
@@ -139,6 +145,7 @@ struct bc_xdg {
     int acked;                        /* a configure was acknowledged */
     int configured;                   /* a configure was sent */
     int mapped;                       /* a buffer is committed */
+    int hidden;                       /* unmapped by its client (WINDOW hide) */
     uint32_t serial;
     /* window geometry, double-buffered */
     int32_t gx, gy, gw, gh, pgx, pgy, pgw, pgh;
@@ -160,6 +167,10 @@ struct bc_xdg {
     int size_fullscreen, size_maximized, size_activated;
     struct bc_output *output;         /* the display it is on */
     uint64_t last_copy;               /* the sequence of its newest FRM1 */
+    BcCopy kept;                      /* its newest frame when it is a copy (fd -1
+                                         none): sent again on a new channel */
+    int replay;                       /* the re-announce pass: 1 announced, 2 its
+                                         parent still to say (WINDOW parent) */
     int32_t buffer_w, buffer_h;       /* its committed buffer's size */
     /* popup */
     struct bc_positioner positioner;
@@ -172,6 +183,17 @@ struct bc_server {
     struct wl_event_source *frame_source, *sigterm_source, *sigint_source;
     BcWire wire;
     char socket_name[32];
+    /* the frame channel's link (the restart section) */
+    const char *frame_socket, *frame_token;
+    int link;                         /* BC_LINK_UP, or BC_LINK_DOWN while reconnecting */
+    int quit;                         /* WINDOW quit 0: ending at once, no reconnect */
+    struct wl_event_source *redial;   /* the next attempt, or a hello's answer overdue */
+    struct wl_event_source *dial_source;
+    int dial_fd;                      /* a hello waiting for its answer, -1 none */
+    uint64_t lost_us;                 /* when the channel was lost */
+    uint32_t bound_ms, backoff_ms;
+    unsigned attempts;
+    char dial_error[96];              /* the last attempt's failure, logged once a kind */
     struct wl_list windows;           /* bc_xdg */
     struct wl_list outputs;           /* bc_output */
     struct wl_list holds;             /* bc_hold: FRM3 frames Blit holds */
@@ -272,13 +294,12 @@ static void send_decor(struct bc_xdg *x)
                  x->decor_mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE ? "server" : "client");
 }
 
-/* The toplevel's first appearance, at its initial commit: new, then every
-   hint it set before it. */
-static void announce_toplevel(struct bc_xdg *x)
+/* `WINDOW new` and every hint the toplevel has, then its input route: at
+   its first appearance, and again on a new channel (the restart section). */
+static void announce_hints(struct bc_xdg *x, int parent)
 {
     BcWire *w = &x->server->wire;
-    x->id = bc_wire_new_id(w);
-    bc_wire_line(w, "WINDOW new %u %d", x->id, xdg_parent_id(x));
+    bc_wire_line(w, "WINDOW new %u %d", x->id, parent);
     if (x->title[0]) bc_wire_line(w, "WINDOW title %u %s", x->id, x->title);
     if (x->appid[0]) bc_wire_line(w, "WINDOW appid %u %s", x->id, x->appid);
     if (x->min_w || x->min_h || x->max_w || x->max_h) send_limits(x);
@@ -289,6 +310,15 @@ static void announce_toplevel(struct bc_xdg *x)
        toplevel); the desktop relays the request. */
     if (x->server->input_path[0])
         bc_wire_line(w, "INPUT sock %s %u", x->server->input_path, x->id);
+}
+
+/* The toplevel's first appearance, at its initial commit: new, then every
+   hint it set before it. */
+static void announce_toplevel(struct bc_xdg *x)
+{
+    BcWire *w = &x->server->wire;
+    x->id = bc_wire_new_id(w);
+    announce_hints(x, xdg_parent_id(x));
     if (x->minimize) bc_wire_line(w, "WINDOW minimize %u", x->id);
     x->minimize = 0;
     logf_("window %u: new parent %d title \"%s\" appid \"%s\"", x->id, xdg_parent_id(x),
@@ -299,13 +329,36 @@ static void announce_toplevel(struct bc_xdg *x)
     if (x->surface) constraint_ask_surface(x->surface);
 }
 
+/* A popup's appearance, at its initial commit once its parent has an id:
+   its own picture at its offset in the parent's surface pixels. */
+static void announce_popup(struct bc_xdg *x)
+{
+    struct bc_xdg *p = x->parent;
+    if (p == NULL || p->id == 0) return;
+    x->id = bc_wire_new_id(&x->server->wire);
+    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + x->px,
+                 p->gy + x->py);
+    logf_("popup %u: parent %u at %d,%d %dx%d", x->id, p->id, p->gx + x->px, p->gy + x->py,
+          x->positioner.width, x->positioner.height);
+    window_set_output(x, p->output);
+}
+
 /* `WINDOW gone`, once, after everything of the id is released: copied
    frames hold nothing, and the dmabuf frames Blit still holds are given
    back to the client first. */
 static void holds_end_id(struct bc_server *s, uint32_t id);
 
+/* The window's newest frame, when a copy: replaced by `c` (NULL to drop). */
+static void kept_set(struct bc_xdg *x, const BcCopy *c)
+{
+    if (x->kept.fd >= 0) close(x->kept.fd);
+    if (c) x->kept = *c;
+    else x->kept.fd = -1;
+}
+
 static void window_gone(struct bc_xdg *x)
 {
+    kept_set(x, NULL);
     window_set_output(x, NULL);
     /* Its pointer lock let go first: the desktop's hold ends with it. */
     constraints_window_gone(x);
@@ -363,7 +416,9 @@ struct bc_dmabuf {
     int holds;                        /* frames of it Blit still holds */
 };
 
-/* A frame sent as FRM3 and not yet released by Blit. */
+/* A frame sent as FRM3 and not yet released by Blit; or, sequence 0, a
+   window's newest dmabuf frame kept while the channel is down, sent on the
+   next (the restart section). */
 struct bc_hold {
     struct wl_list link;              /* bc_server.holds */
     uint32_t id;
@@ -420,10 +475,30 @@ static void holds_end_id(struct bc_server *s, uint32_t id)
         if (h->id == id) hold_end(h);
 }
 
+/* Pixels copied as the window's newest frame: sent as FRM1 while the
+   channel is up, and kept either way, to be sent again on a new channel.
+   Returns 0 when sent (or kept, the channel down), -1 with last_error set
+   when the copy or its send failed (a copy made is kept all the same). */
+static int window_copy(struct bc_xdg *x, const void *pixels, uint32_t width, uint32_t height,
+                       uint32_t stride, uint32_t format)
+{
+    struct bc_server *s = x->server;
+    BcCopy c;
+    int rc = 0;
+    if (bc_frame_copy(&s->wire, pixels, width, height, stride, format, &c) != 0) return -1;
+    if (s->link == BC_LINK_UP) {
+        rc = bc_wire_send_frm1(&s->wire, x->id, &c);
+        if (rc == 0) x->last_copy = s->wire.sequence;
+    }
+    kept_set(x, &c);
+    return rc;
+}
+
 /* A dmabuf's pixels copied as FRM1, for a peer that cannot import it:
    only one linear plane of an 8-bit RGB format can be mapped and read. */
-static int dmabuf_copy(struct bc_server *s, uint32_t id, struct bc_dmabuf *b)
+static int dmabuf_copy(struct bc_xdg *x, struct bc_dmabuf *b)
 {
+    struct bc_server *s = x->server;
     struct dma_buf_sync sync;
     size_t bytes;
     unsigned char *map;
@@ -454,12 +529,12 @@ static int dmabuf_copy(struct bc_server *s, uint32_t id, struct bc_dmabuf *b)
     /* A dmabuf is read between the CPU-access fences; a memfd has none. */
     sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
-    rc = bc_wire_send_shm(&s->wire, id, map + b->offsets[0], (uint32_t)b->width,
-                          (uint32_t)b->height, b->strides[0], shm_format);
+    rc = window_copy(x, map + b->offsets[0], (uint32_t)b->width, (uint32_t)b->height,
+                     b->strides[0], shm_format);
     sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
     munmap(map, bytes);
-    if (rc == 0) ++s->wire.dmabuf_copied;
+    if (rc == 0 && s->link == BC_LINK_UP) ++s->wire.dmabuf_copied;
     return rc;
 }
 
@@ -843,11 +918,15 @@ static int frames_pace_timer(void *data)
     return 0;
 }
 
-/* Blit has taken the surface's committed frame. */
+/* Blit has taken the surface's committed frame. While the channel is down
+   nothing is shown: the frame is kept (the restart section), its feedback
+   discarded, and its callbacks are answered as they would be, at the
+   output's refresh, so the program does not freeze. */
 static void frames_taken(struct bc_surface *surface)
 {
     if (surface == NULL) return;
-    feedback_presented(surface);
+    if (surface->server->link == BC_LINK_UP) feedback_presented(surface);
+    else feedback_discard(&surface->feedback);
     wl_list_insert_list(surface->due.prev, &surface->frames);
     wl_list_init(&surface->frames);
     frames_pace(surface);
@@ -877,6 +956,8 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
             h->buffer = b;
             ++b->holds;
             wl_list_insert(s->holds.prev, &h->link);
+            /* The newest frame is this one, not a copy. */
+            kept_set(x, NULL);
             /* Taken at once when Blit holds nothing else of the window,
                else at the RELEASE of the frame before it. */
             if (!older) frames_taken(x->surface);
@@ -885,11 +966,47 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
         free(h);
         logf_("window %u: FRM3 not sent (%s); copying", x->id, s->wire.last_error);
     }
-    if (dmabuf_copy(s, x->id, b) != 0) {
+    if (dmabuf_copy(x, b) != 0) {
         logf_("window %u: a dmabuf frame not shown: %s", x->id, s->wire.last_error);
         return BC_SENT_NONE;
     }
-    x->last_copy = s->wire.sequence;
+    frames_taken(x->surface);
+    return BC_SENT_COPY;
+}
+
+/* A commit while the channel is down: kept as the window's newest frame,
+   and only it -- a copy for wl_shm, the buffer itself for a dmabuf (a hold
+   of sequence 0), the frame before given back to the client at once so a
+   program drawing on into a full pool does not stall. */
+static int keep_buffer(struct bc_xdg *x, struct wl_shm_buffer *shm, struct bc_dmabuf *dmabuf)
+{
+    struct bc_server *s = x->server;
+    int rc;
+    if (dmabuf) {
+        struct bc_hold *h = calloc(1, sizeof(*h)), *other, *next;
+        if (h == NULL) return BC_SENT_NONE;
+        h->id = x->id;
+        h->buffer = dmabuf;
+        ++dmabuf->holds;
+        /* Held before the one it replaces is given back: a buffer committed
+           again is not released while it is kept. */
+        wl_list_for_each_safe(other, next, &s->holds, link)
+            if (other->id == x->id) hold_end(other);
+        wl_list_insert(s->holds.prev, &h->link);
+        kept_set(x, NULL);
+        frames_taken(x->surface);
+        return BC_SENT_HELD;
+    }
+    wl_shm_buffer_begin_access(shm);
+    rc = window_copy(x, wl_shm_buffer_get_data(shm), (uint32_t)wl_shm_buffer_get_width(shm),
+                     (uint32_t)wl_shm_buffer_get_height(shm), (uint32_t)wl_shm_buffer_get_stride(shm),
+                     wl_shm_buffer_get_format(shm));
+    wl_shm_buffer_end_access(shm);
+    if (rc != 0) {
+        logf_("window %u: a frame not kept: %s", x->id, s->wire.last_error);
+        return BC_SENT_NONE;
+    }
+    holds_end_id(s, x->id);
     frames_taken(x->surface);
     return BC_SENT_COPY;
 }
@@ -909,19 +1026,17 @@ static int send_buffer(struct bc_surface *surface, struct wl_resource *buffer)
     }
     if (x == NULL || x->id == 0 || !x->server->wire.window)
         return BC_SENT_NONE;
+    if (x->server->link != BC_LINK_UP) return keep_buffer(x, shm, dmabuf);
     if (dmabuf) return send_dmabuf(x, dmabuf);
     wl_shm_buffer_begin_access(shm);
-    rc = bc_wire_send_shm(&x->server->wire, x->id, wl_shm_buffer_get_data(shm),
-                          (uint32_t)wl_shm_buffer_get_width(shm),
-                          (uint32_t)wl_shm_buffer_get_height(shm),
-                          (uint32_t)wl_shm_buffer_get_stride(shm),
-                          wl_shm_buffer_get_format(shm));
+    rc = window_copy(x, wl_shm_buffer_get_data(shm), (uint32_t)wl_shm_buffer_get_width(shm),
+                     (uint32_t)wl_shm_buffer_get_height(shm), (uint32_t)wl_shm_buffer_get_stride(shm),
+                     wl_shm_buffer_get_format(shm));
     wl_shm_buffer_end_access(shm);
     if (rc != 0) {
         logf_("window %u: frame not sent: %s", x->id, x->server->wire.last_error);
         return BC_SENT_NONE;
     }
-    x->last_copy = x->server->wire.sequence;
     frames_taken(surface);
     return BC_SENT_COPY;
 }
@@ -1035,7 +1150,10 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
                and its next frame shows it again. */
             logf_("window %u: unmapped by its client", x->id);
             if (x->id) bc_wire_line(&x->server->wire, "WINDOW hide %u", x->id);
+            /* A hidden window has no frame to show again on a new channel. */
+            kept_set(x, NULL);
             x->mapped = 0;
+            x->hidden = 1;
             x->initial = 0;
             x->acked = 0;
             x->configured = 0;
@@ -1048,15 +1166,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
                     logf_("a toplevel \"%s\" is not shown: the peer has no window=1", x->title);
                 configure_if_ready(x);
             } else if (x->popup) {
-                struct bc_xdg *p = x->parent;
-                if (x->id == 0 && x->server->wire.window && p && p->id) {
-                    x->id = bc_wire_new_id(&x->server->wire);
-                    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id,
-                                 p->gx + x->px, p->gy + x->py);
-                    logf_("popup %u: parent %u at %d,%d %dx%d", x->id, p->id, p->gx + x->px,
-                          p->gy + x->py, x->positioner.width, x->positioner.height);
-                    window_set_output(x, p->output);
-                }
+                if (x->id == 0 && x->server->wire.window) announce_popup(x);
                 xdg_popup_send_configure(x->popup, x->px, x->py, x->positioner.width,
                                          x->positioner.height);
                 x->serial = wl_display_next_serial(x->server->display);
@@ -1069,6 +1179,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
             struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
             sent = send_buffer(surface, buffer);
             x->mapped = 1;
+            x->hidden = 0;
             x->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf ? dmabuf->width : 0;
             x->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf ? dmabuf->height : 0;
         }
@@ -1968,6 +2079,7 @@ static void xdg_surface_destroyed(struct wl_resource *resource)
     struct bc_xdg *x = wl_resource_get_user_data(resource);
     struct bc_xdg *other;
     window_gone(x);
+    kept_set(x, NULL);
     if (x->toplevel) {
         struct wl_resource *toplevel = x->toplevel;
         toplevel_destroyed(toplevel);
@@ -2015,6 +2127,7 @@ static void wm_get_xdg_surface(struct wl_client *client, struct wl_resource *res
     if (x->resource == NULL) { free(x); wl_client_post_no_memory(client); return; }
     x->server = surface->server;
     x->surface = surface;
+    x->kept.fd = -1;
     surface->xdg = x;
     surface->role = BC_ROLE_XDG;
     wl_list_insert(&x->server->windows, &x->link);
@@ -2700,6 +2813,23 @@ static int window_locked(struct bc_server *s, struct bc_xdg *x)
 
 static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly);
 
+/* The desktop's hold ended: unlocked or unconfined; a oneshot constraint
+   is then spent. */
+static void constraint_deactivate(struct bc_constraint *c)
+{
+    uint32_t id = c->window;
+    c->active = 0;
+    if (c->kind == BC_CONSTRAINT_LOCK) zwp_locked_pointer_v1_send_unlocked(c->resource);
+    else zwp_confined_pointer_v1_send_unconfined(c->resource);
+    if (!c->persistent) {
+        /* Spent: the desktop's hold has ended, and so has the request. */
+        c->defunct = 1;
+        c->window = 0;
+    }
+    logf_("window %u: pointer %s%s", id, c->kind == BC_CONSTRAINT_LOCK ? "unlocked" : "unconfined",
+          c->defunct ? ", the oneshot constraint is defunct" : "");
+}
+
 /* `WINDOW lock <id> on|off`, the desktop's hold engaged or ended. */
 static void constraints_hold(struct bc_server *s, uint32_t id, int on)
 {
@@ -2717,16 +2847,7 @@ static void constraints_hold(struct bc_server *s, uint32_t id, int on)
             else zwp_confined_pointer_v1_send_confined(c->resource);
             logf_("window %u: pointer %s", id, c->kind == BC_CONSTRAINT_LOCK ? "locked" : "confined");
         } else if (!on && c->active) {
-            c->active = 0;
-            if (c->kind == BC_CONSTRAINT_LOCK) zwp_locked_pointer_v1_send_unlocked(c->resource);
-            else zwp_confined_pointer_v1_send_unconfined(c->resource);
-            if (!c->persistent) {
-                /* Spent: the desktop's hold has ended, and so has the request. */
-                c->defunct = 1;
-                c->window = 0;
-            }
-            logf_("window %u: pointer %s%s", id, c->kind == BC_CONSTRAINT_LOCK ? "unlocked" : "unconfined",
-                  c->defunct ? ", the oneshot constraint is defunct" : "");
+            constraint_deactivate(c);
         }
     }
     if (!found) logf_("WINDOW lock %u %s with no constraint asked for", id, on ? "on" : "off");
@@ -3064,8 +3185,8 @@ static void frame_refused(struct bc_server *s, uint32_t id, const char *code)
             logf_("Blit cannot import dmabuf frames now (ENOTSUP): copying them from here on");
         s->wire.refused = 1;
         if (x && newest->buffer) {
-            if (dmabuf_copy(s, id, newest->buffer) == 0) x->last_copy = s->wire.sequence;
-            else logf_("window %u: the refused dmabuf frame is not shown: %s", id, s->wire.last_error);
+            if (dmabuf_copy(x, newest->buffer) != 0)
+                logf_("window %u: the refused dmabuf frame is not shown: %s", id, s->wire.last_error);
         }
     } else {
         logf_("window %u: a dmabuf frame was refused %s, not shown", id, code);
@@ -3131,6 +3252,14 @@ static void handle_line(struct bc_server *s, const char *line)
     case BC_LINE_LOCK:
         constraints_hold(s, l.id, l.on);
         return;
+    case BC_LINE_QUIT:
+        /* The person quit the desktop: every program ends now, and no
+           desktop is waited for. */
+        logf_("WINDOW quit 0: the desktop is quitting; ending every program");
+        s->quit = 1;
+        s->status = 0;
+        wl_display_terminate(s->display);
+        return;
     case BC_LINE_ERROR_WINDOW:
         logf_("the desktop refused a WINDOW line for %u: %s", l.id, l.code);
         return;
@@ -3168,6 +3297,8 @@ static void handle_line(struct bc_server *s, const char *line)
     }
 }
 
+static void channel_lost(struct bc_server *s, const char *why);
+
 static int on_frame_socket(int fd, uint32_t mask, void *data)
 {
     struct bc_server *s = data;
@@ -3178,9 +3309,7 @@ static int on_frame_socket(int fd, uint32_t mask, void *data)
         if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
         if (got < 0 && errno == EINTR) continue;
         if (got <= 0) {
-            logf_("the frame channel closed: the desktop is gone");
-            s->status = 1;
-            wl_display_terminate(s->display);
+            channel_lost(s, got == 0 ? "closed" : strerror(errno));
             return 0;
         }
         buf[got] = '\0';
@@ -3188,14 +3317,292 @@ static int on_frame_socket(int fd, uint32_t mask, void *data)
             next = strchr(line, '\n');
             if (next) *next++ = '\0';
             handle_line(s, line);
+            if (s->quit) return 0;
         }
     }
-    if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) {
-        logf_("the frame channel hung up");
+    if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) channel_lost(s, "hung up");
+    return 0;
+}
+
+/* ---- restart: surviving the loss of the frame channel ----
+
+   docs/api.md, "Programs survive a desktop restart". When the channel
+   closes (a Restart Desktop execs the desktop, which serves the same socket
+   and token again), the compositor keeps every client and window, the
+   Wayland socket and the input socket, and:
+
+   - stops sending: each window's newest frame is kept and only it -- the
+     copy of a wl_shm (or copied dmabuf) frame, or the dmabuf buffer itself,
+     held (a hold of sequence 0) while every older one is given back at
+     once, so a program drawing on does not stall on a full pool;
+   - answers frame callbacks at the window's output refresh, as if each
+     frame were taken (presentation feedback `discarded`: nothing is shown);
+   - ends what the desktop's holds gave: an active pointer lock or
+     confinement is unlocked or unconfined, as at the desktop's `off` (a
+     oneshot one spent); Blit's input routes end with the desktop's channel
+     and their sockets close (each releasing what it held);
+   - dials the same socket and token again after 50 ms, then 100, 200 ...
+     at most a second apart, never blocking the event loop (the hello's
+     answer is read from it, waited for at most BC_HELLO_MS), until a peer
+     answers `OK` with window=1 (one that answers without it, Blit reached
+     directly, is let go and dialed again), for at most BC_RECONNECT_MS --
+     BLIT_COMPOSITOR_RECONNECT_MS, for gates only, shortens it -- after
+     which it ends its programs as before, status 1.
+
+   On a new channel it says `WINDOW display` again, then announces every
+   window again with the same id and its last state, in creation order:
+   each toplevel's `WINDOW new` (its parent when that was announced before
+   it, else `WINDOW parent` after every toplevel), `title`, `appid`,
+   `limits`, `decor`, `fullscreen`, `maximize` and `INPUT sock`, and `WINDOW
+   hide` for one its program unmapped; each popup's `WINDOW popup`; then
+   each shown window's newest frame; then every pointer constraint still
+   wanted, `WINDOW lock`. A window keeps its configure until the desktop
+   sizes it again: the next comes with the desktop's `WINDOW size`. */
+
+#define BC_RECONNECT_MS 60000u
+#define BC_BACKOFF_FIRST_MS 50u
+#define BC_BACKOFF_MAX_MS 1000u
+#define BC_HELLO_MS 3000u
+
+static uint32_t reconnect_elapsed_ms(struct bc_server *s)
+{
+    return (uint32_t)((now_us() - s->lost_us) / 1000u);
+}
+
+static void dial_end(struct bc_server *s)
+{
+    if (s->dial_source) wl_event_source_remove(s->dial_source);
+    s->dial_source = NULL;
+    if (s->dial_fd >= 0) close(s->dial_fd);
+    s->dial_fd = -1;
+}
+
+/* The next attempt after the backoff, no later than the bound. */
+static void redial_later(struct bc_server *s)
+{
+    uint32_t elapsed = reconnect_elapsed_ms(s), wait = s->backoff_ms;
+    if (elapsed < s->bound_ms && wait > s->bound_ms - elapsed) wait = s->bound_ms - elapsed;
+    s->backoff_ms = s->backoff_ms * 2 > BC_BACKOFF_MAX_MS ? BC_BACKOFF_MAX_MS : s->backoff_ms * 2;
+    wl_event_source_timer_update(s->redial, wait > 0 && elapsed < s->bound_ms ? (int)wait : 1);
+}
+
+static void dial_failed(struct bc_server *s, const char *why)
+{
+    ++s->attempts;
+    if (strcmp(why, s->dial_error) != 0) {
+        logf_("reconnect: %s (attempt %u, %u ms after the loss); trying again", why, s->attempts,
+              reconnect_elapsed_ms(s));
+        snprintf(s->dial_error, sizeof(s->dial_error), "%s", why);
+    }
+    redial_later(s);
+}
+
+/* The newest frame of window `x`, sent again on the new channel: the kept
+   dmabuf as FRM3 (or a copy, for a peer that does not import), else the
+   kept copy as FRM1. */
+static void window_resend(struct bc_xdg *x)
+{
+    struct bc_server *s = x->server;
+    struct bc_hold *h, *kept = NULL;
+    wl_list_for_each(h, &s->holds, link)
+        if (h->id == x->id && h->sequence == 0) kept = h;
+    if (kept) {
+        struct bc_dmabuf *b = kept->buffer;
+        if (b && s->wire.dmabuf && !s->wire.refused) {
+            uint64_t seq = bc_wire_send_dmabuf(&s->wire, x->id, (uint32_t)b->width, (uint32_t)b->height,
+                                               b->format, b->modifier, b->planes, b->fds,
+                                               b->offsets, b->strides);
+            if (seq != 0) {
+                kept->sequence = seq;
+                return;
+            }
+            logf_("window %u: its newest FRM3 not sent again (%s); copying", x->id, s->wire.last_error);
+        }
+        if (b && dmabuf_copy(x, b) != 0)
+            logf_("window %u: its newest dmabuf frame not shown again: %s", x->id, s->wire.last_error);
+        hold_end(kept);
+        return;
+    }
+    if (x->kept.fd < 0) return;
+    if (bc_wire_send_frm1(&s->wire, x->id, &x->kept) == 0) x->last_copy = s->wire.sequence;
+    else logf_("window %u: its newest frame not sent again: %s", x->id, s->wire.last_error);
+}
+
+/* Every window again, with its last state, to the desktop that answered. */
+static void reannounce(struct bc_server *s)
+{
+    BcWire *w = &s->wire;
+    struct bc_xdg *x;
+    struct bc_constraint *c;
+    int windows = 0, frames = 0;
+    bc_wire_line(w, "WINDOW display %s", s->socket_name);
+    wl_list_for_each(x, &s->windows, link) x->replay = 0;
+    /* Toplevels in creation order (the list is newest first). */
+    wl_list_for_each_reverse(x, &s->windows, link) {
+        if (x->toplevel == NULL) continue;
+        if (x->id == 0) {
+            /* Never announced: the peer before had no window=1. */
+            if (x->initial) announce_toplevel(x);
+            if (x->id) x->replay = 1;
+            continue;
+        }
+        if (x->parent && x->parent->id && !x->parent->replay) {
+            announce_hints(x, 0);
+            x->replay = 2;
+        } else {
+            announce_hints(x, xdg_parent_id(x));
+            x->replay = 1;
+        }
+        if (x->hidden) bc_wire_line(w, "WINDOW hide %u", x->id);
+        ++windows;
+    }
+    wl_list_for_each_reverse(x, &s->windows, link)
+        if (x->replay == 2) bc_wire_line(w, "WINDOW parent %u %d", x->id, xdg_parent_id(x));
+    /* Popups, after their parents. */
+    wl_list_for_each_reverse(x, &s->windows, link) {
+        struct bc_xdg *p = x->parent;
+        if (x->popup == NULL || p == NULL || p->id == 0) continue;
+        if (x->id == 0) {
+            if (x->initial) announce_popup(x);
+            continue;
+        }
+        bc_wire_line(w, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + x->px, p->gy + x->py);
+        if (x->hidden) bc_wire_line(w, "WINDOW hide %u", x->id);
+        ++windows;
+    }
+    /* Each shown window's newest frame. */
+    wl_list_for_each_reverse(x, &s->windows, link)
+        if (x->id && x->mapped) {
+            uint64_t before = w->sequence;
+            window_resend(x);
+            if (w->sequence != before) ++frames;
+        }
+    /* The pointer constraints still wanted, asked again. */
+    wl_list_for_each(c, &s->constraints, link) constraint_ask(c);
+    logf_("reconnect: %d windows announced again, %d frames sent again", windows, frames);
+}
+
+/* The new channel is up: the desktop's (window=1). */
+static void channel_up(struct bc_server *s, BcWire *answered)
+{
+    /* The dmabuf formats offered to clients are the first hello's: a desktop
+       that answers others gets copies (FRM1), as a peer that does not
+       import would. */
+    if (answered->dmabuf && (s->format_table_fd < 0 || answered->format_count != s->wire.format_count ||
+                             memcmp(answered->formats, s->wire.formats,
+                                    sizeof(BcFormat) * (size_t)s->wire.format_count) != 0)) {
+        if (s->format_table_fd >= 0)
+            logf_("reconnect: the desktop's dmabuf formats are not the first hello's: copying dmabuf frames");
+        answered->dmabuf = 0;
+    }
+    if (s->format_table_fd >= 0) {
+        memcpy(answered->formats, s->wire.formats, sizeof(answered->formats));
+        answered->format_count = s->wire.format_count;
+    }
+    s->wire = *answered;
+    s->link = BC_LINK_UP;
+    s->frame_source = wl_event_loop_add_fd(s->loop, s->wire.fd, WL_EVENT_READABLE, on_frame_socket, s);
+    wl_event_source_timer_update(s->redial, 0);
+    logf_("reconnect: frame channel %s again after %u ms, %u attempts: %s", s->frame_socket,
+          reconnect_elapsed_ms(s), s->attempts + 1, s->wire.answer);
+    reannounce(s);
+}
+
+static int on_dial_answer(int fd, uint32_t mask, void *data)
+{
+    struct bc_server *s = data;
+    BcWire answered = s->wire;
+    (void)mask;
+    wl_event_source_remove(s->dial_source);
+    s->dial_source = NULL;
+    s->dial_fd = -1;
+    /* Read into a copy: an answer that is not taken changes nothing. */
+    if (bc_wire_answer(&answered, fd) != 0) {
+        dial_failed(s, answered.last_error);
+        return 0;
+    }
+    if (!answered.window) {
+        close(fd);
+        dial_failed(s, "the peer answered without window=1");
+        return 0;
+    }
+    channel_up(s, &answered);
+    return 0;
+}
+
+static int on_redial(void *data)
+{
+    struct bc_server *s = data;
+    uint32_t elapsed, wait = BC_HELLO_MS;
+    int fd;
+    if (s->link == BC_LINK_UP || s->quit) return 0;
+    if (s->dial_fd >= 0) {
+        dial_end(s);
+        dial_failed(s, "no answer to the hello");
+        return 0;
+    }
+    elapsed = reconnect_elapsed_ms(s);
+    if (elapsed >= s->bound_ms) {
+        logf_("reconnect: no desktop answered with window=1 within %u ms of the frame channel's loss "
+              "(%u attempts): ending its programs", s->bound_ms, s->attempts);
         s->status = 1;
         wl_display_terminate(s->display);
+        return 0;
     }
+    fd = bc_wire_dial(&s->wire, s->frame_socket, s->frame_token);
+    if (fd < 0) {
+        dial_failed(s, s->wire.last_error);
+        return 0;
+    }
+    s->dial_fd = fd;
+    s->dial_source = wl_event_loop_add_fd(s->loop, fd, WL_EVENT_READABLE, on_dial_answer, s);
+    /* The answer's wait, no later than the bound. */
+    if (wait > s->bound_ms - elapsed) wait = s->bound_ms - elapsed;
+    wl_event_source_timer_update(s->redial, (int)wait);
     return 0;
+}
+
+static void channel_lost(struct bc_server *s, const char *why)
+{
+    struct bc_xdg *x;
+    struct bc_hold *h, *next;
+    struct bc_constraint *c;
+    if (s->link != BC_LINK_UP || s->quit) return;
+    logf_("the frame channel %s: the desktop is gone; keeping %d windows and reconnecting to %s "
+          "for at most %u ms", why, wl_list_length(&s->windows), s->frame_socket, s->bound_ms);
+    wl_event_source_remove(s->frame_source);
+    s->frame_source = NULL;
+    close(s->wire.fd);
+    s->wire.fd = -1;
+    s->link = BC_LINK_DOWN;
+    /* Each shown window's newest frame, when Blit held it as FRM3, is kept
+       (sequence 0); every other frame Blit held is given back now. */
+    wl_list_for_each(x, &s->windows, link) {
+        struct bc_hold *newest = NULL;
+        if (x->id == 0) continue;
+        wl_list_for_each(h, &s->holds, link)
+            if (h->id == x->id && (newest == NULL || h->sequence > newest->sequence)) newest = h;
+        if (newest && x->mapped && newest->sequence > x->last_copy) {
+            newest->sequence = 0;
+            kept_set(x, NULL);
+        }
+    }
+    wl_list_for_each_safe(h, next, &s->holds, link)
+        if (h->sequence != 0) hold_end(h);
+    /* The desktop's pointer holds ended with it. */
+    wl_list_for_each(c, &s->constraints, link) {
+        if (c->active) constraint_deactivate(c);
+        c->window = 0;
+    }
+    /* Callbacks that waited for Blit to take a frame are answered now, at
+       the refresh; from here every commit is taken as it comes. */
+    wl_list_for_each(x, &s->windows, link)
+        if (x->surface) frames_taken(x->surface);
+    s->lost_us = now_us();
+    s->attempts = 0;
+    s->dial_error[0] = '\0';
+    s->backoff_ms = BC_BACKOFF_FIRST_MS;
+    redial_later(s);
 }
 
 static int on_signal(int signal_number, void *data)
@@ -3208,9 +3615,43 @@ static int on_signal(int signal_number, void *data)
 
 static void usage(FILE *out)
 {
-    fprintf(out, "usage: blit-compositor [--log path]\n"
+    fprintf(out, "usage: blit-compositor [--display name] [--log path]\n"
                  "  Blit's Wayland compositor for programs (ADR 0228). Needs BLIT_FRAME_SOCKET,\n"
-                 "  BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR; listens on $XDG_RUNTIME_DIR/blit-<n>.\n");
+                 "  BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR; listens on $XDG_RUNTIME_DIR/<name>,\n"
+                 "  --display's (refused, status 2, when in use or invalid), else blit-<n>.\n");
+}
+
+/* Why `name` cannot be the display --display asks for, or NULL: it is one
+   file in $XDG_RUNTIME_DIR, beside `<name>-input`, and one word on the
+   `WINDOW display <name>` line, so printable ASCII with no space or slash,
+   at most 31 bytes, and short enough for the input socket's path. */
+static const char *display_name_problem(const char *name, const char *runtime)
+{
+    const char *p;
+    if (name[0] == '\0') return "is empty";
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) return "is a directory";
+    for (p = name; *p; ++p) {
+        if (*p == '/') return "has a slash";
+        if ((unsigned char)*p <= ' ' || (unsigned char)*p >= 0x7f)
+            return "has a space, a control character or a byte past ASCII";
+    }
+    if (strlen(name) >= sizeof(((struct bc_server *)0)->socket_name)) return "is longer than 31 bytes";
+    if (strlen(runtime) + 1 + strlen(name) + strlen("-input") >= sizeof(((struct sockaddr_un *)0)->sun_path))
+        return "is too long: $XDG_RUNTIME_DIR/<name>-input passes 107 bytes";
+    return NULL;
+}
+
+/* BLIT_COMPOSITOR_RECONNECT_MS, for gates only: the reconnect bound in
+   milliseconds, 1 to 60000; anything else is the 60 seconds. */
+static uint32_t reconnect_bound_ms(void)
+{
+    const char *text = getenv("BLIT_COMPOSITOR_RECONNECT_MS");
+    char *end;
+    unsigned long v;
+    if (text == NULL || text[0] < '0' || text[0] > '9') return BC_RECONNECT_MS;
+    v = strtoul(text, &end, 10);
+    if (*end != '\0' || v < 1 || v > BC_RECONNECT_MS) return BC_RECONNECT_MS;
+    return (uint32_t)v;
 }
 
 int main(int argc, char **argv)
@@ -3218,7 +3659,8 @@ int main(int argc, char **argv)
     struct bc_server server;
     const char *socket_env = getenv("BLIT_FRAME_SOCKET");
     const char *token = getenv("BLIT_FRAME_TOKEN");
-    const char *log_path = NULL;
+    const char *runtime = getenv("XDG_RUNTIME_DIR");
+    const char *log_path = NULL, *display_name = NULL, *problem;
     int i;
 
     memset(&server, 0, sizeof(server));
@@ -3235,9 +3677,12 @@ int main(int argc, char **argv)
     wl_list_init(&server.constraints);
     server.input_fd = -1;
     server.keymap_fd = -1;
+    server.dial_fd = -1;
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--log") == 0 && i + 1 < argc) {
             log_path = argv[++i];
+        } else if (strcmp(argv[i], "--display") == 0 && i + 1 < argc) {
+            display_name = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(stdout);
             return 0;
@@ -3249,18 +3694,58 @@ int main(int argc, char **argv)
             return 2;
         }
     }
+    if (display_name && runtime && (problem = display_name_problem(display_name, runtime)) != NULL) {
+        fprintf(stderr, "blit-compositor: --display %s %s\n", display_name, problem);
+        return 2;
+    }
     if (log_path && (server.log = fopen(log_path, "a")) == NULL) {
         fprintf(stderr, "blit-compositor: --log %s: %s\n", log_path, strerror(errno));
         return 2;
     }
     signal(SIGPIPE, SIG_IGN);
     logf_("version %s, libwayland %s", BLIT_BUILD_VERSION, WAYLAND_VERSION);
-    if (!socket_env || !token || !getenv("XDG_RUNTIME_DIR")) {
+    if (!socket_env || !token || !runtime) {
         logf_("BLIT_FRAME_SOCKET, BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR are required");
         return 1;
     }
-    if (bc_wire_connect(&server.wire, socket_env, token) != 0) {
+    server.frame_socket = socket_env;
+    server.frame_token = token;
+    server.bound_ms = reconnect_bound_ms();
+
+    /* The Wayland socket first: a name the desktop chose and cannot have is
+       refused before the channel hears of it. */
+    server.display = wl_display_create();
+    if (server.display == NULL) {
+        logf_("wl_display_create failed");
+        return 1;
+    }
+    if (display_name) {
+        snprintf(server.socket_name, sizeof(server.socket_name), "%s", display_name);
+        if (wl_display_add_socket(server.display, server.socket_name) != 0) {
+            int e = errno;
+            fprintf(stderr, "blit-compositor: --display %s %s\n", display_name,
+                    e == EWOULDBLOCK || e == EAGAIN
+                        ? "is in use: another compositor holds its lock"
+                        : "is in use or cannot be created in $XDG_RUNTIME_DIR");
+            logf_("--display %s: refused (%s)", display_name, strerror(e));
+            wl_display_destroy(server.display);
+            if (server.log) fclose(server.log);
+            return 2;
+        }
+    } else {
+        for (i = 0; i < BC_SOCKETS; ++i) {
+            snprintf(server.socket_name, sizeof(server.socket_name), "blit-%d", i);
+            if (wl_display_add_socket(server.display, server.socket_name) == 0) break;
+        }
+        if (i == BC_SOCKETS) {
+            logf_("no free socket blit-0 to blit-%d in %s", BC_SOCKETS - 1, runtime);
+            wl_display_destroy(server.display);
+            return 1;
+        }
+    }
+    if (bc_wire_connect(&server.wire, socket_env, token, (int)BC_HELLO_MS) != 0) {
         logf_("frame channel %s: %s", socket_env, server.wire.last_error);
+        wl_display_destroy(server.display);
         return 1;
     }
     logf_("frame channel %s: %s", socket_env, server.wire.answer);
@@ -3268,20 +3753,6 @@ int main(int argc, char **argv)
         logf_("the peer answered without window=1: it places no windows, so none is shown "
               "(Blit reached directly answers window=0; the desktop's channel is needed)");
 
-    server.display = wl_display_create();
-    if (server.display == NULL) {
-        logf_("wl_display_create failed");
-        return 1;
-    }
-    for (i = 0; i < BC_SOCKETS; ++i) {
-        snprintf(server.socket_name, sizeof(server.socket_name), "blit-%d", i);
-        if (wl_display_add_socket(server.display, server.socket_name) == 0) break;
-    }
-    if (i == BC_SOCKETS) {
-        logf_("no free socket blit-0 to blit-%d in %s", BC_SOCKETS - 1, getenv("XDG_RUNTIME_DIR"));
-        wl_display_destroy(server.display);
-        return 1;
-    }
     server.loop = wl_display_get_event_loop(server.display);
     server.xkb = xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES | XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
     keymap_refresh(&server, BC_KEYMAP_START_MS);
@@ -3339,7 +3810,8 @@ int main(int argc, char **argv)
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);
     server.sigint_source = wl_event_loop_add_signal(server.loop, SIGINT, on_signal, &server);
-    logf_("listening on %s/%s", getenv("XDG_RUNTIME_DIR"), server.socket_name);
+    server.redial = wl_event_loop_add_timer(server.loop, on_redial, &server);
+    logf_("listening on %s/%s", runtime, server.socket_name);
     bc_wire_line(&server.wire, "WINDOW display %s", server.socket_name);
 
     wl_display_run(server.display);
@@ -3360,6 +3832,8 @@ int main(int argc, char **argv)
     if (server.frame_source) wl_event_source_remove(server.frame_source);
     if (server.sigterm_source) wl_event_source_remove(server.sigterm_source);
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
+    if (server.redial) wl_event_source_remove(server.redial);
+    dial_end(&server);
     wl_display_destroy(server.display);
     while (!wl_list_empty(&server.holds)) {
         struct bc_hold *h = wl_container_of(server.holds.next, h, link);
