@@ -47,7 +47,7 @@ minimum() {
     egl|glesv2|gbm) echo - ;;           # headers only, dlopen'd
     wayland-server|wayland-client|wayland-scanner) echo 1.21.0 ;;
     xkbcommon) echo 1.5.0 ;;
-    wayland-protocols) echo 1.31 ;;
+    wayland-protocols) echo 1.32 ;;  # staging/cursor-shape (ADR 0229)
     *) return 1 ;;
     esac
 }

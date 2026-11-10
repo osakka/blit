@@ -2,7 +2,8 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
+                       [--cursor] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -30,6 +31,11 @@
    clipboard <text>`; P (25) and O (24) copy and paste the primary
    selection; D (32) destroys its clipboard source. Every selection it is
    offered prints `STANDIN selection clipboard|primary <types>|none`.
+
+   With --cursor it names its pointer shapes (wp_cursor_shape_v1): `text`
+   when the pointer enters, `pointer` at a BTN_LEFT press, and at BTN_RIGHT
+   it hides the pointer (wl_pointer.set_cursor, no surface), at BTN_MIDDLE
+   it sets a cursor image of its own (a surface), as an old client would.
 
    With --csd it draws its own frame, as GTK does: a window geometry 10
    pixels inside its buffer on each side (its shadow outside), and on a
@@ -109,6 +115,7 @@
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "pointer-constraints-unstable-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
+#include "cursor-shape-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -160,6 +167,12 @@ struct standin {
     /* --sub */
     int sub_script, sub_step;
     int csd, csd_asked;
+    /* --cursor */
+    int cursor;
+    struct wp_cursor_shape_manager_v1 *shape_manager;
+    struct wp_cursor_shape_device_v1 *shape_device;
+    struct wl_surface *cursor_surface;
+    uint32_t enter_serial;
     /* --clip */
     int clip;
     struct wl_data_device_manager *ddm;
@@ -939,9 +952,17 @@ static const struct wl_keyboard_listener keyboard_listener = {
 static void pointer_enter(void *data, struct wl_pointer *p, uint32_t serial,
                           struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y)
 {
-    (void)p; (void)serial;
+    struct standin *s = data;
     printf("STANDIN pointer enter %s %.2f %.2f\n", surface_name(data, surface),
            wl_fixed_to_double(x), wl_fixed_to_double(y));
+    /* --cursor: the shape named at enter, with enter's serial. */
+    s->enter_serial = serial;
+    if (s->cursor && s->shape_manager) {
+        if (s->shape_device == NULL)
+            s->shape_device = wp_cursor_shape_manager_v1_get_pointer(s->shape_manager, p);
+        wp_cursor_shape_device_v1_set_shape(s->shape_device, serial, WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT);
+        printf("STANDIN cursor text\n");
+    }
 }
 
 static void pointer_leave(void *data, struct wl_pointer *p, uint32_t serial,
@@ -964,6 +985,21 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
     struct standin *s = data;
     (void)p; (void)time;
     printf("STANDIN button %u %u\n", button, state);
+    /* --cursor: a shape named, the pointer hidden, an image of its own. */
+    if (s->cursor && state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        if (button == 0x110 && s->shape_device) {
+            wp_cursor_shape_device_v1_set_shape(s->shape_device, s->enter_serial,
+                                                WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER);
+            printf("STANDIN cursor pointer\n");
+        } else if (button == 0x111) {
+            wl_pointer_set_cursor(p, s->enter_serial, NULL, 0, 0);
+            printf("STANDIN cursor hidden\n");
+        } else if (button == 0x112) {
+            if (s->cursor_surface == NULL) s->cursor_surface = wl_compositor_create_surface(s->compositor);
+            wl_pointer_set_cursor(p, s->enter_serial, s->cursor_surface, 1, 1);
+            printf("STANDIN cursor image\n");
+        }
+    }
     /* --csd: its own frame asks for the drag, the menu or the resize. */
     if (s->csd && state == WL_POINTER_BUTTON_STATE_PRESSED) {
         if (button == 0x110) xdg_toplevel_move(s->toplevel, s->seat, serial);
@@ -1135,6 +1171,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
     else if (strcmp(interface, wl_data_device_manager_interface.name) == 0)
         s->ddm = wl_registry_bind(registry, name, &wl_data_device_manager_interface, version < 3 ? version : 3);
+    else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0)
+        s->shape_manager = wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1);
     else if (strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) == 0)
         s->psm = wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1);
     else if (strcmp(interface, wl_shm_interface.name) == 0)
@@ -1253,6 +1291,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
+        else if (strcmp(argv[i], "--cursor") == 0) s.cursor = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -1361,6 +1400,9 @@ int main(int argc, char **argv)
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);
     if (s.sub_surface) wl_surface_destroy(s.sub_surface);
+    if (s.shape_device) wp_cursor_shape_device_v1_destroy(s.shape_device);
+    if (s.shape_manager) wp_cursor_shape_manager_v1_destroy(s.shape_manager);
+    if (s.cursor_surface) wl_surface_destroy(s.cursor_surface);
     if (s.clip_offer) wl_data_offer_destroy(s.clip_offer);
     if (s.clip_pending) wl_data_offer_destroy(s.clip_pending);
     if (s.primary_offer) zwp_primary_selection_offer_v1_destroy(s.primary_offer);

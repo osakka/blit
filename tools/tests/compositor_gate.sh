@@ -19,14 +19,19 @@ if grep -nE '"(RELEASE|ERROR|OK input|OK window)|"ERROR (INPUT|WINDOW)|INPUT soc
     echo "COMPOSITOR_GATE_FAIL blit-compositor still speaks a version 4 line form" >&2
     exit 1
 fi
+# The compositor's dependencies (tools/build-flags.sh): a host below the
+# minimums -- wayland-protocols before 1.32 has no cursor-shape-v1 -- is a
+# blocked capability, a skip that says why, never a fallback.
+if ! why=$(tools/build-flags.sh --protocols 2>&1 >/dev/null) ||
+        ! why=$(tools/build-flags.sh --check compositor wayland-client 2>&1 >/dev/null); then
+    echo "COMPOSITOR_GATE_SKIP $why"
+    exit 77
+fi
 mkdir -p "$out"
 BLIT_PROTOCOL_DIR=$proto sh tools/build-tcc.sh "$out/blit-compositor" compositor >/dev/null
 # The protocol code build-tcc.sh generated, for the client and the
 # sanitized builds alike.
-protocol_sources="$proto/xdg-shell-protocol.c $proto/xdg-decoration-unstable-v1-protocol.c
-    $proto/linux-dmabuf-unstable-v1-protocol.c $proto/presentation-time-protocol.c
-    $proto/relative-pointer-unstable-v1-protocol.c $proto/pointer-constraints-unstable-v1-protocol.c
-    $proto/primary-selection-unstable-v1-protocol.c"
+protocol_sources=$(cat "$proto/sources")
 client_sources="tools/tests/wl_standin_client.c $protocol_sources"
 # The system's libwayland and libxkbcommon (tools/build-flags.sh).
 client_cflags=$(tools/build-flags.sh --cflags wayland-client)
