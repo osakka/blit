@@ -2041,9 +2041,9 @@ It speaks the frame channel above as a producer, with these additions.
   The compositor's first line after `OK` is `WINDOW display <name>`, on
   every connection (a reconnect too: "Programs survive a desktop
   restart").
-- **One grammar, version 5** (Blit 0.3.73 and Hibr 0.99.482, which ship
+- **One grammar, version 5** (Blit 0.3.74 and Hibr 0.99.482, which ship
   together: the `blit` package Breaks `hibr (<< 0.99.482)` and Hibr's
-  Breaks `blit (<< 0.3.73)`, so there are no compatibility forms). Every
+  Breaks `blit (<< 0.3.74)`, so there are no compatibility forms). Every
   line on the frame channel that concerns a picture is
   `<WORD> <verb> <id> [arguments]`, the picture id always the third word:
   - Blit to a producer: `FRAME release <id> <seq>`, `FRAME error <id>

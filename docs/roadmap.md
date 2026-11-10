@@ -5,24 +5,21 @@ internal issue tracker's, not GitHub's. What already works is in
 [features](features.md); the plans and restart notes from the 0.1 and 0.2
 lines are kept in [history](history/roadmap-0.1-0.2.md).
 
-## Where we are (0.3.20, 2026-10-30)
+## Where we are (0.3.74, 2026-11-10)
 
 Blit is the display server under Hibr on the owner's machine, released
-continuously through Hibr's apt repository. The 0.3 line started at 0.3.0
-once it was stable for daily use. Since then:
+continuously through Hibr's apt repository. Since 0.3.20:
 
-- Kitty images change in place and redraw only what changed (0.3.1–0.3.3).
-- File-manager icons: 63 kinds, folders in four colourways, everything else
-  in its own natural colours (0.3.4–0.3.9).
-- Documentation rewritten, manual pages added (0.3.10).
-- The GPU compositor is the default (0.3.11).
-- Terminal fixes found by writing the terminal reference (0.3.12).
-- Frames no longer held or scheduled late (0.3.13–0.3.15).
-- Startup cannot hang on a stuck GPU, rotation plumbing removed, the DRM test
-  double sleeps instead of polling (0.3.16).
-- Pictures by descriptor: video reaches Blit as shared memory instead of
-  text through the terminal, on this machine (0.3.17–0.3.19, ADR 0202).
-- `blit --version` and `blit --help` (0.3.20).
+- Pictures by dmabuf (0.3.60, ADR 0223), bounded by memory rather than
+  count (0.3.65, ADR 0226); Spleen as one font of five masters (ADR 0227).
+- Programs in Hibr windows through Blit's own Wayland compositor (ADR 0228
+  phase 1, 0.3.71-0.3.74): windows, popups and subsurfaces as pictures,
+  dmabuf frames, Blit's keyboard and pointer with pointer lock, programs
+  surviving a desktop restart, client-side frames moved and resized by
+  their own title bars, and the clipboard and Vault shared with Hibr --
+  the interop drawn as one owner per concern in ADR 0229. vkcube and
+  Firefox are the live checks.
+- The frame channel's version 5 grammar, a flag day with Hibr 0.99.482.
 
 SDL is gone (ADR 0184): native KMS is the only way Blit presents, composed
 on the GPU by default (0.3.11), or on the CPU.
@@ -100,17 +97,23 @@ already be fixed.
 Security review, a reproducible package, and a rehearsed install, rollback
 and recovery.
 
-### 7. Steam through gamescope (#148, [ADR 0206](adr/0206-hand-the-display-to-gamescope.md), proposed)
+### 7. Programs in windows (ADR 0228, ADR 0229)
 
-- **Hand-over first:** `POST /v1/control/handover` starts gamescope
-  (`--backend drm`) as the signed-in user in a logind session on a free VT;
-  Blit's existing VT release gives up the display and input, and the
-  acquire path takes them back when it exits. Hibr adds the Steam launcher.
-- **Before building:** package gamescope for hibr-apt (not in the mini PC's
-  apt sources); confirm its DRM backend on the Radeon from such a session;
-  confirm PipeWire audio across the VT switch.
-- **Then Steam in a window:** its own ADR, with zero-copy dma-buf import;
-  verify how gamescope's headless backend takes input first.
+- **Now: gamescope out (0.3.75).** The owner chose to remove
+  `blit-gamescope` and everything that served it -- the bridge, the libei
+  input path (`INPUT eis`), their gates and package, ADR 0206's hand-over --
+  in one change with Hibr's and steamer's sides. Until phase 2, Steam and
+  other X11 programs do not run in Blit windows.
+- **Phase 0:** the latency baseline, deferred by the owner; measured before
+  phase 2 is judged.
+- **Phase 2: Xwayland.** Rootless Xwayland per session with the compositor
+  as its X window manager; ADR 0229's rows already name the X equivalents
+  (decorations, move and resize, selections), so it adds no wire. Steam Big
+  Picture, then a Proton game, in a window.
+- **Phase 3: full screen** scanned out directly; **phase 4** is now only
+  the retirement of ADR 0206, done with 0.3.75.
+- ADR 0229's later rows, each its own change: cursor shapes, drag and
+  drop, activation, idle inhibit, text input, HiDPI, portals, touch.
 
 ## Waiting for hardware
 

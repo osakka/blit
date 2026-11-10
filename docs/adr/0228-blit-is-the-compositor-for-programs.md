@@ -566,3 +566,11 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   answered at the refresh, so EGL's swap never stalls. `compositor_gate`'s
   `--sub` script covers each mode, the input region both ways, `below`,
   destruction and the reconnect; ASan/UBSan clean.
+- **gamescope out now (2026-11-10).** The owner chose to remove
+  blit-gamescope and every part that served it -- the bridge, the libei
+  input path (`INPUT eis`), their gates and package, ADR 0206 -- in 0.3.75,
+  with Hibr's and steamer's sides, before phase 2, accepting that Steam and
+  other X11 programs do not run in Blit windows until Xwayland arrives
+  ("I want no legacy stuff loose"). Phase 4 is then only what is left of
+  ADR 0206, which was never built. 0.3.74 ships with blit-gamescope marked
+  deprecated in its documentation.
