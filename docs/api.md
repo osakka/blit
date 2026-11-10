@@ -2348,6 +2348,14 @@ It speaks the frame channel above as a producer, with these additions.
   change only the repeat (compared by bytes: a restarted Blit counts
   revisions afresh). Until a route's first keymap its clients are sent
   `no_keymap`, and keys still reach them.
+  A window's input socket has at most one route: Blit ends a route to the
+  same socket file (by device and inode, on any channel of the same user)
+  when a new `INPUT sock` opens one -- what it held released first, its
+  channel told `INPUT error <id> ENOENT`, `last_error` `superseded` -- so a
+  route left behind when a desktop asks again under a new picture id, or
+  on another display's channel, cannot linger. In `frames.input` a route
+  that is live by the rule but whose picture is not in its session (not
+  come yet, or drawn in another display's) says `waiting`, not `live`.
   A top-level's input socket is `$XDG_RUNTIME_DIR/<display>-input-<id>`
   (mode 0600, made at its first `WINDOW new`, removed when it goes), and
   the compositor sends `INPUT sock` for it right after its `WINDOW new`

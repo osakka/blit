@@ -105,6 +105,8 @@ struct BlitFrameInput {
     int on;                 /* INPUT on / INPUT off */
     int confine;            /* INPUT hold: 0 relative (the default), 1 confine */
     int image_seen;         /* the image has existed: its absence is a delete */
+    dev_t sock_dev;         /* the socket file's identity: one route per window socket */
+    ino_t sock_ino;
     unsigned char keys[(KEY_MAX + 8) / 8];  /* pressed through this route */
     unsigned int buttons;   /* Blit's buttons 0..2 pressed through it */
     /* The last absolute pointer, for diagnostics: where it was on the
@@ -767,6 +769,30 @@ static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id
 /* `INPUT sock <image-id> <path>`: the checks that need nothing come first,
    then the socket's owner, the connection and its peer; the connection is
    the route's. */
+/* One route per compositor window socket (ADR 0229): a window has one
+   picture, so a route to the same socket file -- on any channel of the
+   same user, as one left behind when a desktop asks again under a new
+   picture id, or on another display's channel -- ends when a new one is
+   opened: what it held released to the compositor first, its channel told
+   `INPUT error <id> ENOENT`, `last_error` `superseded`. The file's device
+   and inode, not its name, say which socket it is. */
+static void frame_input_supersede(BlitRuntime *runtime, uid_t uid, dev_t dev, ino_t ino)
+{
+    int i, k;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *other = &runtime->frame_clients[i];
+        if (!other->used || !other->authenticated || other->uid != uid)
+            continue;
+        for (k = 0; k < other->input_capacity; ++k) {
+            BlitFrameInput *old = other->inputs[k];
+            if (old == NULL || old->sock_dev != dev || old->sock_ino != ino)
+                continue;
+            frame_input_end(runtime, other, old);
+            frame_input_disconnected(runtime, other, k, "superseded");
+        }
+    }
+}
+
 static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
                              const char *path, unsigned int image_id)
 {
@@ -845,6 +871,9 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
         frame_input_refuse(runtime, client, image_id, "ENOMEM");
         return;
     }
+    frame_input_supersede(runtime, client->uid, info.st_dev, info.st_ino);
+    in->sock_dev = info.st_dev;
+    in->sock_ino = info.st_ino;
     in->sock = fd;
     in->image_id = image_id;
     in->image_seen = image != NULL;
@@ -1107,7 +1136,12 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
                          "\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
                          "\"over\":%u,\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
                          first ? "" : ",", in->image_id,
-                         !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
+                         /* `waiting`: live by the rule, but its picture is not in this
+                            session (not come yet, or drawn in another display's). */
+                         !in->on ? "off"
+                         : !frame_input_live(runtime, client, in) ? "on"
+                         : session != NULL && graphics_image_find((BlitSession *)session, in->image_id) == NULL
+                               ? "waiting" : "live",
                          in->confine ? "confine" : "relative", members,
                          in->last_surface[0], in->last_surface[1],
                          in->last_draw[0], in->last_draw[1], in->last_draw[2], in->last_draw[3],
