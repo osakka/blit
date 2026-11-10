@@ -2100,6 +2100,23 @@ It speaks the frame channel above as a producer, with these additions.
 - **Pixels, scale 1.** The desktop computes a window's size from its cells
   and the cell size of the display it is on; a window moved to a display
   with a different cell size gets a new `WINDOW size`.
+- **Programs survive a desktop restart** (agreed with Hibr 2026-11-10;
+  built after milestone C). The desktop starts blit-compositor detached (its
+  own session, owned by init), records its pid and display, and serves the
+  frame socket under a name and token fixed for the desktop session, so a
+  Restart Desktop (an exec) neither ends the compositor nor changes its
+  environment, and the restarted desktop starts no second one. When the
+  channel closes, the compositor keeps its programs running, their windows
+  unshown, and reconnects to the same socket and token with backoff, for at
+  most 60 seconds. On reconnect it says hello again, announces every window
+  again with its last state (`WINDOW new`, `title`, `appid`, `limits`,
+  `decor`, `parent`, `fullscreen`, the same ids), sends each window's last
+  frame again and asks for its input route again; the desktop answers as
+  for new windows (`WINDOW size`, `WINDOW output`, `INPUT on`). If no
+  desktop answers within the 60 seconds, it ends its programs as it does
+  today. When the person quits the desktop, the desktop sends `WINDOW quit
+  0` (id 0: the whole compositor) and the compositor ends its programs at
+  once.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
