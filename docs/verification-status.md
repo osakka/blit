@@ -9,6 +9,33 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.75 gamescope removed; the compositor is the one path (ADR 0228)
+
+- **Removed, by the owner's decision ("no legacy stuff loose"):**
+  blit-gamescope (the bridge, its package and build target), the libei
+  input path (`INPUT eis`, now an unknown verb answered `INPUT error 0
+  EINVAL`), their gates, ADR 0206 and 0225 (superseded by 0228); steamer
+  retired with it. `blit` Breaks `blit-gamescope` and `steamer`; the pool's
+  blit-gamescope versions removed in this publish. Steam and X11 programs
+  return through phase 2 (Xwayland).
+- **Kept, on `INPUT sock` alone:** the routes, members, hold modes,
+  release-all, the live rule and the keymap memfd; `frame_input_gate`
+  covers on sock every case the stand-in libei did.
+- **Gates:** the root gates (auxiliary_native, auxiliary_policy,
+  login_desktop_observer, login_identity) keep Blit's state in a directory
+  of their own; they had written the build host's /var/lib/blit, whose
+  stale GLES start marker turned a later GLES gate's server to the CPU.
+- **ADR 0228:** the owner dropped phase 0's latency condition for phase 2.
+- **Suites** (main 94172dc, the server rebuilt): `all` 187 pass, 11 skip,
+  0 fail; GLES `renderer` 82 pass, 1 skip, 0 fail; `compositor_gate` with
+  ASan/UBSan; `frame_input_gate` three runs; `package_artifact_gate`
+  passes. Hibr 0.99.483's end to end against this build (keys and pointer
+  across a restart, subsurfaces, geometry, clipboard, menu, resize) green
+  on its side.
+- **Published** to hibr-apt with hibr 0.99.483 in one call that also
+  removes blit-gamescope. The owner purges blit-gamescope and gamescope
+  once by hand.
+
 ## 2026-11-10: 0.3.74 frame channel version 5, and programs as whole windows (ADR 0228, ADR 0229)
 
 - **Version 5, a flag day with Hibr 0.99.482:** one grammar on the frame
