@@ -86,17 +86,26 @@ case "$target" in
         libs=$("$ROOT/tools/build-flags.sh" --libs compositor)
         proto=${BLIT_PROTOCOL_DIR:-$ROOT/build/protocol}
         mkdir -p "$proto"
+        # The protocols the compositor speaks: this list is the one place.
+        # Their code goes to $proto, and $proto/sources lists the .c files
+        # for every other build of it (the gate's client and sanitizer
+        # builds). cursor-shape-v1 refers to the tablet tool, so the tablet
+        # protocol's interfaces are generated with it.
+        : > "$proto/sources"
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
                    "$protocols/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml" \
                    "$protocols/stable/presentation-time/presentation-time.xml" \
                    "$protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml" \
                    "$protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml" \
-                   "$protocols/unstable/primary-selection/primary-selection-unstable-v1.xml"; do
+                   "$protocols/unstable/primary-selection/primary-selection-unstable-v1.xml" \
+                   "$protocols/staging/cursor-shape/cursor-shape-v1.xml" \
+                   "$protocols/unstable/tablet/tablet-unstable-v2.xml"; do
             base=$(basename "$xml" .xml)
             "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"
             "$scanner" client-header "$xml" "$proto/$base-client-protocol.h"
             "$scanner" private-code "$xml" "$proto/$base-protocol.c"
+            echo "$proto/$base-protocol.c" >> "$proto/sources"
         done
         # No -g: the package (packaging/build-deb.sh, blit-compositor) must
         # be the same bytes from any checkout, and tcc 0.9.27 records the
@@ -108,12 +117,7 @@ case "$target" in
         tcc -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             -I"$ROOT/src" -I"$proto" $cflags \
-            "$ROOT/src/blit_compositor.c" \
-            "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
-            "$proto/linux-dmabuf-unstable-v1-protocol.c" "$proto/presentation-time-protocol.c" \
-            "$proto/relative-pointer-unstable-v1-protocol.c" \
-            "$proto/pointer-constraints-unstable-v1-protocol.c" \
-            "$proto/primary-selection-unstable-v1-protocol.c" \
+            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources") \
             $libs \
             -o "$output"
         ;;

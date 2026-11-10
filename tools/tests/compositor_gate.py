@@ -288,6 +288,57 @@ def states_part(desk, standin, env, display, work):
             'BLIT-1,BLIT-2:800x600@75000')
 
 
+def cursor_part(desk, standin, env, display, work, log):
+    """The pointer's shape (ADR 0229), with `--cursor`, window 11: shapes the
+    program names reach the desktop as `WINDOW cursor <id> <name>` in Blit's
+    OSC 22 vocabulary, once per change; no surface hides it (`none`); a
+    cursor image of the program's own is never drawn (`default`)."""
+    out_path = os.path.join(work, 'standin-cursor.out')
+    client = start([standin, '--cursor', 'Cursor'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    frame = [0]
+
+    def lines(*events):
+        text = b''
+        for e in events:
+            frame[0] += 1
+            text += b'INPUT %s\nINPUT frame %d %d\n' % (e.encode() % BLIT_PICTURE, BLIT_PICTURE, frame[0])
+        route.sendall(text)
+
+    try:
+        for want in ('WINDOW new 11 0', 'WINDOW title 11 Cursor', 'WINDOW appid 11 blit.standin',
+                     'WINDOW limits 11 64 48 0 0', 'WINDOW decor 11 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=11)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[11])
+        lines('ptr %d 10.00 10.00')
+        desk.line('WINDOW cursor 11 text')
+        lines('ptr %d 20.00 20.00')  # the same shape again: no line
+        desk.nothing(0.3)
+        lines('btn %d 272 press')
+        desk.line('WINDOW cursor 11 pointer')
+        lines('btn %d 272 release', 'btn %d 273 press')
+        desk.line('WINDOW cursor 11 none')
+        lines('btn %d 273 release', 'btn %d 274 press')
+        desk.line('WINDOW cursor 11 default')
+        lines('btn %d 274 release')
+        wait_for(lambda: 'STANDIN cursor image' in printed(), lambda: 'no cursor image:\n' + printed())
+        desk.nothing(0.3)
+        check("a program's own cursor image is shown as the display's pointer" in open(log).read(),
+              'the cursor image was not noted in the log')
+        desk.send('WINDOW close 11')
+        desk.line('WINDOW gone 11')
+        check(client.wait(5) == 0, 'the cursor stand-in failed:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return 'shapes=text,pointer(once per change) set_cursor(NULL)=none image=default(noted)'
+
+
 def clip_part(desk, standin, env, display, work):
     """The clipboard (ADR 0229), with `--clip`, window 10, the gate as Hibr's
     clipboard: a program's copy offered to the desktop as one text type and
@@ -1527,6 +1578,7 @@ def desktop_part(compositor, standin, work):
         subs = sub_part(desk, standin, env, display, work)
         csd = csd_part(desk, standin, env, display, work)
         clip = clip_part(desk, standin, env, display, work)
+        cursor = cursor_part(desk, standin, env, display, work, log)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1540,7 +1592,7 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('36 frames sent, 0 failed' in text, 'the log does not count 36 frames:\n%s' % text)
+        check('37 frames sent, 0 failed' in text, 'the log does not count 37 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
@@ -1550,6 +1602,7 @@ def desktop_part(compositor, standin, work):
         print('COMPOSITOR_SUB_OK %s' % subs)
         print('COMPOSITOR_CSD_OK %s' % csd)
         print('COMPOSITOR_CLIP_OK %s' % clip)
+        print('COMPOSITOR_CURSOR_OK %s' % cursor)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

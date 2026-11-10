@@ -72,6 +72,7 @@
 #include "relative-pointer-unstable-v1-server-protocol.h"
 #include "pointer-constraints-unstable-v1-server-protocol.h"
 #include "primary-selection-unstable-v1-server-protocol.h"
+#include "cursor-shape-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -141,6 +142,7 @@ struct bc_surface {
     struct wl_event_source *pace;     /* the refresh timer for `due` */
     uint64_t last_done_us;            /* when frame callbacks were last answered */
     int scale_warned;
+    int cursor_logged;                /* a cursor image from it was noted once */
     struct bc_constraint *constraint; /* its pointer lock or confinement, one at most */
 };
 
@@ -177,6 +179,7 @@ struct bc_xdg {
     /* toplevel */
     struct bc_xdg *parent;
     char title[BC_TEXT_BYTES + 1], appid[BC_TEXT_BYTES + 1];
+    char cursor[24];                  /* the pointer shape last sent (WINDOW cursor), "" none yet */
     int32_t min_w, min_h, max_w, max_h;           /* committed */
     int32_t pmin_w, pmin_h, pmax_w, pmax_h;       /* pending */
     int limits_sent;
@@ -381,6 +384,7 @@ static void announce_hints(struct bc_xdg *x, int parent)
     if (x->gw > 0 && x->gh > 0) send_geometry(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
+    if (x->cursor[0]) bc_wire_line(w, "WINDOW cursor %u %s", x->id, x->cursor);
     /* Its input, straight from Blit to its own input socket (one route per
        toplevel); the desktop relays the request under its own id. */
     if (window_input_listen(x) == 0)
@@ -2613,10 +2617,116 @@ static void window_move_output(struct bc_server *s, struct bc_xdg *x, struct bc_
 
 /* ---- wl_seat: keyboard and pointer (their events: the input section) ---- */
 
+/* ---- the pointer's shape (ADR 0229) ----
+
+   One source of cursors: Blit's own pointer art, chosen by name
+   (blit_pointer_name_shape, OSC 22). A program names its shape with
+   wp_cursor_shape_v1 -- the shapes are CSS cursor names, the vocabulary
+   Blit's table speaks -- and the compositor tells the desktop `WINDOW
+   cursor <id> <name>` for the top-level whose surface has the pointer; the
+   desktop relays it to Blit as that window's OSC 22 shape. A program's own
+   cursor images (wl_pointer.set_cursor with a surface) are never drawn:
+   that is `default`, the display's own pointer. set_cursor with no
+   surface hides the pointer: `none`. Only the program with the pointer
+   sets it. */
+
+static const char *const bc_cursor_names[] = {
+    NULL, "default", "context-menu", "help", "pointer", "progress", "wait", "cell", "crosshair",
+    "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "grab", "grabbing",
+    "e-resize", "n-resize", "ne-resize", "nw-resize", "s-resize", "se-resize", "sw-resize",
+    "w-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize", "col-resize", "row-resize",
+    "all-scroll", "zoom-in", "zoom-out", "dnd-ask", "all-resize",
+};
+
+/* The window of the program with the pointer is given `name`, once per
+   change. */
+static void cursor_set(struct bc_server *s, struct wl_client *client, const char *name)
+{
+    struct bc_xdg *x;
+    if (s->ptr_focus == NULL || wl_resource_get_client(s->ptr_focus->resource) != client) return;
+    x = surface_window(s->ptr_focus);
+    if (x == NULL || strcmp(x->cursor, name) == 0) return;
+    snprintf(x->cursor, sizeof(x->cursor), "%s", name);
+    if (x->id) bc_wire_line(&s->wire, "WINDOW cursor %u %s", x->id, name);
+}
+
 static void pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
                                uint32_t serial, struct wl_resource *surface, int32_t x, int32_t y)
 {
-    (void)client; (void)resource; (void)serial; (void)surface; (void)x; (void)y;
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    (void)serial; (void)x; (void)y;
+    if (surface) {
+        struct bc_surface *cs = wl_resource_get_user_data(surface);
+        if (!cs->cursor_logged) {
+            cs->cursor_logged = 1;
+            logf_("cursor: a program's own cursor image is shown as the display's pointer "
+                  "(it names no shape: wp_cursor_shape_v1 is the way)");
+        }
+    }
+    cursor_set(s, client, surface ? "default" : "none");
+}
+
+static void shape_set(struct wl_client *client, struct wl_resource *resource, uint32_t serial,
+                      uint32_t shape)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    (void)serial;
+    if (shape == 0 || shape >= sizeof(bc_cursor_names) / sizeof(bc_cursor_names[0]) ||
+        (shape >= 35 && wl_resource_get_version(resource) < 2)) {
+        wl_resource_post_error(resource, WP_CURSOR_SHAPE_DEVICE_V1_ERROR_INVALID_SHAPE, "shape %u", shape);
+        return;
+    }
+    if (s) cursor_set(s, client, bc_cursor_names[shape]);
+}
+
+static const struct wp_cursor_shape_device_v1_interface shape_device_impl = {
+    .destroy = bc_destroy_request,
+    .set_shape = shape_set,
+};
+
+/* A device for a pointer carries the server; one for a tablet tool (Blit
+   has no tablets yet) carries none and changes nothing. */
+static void shape_device_create(struct wl_client *client, struct wl_resource *manager, uint32_t id,
+                                struct bc_server *s)
+{
+    struct wl_resource *r = wl_resource_create(client, &wp_cursor_shape_device_v1_interface,
+                                               wl_resource_get_version(manager), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &shape_device_impl, s, NULL);
+}
+
+static void shape_get_pointer(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                              struct wl_resource *pointer)
+{
+    (void)pointer;
+    shape_device_create(client, resource, id, wl_resource_get_user_data(resource));
+}
+
+static void shape_get_tablet_tool(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                  struct wl_resource *tool)
+{
+    (void)tool;
+    shape_device_create(client, resource, id, NULL);
+}
+
+static const struct wp_cursor_shape_manager_v1_interface shape_manager_impl = {
+    .destroy = bc_destroy_request,
+    .get_pointer = shape_get_pointer,
+    .get_tablet_tool_v2 = shape_get_tablet_tool,
+};
+
+static void bind_shape_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &wp_cursor_shape_manager_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &shape_manager_impl, data, NULL);
 }
 
 static const struct wl_pointer_interface pointer_impl = {
@@ -4922,7 +5032,10 @@ int main(int argc, char **argv)
                           bind_data_device_manager) ||
         !wl_global_create(server.display, &zwp_primary_selection_device_manager_v1_interface,
                           BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface), &server,
-                          bind_primary_manager)) {
+                          bind_primary_manager) ||
+        !wl_global_create(server.display, &wp_cursor_shape_manager_v1_interface,
+                          BC_VERSION(2, wp_cursor_shape_manager_v1_interface), &server,
+                          bind_shape_manager)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
@@ -4945,7 +5058,8 @@ int main(int argc, char **argv)
     logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
           "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d, "
-          "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d",
+          "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d, "
+          "wp_cursor_shape_manager_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
@@ -4953,7 +5067,8 @@ int main(int argc, char **argv)
           BC_VERSION(1, zwp_relative_pointer_manager_v1_interface),
           BC_VERSION(1, zwp_pointer_constraints_v1_interface),
           BC_VERSION(3, wl_data_device_manager_interface),
-          BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface));
+          BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface),
+          BC_VERSION(2, wp_cursor_shape_manager_v1_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);

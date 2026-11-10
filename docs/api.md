@@ -2146,9 +2146,17 @@ It speaks the frame channel above as a producer, with these additions.
   - `WINDOW menu <id> <x> <y>`: the window menu, asked for at x, y in its
     surface pixels (`xdg_toplevel.show_window_menu`, the same press rule).
   - `WINDOW cursor <id> <name>`: the pointer shape the program asks for over
-    that window, a CSS cursor name (`default`, `text`, `pointer`, ...) or
-    `hidden`. The desktop turns it into its own per-window pointer shape
-    (`OSC 22`), so Blit and `hold` gain nothing new for it.
+    that window, in Blit's own OSC 22 vocabulary -- one source of cursors,
+    Blit's pointer art: a CSS cursor name (`default`, `text`, `pointer`,
+    `wait`, the `*-resize` names, ...) as the program named it through
+    `wp_cursor_shape_v1`, or `none` to hide the pointer (`wl_pointer.
+    set_cursor` with no surface, as games do). A program's own cursor image
+    (`set_cursor` with a surface) is never drawn: it is `default`, the
+    display's own pointer. Sent for the top-level whose surface has the
+    pointer, once per change, and again when the window is announced again.
+    The desktop relays the name unchanged as that window's OSC 22 shape (a
+    name Blit has no art for shows the display's own pointer), so Blit and
+    `hold` gain nothing new for it.
   - `WINDOW maximize <id> on|off`, `WINDOW minimize <id>`: the program's
     requests; the desktop decides and answers with `WINDOW size`. xdg has
     no restore event: a minimized window stops being drawn, and its next
@@ -2172,7 +2180,7 @@ It speaks the frame channel above as a producer, with these additions.
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
     their own size and the desktop sizes its window to the first frame.
-    The tiled words, each at most once and in this order, say which edges
+    The state words are a set (any order, each at most once); the tiled ones say which edges
     the desktop has put the window against (xdg_toplevel's tiled states):
     a program that draws its own frame drops its shadow there.
     A program's initial commit is answered at once, as xdg-shell requires
@@ -2340,6 +2348,15 @@ It speaks the frame channel above as a producer, with these additions.
   change only the repeat (compared by bytes: a restarted Blit counts
   revisions afresh). Until a route's first keymap its clients are sent
   `no_keymap`, and keys still reach them.
+  A window's input socket has at most one route: Blit ends a route to the
+  same socket file (by device and inode, on any channel of the same user)
+  when a new `INPUT sock` opens one -- what it held released first, its
+  channel told `INPUT error <id> ENOENT`, `last_error` `superseded` -- so a
+  route left behind when a desktop asks again under a new picture id, or
+  on another display's channel, cannot linger. In `frames.input` each
+  route says `picture`: `present` when its picture is in the route's
+  session, `absent` when it has not come yet or is drawn in another
+  display's session (keys still reach a live route; the pointer cannot).
   A top-level's input socket is `$XDG_RUNTIME_DIR/<display>-input-<id>`
   (mode 0600, made at its first `WINDOW new`, removed when it goes), and
   the compositor sends `INPUT sock` for it right after its `WINDOW new`

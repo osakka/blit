@@ -58,8 +58,8 @@ origin once; Blit maps the pointer through source rectangles already.
 | Keymap and repeat | Blit | `INPUT keymap` with a memfd | done (0.3.73) |
 | Clipboard (Ctrl-C/V) and primary selection (middle click) | Hibr | `CLIP offer/read/clear` | 0.3.74 |
 | Secrets on the clipboard (the Vault) | Hibr | the `x-kde-passwordManagerHint` type on `CLIP offer`; `CLIP clear` | 0.3.74 |
-| Cursor shape | the program asks, Hibr's theme draws | `WINDOW cursor <id> <name>` (wp_cursor_shape_v1) | next |
-| Cursor images (wl_pointer.set_cursor surfaces) | program | a picture, as a subsurface | decided with the next |
+| Cursor shape | the program names, Blit's pointer art draws (one source: OSC 22's names), Hibr relays | `WINDOW cursor <id> <name>` (wp_cursor_shape_v1); `none` hides | 0.3.76 |
+| Cursor images (wl_pointer.set_cursor surfaces) | none: never drawn, the display's own pointer (`default`) | -- | decided (owner: the same cursors we already have) |
 | Drag and drop | Hibr | `CLIP` extended with a drag | later |
 | Activation (xdg_activation: a launched program's window raised) | Hibr | `WINDOW activate <id>` | later |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |
@@ -180,3 +180,14 @@ release half-implements one of them.
   and cleared both ways, a source's destruction clearing, the primary
   both ways) and, across a restart, the program's selection offered again
   and the old desktop's lapsed. ASan and UBSan clean.
+- **Cursors are Blit's (2026-11-10).** The owner: "one source of truth --
+  these should be the same cursors we have already". Blit already draws
+  the pointer from its own art chosen by name (OSC 22,
+  `blit_pointer_name_shape`), and Hibr 0.99.482 already turns `WINDOW
+  cursor` into a window's OSC 22 shape. So programs only name shapes
+  (Debian 13's GTK 3.24.49 binds `wp_cursor_shape_manager_v1` and names CSS
+  shapes, verified in its gdkdevice-wayland.c), `none` hides (Hibr's X
+  Screen already uses it), and cursor images are never drawn. The
+  protocol needs wayland-protocols 1.32: the build's minimum rose
+  (ADR 0230), and a host below it skips the compositor gate with the
+  reason.

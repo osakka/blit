@@ -831,30 +831,28 @@ static int bc_parse_line(const char *line, BcLine *out)
             return out->kind = BC_LINE_UNKNOWN;
         out->width = (int32_t)a;
         out->height = (int32_t)b;
-        /* The flags in the draft's order, each at most once. */
-        if (strncmp(p, " fullscreen", 11) == 0 && (p[11] == '\0' || p[11] == ' ' || p[11] == '\n')) {
-            out->fullscreen = 1;
-            p += 11;
-        }
-        if (strncmp(p, " maximized", 10) == 0 && (p[10] == '\0' || p[10] == ' ' || p[10] == '\n')) {
-            out->maximized = 1;
-            p += 10;
-        }
-        if (strncmp(p, " activated", 10) == 0 && (p[10] == '\0' || p[10] == ' ' || p[10] == '\n')) {
-            out->activated = 1;
-            p += 10;
-        }
-        {
-            static const char *const tiled[] = { " tiled-left", " tiled-right", " tiled-top",
-                                                 " tiled-bottom" };
-            size_t k;
-            for (k = 0; k < sizeof(tiled) / sizeof(tiled[0]); ++k) {
-                size_t n = strlen(tiled[k]);
-                if (strncmp(p, tiled[k], n) == 0 && (p[n] == '\0' || p[n] == ' ' || p[n] == '\n')) {
-                    out->tiled |= 1u << k;
-                    p += n;
-                }
+        /* The state words, a set: any order, each at most once (Hibr writes
+           `activated fullscreen`; an order bought nothing and dropped the
+           whole line). An unknown word, or one twice, refuses the line. */
+        while (*p == ' ') {
+            static const char *const words[] = { "fullscreen", "maximized", "activated", "tiled-left",
+                                                 "tiled-right", "tiled-top", "tiled-bottom" };
+            size_t k, n = 0;
+            int seen;
+            ++p;
+            for (k = 0; k < sizeof(words) / sizeof(words[0]); ++k) {
+                n = strlen(words[k]);
+                if (strncmp(p, words[k], n) == 0 && (p[n] == '\0' || p[n] == ' ' || p[n] == '\n')) break;
             }
+            if (k == sizeof(words) / sizeof(words[0])) return out->kind = BC_LINE_UNKNOWN;
+            seen = k == 0 ? out->fullscreen : k == 1 ? out->maximized : k == 2 ? out->activated
+                 : (int)(out->tiled & (1u << (k - 3)));
+            if (seen) return out->kind = BC_LINE_UNKNOWN;
+            if (k == 0) out->fullscreen = 1;
+            else if (k == 1) out->maximized = 1;
+            else if (k == 2) out->activated = 1;
+            else out->tiled |= 1u << (k - 3);
+            p += n;
         }
         if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_SIZE;
