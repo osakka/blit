@@ -15,10 +15,11 @@ promise: if what you see differs from it, that is a bug.
   suggests it). Hibr starts it with the desktop when **Control Panel >
   Windows > Programs in Windows** is on.
 - **Use a terminal opened after that.** Hibr gives every terminal it opens
-  from then on `WAYLAND_DISPLAY` (`blit-0`). A terminal opened before the
-  switch was turned on does not have it, and cannot be given it (a shell's
-  environment is its own): a program run there falls back to X11 and fails
-  with "cannot open display". Open a new terminal.
+  from then on `WAYLAND_DISPLAY` (`blit-0`), and `DISPLAY` (`:0` or the
+  next free one) when Xwayland is installed (below). A terminal opened
+  before the switch was turned on does not have them, and cannot be given
+  them (a shell's environment is its own): a program run there fails with
+  "cannot open display". Open a new terminal.
 
 ## Running a program
 
@@ -29,6 +30,24 @@ promise: if what you see differs from it, that is a bug.
 - The terminal stays the program's parent, as for any command: its warnings
   print there, Ctrl-C ends it, and closing the terminal ends the program.
   Run it as `firefox &` (or from Hibr's menus) to keep the terminal free.
+
+## X11 programs
+
+*Coming with the next Blit (ADR 0228 phase 2, milestone A); Hibr's side --
+exporting `DISPLAY` -- follows.* Programs that speak only X11 (xterm,
+older applications; Steam is milestone B) run under Xwayland, which
+`blit-compositor` starts with itself and manages: install `xwayland`
+(`blit-compositor` recommends it; 23.1 or later, as Debian 13 has).
+Without it, or with an older one, X11 programs fail with "cannot open
+display" and the compositor's log says why.
+
+An X program's window is a Hibr window like any other: its title and
+application name, placed and sized by the desktop, keys and mouse, and
+Hibr's close asks it to close. Not yet in milestone A: its menus and
+tooltips (they do not show), its own full screen, maximize and
+move/resize requests, its own pointer shapes (the display's pointer
+shows), dialogs kept with their parent, and copy and paste with X
+programs; these are milestones C and D.
 
 ## Using the window
 
@@ -45,8 +64,9 @@ promise: if what you see differs from it, that is a bug.
 
 ## Not yet
 
-- **X11 programs** (Steam, older applications) do not open: they need
-  Xwayland, ADR 0228's phase 2. They fail with "cannot open display".
+- **X11 programs beyond one plain window**: menus and tooltips, their
+  full screen and pointer shapes, the X clipboard, and Steam -- ADR 0228
+  phase 2's milestones B to E (above).
 - **Programs' menus in Hibr's bar** (the global menu): Blit's side is in
   0.3.77, Hibr's to follow. Qt and KDE programs, and GTK 3 ones with the
   appmenu module, get it; Firefox and GTK 4 programs keep their own menus.
@@ -55,8 +75,10 @@ promise: if what you see differs from it, that is a bug.
 
 ## When something is wrong
 
-- **No window at all:** check `echo $WAYLAND_DISPLAY` in that terminal (see
-  above) and that `blit-compositor` is running.
+- **No window at all:** check `echo $WAYLAND_DISPLAY` (and `echo $DISPLAY`
+  for an X program) in that terminal (see above) and that
+  `blit-compositor` is running; for an X program, that `Xwayland -version`
+  says 23.1 or later.
 - **A window, but no keys or clicks:** this was a real bug for programs
   that draw their own frame in shared memory (Firefox), fixed in Hibr
   0.99.484. Note the program and what you did, and report it.
@@ -69,4 +91,7 @@ Each release is checked against this page with real programs on the
 owner's machine -- vkcube, Firefox, a GTK and a Qt application: open, type,
 click, copy and paste both ways, move and resize from both frames,
 minimize and raise, Restart Desktop -- besides `compositor_gate`, which
-checks every line of the wire with a stand-in program.
+checks every line of the wire with a stand-in program, and
+`xwayland_gate`, which runs an X stand-in program under the compositor's
+Xwayland (map, title and class, a drawing pixel for pixel, a resize,
+focus, a key and a click, close).

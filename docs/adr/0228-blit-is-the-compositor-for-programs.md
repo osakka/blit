@@ -197,9 +197,12 @@ compositor library (a foreign compositor under Blit again) were each worse.
   starts it again for the next and logs why. Xwayland is `Recommends`:
   without it the compositor runs Wayland only and says so once.
 - **Association by `xwayland_shell_v1`** (Xwayland >= 23.1; Debian 13 has
-  24.1.6): `_XWAYLAND_SURFACE_SERIAL` on the X window matched to the
-  surface's `set_serial`. No `WL_SURFACE_ID` path; an older Xwayland is
-  refused with the reason.
+  24.1.6): the serial Xwayland gives the window manager in a
+  `WL_SURFACE_SERIAL` client message on the X window (l[0] its low 32
+  bits, l[1] its high; corrected at milestone A from "a
+  `_XWAYLAND_SURFACE_SERIAL` property", which does not exist:
+  xwayland-shell-v1.xml) matched to the surface's `set_serial`. No
+  `WL_SURFACE_ID` path; an older Xwayland is refused with the reason.
 - **The window manager** on libxcb (pkg-config `xcb`, `xcb-composite`,
   `xcb-xfixes`, `xcb-res`, ADR 0230), built against wlroots' `xwm.c`
   (MIT) as the reference: its order of `CompositeRedirectSubwindows(root,
@@ -237,6 +240,93 @@ Present to Blit's flip, and frames per second:
 - **D.** The X selections onto `CLIP`.
 - **E.** Big Picture full screen and one Proton game, at the monitor's
   refresh.
+
+**Milestone A, built (2026-11-10; unreleased until the next Blit).** One
+X program in a Hibr window, keys and mouse (`src/blit_compositor.c`, the X
+section; `docs/api.md`, "X programs"):
+
+- **Xwayland** is started with the compositor: `Xwayland` on `PATH`
+  (`BLIT_COMPOSITOR_XWAYLAND` names another, `none` turns X off: gates
+  only), refused below 23.1 by its `-version` with the reason; the first
+  free display from :0 to :32 taken as X does (`/tmp/.X<n>-lock` with the
+  compositor's pid, a dead pid's lock taken over; `@/tmp/.X11-unix/X<n>`
+  and `/tmp/.X11-unix/X<n>`, passed by `-listenfd`), `-rootless`, `-wm` on
+  a socketpair, `WAYLAND_SOCKET` a `wl_client` of ours, `-displayfd` for
+  readiness, no `-terminate`. Restarted when it dies, its status logged;
+  three deaths within 5 s of a start in a row stop it (X off, the sockets
+  closed, `-` to the next desktop). Ended and its sockets and lock removed
+  at the compositor's end.
+- **The wire:** `WINDOW display <wayland-name> <x-display>`, `:<n>` or
+  `-`, on every connection.
+- **Window kinds:** an X top-level is a `bc_xdg` (the picture) with its
+  X window `xwin`; `window_is_toplevel`, `window_configure` and
+  `window_close` let xdg and X top-levels share the announcement, frames,
+  input routing, outputs and re-announcement, and only the X section knows
+  X. The keyboard entering an X window's surface gives it X's focus.
+- **Evidence here (the build host: Debian 12, no Xwayland).** The
+  compositor builds with tcc and with `gcc -Wall -Wextra` (no new
+  warning); `compositor_gate` passes, also under ASan/UBSan, with X off
+  and `WINDOW display blit-0 -`, against a scratch copy of wayland-protocols
+  1.44's XML on `PKG_CONFIG_PATH` (the host's 1.31 has no cursor-shape-v1,
+  so `run-gates.sh` skips it here); `xwayland_gate` skips with its reason.
+  Against a scratch imitation of Xwayland -- Xvfb serving X behind the
+  compositor's own sockets and `-wm`, and a Wayland client doing Xwayland's
+  side of xwayland-shell, never committed -- `xwayland_gate.py` passed end
+  to end under tcc and ASan/UBSan in each order of the association (the
+  commit first, the X message first, and buffers committed with the serial
+  before the X message, which is the held-buffer path), and a scratch check
+  passed the restart, a desktop reconnect re-announcing `:0`, the give-up
+  after three quick deaths and the sockets' removal. Commit to frame sent
+  there, 400x300 by wl_shm: median 1.3-2.4 ms, minimum 0.4-0.9 ms.
+- **Pending:** the gate against Xwayland 24.1 on the owner's Debian 13
+  desktop (`sh tools/tests/xwayland_gate.sh`); Hibr's side (exporting
+  `DISPLAY` from `WINDOW display`'s second word); xterm and glxgears live.
+
+**Where blit-compositor's window manager differs from wlroots' `xwm.c` and
+`server.c`, and why.**
+- One fork and SIGCHLD (libwayland's signalfd), not a double fork: the
+  compositor reaps Xwayland itself, so it can log why it ended.
+- Started with the compositor, never lazily, and no `-terminate`: the
+  ADR's decision; X programs find their display ready and it does not end
+  between them.
+- Quick deaths are restarted (after 1 s, then 2 s) and given up only after
+  three in a row; wlroots does not restart one that lived under 5 s. A
+  given-up display's sockets close, so X programs fail at once.
+- `xwayland_shell_v1` only: no `WL_SURFACE_ID`. An Xwayland older than
+  23.1 is refused before it starts; one that sends `WL_SURFACE_ID` anyway
+  is logged and its windows not shown.
+- `CompositeRedirectSubwindows` before the root's event mask (the ADR's
+  order; wlroots selects the mask first; both go in the first flush,
+  before any client can map), and the mask request is checked: another
+  window manager on the root is logged and refused.
+- A window's properties are read at its MapRequest and kept by
+  PropertyNotify, not at the association (wlroots reads them in a surface
+  commit): its title and class are known when it is announced, and no X
+  round trip is made from inside a Wayland request.
+- A buffer committed before the match is held, not released, and is the
+  first frame: the compositor keeps no surface state of its own to show
+  later, as wlroots' `wlr_surface` does.
+- Focus by ICCCM 4.1.7: `SetInputFocus` only when `WM_HINTS` takes input,
+  `WM_TAKE_FOCUS` only to a window that lists it in `WM_PROTOCOLS`
+  (wlroots sends it to every window); a program that moves X's focus
+  itself is logged, not reverted (milestone C decides, with Steam).
+- No stacking: no `_NET_CLIENT_LIST(_STACKING)`, and a ConfigureRequest's
+  sibling and stack mode are dropped -- stacking is the desktop's. A
+  ConfigureRequest after the desktop's size is answered with that size and
+  a synthetic ConfigureNotify (ICCCM 4.1.5); wlroots hands it to its
+  compositor.
+- Override-redirect windows are matched and not shown until milestone C.
+- `_NET_SUPPORTED` names what the ADR lists (state, full screen,
+  maximized, active window, move/resize, name, the check window), not
+  wlroots' focused, modal, hidden and client lists, which nothing keeps
+  here; the states and move/resize are advertised ahead of milestone C and
+  their requests logged until then.
+- Xwayland gets exactly its five descriptors (`close_range` past them) and
+  an unblocked signal mask (libwayland's signalfd blocks SIGTERM, SIGINT and
+  SIGCHLD, which a child inherits); the listening sockets have a backlog of
+  64, not 1, for X programs started before Xwayland is ready.
+- X errors are logged by code (no xcb-errors); BadWindow, a window gone
+  before a request about it, is not logged.
 
 **Outside Blit,** for "Steam works" (written in programs-in-windows.md
 before B): the Steam package (non-free), i386 multiarch, the Vulkan
