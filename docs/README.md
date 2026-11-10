@@ -15,6 +15,7 @@ GitHub's.
 | You are… | Read, in order |
 | --- | --- |
 | **Trying Blit out** | the [README](../README.md), [features](features.md), `man blit` ([source](../man/blit.8)) |
+| **Running programs in windows** | [programs in windows](programs-in-windows.md): what to expect, what is not there yet |
 | **Running it** | `man blit`, `man blit.env` ([source](../man/blit.env.5)), the [operator runbook](api.md#operator-runbook-prove-the-server-before-touching-a-desktop), [diagnostic capture](diagnostic-capture.md) |
 | **Writing a client** | the [API guide](api.md), the [OpenAPI document](../openapi/blit-0.1.yaml), [API principles](spec/api-principles.md) |
 | **Writing a terminal program** | the [terminal reference](terminal.md), the [font and glyph reference](font-reference.md) |
@@ -27,6 +28,9 @@ GitHub's.
 
 - [Features](features.md) — everything Blit does, when it arrived, how far
   it has been proved.
+- [Programs in windows](programs-in-windows.md) — running Firefox, GTK, Qt
+  and Vulkan programs as Hibr windows: what to expect, and what is not there
+  yet.
 - [Terminal reference](terminal.md) — escape sequences, mouse and keyboard
   protocols, Kitty graphics, Sixel, Unicode, limits and known gaps.
 - [Font and glyph reference](font-reference.md) — fonts, the glyph stack,
