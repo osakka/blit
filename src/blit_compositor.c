@@ -60,6 +60,7 @@
 #include "xdg-decoration-unstable-v1-server-protocol.h"
 #include "linux-dmabuf-unstable-v1-server-protocol.h"
 #include "presentation-time-server-protocol.h"
+#include "relative-pointer-unstable-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -2440,12 +2441,55 @@ static void pointer_focus(struct bc_server *s, struct bc_surface *surface, doubl
                               wl_fixed_from_double(lx), wl_fixed_from_double(ly));
 }
 
-/* Relative motion under Blit's relative hold: zwp_relative_pointer_v1
-   is not offered yet, so it reaches no client. */
+/* Relative motion, Blit's raw counts under its relative hold (the
+   desktop's ?7701 with `INPUT hold <id> relative`), to the
+   zwp_relative_pointer_v1 objects of the client with the pointer -- the
+   window's surface, entered where the pointer last was if it has not got
+   it. The counts are not accelerated, so both pairs are the same. The
+   lock itself is the desktop's (ADR 0198): zwp_pointer_constraints_v1
+   waits on `WINDOW lock` (docs/api.md, a proposal). */
 static void relative_motion(struct bc_server *s, struct bc_xdg *x, double dx, double dy,
                             uint64_t time_us)
 {
-    (void)s; (void)x; (void)dx; (void)dy; (void)time_us;
+    struct wl_resource *r;
+    uint64_t us = time_us ? time_us : (uint64_t)now_ms() * 1000u;
+    if (s->ptr_focus == NULL || s->ptr_focus->xdg == NULL ||
+        (s->ptr_focus->xdg != x && s->ptr_focus->xdg->parent != x))
+        pointer_focus(s, x->surface, s->ptr_x, s->ptr_y);
+    if (s->ptr_focus == NULL) return;
+    seat_for_client(r, &s->relative_pointers, s->ptr_focus)
+        zwp_relative_pointer_v1_send_relative_motion(r, (uint32_t)(us >> 32), (uint32_t)us,
+                                                     wl_fixed_from_double(dx), wl_fixed_from_double(dy),
+                                                     wl_fixed_from_double(dx), wl_fixed_from_double(dy));
+}
+
+static const struct zwp_relative_pointer_v1_interface relative_pointer_impl = {
+    .destroy = bc_destroy_request,
+};
+
+static void relative_manager_get(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                 struct wl_resource *pointer)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct wl_resource *r = wl_resource_create(client, &zwp_relative_pointer_v1_interface,
+                                               wl_resource_get_version(resource), id);
+    (void)pointer;
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &relative_pointer_impl, s, unlink_resource);
+    wl_list_insert(&s->relative_pointers, wl_resource_get_link(r));
+}
+
+static const struct zwp_relative_pointer_manager_v1_interface relative_manager_impl = {
+    .destroy = bc_destroy_request,
+    .get_relative_pointer = relative_manager_get,
+};
+
+static void bind_relative_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zwp_relative_pointer_manager_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &relative_manager_impl, data, NULL);
 }
 
 static void input_line(struct bc_server *s, struct bc_input_conn *conn, const char *line)
@@ -2907,7 +2951,10 @@ int main(int argc, char **argv)
                           BC_VERSION(1, zxdg_decoration_manager_v1_interface), &server,
                           bind_decoration_manager) ||
         !wl_global_create(server.display, &wp_presentation_interface,
-                          BC_VERSION(1, wp_presentation_interface), &server, bind_presentation)) {
+                          BC_VERSION(1, wp_presentation_interface), &server, bind_presentation) ||
+        !wl_global_create(server.display, &zwp_relative_pointer_manager_v1_interface,
+                          BC_VERSION(1, zwp_relative_pointer_manager_v1_interface), &server,
+                          bind_relative_manager)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;

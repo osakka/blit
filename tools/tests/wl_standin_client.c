@@ -47,8 +47,9 @@
    <depressed> <latched> <locked> <group>`, `STANDIN pointer enter <surface>
    <x> <y>`, `STANDIN pointer leave <surface>`, `STANDIN pointer motion <x>
    <y>`, `STANDIN button <code> <state>`, `STANDIN axis <axis> <value>`,
-   `STANDIN axis120 <axis> <v120>`, `STANDIN axis source <n>` and `STANDIN
-   pointer frame`.
+   `STANDIN axis120 <axis> <v120>`, `STANDIN axis source <n>`, `STANDIN
+   pointer frame` and, from zwp_relative_pointer_v1 when it is offered,
+   `STANDIN relative <dx> <dy>`.
 
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
@@ -72,6 +73,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
+#include "relative-pointer-unstable-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -88,6 +90,8 @@ struct standin {
     unsigned feedback_pairs, feedback_tranche;
     int feedback_xr24_linear;
     struct wp_presentation *presentation;
+    struct zwp_relative_pointer_manager_v1 *relative_manager;
+    struct zwp_relative_pointer_v1 *relative;
     unsigned presented, discarded;
     uint32_t refresh;
     int animate, animated;
@@ -573,6 +577,15 @@ static const struct wl_pointer_listener pointer_listener = {
     pointer_axis_source, pointer_axis_stop, pointer_axis_discrete, pointer_axis_value120,
 };
 
+static void relative_motion(void *data, struct zwp_relative_pointer_v1 *r, uint32_t hi, uint32_t lo,
+                            wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t udx, wl_fixed_t udy)
+{
+    (void)data; (void)r; (void)hi; (void)lo; (void)udx; (void)udy;
+    printf("STANDIN relative %.2f %.2f\n", wl_fixed_to_double(dx), wl_fixed_to_double(dy));
+}
+
+static const struct zwp_relative_pointer_v1_listener relative_listener = { relative_motion };
+
 static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps)
 {
     struct standin *s = data;
@@ -693,6 +706,9 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         out->output = wl_registry_bind(registry, name, &wl_output_interface,
                                        version < 4 ? version : 4);
         wl_output_add_listener(out->output, &output_listener, out);
+    } else if (strcmp(interface, zwp_relative_pointer_manager_v1_interface.name) == 0) {
+        s->relative_manager = wl_registry_bind(registry, name,
+                                               &zwp_relative_pointer_manager_v1_interface, 1);
     } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
         s->presentation = wl_registry_bind(registry, name, &wp_presentation_interface, 1);
     } else if (strcmp(interface, zwp_linux_dmabuf_v1_interface.name) == 0 && version >= 4) {
@@ -806,6 +822,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "STANDIN missing wl_compositor, wl_shm or xdg_wm_base\n");
         return 1;
     }
+    if (s.relative_manager && s.pointer) {
+        s.relative = zwp_relative_pointer_manager_v1_get_relative_pointer(s.relative_manager, s.pointer);
+        zwp_relative_pointer_v1_add_listener(s.relative, &relative_listener, &s);
+    }
     if (s.use_dmabuf && !s.dmabuf) {
         fprintf(stderr, "STANDIN --dmabuf: no zwp_linux_dmabuf_v1 version 4\n");
         return 1;
@@ -854,6 +874,8 @@ int main(int argc, char **argv)
     if (s.feedback) zwp_linux_dmabuf_feedback_v1_destroy(s.feedback);
     if (s.dmabuf) zwp_linux_dmabuf_v1_destroy(s.dmabuf);
     if (s.presentation) wp_presentation_destroy(s.presentation);
+    if (s.relative) zwp_relative_pointer_v1_destroy(s.relative);
+    if (s.relative_manager) zwp_relative_pointer_manager_v1_destroy(s.relative_manager);
     /* A callback the compositor never answered (the last frame's, at
        close) is still the client's to free. */
     for (i = 0; i < (int)(sizeof(s.callbacks) / sizeof(s.callbacks[0])); ++i)

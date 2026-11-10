@@ -118,7 +118,8 @@ case "$target" in
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
                    "$protocols/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml" \
-                   "$protocols/stable/presentation-time/presentation-time.xml"; do
+                   "$protocols/stable/presentation-time/presentation-time.xml" \
+                   "$protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml"; do
             base=$(basename "$xml" .xml)
             wayland-scanner server-header "$xml" "$proto/$base-server-protocol.h"
             wayland-scanner client-header "$xml" "$proto/$base-client-protocol.h"
@@ -130,6 +131,7 @@ case "$target" in
             "$ROOT/src/blit_compositor.c" \
             "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
             "$proto/linux-dmabuf-unstable-v1-protocol.c" "$proto/presentation-time-protocol.c" \
+            "$proto/relative-pointer-unstable-v1-protocol.c" \
             "${BLIT_XKBCOMMON_LIBRARY:-/lib/x86_64-linux-gnu/libxkbcommon.so.0}" \
             "${BLIT_WAYLAND_SERVER_LIBRARY:-/lib/x86_64-linux-gnu/libwayland-server.so.0}" \
             -o "$output"

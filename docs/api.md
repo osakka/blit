@@ -2149,6 +2149,32 @@ It speaks the frame channel above as a producer, with these additions.
   went down on keeps it until the last button is up. Clients are told key
   repeat 25 a second after 600 ms (Blit's per-device repeat is not on the
   wire yet).
+- **Relative pointer.** `zwp_relative_pointer_manager_v1` is offered: the
+  `INPUT rel` lines of a route under Blit's relative hold (the desktop's
+  `?7701` with `INPUT hold <id> relative`) go to the relative pointers of
+  the client that has the pointer, the raw counts as both the accelerated
+  and the unaccelerated motion.
+- **Pointer lock, a proposal** (*not agreed with Hibr, not implemented;
+  until it is, blit-compositor does not offer `zwp_pointer_constraints_v1`,
+  so a program never waits on a lock it cannot get*). The lock is the
+  desktop's (ADR 0198), so the compositor asks for it rather than taking
+  it:
+  - compositor to desktop, `WINDOW lock <id> relative|confine|off`: the
+    program locked the pointer (`zwp_pointer_constraints_v1.lock_pointer`:
+    `relative`), confined it (`confine_pointer`: `confine`), or let it go
+    (`off`, its constraint destroyed or its window gone). A lock's region
+    and a confinement's region are not carried: Blit confines to the
+    picture's drawn rectangle.
+  - desktop to compositor, `WINDOW lock <id> on|off`: the desktop engaged
+    its hold for the window (`?7701`, after `INPUT hold <id> relative` or
+    `confine`), or the hold ended -- on its Release Pointer chord, a focus
+    change, or the program's `off`. The compositor sends `locked` or
+    `confined` on `on`, and `unlocked` or `unconfined` on `off` (a
+    `oneshot` constraint is then dead, a `persistent` one waits for the
+    next `on`).
+  - Relative motion while locked is the existing `INPUT rel`; a confined
+    pointer's positions are the existing `INPUT ptr` (Blit keeps the
+    pointer inside the picture under `confine`).
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete

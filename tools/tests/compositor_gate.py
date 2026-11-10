@@ -362,7 +362,7 @@ def input_part(server, compositor, standin, work):
             def events():
                 return [l for l in printed().splitlines()[mark[0]:]
                         if l.split(' ')[1] in ('keyboard', 'key', 'modifiers', 'pointer', 'button',
-                                               'axis', 'axis120')]
+                                               'axis', 'axis120', 'relative')]
             wait_for(lambda: len(events()) >= len(wanted),
                      lambda: 'the client saw %s, expected %s' % (events(), list(wanted)))
             got = events()[:len(wanted)]
@@ -393,6 +393,9 @@ def input_part(server, compositor, standin, work):
              'pointer enter main 30.00 30.00', 'pointer frame')
         lines_to('wheel 1 0 1')
         seen('axis source 0', 'axis120 0 120', 'axis 0 15.00', 'pointer frame')
+        # Relative motion (Blit's relative hold) to the client with the pointer.
+        lines_to('rel 1 7 -3', 'rel 1 -2 5')
+        seen('relative 7.00 -3.00', 'pointer frame', 'relative -2.00 5.00', 'pointer frame')
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         # The desktop takes the window's focus: the keyboard leaves it.
@@ -413,7 +416,7 @@ def input_part(server, compositor, standin, work):
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
-                'focus=line,!activated,route-end' % len(keymap))
+                'relative=7,-3+-2,5 focus=line,!activated,route-end' % len(keymap))
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -622,11 +625,14 @@ def desktop_part(compositor, standin, work):
         # The versions are the ADR's, bounded by the build host's XML.
         versions = dict(l.split()[2:4] for l in output.splitlines() if l.startswith('STANDIN global '))
         for global_ in ('wl_compositor', 'wl_subcompositor', 'wl_shm', 'wl_output', 'wl_seat',
-                        'xdg_wm_base', 'zxdg_decoration_manager_v1'):
+                        'xdg_wm_base', 'zxdg_decoration_manager_v1', 'wp_presentation',
+                        'zwp_relative_pointer_manager_v1'):
             check(global_ in versions, 'no global %s: %s' % (global_, versions))
         check(int(versions['wl_output']) == 4 and int(versions['wl_seat']) == 8,
               'wl_output or wl_seat at another version: %s' % versions)
         check('zwp_linux_dmabuf_v1' not in versions, 'linux-dmabuf offered without dmabuf=1: %s' % versions)
+        # Pointer constraints wait on WINDOW lock (docs/api.md, a proposal).
+        check('zwp_pointer_constraints_v1' not in versions, 'pointer constraints offered: %s' % versions)
         check(versions.get('wp_presentation') == '1', 'no wp_presentation 1: %s' % versions)
         check('STANDIN presentation presented=4 discarded=0 refresh=16666666' in output,
               'the stand-in\'s frames were not each presented at 60 Hz:\n%s' % output)
