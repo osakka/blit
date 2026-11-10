@@ -280,6 +280,62 @@ def states_part(desk, standin, env, display, work):
             'BLIT-1,BLIT-2:800x600@75000')
 
 
+def csd_part(desk, standin, env, display, work):
+    """A program that draws its own frame (ADR 0229), with `--csd`, window 9:
+    `WINDOW decor client`, its geometry inside its buffer, tiled states
+    passed on, and move, menu and resize asked from its own frame with a
+    press's serial -- one asked with no press comes to nothing."""
+    out_path = os.path.join(work, 'standin-csd.out')
+    client = start([standin, '--csd', 'Csd'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    try:
+        for want in ('WINDOW new 9 0', 'WINDOW title 9 Csd', 'WINDOW appid 9 blit.standin',
+                     'WINDOW limits 9 64 48 0 0', 'WINDOW decor 9 client'):
+            desk.line(want)
+        desk.line('WINDOW geometry 9 10 10 236 140')
+        desk.frame(256, 160, image_id=9)
+        desk.send('WINDOW size 9 200 120 tiled-left tiled-top')
+        desk.line('WINDOW geometry 9 10 10 180 100')
+        desk.frame(200, 120, image_id=9)
+        wait_for(lambda: 'STANDIN csd asked to move with no press' in printed(),
+                 lambda: 'no unsolicited move:\n' + printed())
+        desk.nothing(0.3)  # no WINDOW move: there was no press
+        check('STANDIN configure 200x120 tiled-left tiled-top' in printed(),
+              lambda: 'the tiled states did not reach the program:\n' + printed())
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[9])
+        frame = [0]
+
+        def lines(*events):
+            text = b''
+            for e in events:
+                frame[0] += 1
+                text += b'INPUT %s\nINPUT frame %d %d\n' % (e.encode() % BLIT_PICTURE, BLIT_PICTURE, frame[0])
+            route.sendall(text)
+
+        lines('ptr %d 50.00 50.00', 'btn %d 272 press')
+        desk.line('WINDOW move 9')
+        lines('btn %d 272 release', 'btn %d 273 press')
+        desk.line('WINDOW menu 9 15 16')
+        lines('btn %d 273 release', 'btn %d 274 press')
+        desk.line('WINDOW resize 9 bottom-right')
+        lines('btn %d 274 release')
+        wait_for(lambda: printed().count('STANDIN csd asked with serial') == 3,
+                 lambda: 'the frame did not ask three times:\n' + printed())
+        desk.nothing(0.3)
+        desk.send('WINDOW close 9')
+        desk.line('WINDOW gone 9')
+        check(client.wait(5) == 0, 'the csd stand-in failed:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('decor=client geometry=10,10+236x140->180x100 tiled=left,top '
+            'move/menu@15,16/resize=bottom-right on a press only')
+
+
 def sub_part(desk, standin, env, display, work):
     """Subsurfaces (docs/api.md, "Subsurfaces"), with `--sub`: window 7 and
     its subsurface, picture 8. Synchronized, the subsurface's frame waits
@@ -1345,6 +1401,7 @@ def desktop_part(compositor, standin, work):
         states = states_part(desk, standin, env, display, work)
         pacing = pacing_part(desk, standin, env, display, work)
         subs = sub_part(desk, standin, env, display, work)
+        csd = csd_part(desk, standin, env, display, work)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1358,7 +1415,7 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('33 frames sent, 0 failed' in text, 'the log does not count 33 frames:\n%s' % text)
+        check('35 frames sent, 0 failed' in text, 'the log does not count 35 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
@@ -1366,6 +1423,7 @@ def desktop_part(compositor, standin, work):
         print('COMPOSITOR_STATES_OK %s' % states)
         print('COMPOSITOR_PACING_OK %s' % pacing)
         print('COMPOSITOR_SUB_OK %s' % subs)
+        print('COMPOSITOR_CSD_OK %s' % csd)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

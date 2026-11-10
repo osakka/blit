@@ -187,6 +187,7 @@ struct bc_xdg {
                                          client draws from its next commit */
     int32_t size_w, size_h;
     int size_fullscreen, size_maximized, size_activated;
+    unsigned size_tiled;              /* BC_TILED_* */
     struct bc_output *output;         /* the display it is on */
     uint64_t last_copy;               /* the sequence of its newest FRM1 */
     BcCopy kept;                      /* its newest frame when it is a copy (fd -1
@@ -253,6 +254,7 @@ struct bc_server {
     struct bc_surface *kbd_focus, *ptr_focus;
     double ptr_x, ptr_y;
     uint32_t buttons_down;            /* BTN_LEFT + n */
+    uint32_t button_serial;           /* the serial of the newest press, sent to every pointer */
     int pointer_batch;                /* a pointer event since the last frame */
     FILE *log;
     int status;
@@ -318,6 +320,13 @@ static void send_limits(struct bc_xdg *x)
     x->limits_sent = 1;
 }
 
+/* `WINDOW geometry`: the window's rectangle in its surface pixels. */
+static void send_geometry(struct bc_xdg *x)
+{
+    bc_wire_line(&x->server->wire, "WINDOW geometry %u %d %d %d %d", x->id, x->gx, x->gy, x->gw,
+                 x->gh);
+}
+
 static void send_decor(struct bc_xdg *x)
 {
     bc_wire_line(&x->server->wire, "WINDOW decor %u %s", x->id,
@@ -337,6 +346,7 @@ static void announce_hints(struct bc_xdg *x, int parent)
     if (x->appid[0]) bc_wire_line(w, "WINDOW appid %u %s", x->id, x->appid);
     if (x->min_w || x->min_h || x->max_w || x->max_h) send_limits(x);
     send_decor(x);
+    if (x->gw > 0 && x->gh > 0) send_geometry(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
     /* Its input, straight from Blit to its own input socket (one route per
@@ -423,6 +433,15 @@ static void send_toplevel_configure(struct bc_xdg *x)
         *s = XDG_TOPLEVEL_STATE_MAXIMIZED;
     if (x->size_activated && (s = wl_array_add(&states, sizeof(*s))) != NULL)
         *s = XDG_TOPLEVEL_STATE_ACTIVATED;
+    /* Tiled (xdg_toplevel v2): a client-side frame drops its shadow there. */
+    if (wl_resource_get_version(x->toplevel) >= 2) {
+        static const uint32_t tiled[] = { XDG_TOPLEVEL_STATE_TILED_LEFT, XDG_TOPLEVEL_STATE_TILED_RIGHT,
+                                          XDG_TOPLEVEL_STATE_TILED_TOP, XDG_TOPLEVEL_STATE_TILED_BOTTOM };
+        unsigned k;
+        for (k = 0; k < 4; ++k)
+            if ((x->size_tiled & (1u << k)) && (s = wl_array_add(&states, sizeof(*s))) != NULL)
+                *s = tiled[k];
+    }
     if (x->decoration)
         zxdg_toplevel_decoration_v1_send_configure(x->decoration, x->decor_mode);
     xdg_toplevel_send_configure(x->toplevel, x->size_w, x->size_h, &states);
@@ -1342,8 +1361,11 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
 
     if (x && (x->toplevel || x->popup)) {
         if (x->pending_geometry) {
+            int changed = x->gx != x->pgx || x->gy != x->pgy || x->gw != x->pgw || x->gh != x->pgh;
             x->gx = x->pgx; x->gy = x->pgy; x->gw = x->pgw; x->gh = x->pgh;
             x->pending_geometry = 0;
+            /* The window inside its buffer (ADR 0229): its shadows outside. */
+            if (changed && x->toplevel && x->id) send_geometry(x);
         }
         if (x->toplevel && x->decor_dropped && !x->decoration) {
             x->decor_dropped = 0;
@@ -2368,24 +2390,60 @@ static void toplevel_set_app_id(struct wl_client *client, struct wl_resource *re
     if (x->id) bc_wire_line(&x->server->wire, "WINDOW appid %u %s", x->id, x->appid);
 }
 
-static void toplevel_show_window_menu(struct wl_client *client, struct wl_resource *resource,
-                                      struct wl_resource *seat, uint32_t serial, int32_t x,
-                                      int32_t y)
+/* A program's own frame asks the desktop to run a drag or show the window
+   menu (ADR 0229): only with the serial of a press still down on that
+   window, so no program starts one by itself. */
+static struct bc_xdg *toplevel_grab_window(struct wl_resource *resource, uint32_t serial)
 {
-    (void)client; (void)resource; (void)seat; (void)serial; (void)x; (void)y;
+    struct bc_xdg *x = wl_resource_get_user_data(resource);
+    struct bc_server *s;
+    if (x == NULL || x->id == 0) return NULL;
+    s = x->server;
+    if (s->link != BC_LINK_UP || !s->wire.window || s->buttons_down == 0 ||
+        serial != s->button_serial || surface_window(s->ptr_focus) != x) {
+        logf_("window %u: a move, resize or menu without a press on it is ignored", x->id);
+        return NULL;
+    }
+    return x;
+}
+
+static void toplevel_show_window_menu(struct wl_client *client, struct wl_resource *resource,
+                                      struct wl_resource *seat, uint32_t serial, int32_t mx,
+                                      int32_t my)
+{
+    struct bc_xdg *x = toplevel_grab_window(resource, serial);
+    (void)client; (void)seat;
+    /* x, y are in window geometry coordinates: the surface's are the
+       geometry's origin plus them. */
+    if (x) bc_wire_line(&x->server->wire, "WINDOW menu %u %d %d", x->id, x->gx + mx, x->gy + my);
 }
 
 static void toplevel_move(struct wl_client *client, struct wl_resource *resource,
                           struct wl_resource *seat, uint32_t serial)
 {
-    /* Moving and resizing are the desktop's, through its own frame. */
-    (void)client; (void)resource; (void)seat; (void)serial;
+    struct bc_xdg *x = toplevel_grab_window(resource, serial);
+    (void)client; (void)seat;
+    if (x) bc_wire_line(&x->server->wire, "WINDOW move %u", x->id);
 }
 
 static void toplevel_resize(struct wl_client *client, struct wl_resource *resource,
                             struct wl_resource *seat, uint32_t serial, uint32_t edges)
 {
-    (void)client; (void)resource; (void)seat; (void)serial; (void)edges;
+    static const char *const names[] = {
+        [XDG_TOPLEVEL_RESIZE_EDGE_TOP] = "top", [XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM] = "bottom",
+        [XDG_TOPLEVEL_RESIZE_EDGE_LEFT] = "left", [XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT] = "top-left",
+        [XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT] = "bottom-left", [XDG_TOPLEVEL_RESIZE_EDGE_RIGHT] = "right",
+        [XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT] = "top-right",
+        [XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT] = "bottom-right",
+    };
+    struct bc_xdg *x;
+    (void)client; (void)seat;
+    if (edges >= sizeof(names) / sizeof(names[0]) || names[edges] == NULL) {
+        wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_RESIZE_EDGE, "edge %u", edges);
+        return;
+    }
+    if ((x = toplevel_grab_window(resource, serial)) != NULL)
+        bc_wire_line(&x->server->wire, "WINDOW resize %u %s", x->id, names[edges]);
 }
 
 static void toplevel_set_max_size(struct wl_client *client, struct wl_resource *resource,
@@ -3490,10 +3548,16 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         if (in.pressed) s->buttons_down |= 1u << (in.code - 0x110);
         else s->buttons_down &= ~(1u << (in.code - 0x110));
         if (s->ptr_focus == NULL) return;
-        seat_for_client(r, &s->pointers, s->ptr_focus)
-            wl_pointer_send_button(r, wl_display_next_serial(s->display), now_ms(), in.code,
-                                   in.pressed ? WL_POINTER_BUTTON_STATE_PRESSED
-                                              : WL_POINTER_BUTTON_STATE_RELEASED);
+        {
+            /* One serial for the event: a press's is what a move, resize or
+               menu request must name (WINDOW move). */
+            uint32_t serial = wl_display_next_serial(s->display);
+            if (in.pressed) s->button_serial = serial;
+            seat_for_client(r, &s->pointers, s->ptr_focus)
+                wl_pointer_send_button(r, serial, now_ms(), in.code,
+                                       in.pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+                                                  : WL_POINTER_BUTTON_STATE_RELEASED);
+        }
         s->pointer_batch = 1;
         return;
     case BC_INPUT_WHEEL: {
@@ -3748,6 +3812,7 @@ static void handle_line(struct bc_server *s, const char *line)
         x->size_fullscreen = l.fullscreen;
         x->size_maximized = l.maximized;
         x->size_activated = l.activated;
+        x->size_tiled = l.tiled;
         /* The desktop took the window's focus away: so does the keyboard. */
         if (!l.activated && x->surface && s->kbd_focus == x->surface) keyboard_focus(s, NULL);
         logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,

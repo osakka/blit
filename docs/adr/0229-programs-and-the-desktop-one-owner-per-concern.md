@@ -89,9 +89,13 @@ All lines follow version 5's grammar, `<WORD> <verb> <id> ...`.
   that window -- the request's serial is checked against the button's --
   so no program can start a drag by itself. `<edges>` is one of `top`,
   `bottom`, `left`, `right`, `top-left`, `top-right`, `bottom-left`,
-  `bottom-right`. The desktop runs the drag as from its own frame, then
-  sends `WINDOW size` as usual. Turning the window's input route off while
-  it drags releases the program's button through the route's own release.
+  `bottom-right`. The desktop runs the drag as from its own frame (Hibr's
+  DT_DRAG and DT_SIZE, set at a press and driven by the drag reports),
+  then sends `WINDOW size` as usual. It has the press: Blit reports every
+  press, drag and release to the terminal as well as to a live route. It
+  sends `INPUT off <id>` when the drag starts, which releases the
+  program's button through the route's own release and keeps the drag's
+  motion from the program, and `INPUT on <id>` after.
 - **`WINDOW menu <id> <x> <y>`**, compositor to desktop: the window menu
   asked for at x, y in the window's surface pixels.
 - **Tiled states** on `WINDOW size`: `tiled-left`, `tiled-right`,
@@ -113,6 +117,17 @@ All lines follow version 5's grammar, `<WORD> <verb> <id> ...`.
   - `CLIP clear <seq>`: the offer is withdrawn (the program's source went,
     Hibr's clipboard was cleared). The compositor then sets the program
     side's selection to nothing.
+  - **Text, one type.** Hibr's clipboard is text and reads a program's
+    selection eagerly, at copy, for its history (at most 1 MB kept). The
+    compositor normalizes: a program's offer with any text type
+    (`text/plain;charset=utf-8`, `text/plain`, `UTF8_STRING`, `STRING`,
+    `TEXT`) reaches the desktop as `text/plain;charset=utf-8`, read from
+    the program's best text type; an offer with no text type reaches it
+    with no types, so the desktop knows the selection moved to something
+    it does not hold (programs still paste it from one another through the
+    compositor). The desktop's offers are advertised to programs with the
+    text aliases, every read asked of the desktop as
+    `text/plain;charset=utf-8`.
   - The compositor stores no bytes. It keeps the current offer of each
     selection -- a Wayland source or the desktop's `<seq>` -- and streams a
     read from the owner to the reader through the pipe. A program with the

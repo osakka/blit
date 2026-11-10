@@ -80,6 +80,14 @@ static void lines(void)
            l.activated, "size, activated");
     EXPECT(bc_parse_line("WINDOW size 2 0 0", &l) == BC_LINE_SIZE && l.width == 0 && l.height == 0,
            "0 0: the program chooses");
+    EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-left tiled-top", &l) == BC_LINE_SIZE &&
+           l.tiled == (BC_TILED_LEFT | BC_TILED_TOP) && !l.activated, "tiled");
+    EXPECT(bc_parse_line("WINDOW size 3 200 120 maximized activated tiled-left tiled-right tiled-top "
+                         "tiled-bottom", &l) == BC_LINE_SIZE && l.maximized && l.activated && l.tiled == 15,
+           "every state");
+    EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-top tiled-left", &l) == BC_LINE_UNKNOWN,
+           "tiled out of order");
+    EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-middle", &l) == BC_LINE_UNKNOWN, "no such edge");
     EXPECT(bc_parse_line("WINDOW size 2 40000 10", &l) == BC_LINE_UNKNOWN, "too wide");
     EXPECT(bc_parse_line("WINDOW size 2 -1 10", &l) == BC_LINE_UNKNOWN, "negative");
     EXPECT(bc_parse_line("WINDOW size 0 10 10", &l) == BC_LINE_UNKNOWN, "id 0");

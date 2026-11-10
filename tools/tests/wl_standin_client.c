@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -22,6 +22,14 @@
    to 40,10 and a 48x24 frame committed before the parent's commit; 3 an
    empty input region; 4 the whole surface again; 5 placed below the
    parent; 6 the wl_subsurface destroyed. Its pointer events name it `sub`.
+
+   With --csd it draws its own frame, as GTK does: a window geometry 10
+   pixels inside its buffer on each side (its shadow outside), and on a
+   press in its surface it asks the compositor to move it (BTN_LEFT), for
+   the window menu at 5,6 (BTN_RIGHT) or to resize it from the
+   bottom-right (BTN_MIDDLE), with that press's serial; at its first sized
+   configure it asks to be moved with no press at all (serial 0), which
+   must come to nothing. Configures print their tiled states.
 
    With --popup, after its first frame it opens one xdg_popup of 80x60
    (anchor rectangle 10,20 30x40, anchor bottom-left, gravity bottom-right,
@@ -142,6 +150,7 @@ struct standin {
     struct wl_surface *popup_surface;
     /* --sub */
     int sub_script, sub_step;
+    int csd, csd_asked;
     struct wl_subcompositor *subcompositor;
     struct wl_surface *sub_surface;
     struct wl_subsurface *subsurface;
@@ -308,14 +317,19 @@ static void toplevel_configure(void *data, struct xdg_toplevel *t, int32_t w, in
     struct standin *s = data;
     uint32_t *state;
     int fullscreen = 0, maximized = 0, activated = 0;
+    char tiled[64] = "";
     wl_array_for_each(state, states) {
         if (*state == XDG_TOPLEVEL_STATE_FULLSCREEN) fullscreen = 1;
         if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED) maximized = 1;
         if (*state == XDG_TOPLEVEL_STATE_ACTIVATED) activated = 1;
+        if (*state == XDG_TOPLEVEL_STATE_TILED_LEFT) strcat(tiled, " tiled-left");
+        if (*state == XDG_TOPLEVEL_STATE_TILED_RIGHT) strcat(tiled, " tiled-right");
+        if (*state == XDG_TOPLEVEL_STATE_TILED_TOP) strcat(tiled, " tiled-top");
+        if (*state == XDG_TOPLEVEL_STATE_TILED_BOTTOM) strcat(tiled, " tiled-bottom");
     }
-    printf("STANDIN %sconfigure %dx%d%s%s%s\n", t == s->child ? "child " : "", w, h,
+    printf("STANDIN %sconfigure %dx%d%s%s%s%s\n", t == s->child ? "child " : "", w, h,
            fullscreen ? " fullscreen" : "", maximized ? " maximized" : "",
-           activated ? " activated" : "");
+           activated ? " activated" : "", tiled);
     /* 0x0 is the compositor's reply before the desktop has sized the
        window: the client picks. The scripted steps wait for a sized one. */
     if (t == s->child) {
@@ -572,7 +586,15 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
     struct standin *s = data;
     ++s->surface_configures;
     xdg_surface_ack_configure(xs, serial);
+    if (s->csd)
+        xdg_surface_set_window_geometry(s->xdg_surface, 10, 10, s->want_w - 20, s->want_h - 20);
     draw(s, s->surface, s->want_w, s->want_h);
+    if (s->csd && s->sized && !s->csd_asked) {
+        s->csd_asked = 1;
+        xdg_toplevel_move(s->toplevel, s->seat, 0);
+        printf("STANDIN csd asked to move with no press\n");
+        fflush(stdout);
+    }
     if (!s->sized) return;
     if (s->sub_script) sub_next(s);
     if (s->lock && s->lock_step == 0) lock_next(s);
@@ -687,8 +709,18 @@ static void pointer_motion(void *data, struct wl_pointer *p, uint32_t time, wl_f
 static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
                            uint32_t button, uint32_t state)
 {
-    (void)data; (void)p; (void)serial; (void)time;
+    struct standin *s = data;
+    (void)p; (void)time;
     printf("STANDIN button %u %u\n", button, state);
+    /* --csd: its own frame asks for the drag, the menu or the resize. */
+    if (s->csd && state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        if (button == 0x110) xdg_toplevel_move(s->toplevel, s->seat, serial);
+        else if (button == 0x111) xdg_toplevel_show_window_menu(s->toplevel, s->seat, serial, 5, 6);
+        else if (button == 0x112)
+            xdg_toplevel_resize(s->toplevel, s->seat, serial, XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT);
+        printf("STANDIN csd asked with serial %u\n", serial);
+    }
+    fflush(stdout);
 }
 
 static void pointer_axis(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis,
@@ -963,6 +995,7 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
+        else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -1005,7 +1038,7 @@ int main(int argc, char **argv)
     xdg_toplevel_set_title(s.toplevel, title);
     xdg_toplevel_set_app_id(s.toplevel, "blit.standin");
     xdg_toplevel_set_min_size(s.toplevel, 64, 48);
-    if (s.decoration_manager) {
+    if (s.decoration_manager && !s.csd) {  /* --csd draws its own frame */
         s.decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(s.decoration_manager,
                                                                            s.toplevel);
         zxdg_toplevel_decoration_v1_add_listener(s.decoration, &decoration_listener, &s);

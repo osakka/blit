@@ -2127,6 +2127,25 @@ It speaks the frame channel above as a producer, with these additions.
     (`zxdg_decoration`). `client` (a program that insists on its own, such
     as GTK's client-side decorations) gets a bare window from the desktop,
     never a frame around a frame.
+  - `WINDOW geometry <id> <x> <y> <w> <h>`: the window itself inside its
+    buffer, in its surface pixels (`xdg_surface.set_window_geometry`): a
+    program that draws its own frame draws its shadow outside it. Sent at
+    the commit that changes it and when the window is announced again; no
+    line means the whole buffer. The desktop crops the picture to it with
+    a source rectangle (Blit maps the pointer through it) and sizes the
+    window body by it: `WINDOW size` is this rectangle's size.
+  - `WINDOW move <id>`, `WINDOW resize <id>
+    top|bottom|left|right|top-left|top-right|bottom-left|bottom-right`: the
+    program's own frame asks the desktop to move or resize it
+    (`xdg_toplevel.move/resize`). Sent only while a pointer button the
+    compositor delivered to that window is down, the request naming that
+    press's serial; anything else is ignored and logged. The desktop has
+    seen the press itself (Blit reports every press, drag and release to
+    the terminal as well as to a live route), starts its own drag at the
+    pointer, and sends `INPUT off <id>` so that the program's button is
+    released and it gets no motion during the drag, `INPUT on <id>` after.
+  - `WINDOW menu <id> <x> <y>`: the window menu, asked for at x, y in its
+    surface pixels (`xdg_toplevel.show_window_menu`, the same press rule).
   - `WINDOW cursor <id> <name>`: the pointer shape the program asks for over
     that window, a CSS cursor name (`default`, `text`, `pointer`, ...) or
     `hidden`. The desktop turns it into its own per-window pointer shape
@@ -2146,13 +2165,17 @@ It speaks the frame channel above as a producer, with these additions.
   titles and app ids and bounds them to 256 bytes.
   A line the desktop does not know is answered `WINDOW error <id> EINVAL`.
 - **Desktop to compositor:**
-  - `WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]`:
+  - `WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
+    [tiled-left] [tiled-right] [tiled-top] [tiled-bottom]`:
     pixels, with the xdg states the desktop has given the window (so a
     window it zooms on its own still tells the program it is maximized). The
     compositor configures exactly this size; the frame that follows carries
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
     their own size and the desktop sizes its window to the first frame.
+    The tiled words, each at most once and in this order, say which edges
+    the desktop has put the window against (xdg_toplevel's tiled states):
+    a program that draws its own frame drops its shadow there.
     A program's initial commit is answered at once, as xdg-shell requires
     and as programs rely on (vkcube presents after one roundtrip): with the
     desktop's size if one has come, else 0,0. So the first frame of a new

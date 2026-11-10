@@ -23,6 +23,7 @@
            WINDOW gone <id>
        desktop to compositor
            WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
+                       [tiled-left] [tiled-right] [tiled-top] [tiled-bottom]
            WINDOW output <id> <w> <h> <mHz>
            WINDOW close <id>
            WINDOW lock <id> on|off
@@ -600,7 +601,7 @@ static uint64_t bc_wire_send_dmabuf(BcWire *w, uint32_t id, uint32_t width, uint
 /* One line from the desktop (or from Blit) on the channel. */
 enum {
     BC_LINE_UNKNOWN = 0,
-    BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] */
+    BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] [tiled-*] */
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
     BC_LINE_LOCK,           /* WINDOW lock <id> on|off: the desktop's pointer hold */
@@ -617,6 +618,7 @@ typedef struct {
     uint32_t id;
     int32_t width, height;
     int fullscreen, maximized, activated;
+    unsigned tiled;         /* BC_TILED_*: the edges the desktop put it against */
     int on;                 /* WINDOW lock */
     uint32_t refresh_mhz;   /* WINDOW output */
     uint64_t sequence;      /* FRAME release */
@@ -641,6 +643,9 @@ static int bc_read_u32(const char **p, unsigned long max, uint32_t *out)
 }
 
 /* One line from Blit on an input socket. */
+/* WINDOW size's tiled words, in their order: bits of BcLine.tiled. */
+enum { BC_TILED_LEFT = 1, BC_TILED_RIGHT = 2, BC_TILED_TOP = 4, BC_TILED_BOTTOM = 8 };
+
 enum {
     BC_INPUT_UNKNOWN = 0,
     BC_INPUT_KEY,           /* code, pressed */
@@ -762,6 +767,18 @@ static int bc_parse_line(const char *line, BcLine *out)
         if (strncmp(p, " activated", 10) == 0 && (p[10] == '\0' || p[10] == ' ' || p[10] == '\n')) {
             out->activated = 1;
             p += 10;
+        }
+        {
+            static const char *const tiled[] = { " tiled-left", " tiled-right", " tiled-top",
+                                                 " tiled-bottom" };
+            size_t k;
+            for (k = 0; k < sizeof(tiled) / sizeof(tiled[0]); ++k) {
+                size_t n = strlen(tiled[k]);
+                if (strncmp(p, tiled[k], n) == 0 && (p[n] == '\0' || p[n] == ' ' || p[n] == '\n')) {
+                    out->tiled |= 1u << k;
+                    p += n;
+                }
+            }
         }
         if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_SIZE;
