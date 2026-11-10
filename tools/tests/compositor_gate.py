@@ -11,7 +11,12 @@ docs/api.md, "Program windows": `WINDOW display` first, the new window and
 its hints, no frame before the desktop's size, a frame of exactly each size
 asked for (1:1, the stand-in's pattern pixel for pixel), `0 0` leaving the
 size to the program, `WINDOW gone` after close, and the compositor ending
-when the desktop's channel closes.
+when the desktop's channel closes and no desktop comes back.
+
+The restart part ("Programs survive a desktop restart"): the channel lost
+with programs running, which keep running and drawing; the same socket
+served again; every window announced again with its newest frame; the
+`WINDOW quit 0` ending; no desktop coming back; `--display`.
 
 Part two, with a blit-server (on the mock display, gate_display.sh), checks
 Blit's side: a version 5 hello is answered with ` window=0`, each WINDOW
@@ -446,8 +451,7 @@ def input_part(server, compositor, standin, work):
         desk.send('WINDOW close 1')
         desk.line('WINDOW gone 1')
         check(client.wait(5) == 0, 'the input stand-in failed:\n' + printed())
-        desk.sock.close()
-        comp.wait(5)
+        quit_compositor(desk, comp)
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
         # Read at start and on each notice only, never at a keyboard enter.
@@ -576,8 +580,7 @@ def lock_part(compositor, standin, work):
         check(tally == {'locked': 3, 'unlocked': 2, 'confined': 2, 'unconfined': 1},
               'the constraint events: %s\n%s' % (tally, printed()))
         route.close()
-        desk.sock.close()
-        comp.wait(5)
+        quit_compositor(desk, comp)
         return ('oneshot=pending(off ignored)->on:locked+rel,ptr-dropped->off:unlocked,defunct '
                 'persistent=on/off/on,destroy->off confine=on+motion/off/on gone=off->gone')
     finally:
@@ -774,8 +777,7 @@ def dmabuf_part(compositor, standin, work):
                      'STANDIN dmabuf feedback pairs=2 tranche=2 xr24-linear=1',
                      'STANDIN done draws=3 releases=3 frames=3'):
             check(want in output, 'the dmabuf stand-in did not print %r:\n%s' % (want, output))
-        desk.sock.close()
-        comp.wait(5)
+        quit_compositor(desk, comp)
         text = open(log).read()
         check('dmabuf 6 sent, 3 released, 1 refused, 2 copied' in text,
               'the log does not count the dmabuf frames:\n' + text)
@@ -793,6 +795,236 @@ def dmabuf_part(compositor, standin, work):
         listener.close()
 
 
+def quit_compositor(desk, comp):
+    """The person quits the desktop: `WINDOW quit 0`, and the compositor
+    ends at once, status 0, with no reconnect."""
+    desk.send('WINDOW quit 0')
+    try:
+        status = comp.wait(5)
+    except subprocess.TimeoutExpired:
+        fail('blit-compositor did not end at WINDOW quit 0')
+    check(status == 0, 'blit-compositor exited %d at WINDOW quit 0' % status)
+    desk.sock.close()
+
+
+def listen(name):
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    return listener
+
+
+def restart_part(compositor, standin, work):
+    """docs/api.md, "Programs survive a desktop restart". The desktop picks
+    the display (`--display`); a dmabuf program (window 1, drawing on every
+    callback, so one frame ahead of Blit and stalled until a FRAME release) and a
+    wl_shm one (window 2, drawing 60 frames on its callbacks, and asking for
+    a pointer lock the desktop has not granted) are shown; the channel
+    closes. Both keep drawing at the output's refresh with
+    nothing shown, each dmabuf buffer given back at once but the newest; a
+    third program starts meanwhile. The fake desktop serves the same socket
+    again after its programs are done drawing (about a second): the
+    compositor says hello, `WINDOW display`, announces windows 1, 2 and 3
+    with their hints and input routes, then the newest frame of 1 (FRM3) and
+    of 2 (FRM1), each the program's pattern at its size, then the lock
+    asked for again; nothing is
+    configured until the desktop's new `WINDOW size`, which brings a frame
+    of that size. `WINDOW quit 0` ends it at once, status 0, its programs
+    gone. A second compositor, whose desktop never comes back (only a
+    peer answering without window=1), ends after the bound, status 1. Names
+    in use or invalid are refused, status 2."""
+    runtime = os.path.join(work, 'run-restart')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-restart-%d' % os.getpid()
+    display = 'gate-display'
+    answer = b'OK dmabuf=1 fence=0 formats=XR24/0,AR24/0 window=1\n'
+    listener = listen(name)
+    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_COMPOSITOR_RECONNECT_MS'):
+        env.pop(k, None)
+    log = os.path.join(work, 'compositor-restart.log')
+    comp = start([compositor, '--display', display, '--log', log], env,
+                 open(os.path.join(work, 'compositor-restart.out'), 'w'))
+    clients = []
+    comp2 = None
+    try:
+        desk = Desktop(listener, answer)
+        desk.line('WINDOW display %s' % display)
+        check(os.path.exists(os.path.join(runtime, display)) and
+              os.path.exists(os.path.join(runtime, display + '-input')),
+              'no %s or %s-input in XDG_RUNTIME_DIR: %s' % (display, display, os.listdir(runtime)))
+        # A display in use, or one that is not a name, is refused before the
+        # channel hears of it.
+        refused = []
+        for label, arg, why in (('taken', display, 'is in use'), ('slash', 'a/b', 'has a slash'),
+                                ('long', 'x' * 32, 'is longer than 31 bytes'),
+                                ('space', 'a b', 'has a space'), ('empty', '', 'is empty')):
+            r = subprocess.run([compositor, '--display', arg], env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, timeout=10)
+            check(r.returncode == 2 and why in r.stderr.decode(),
+                  '--display %r: status %d, %r' % (arg, r.returncode, r.stderr))
+            refused.append(label)
+        cenv = dict(env, WAYLAND_DISPLAY=display)
+
+        held_path = os.path.join(work, 'standin-restart-held.out')
+        clients.append(start([standin, '--dmabuf', '--animate', '60', 'Held'], cenv, open(held_path, 'w')))
+        held = lambda: open(held_path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Held', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.send('WINDOW size 1 64 32')
+        desk.frm3(64, 32, 1)
+        desk.frm3(64, 32, 1)
+        desk.nothing(0.3)  # one frame ahead of Blit: no FRAME release, no third
+        kept_path = os.path.join(work, 'standin-restart-kept.out')
+        clients.append(start([standin, '--animate', '60', '--lock', 'Kept'], cenv,
+                             open(kept_path, 'w')))
+        kept = lambda: open(kept_path).read()
+        for want in ('WINDOW new 2 0', 'WINDOW title 2 Kept', 'WINDOW appid 2 blit.standin',
+                     'WINDOW limits 2 64 48 0 0', 'WINDOW decor 2 server'):
+            desk.line(want)
+        desk.send('WINDOW size 2 160 100')
+        desk.frame(160, 100, image_id=2)
+        desk.line('WINDOW lock 2 relative')
+        check(sorted(desk.input_socks) == [1, 2], 'INPUT sock before: %s' % desk.input_socks)
+
+        # The desktop goes (Restart Desktop): its channel and its socket.
+        desk.sock.close()
+        listener.close()
+        lost = time.time()
+        wait_for(lambda: 'STANDIN animated 60 in' in kept(),
+                 lambda: 'the wl_shm program stopped drawing with the channel down:\n' + kept())
+        wait_for(lambda: 'STANDIN animated 60 in' in held(),
+                 lambda: 'the dmabuf program stopped drawing with the channel down:\n' + held())
+        ms = int(kept().split('STANDIN animated 60 in ')[1].split()[0])
+        check(ms >= 59 * 1000 / 60 * 0.85, 'sixty frame callbacks in %d ms: not at the refresh' % ms)
+        wait_for(lambda: held().count('STANDIN release 64x32') >= 60,
+                 lambda: 'the dmabuf buffers were not given back with the channel down:\n' + held())
+        time.sleep(0.2)
+        draws = held().count('STANDIN dmabuf 64x32')
+        releases = held().count('STANDIN release 64x32')
+        check(draws == 61 and releases == 60,
+              'the dmabuf program drew %d and was given back %d with the channel down:\n%s'
+              % (draws, releases, held()))
+        check(comp.poll() is None, 'blit-compositor ended with the channel')
+        check(os.path.exists(os.path.join(runtime, display)) and
+              os.path.exists(os.path.join(runtime, display + '-input')),
+              'the Wayland or the input socket went with the channel')
+        # A program started meanwhile: announced on the new channel.
+        late_path = os.path.join(work, 'standin-restart-late.out')
+        clients.append(start([standin, 'Late'], cenv, open(late_path, 'w')))
+        late = lambda: open(late_path).read()
+        wait_for(lambda: 'committed, waiting' in late(), 'the late program did not start')
+        time.sleep(max(0.0, 1.0 - (time.time() - lost)))
+
+        # The desktop again, on the same socket.
+        listener = listen(name)
+        desk = Desktop(listener, answer)
+        back = time.time() - lost
+        desk.line('WINDOW display %s' % display)
+        for image, title in ((1, 'Held'), (2, 'Kept'), (3, 'Late')):
+            for want in ('WINDOW new %d 0' % image, 'WINDOW title %d %s' % (image, title),
+                         'WINDOW appid %d blit.standin' % image, 'WINDOW limits %d 64 48 0 0' % image,
+                         'WINDOW decor %d server' % image):
+                desk.line(want)
+        desk.frm3(64, 32, 1)
+        desk.frame(160, 100, image_id=2)
+        desk.line('WINDOW lock 2 relative')
+        desk.nothing(0.4)
+        check(sorted(desk.input_socks) == [1, 2, 3], 'INPUT sock again: %s' % desk.input_socks)
+        check(kept().count('STANDIN configure') == 1 and held().count('STANDIN configure') == 1 and
+              'STANDIN configure' not in late(), 'a window was configured before its new WINDOW size')
+        desk.send('WINDOW size 2 200 120 activated')
+        desk.frame(200, 120, image_id=2)
+        desk.send('WINDOW size 1 80 40')
+        desk.frm3(80, 40, 1)
+        desk.send('WINDOW size 3 100 80')
+        desk.frame(100, 80, image_id=3)
+        desk.nothing(0.3)
+
+        # The person quits the desktop: at once, status 0, the programs gone.
+        started = time.time()
+        quit_compositor(desk, comp)
+        took = time.time() - started
+        for client in clients:
+            try:
+                client.wait(5)
+            except subprocess.TimeoutExpired:
+                fail('a program outlived WINDOW quit 0')
+        check(not os.path.exists(os.path.join(runtime, display)), 'the Wayland socket outlived quit')
+        text = open(log).read()
+        check('reconnect: 3 windows announced again, 2 frames sent again' in text and
+              'no desktop answered' not in text, 'the restart in the log:\n' + text)
+        check(text.split('WINDOW quit 0')[1].count('reconnect:') == 0, 'a reconnect after quit:\n' + text)
+        listener.close()
+
+        # No desktop comes back: only a peer that answers without window=1.
+        runtime2 = os.path.join(work, 'run-restart-gone')
+        os.mkdir(runtime2, 0o700)
+        name2 = name + '-gone'
+        listener = listen(name2)
+        env2 = dict(env, BLIT_FRAME_SOCKET='@' + name2, XDG_RUNTIME_DIR=runtime2,
+                    BLIT_COMPOSITOR_RECONNECT_MS='1500')
+        log2 = os.path.join(work, 'compositor-gone.log')
+        comp2 = start([compositor, '--log', log2], env2, open(os.path.join(work, 'compositor-gone.out'), 'w'))
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        gone_path = os.path.join(work, 'standin-gone.out')
+        gone = start([standin, 'Gone'], dict(env2, WAYLAND_DISPLAY='blit-0'), open(gone_path, 'w'))
+        clients.append(gone)
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Gone', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.send('WINDOW size 1 64 48')
+        desk.frame(64, 48)
+        desk.sock.close()
+        listener.close()
+        lost = time.time()
+        listener = listen(name2)
+        listener.settimeout(0.1)
+        windowless = 0
+        while comp2.poll() is None and time.time() - lost < 10:
+            try:
+                peer, _ = listener.accept()
+            except socket.timeout:
+                continue
+            peer.settimeout(2)
+            hello = peer.recv(128)
+            if hello[:8] == b'BLITFRM1':
+                # Each redial is a version 5 hello, as the first was.
+                check(struct.unpack_from('<I', hello, 8)[0] == 5,
+                      'a redial says version %d, not 5' % struct.unpack_from('<I', hello, 8)[0])
+                peer.send(b'OK dmabuf=0 window=0\n')
+                windowless += 1
+            peer.close()
+        took2 = time.time() - lost
+        check(comp2.poll() == 1, 'with no desktop back, blit-compositor %s'
+              % ('ended %d' % comp2.returncode if comp2.returncode is not None else 'kept running'))
+        check(1.4 <= took2 <= 4.5, 'it ended %.2f s after the loss, the bound is 1.5 s' % took2)
+        check(windowless >= 1, 'it never dialed again')
+        # Ended with its compositor: an error, not a close (under the
+        # sanitizers, the stand-in's leaks on that path abort it instead).
+        check(gone.wait(5) != 0 and 'the connection ended before close' in open(gone_path).read(),
+              'its program did not go with it:\n' + open(gone_path).read())
+        text = open(log2).read()
+        check('without window=1' in text and
+              'no desktop answered with window=1 within 1500 ms of the frame channel\'s loss' in text,
+              'the log does not say why it ended:\n' + text)
+        listener.close()
+        return ('display=%s refused=%s outage: shm 60 callbacks in %d ms, dmabuf 61 draws 60 given back, '
+                'a program started; back after %.1f s: display+new 1,2,3+hints+INPUT sock, newest '
+                'FRM3 64x32 and FRM1 160x100, lock asked again, no configure before WINDOW size, then 200x120,80x40,100x80; '
+                'quit 0 in %.2f s; no desktop: status 1 after %.2f s (bound 1.5 s, %d window=0 answers)'
+                % (display, ','.join(refused), ms, back, took, took2, windowless))
+    finally:
+        for p in clients + [comp, comp2]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def start(argv, env, out):
     return subprocess.Popen(argv, env=env, stdout=out, stderr=subprocess.STDOUT)
 
@@ -804,8 +1036,10 @@ def desktop_part(compositor, standin, work):
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind('\0' + name)
     listener.listen(2)
+    # The reconnect bound shortened (for gates only): the ending below is
+    # the one after it.
     env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
-               XDG_RUNTIME_DIR=runtime)
+               XDG_RUNTIME_DIR=runtime, BLIT_COMPOSITOR_RECONNECT_MS='600')
     env.pop('WAYLAND_DISPLAY', None)
     log = os.path.join(work, 'compositor.log')
     comp = start([compositor, '--log', log], env, open(os.path.join(work, 'compositor.out'), 'w'))
@@ -901,14 +1135,17 @@ def desktop_part(compositor, standin, work):
         states = states_part(desk, standin, env, display, work)
         pacing = pacing_part(desk, standin, env, display, work)
 
-        # The desktop goes: the compositor ends, status 1, and says why.
+        # The desktop goes and does not come back: the compositor ends after
+        # the reconnect bound, status 1, and says why.
+        listener.close()
         desk.sock.close()
         try:
             status = comp.wait(5)
         except subprocess.TimeoutExpired:
             fail('blit-compositor kept running after its channel closed')
         text = open(log).read()
-        check(status == 1 and 'the frame channel closed' in text,
+        check(status == 1 and 'the frame channel closed' in text and
+              'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
         check('19 frames sent, 0 failed' in text, 'the log does not count 19 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=320x200,500x300,'
@@ -1042,6 +1279,7 @@ def main():
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
+        print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
             # A server of its own, for its keymap.

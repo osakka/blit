@@ -26,6 +26,7 @@
            WINDOW output <id> <w> <h> <mHz>
            WINDOW close <id>
            WINDOW lock <id> on|off
+           WINDOW quit 0                  the person quit the desktop: end now
            WINDOW ok <id>                 WINDOW error <id> <code>
 
    A peer whose hello answer has no `window=1` (Blit itself says
@@ -77,6 +78,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -226,16 +228,15 @@ static int bc_wire_parse_hello(BcWire *w, const char *answer)
 }
 
 /* Connects to the abstract socket `name` (BLIT_FRAME_SOCKET, its leading
-   '@' optional) and says hello as a version 5 client. Returns 0, or -1 with
-   last_error set. */
-static int bc_wire_connect(BcWire *w, const char *name, const char *token)
+   '@' optional) and says hello as a version 5 client, without waiting: the
+   socket is non-blocking from the connect on (a listener whose backlog is
+   full is a failed attempt, not a wait). Returns the socket, whose first
+   message is the answer (bc_wire_answer), or -1 with last_error set. */
+static int bc_wire_dial(BcWire *w, const char *name, const char *token)
 {
     struct sockaddr_un addr;
     unsigned char hello[16 + 64];
     uint32_t version = BC_WIRE_VERSION, length;
-    char answer[1400];
-    ssize_t got;
-    struct timeval tv = { 3, 0 };
     socklen_t addrlen;
     int fd;
 
@@ -245,7 +246,7 @@ static int bc_wire_connect(BcWire *w, const char *name, const char *token)
         snprintf(w->last_error, sizeof(w->last_error), "bad socket or token");
         return -1;
     }
-    fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+    fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
     if (fd < 0) {
         snprintf(w->last_error, sizeof(w->last_error), "socket: %s", strerror(errno));
         return -1;
@@ -263,11 +264,24 @@ static int bc_wire_connect(BcWire *w, const char *name, const char *token)
     memcpy(hello + 8, &version, 4);
     memcpy(hello + 12, &length, 4);
     memcpy(hello + 16, token, length);
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    if (send(fd, hello, 16 + length, MSG_NOSIGNAL) != (ssize_t)(16 + length) ||
-        (got = recv(fd, answer, sizeof(answer) - 1, 0)) <= 0) {
+    if (send(fd, hello, 16 + length, MSG_NOSIGNAL) != (ssize_t)(16 + length)) {
+        snprintf(w->last_error, sizeof(w->last_error), "hello: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* The hello's answer, read from a dialed socket that is readable: 0 with
+   w->fd the socket when it is `OK ...` (whatever it says of window=1), or
+   -1 with last_error set and the socket closed. */
+static int bc_wire_answer(BcWire *w, int fd)
+{
+    char answer[1400];
+    ssize_t got = recv(fd, answer, sizeof(answer) - 1, MSG_DONTWAIT);
+    if (got <= 0) {
         snprintf(w->last_error, sizeof(w->last_error), "hello: %s",
-                 errno ? strerror(errno) : "closed");
+                 got < 0 ? strerror(errno) : "closed");
         close(fd);
         return -1;
     }
@@ -277,10 +291,29 @@ static int bc_wire_connect(BcWire *w, const char *name, const char *token)
         close(fd);
         return -1;
     }
-    tv.tv_sec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     w->fd = fd;
     return 0;
+}
+
+/* Dials and waits up to `timeout_ms` for the answer: the first connection,
+   before there is an event loop. Returns 0, or -1 with last_error set. */
+static int bc_wire_connect(BcWire *w, const char *name, const char *token, int timeout_ms)
+{
+    struct pollfd pfd;
+    int fd = bc_wire_dial(w, name, token), ready;
+    if (fd < 0) return -1;
+    pfd.fd = fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    do ready = poll(&pfd, 1, timeout_ms);
+    while (ready < 0 && errno == EINTR);
+    if (ready <= 0) {
+        snprintf(w->last_error, sizeof(w->last_error), "hello: %s",
+                 ready == 0 ? "no answer" : strerror(errno));
+        close(fd);
+        return -1;
+    }
+    return bc_wire_answer(w, fd);
 }
 
 /* One message with `count` descriptors (0 to BC_PLANES_MAX) in SCM_RIGHTS. */
@@ -414,22 +447,28 @@ static void bc_convert_rows(unsigned char *out, uint32_t out_stride, const unsig
     }
 }
 
-/* Copies a wl_shm buffer's pixels into a fresh sealed memfd and sends them
-   as one whole FRM1 frame of picture `id`. Blit reads it when it arrives
-   (ADR 0202), so nothing is held: the buffer may be released at once.
-   Returns 0, or -1 with last_error set. */
-static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t width,
-                            uint32_t height, uint32_t stride, uint32_t format)
+/* A frame's pixels as FRM1 carries them: a sealed memfd (fd, -1 for none)
+   of `height` rows of `stride` bytes, format 24 (RGB) or 32 (RGBA). The
+   compositor keeps each window's newest, to send again on a new channel;
+   Blit reads a frame when it arrives (ADR 0202) and the memfd is sealed, so
+   one copy may be sent any number of times. */
+typedef struct {
+    int fd;
+    uint32_t width, height, format, stride;
+} BcCopy;
+
+/* Copies a wl_shm buffer's pixels into a fresh memfd sealed against
+   shrinking, growing and writing. Needs no channel. Returns 0, or -1 with
+   last_error set (counted in frames_failed). */
+static int bc_frame_copy(BcWire *w, const void *pixels, uint32_t width, uint32_t height,
+                         uint32_t stride, uint32_t format, BcCopy *out)
 {
-    unsigned char h[48];
     uint32_t bpp = format == BC_SHM_XRGB8888 || format == BC_FOURCC_XB24 ? 3 : 4;
-    uint32_t fmt = bpp == 3 ? 24 : 32, out_stride, zero = 0;
-    uint64_t seq;
     size_t bytes;
     unsigned char *map;
-    int fd, rc;
+    int fd;
 
-    if (w->fd < 0 || !w->window) return -1;
+    out->fd = -1;
     if (width == 0 || height == 0 || width > BC_SIZE_MAX || height > BC_SIZE_MAX ||
         (format != BC_SHM_XRGB8888 && format != BC_SHM_ARGB8888 && format != BC_FOURCC_XB24 &&
          format != BC_FOURCC_AB24) || stride < width * 4) {
@@ -438,8 +477,11 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
         ++w->frames_failed;
         return -1;
     }
-    out_stride = width * bpp;
-    bytes = (size_t)out_stride * height;
+    out->width = width;
+    out->height = height;
+    out->format = bpp == 3 ? 24 : 32;
+    out->stride = width * bpp;
+    bytes = (size_t)out->stride * height;
     fd = memfd_create("blit-compositor-frame", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd < 0 || ftruncate(fd, (off_t)bytes) != 0) {
         snprintf(w->last_error, sizeof(w->last_error), "memfd: %s", strerror(errno));
@@ -454,7 +496,7 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
         ++w->frames_failed;
         return -1;
     }
-    bc_convert_rows(map, out_stride, (const unsigned char *)pixels, stride, width, height, format);
+    bc_convert_rows(map, out->stride, (const unsigned char *)pixels, stride, width, height, format);
     munmap(map, bytes);
     if (fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL) != 0) {
         snprintf(w->last_error, sizeof(w->last_error), "seal: %s", strerror(errno));
@@ -462,19 +504,29 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
         ++w->frames_failed;
         return -1;
     }
+    out->fd = fd;
+    return 0;
+}
+
+/* One whole FRM1 frame of picture `id` from a copy (ADR 0202). Returns 0,
+   or -1 with last_error set. */
+static int bc_wire_send_frm1(BcWire *w, uint32_t id, const BcCopy *c)
+{
+    unsigned char h[48];
+    uint32_t zero = 0;
+    uint64_t seq;
+    if (w->fd < 0 || !w->window || c->fd < 0) return -1;
     seq = w->sequence + 1;
     memset(h, 0, sizeof(h));
     memcpy(h, "FRM1", 4);
     memcpy(h + 4, &id, 4);
     memcpy(h + 8, &seq, 8);
-    memcpy(h + 16, &width, 4);
-    memcpy(h + 20, &height, 4);
-    memcpy(h + 24, &fmt, 4);
-    memcpy(h + 28, &out_stride, 4);
+    memcpy(h + 16, &c->width, 4);
+    memcpy(h + 20, &c->height, 4);
+    memcpy(h + 24, &c->format, 4);
+    memcpy(h + 28, &c->stride, 4);
     memcpy(h + 32, &zero, 4); /* x, y, w, h all 0: the whole image */
-    rc = bc_wire_sendmsg(w->fd, h, sizeof(h), fd);
-    close(fd);
-    if (rc != 0) {
+    if (bc_wire_sendmsg(w->fd, h, sizeof(h), c->fd) != 0) {
         snprintf(w->last_error, sizeof(w->last_error), "send FRM1: %s", strerror(errno));
         ++w->frames_failed;
         return -1;
@@ -482,6 +534,21 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
     w->sequence = seq;
     ++w->frames_sent;
     return 0;
+}
+
+/* A wl_shm buffer's pixels copied and sent as one FRM1 of picture `id`,
+   the copy not kept: nothing is held, so the buffer may be released at
+   once. Returns 0, or -1 with last_error set. */
+static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t width,
+                            uint32_t height, uint32_t stride, uint32_t format)
+{
+    BcCopy c;
+    int rc;
+    if (w->fd < 0 || !w->window) return -1;
+    if (bc_frame_copy(w, pixels, width, height, stride, format, &c) != 0) return -1;
+    rc = bc_wire_send_frm1(w, id, &c);
+    close(c.fd);
+    return rc;
 }
 
 /* One dmabuf frame of picture `id` as FRM3 (ADR 0223, "Wire format,
@@ -534,6 +601,7 @@ enum {
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
     BC_LINE_LOCK,           /* WINDOW lock <id> on|off: the desktop's pointer hold */
+    BC_LINE_QUIT,           /* WINDOW quit 0: end every program, exit, no reconnect */
     BC_LINE_OK_WINDOW,      /* WINDOW ok <id> */
     BC_LINE_ERROR_WINDOW,   /* WINDOW error <id> <code> */
     BC_LINE_RELEASE,        /* FRAME release <id> <sequence>: an FRM3 frame's buffer is free */
@@ -714,6 +782,14 @@ static int bc_parse_line(const char *line, BcLine *out)
         else if (strncmp(p, "off", 3) != 0 || (p[3] != '\0' && p[3] != '\n'))
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_LOCK;
+    }
+    if (strncmp(line, "WINDOW quit ", 12) == 0) {
+        /* Id 0, the whole compositor: no other id is defined. */
+        p = line + 12;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id != 0 ||
+            (*p != '\0' && *p != '\n'))
+            return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = BC_LINE_QUIT;
     }
     if (strncmp(line, "WINDOW ok ", 10) == 0) {
         p = line + 10;

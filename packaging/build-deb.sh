@@ -515,12 +515,15 @@ chmod 0755 "$cstage/pkg/usr/bin/blit-compositor"
 cat > "$cdoc/README" <<EOF
 blit-compositor: Blit's Wayland compositor for programs
 
-  blit-compositor [--log path]
+  blit-compositor [--display name] [--log path]
 
 One per desktop session, started by the desktop with the BLIT_FRAME_SOCKET
 and BLIT_FRAME_TOKEN of the frame channel it serves. It listens on
-\$XDG_RUNTIME_DIR/blit-<n>, says that name to the desktop, and the desktop
-puts it in its programs' environment as WAYLAND_DISPLAY. It composites
+\$XDG_RUNTIME_DIR/<name> (--display's, refused with status 2 when in use or
+invalid; else blit-<n>, the first free n), says that name to the desktop,
+and the desktop puts it in its programs' environment as WAYLAND_DISPLAY.
+Its programs survive a desktop restart: when the channel closes it keeps
+them and reconnects to the same socket for up to 60 seconds. It composites
 nothing: each Wayland window is one picture by descriptor on Blit's frame
 channel (wl_shm copied, dmabuf by its own planes), placed and sized by the
 desktop, and its keyboard and mouse come straight from Blit, with the

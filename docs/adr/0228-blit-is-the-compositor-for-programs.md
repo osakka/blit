@@ -168,6 +168,13 @@ owner can see.
 4. **Cut over.** `blit-gamescope` and the gamescope dependency removed;
    Screens' engine becomes Blit's own windows; X Screen's retirement decided
    on the GTK comparison (clipboard, dialogs, menus).
+   **Planned with phase 2: the colour scheme.** Programs follow the
+   desktop's light or dark look live: the desktop tells blit-compositor
+   `WINDOW scheme 0 light|dark` (agreed with Hibr 2026-11-10), and the
+   compositor serves the session's xdg-desktop-portal Settings backend
+   (`org.freedesktop.appearance color-scheme`, later accent and contrast)
+   through sd-bus, registered for `XDG_CURRENT_DESKTOP=Hibr`, so GTK4,
+   libadwaita, Qt 6.5+, Firefox, Chromium and Steam's CEF follow it.
 5. **Later, optional:** an upscaler (an FSR/NIS-like GLES pass), a frame
    limiter, HDR. Not part of this decision; listed so the loss is explicit.
 
@@ -411,3 +418,73 @@ Blit-side work that closes phase 1, apart from the owner's live check.
   lock` and `INPUT member`, and the owner's live check on the mini PC:
   vkcube's dmabuf frames imported by Blit's GPU, an everyday Wayland
   program (a GTK one), keys, mouse, popups and pointer lock.
+
+**Programs survive a desktop restart (unreleased, the next Blit after
+0.3.72, 2026-11-10).** `docs/api.md` "Programs survive a desktop restart",
+as agreed with Hibr, built in blit-compositor; it replaces milestone A's
+"the compositor ends, status 1, when the desktop's channel closes".
+
+- **`--display <name>`.** The desktop picks the Wayland socket, so it can
+  export `WAYLAND_DISPLAY` before the compositor answers. The socket is now
+  made before the channel is dialed: a name in use (libwayland's lock
+  held), or not a name (empty, a slash, a space or control byte, over 31
+  bytes, or too long for `<name>-input` in `sun_path`), is refused with a
+  line on standard error and status 2, and the channel never hears of it.
+- **The channel lost.** No client is ended. The channel's socket is
+  closed; every FRM3 Blit held is given back except each shown window's
+  newest, kept (a hold of sequence 0); a copied frame is kept as its sealed
+  memfd, which every window now keeps for its newest copy (one copy per
+  window, the price of sending it again). Callbacks waiting for a
+  `FRAME release` are answered; while down, every commit is taken at once,
+  paced at the output's refresh, its feedback `discarded`; a dmabuf
+  commit's previous buffer is given back at once. Active pointer
+  constraints end as at the desktop's `off`, and every one still wanted is
+  asked again later.
+- **Reconnecting** never blocks the event loop: the wire's hello is split
+  into a non-blocking dial (`bc_wire_dial`) and the answer
+  (`bc_wire_answer`), read when the socket is readable, at most 3 s; 50 ms
+  doubling to 1 s between attempts, at most 60 s (the gates shorten it with
+  `BLIT_COMPOSITOR_RECONNECT_MS`). An answer is read into a copy of the
+  wire, so a `window=0` peer changes nothing; ids and sequences continue.
+  The dmabuf formats offered stay the first hello's; a desktop answering
+  others gets copies. A pointer constraint made while the channel is down
+  is not marked asked (found by review: it would have been skipped on
+  reconnect), so the reconnect asks it with the rest.
+- **The re-announcement**, in creation order: `WINDOW display`, each
+  top-level's `new` and hints and `INPUT sock` (a parent created later as
+  `WINDOW parent` after them; `hide` for a window unmapped by its program,
+  not for one not yet drawn), popups, the newest frames, `WINDOW lock`. A
+  toplevel never announced (the peer before had no `window=1`) is
+  announced then, with a new id. No configure until the desktop's `WINDOW
+  size`.
+- **`WINDOW quit 0`**: status 0 at once, no reconnect; the parser takes id
+  0 only.
+- **Gate.** `compositor_gate`'s restart part, with a fake desktop
+  answering `dmabuf=1`: `--display gate-display`, then that name in use,
+  `a/b`, 32 bytes, `a b` and empty refused with status 2; a dmabuf program
+  (stalled one frame ahead of Blit) and a wl_shm one animating 60 frames
+  and asking for a pointer lock (`WINDOW lock 2 relative`, not granted);
+  the channel and the listening socket closed; both programs go on, the
+  wl_shm one's 60 callbacks taking about a second (the refresh), the dmabuf
+  one drawing 61 buffers and given back 60 of them; the compositor, the
+  Wayland socket and the input socket still there; a third program started;
+  the same socket served again about a second later: `WINDOW display`,
+  `new`/`title`/`appid`/`limits`/`decor` and `INPUT sock` for 1, 2 and 3,
+  the newest FRM3 of 1 (64x32, the pattern) and FRM1 of 2 (160x100, the
+  pattern), `WINDOW lock 2 relative` again, nothing configured until each
+  new `WINDOW size`, then frames
+  of 200x120, 80x40 and 100x80; `WINDOW quit 0` ending it at once, status
+  0, its programs gone and its socket removed. A second compositor whose
+  desktop never comes back -- only a peer answering `window=0` -- ends
+  after its 1.5 s bound, status 1, its program gone, the log saying why.
+  The other parts end with `WINDOW quit 0`; the desktop part keeps the
+  status-1 ending, after a 600 ms bound. All again under AddressSanitizer
+  and UBSan. `compositor_wire_unit`: `WINDOW quit` (only `0`).
+- **Not tested here:** a real Hibr restarting (Hibr's side: the detached
+  start, `--display`, the fixed socket and token, `WINDOW quit 0`, the
+  members re-sent), a desktop answering a hello slower than 3 s, a desktop
+  answering other dmabuf formats on reconnect, an active lock across a
+  restart (its `unlocked` is the `off` path) and one made during the
+  outage, popups and hidden
+  windows announced again (built, not in the gate), and a real GPU's
+  dmabuf held across the outage.
