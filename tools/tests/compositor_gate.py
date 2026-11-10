@@ -430,6 +430,124 @@ def input_part(server, compositor, standin, work):
             blit.kill()
 
 
+def lock_part(compositor, standin, work):
+    """zwp_pointer_constraints_v1 asked of the desktop (docs/api.md, "Pointer
+    lock"), with `--lock`: a oneshot lock pending until `WINDOW lock 1 on`
+    (an `off` before it, no gesture yet, leaves it pending), then locked,
+    relative motion and no absolute motion, `off` -> unlocked and defunct
+    (a second `on` does nothing, and its destroy says nothing); a
+    persistent lock locked again after `off`, its destroy `WINDOW lock 1
+    off`; a persistent confinement whose pointer moves; and the window going
+    with it still there: `WINDOW lock 1 off`, then `WINDOW gone 1`. The gate
+    plays the desktop and Blit's route on the input socket."""
+    runtime = os.path.join(work, 'run-lock')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-lock-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    env.pop('BLIT_SERVER_PORT', None)
+    log = os.path.join(work, 'compositor-lock.log')
+    comp = start([compositor, '--log', log], env, open(os.path.join(work, 'compositor-lock.out'), 'w'))
+    client = None
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        out_path = os.path.join(work, 'standin-lock.out')
+        client = start([standin, '--lock', 'Lock'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        count = lambda what: printed().splitlines().count('STANDIN ' + what)
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Lock', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.send('WINDOW size 1 120 80 activated')
+        desk.frame(120, 80)
+        desk.line('WINDOW lock 1 relative')
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        frame = [0]
+
+        def lines_to(*lines):
+            text = ''
+            for line in lines:
+                frame[0] += 1
+                text += 'INPUT %s\nINPUT frame 1 %d\n' % (line, frame[0])
+            route.sendall(text.encode())
+
+        def settle(what, n):
+            wait_for(lambda: count(what) >= n, lambda: 'no STANDIN %s #%d:\n%s' % (what, n, printed()))
+
+        lines_to('ptr 1 10.00 10.00')
+        settle('pointer enter main 10.00 10.00', 1)
+        # Pending: no gesture yet, the desktop says off; nothing activates.
+        desk.send('WINDOW lock 1 off')
+        lines_to('rel 1 3 4')
+        settle('relative 3.00 4.00', 1)
+        desk.nothing(0.3)
+        check(count('locked') == 0 and count('unlocked') == 0,
+              lambda: 'a pending lock was activated or deactivated:\n' + printed())
+        # On: locked; relative motion, and an absolute position is dropped.
+        desk.send('WINDOW lock 1 on')
+        settle('locked', 1)
+        lines_to('ptr 1 20.00 20.00', 'rel 1 5 -2')
+        settle('relative 5.00 -2.00', 1)
+        check(count('pointer motion 20.00 20.00') == 0, lambda: 'a locked pointer moved:\n' + printed())
+        # Off: unlocked, and the oneshot is defunct: on again does nothing.
+        desk.send('WINDOW lock 1 off')
+        settle('unlocked', 1)
+        desk.send('WINDOW lock 1 on')
+        lines_to('ptr 1 30.00 30.00')
+        settle('pointer motion 30.00 30.00', 1)
+        check(count('locked') == 1, lambda: 'a defunct oneshot lock was locked again:\n' + printed())
+        # Space: the defunct oneshot destroyed (nothing said), a persistent lock.
+        lines_to('key 1 57 press', 'key 1 57 release')
+        settle('lock persistent', 1)
+        desk.line('WINDOW lock 1 relative')
+        desk.send('WINDOW lock 1 on')
+        settle('locked', 2)
+        desk.send('WINDOW lock 1 off')
+        settle('unlocked', 2)
+        desk.send('WINDOW lock 1 on')
+        settle('locked', 3)
+        # Space: the persistent lock destroyed, `off`; a confinement asked for.
+        lines_to('key 1 57 press', 'key 1 57 release')
+        desk.line('WINDOW lock 1 off')
+        desk.line('WINDOW lock 1 confine')
+        settle('confine persistent', 1)
+        desk.send('WINDOW lock 1 on')
+        settle('confined', 1)
+        lines_to('ptr 1 40.00 40.00')
+        settle('pointer motion 40.00 40.00', 1)
+        desk.send('WINDOW lock 1 off')
+        settle('unconfined', 1)
+        desk.send('WINDOW lock 1 on')
+        settle('confined', 2)
+        # The window goes with the confinement still there.
+        desk.send('WINDOW close 1')
+        desk.line('WINDOW lock 1 off')
+        desk.line('WINDOW gone 1')
+        desk.nothing(0.3)
+        check(client.wait(5) == 0, 'the lock stand-in failed:\n' + printed())
+        check(count('global zwp_pointer_constraints_v1 1') == 1, 'no pointer constraints 1:\n' + printed())
+        tally = dict((w, count(w)) for w in ('locked', 'unlocked', 'confined', 'unconfined'))
+        check(tally == {'locked': 3, 'unlocked': 2, 'confined': 2, 'unconfined': 1},
+              'the constraint events: %s\n%s' % (tally, printed()))
+        route.close()
+        desk.sock.close()
+        comp.wait(5)
+        return ('oneshot=pending(off ignored)->on:locked+rel,ptr-dropped->off:unlocked,defunct '
+                'persistent=on/off/on,destroy->off confine=on+motion/off/on gone=off->gone')
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -626,13 +744,13 @@ def desktop_part(compositor, standin, work):
         versions = dict(l.split()[2:4] for l in output.splitlines() if l.startswith('STANDIN global '))
         for global_ in ('wl_compositor', 'wl_subcompositor', 'wl_shm', 'wl_output', 'wl_seat',
                         'xdg_wm_base', 'zxdg_decoration_manager_v1', 'wp_presentation',
-                        'zwp_relative_pointer_manager_v1'):
+                        'zwp_relative_pointer_manager_v1', 'zwp_pointer_constraints_v1'):
             check(global_ in versions, 'no global %s: %s' % (global_, versions))
         check(int(versions['wl_output']) == 4 and int(versions['wl_seat']) == 8,
               'wl_output or wl_seat at another version: %s' % versions)
         check('zwp_linux_dmabuf_v1' not in versions, 'linux-dmabuf offered without dmabuf=1: %s' % versions)
-        # Pointer constraints wait on WINDOW lock (docs/api.md, a proposal).
-        check('zwp_pointer_constraints_v1' not in versions, 'pointer constraints offered: %s' % versions)
+        # Pointer constraints, asked of the desktop with WINDOW lock.
+        check(versions.get('zwp_pointer_constraints_v1') == '1', 'pointer constraints: %s' % versions)
         check(versions.get('wp_presentation') == '1', 'no wp_presentation 1: %s' % versions)
         check('STANDIN presentation presented=4 discarded=0 refresh=16666666' in output,
               'the stand-in\'s frames were not each presented at 60 Hz:\n%s' % output)
@@ -794,6 +912,7 @@ def main():
     try:
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
+        print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
             # A server of its own, for its keymap.

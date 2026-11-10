@@ -98,6 +98,11 @@ static void lines(void)
            "flags out of the draft's order");
     EXPECT(bc_parse_line("WINDOW close 9\n", &l) == BC_LINE_CLOSE && l.id == 9, "close");
     EXPECT(bc_parse_line("WINDOW close 9 x", &l) == BC_LINE_UNKNOWN, "close with a tail");
+    EXPECT(bc_parse_line("WINDOW lock 4 on\n", &l) == BC_LINE_LOCK && l.id == 4 && l.on, "lock on");
+    EXPECT(bc_parse_line("WINDOW lock 4 off", &l) == BC_LINE_LOCK && l.id == 4 && !l.on, "lock off");
+    EXPECT(bc_parse_line("WINDOW lock 4 relative", &l) == BC_LINE_UNKNOWN, "lock relative is the compositor's");
+    EXPECT(bc_parse_line("WINDOW lock 4 onx", &l) == BC_LINE_UNKNOWN, "lock, a tail");
+    EXPECT(bc_parse_line("WINDOW lock 0 on", &l) == BC_LINE_UNKNOWN, "lock, id 0");
     EXPECT(bc_parse_line("ERROR WINDOW 3 EINVAL\n", &l) == BC_LINE_ERROR_WINDOW && l.id == 3 &&
            strcmp(l.code, "EINVAL") == 0, "ERROR WINDOW");
     EXPECT(bc_parse_line("OK window 3", &l) == BC_LINE_OK_WINDOW && l.id == 3, "OK window");

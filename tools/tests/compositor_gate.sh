@@ -16,7 +16,7 @@ BLIT_PROTOCOL_DIR=$proto sh tools/build-tcc.sh "$out/blit-compositor" compositor
 # sanitized builds alike.
 protocol_sources="$proto/xdg-shell-protocol.c $proto/xdg-decoration-unstable-v1-protocol.c
     $proto/linux-dmabuf-unstable-v1-protocol.c $proto/presentation-time-protocol.c
-    $proto/relative-pointer-unstable-v1-protocol.c"
+    $proto/relative-pointer-unstable-v1-protocol.c $proto/pointer-constraints-unstable-v1-protocol.c"
 client_sources="tools/tests/wl_standin_client.c $protocol_sources"
 # shellcheck disable=SC2086
 tcc -std=c99 -Wall -I"$proto" $client_sources -lwayland-client -o "$out/wl_standin_client"

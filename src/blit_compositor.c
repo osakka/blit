@@ -1,5 +1,5 @@
 /* blit-compositor: Blit's Wayland compositor for programs (ADR 0228,
-   phase 1, milestones A and B).
+   phase 1, milestones A, B and C).
 
      blit-compositor [--log path]
 
@@ -31,9 +31,10 @@
    frames; a client that insists on its own gets `WINDOW decor <id>
    client`), wl_seat (keyboard with Blit's xkb keymap, pointer),
    zwp_linux_dmabuf_v1 (only for a peer that imports: dmabuf=1),
-   wp_presentation and zwp_relative_pointer_manager_v1. Each is offered at
-   the version the task names or the one the build host's protocol XML
-   carries, whichever is lower (BC_VERSION).
+   wp_presentation, zwp_relative_pointer_manager_v1 and
+   zwp_pointer_constraints_v1 (asked of the desktop, `WINDOW lock`). Each
+   is offered at the version the task names or the one the build host's
+   protocol XML carries, whichever is lower (BC_VERSION).
 
    Against a peer that answers the hello without window=1 (Blit itself) it
    keeps running, shows nothing and says so in its log: no WINDOW line, no
@@ -65,6 +66,7 @@
 #include "linux-dmabuf-unstable-v1-server-protocol.h"
 #include "presentation-time-server-protocol.h"
 #include "relative-pointer-unstable-v1-server-protocol.h"
+#include "pointer-constraints-unstable-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -80,6 +82,7 @@ enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE };
 
 struct bc_server;
 struct bc_xdg;
+struct bc_constraint;
 
 /* One wl_output global per display mode the desktop has named with
    `WINDOW output` (the line carries the mode, not the display, so two
@@ -112,6 +115,7 @@ struct bc_surface {
     struct wl_event_source *pace;     /* the refresh timer for `due` */
     uint64_t last_done_us;            /* when frame callbacks were last answered */
     int scale_warned;
+    struct bc_constraint *constraint; /* its pointer lock or confinement, one at most */
 };
 
 struct bc_positioner {
@@ -179,6 +183,7 @@ struct bc_server {
     struct wl_list input_conns;       /* bc_input_conn: Blit's routes */
     struct wl_list keyboards, pointers;   /* wl_keyboard, wl_pointer resources */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
+    struct wl_list constraints;       /* bc_constraint: pointer locks and confinements */
     struct xkb_context *xkb;
     struct xkb_keymap *keymap;
     struct xkb_state *xkb_state;
@@ -207,6 +212,9 @@ static struct bc_server *g_server;
 static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r);
 static void keyboard_send_modifiers(struct bc_server *s, int force);
 static void keyboard_focus(struct bc_server *s, struct bc_surface *surface);
+static void constraints_window_gone(struct bc_xdg *x);
+static void constraint_ask_surface(struct bc_surface *surface);
+static void constraint_surface_gone(struct bc_surface *surface);
 
 static void logf_(const char *fmt, ...)
 {
@@ -288,6 +296,8 @@ static void announce_toplevel(struct bc_xdg *x)
           x->title, x->appid);
     /* On the first output until the desktop says which display it is on. */
     window_set_output(x, output_default(x->server));
+    /* A lock asked for before the window was announced is asked for now. */
+    if (x->surface) constraint_ask_surface(x->surface);
 }
 
 /* `WINDOW gone`, once, after everything of the id is released: copied
@@ -298,6 +308,8 @@ static void holds_end_id(struct bc_server *s, uint32_t id);
 static void window_gone(struct bc_xdg *x)
 {
     window_set_output(x, NULL);
+    /* Its pointer lock let go first: the desktop's hold ends with it. */
+    constraints_window_gone(x);
     if (x->id) {
         holds_end_id(x->server, x->id);
         bc_wire_line(&x->server->wire, "WINDOW gone %u", x->id);
@@ -1126,6 +1138,7 @@ static void surface_destroyed(struct wl_resource *resource)
     feedback_discard(&surface->feedback);
     if (surface->pace) wl_event_source_remove(surface->pace);
     if (surface->server->kbd_focus == surface) surface->server->kbd_focus = NULL;
+    constraint_surface_gone(surface);
     if (surface->server->ptr_focus == surface) {
         surface->server->ptr_focus = NULL;
         surface->server->buttons_down = 0;
@@ -2450,8 +2463,8 @@ static void pointer_focus(struct bc_server *s, struct bc_surface *surface, doubl
    zwp_relative_pointer_v1 objects of the client with the pointer -- the
    window's surface, entered where the pointer last was if it has not got
    it. The counts are not accelerated, so both pairs are the same. The
-   lock itself is the desktop's (ADR 0198): zwp_pointer_constraints_v1
-   waits on `WINDOW lock` (docs/api.md, a proposal). */
+   lock itself is the desktop's (ADR 0198; zwp_pointer_constraints_v1
+   below). */
 static void relative_motion(struct bc_server *s, struct bc_xdg *x, double dx, double dy,
                             uint64_t time_us)
 {
@@ -2496,6 +2509,236 @@ static void bind_relative_manager(struct wl_client *client, void *data, uint32_t
     wl_resource_set_implementation(r, &relative_manager_impl, data, NULL);
 }
 
+/* ---- zwp_pointer_constraints_v1: the lock is the desktop's ----
+
+   docs/api.md, "Pointer lock". A program's lock_pointer or confine_pointer
+   is asked of the desktop, `WINDOW lock <id> relative|confine`, with the id
+   of the toplevel the surface belongs to (a popup's is its toplevel's: one
+   route per toplevel); the constraint waits until the desktop engages its
+   hold (ADR 0198: within its gesture window after a click or key in that
+   window) and says `WINDOW lock <id> on`, then `locked` or `confined`; the
+   desktop's `off` (Release Pointer, a focus change, no gesture yet) sends
+   `unlocked` or `unconfined` to an active one and leaves a pending one
+   waiting. A oneshot constraint deactivated is defunct (it never activates
+   again, and its request is spent: destroying it says nothing); a
+   persistent one waits for the next `on`. The program destroying a
+   constraint still asked for, or its window going, is `WINDOW lock <id>
+   off`. Regions and the cursor hint are not carried: Blit confines to the
+   picture's drawn rectangle and keeps a locked pointer still. While a lock
+   is active the window is sent no absolute motion (Blit's relative hold
+   sends only `INPUT rel`, which reaches zwp_relative_pointer_v1). */
+
+enum { BC_CONSTRAINT_LOCK = 1, BC_CONSTRAINT_CONFINE };
+
+struct bc_constraint {
+    struct wl_resource *resource;
+    struct bc_server *server;
+    struct wl_list link;              /* bc_server.constraints */
+    struct bc_surface *surface;       /* NULL once the surface is gone */
+    int kind;
+    int persistent;
+    uint32_t window;                  /* the id `WINDOW lock` asked for, 0 when not asked */
+    int active;                       /* locked or confined sent */
+    int defunct;                      /* a oneshot deactivated */
+};
+
+/* The toplevel a surface belongs to, announced, or NULL. */
+static struct bc_xdg *surface_toplevel(struct bc_surface *surface)
+{
+    struct bc_xdg *x = surface ? surface->xdg : NULL;
+    while (x && x->popup && x->parent) x = x->parent;
+    return x && x->toplevel && x->id ? x : NULL;
+}
+
+static void constraint_ask(struct bc_constraint *c)
+{
+    struct bc_xdg *x;
+    if (c->window || c->defunct || (x = surface_toplevel(c->surface)) == NULL) return;
+    c->window = x->id;
+    bc_wire_line(&c->server->wire, "WINDOW lock %u %s", c->window,
+                 c->kind == BC_CONSTRAINT_LOCK ? "relative" : "confine");
+    logf_("window %u: the program asks for a pointer %s (%s)", c->window,
+          c->kind == BC_CONSTRAINT_LOCK ? "lock" : "confinement",
+          c->persistent ? "persistent" : "oneshot");
+}
+
+static void constraint_ask_surface(struct bc_surface *surface)
+{
+    if (surface->constraint) constraint_ask(surface->constraint);
+}
+
+/* The request withdrawn: `WINDOW lock <id> off`, once. */
+static void constraint_withdraw(struct bc_constraint *c)
+{
+    if (c->window == 0) return;
+    bc_wire_line(&c->server->wire, "WINDOW lock %u off", c->window);
+    logf_("window %u: the program let the pointer go", c->window);
+    c->window = 0;
+    c->active = 0;
+}
+
+/* The surface gone: its constraint, inert until the client destroys it. */
+static void constraint_surface_gone(struct bc_surface *surface)
+{
+    if (surface->constraint) {
+        constraint_withdraw(surface->constraint);
+        surface->constraint->surface = NULL;
+        surface->constraint = NULL;
+    }
+}
+
+/* A window going ends the requests of every constraint asked for it, and of
+   the surface's own (a popup's). */
+static void constraints_window_gone(struct bc_xdg *x)
+{
+    struct bc_constraint *c;
+    wl_list_for_each(c, &x->server->constraints, link)
+        if ((x->id && c->window == x->id) || (x->surface && c->surface == x->surface))
+            constraint_withdraw(c);
+}
+
+/* Whether window `x` has an active lock: it is sent no absolute motion. */
+static int window_locked(struct bc_server *s, struct bc_xdg *x)
+{
+    struct bc_constraint *c;
+    wl_list_for_each(c, &s->constraints, link)
+        if (c->active && c->kind == BC_CONSTRAINT_LOCK && c->window == x->id) return 1;
+    return 0;
+}
+
+static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly);
+
+/* `WINDOW lock <id> on|off`, the desktop's hold engaged or ended. */
+static void constraints_hold(struct bc_server *s, uint32_t id, int on)
+{
+    struct bc_constraint *c;
+    int found = 0;
+    wl_list_for_each(c, &s->constraints, link) {
+        if (c->window != id || c->defunct) continue;
+        found = 1;
+        if (on && !c->active && c->surface) {
+            c->active = 1;
+            /* A lock is the surface's with the pointer on it. */
+            if (c->kind == BC_CONSTRAINT_LOCK && s->ptr_focus != c->surface)
+                pointer_focus(s, c->surface, s->ptr_x, s->ptr_y);
+            if (c->kind == BC_CONSTRAINT_LOCK) zwp_locked_pointer_v1_send_locked(c->resource);
+            else zwp_confined_pointer_v1_send_confined(c->resource);
+            logf_("window %u: pointer %s", id, c->kind == BC_CONSTRAINT_LOCK ? "locked" : "confined");
+        } else if (!on && c->active) {
+            c->active = 0;
+            if (c->kind == BC_CONSTRAINT_LOCK) zwp_locked_pointer_v1_send_unlocked(c->resource);
+            else zwp_confined_pointer_v1_send_unconfined(c->resource);
+            if (!c->persistent) {
+                /* Spent: the desktop's hold has ended, and so has the request. */
+                c->defunct = 1;
+                c->window = 0;
+            }
+            logf_("window %u: pointer %s%s", id, c->kind == BC_CONSTRAINT_LOCK ? "unlocked" : "unconfined",
+                  c->defunct ? ", the oneshot constraint is defunct" : "");
+        }
+    }
+    if (!found) logf_("WINDOW lock %u %s with no constraint asked for", id, on ? "on" : "off");
+}
+
+static void constraint_destroyed(struct wl_resource *resource)
+{
+    struct bc_constraint *c = wl_resource_get_user_data(resource);
+    constraint_withdraw(c);
+    if (c->surface && c->surface->constraint == c) c->surface->constraint = NULL;
+    wl_list_remove(&c->link);
+    free(c);
+}
+
+static void constraint_set_region(struct wl_client *client, struct wl_resource *resource,
+                                  struct wl_resource *region)
+{
+    (void)client; (void)resource; (void)region;
+}
+
+static void locked_set_hint(struct wl_client *client, struct wl_resource *resource, wl_fixed_t x,
+                            wl_fixed_t y)
+{
+    (void)client; (void)resource; (void)x; (void)y;
+}
+
+static const struct zwp_locked_pointer_v1_interface locked_pointer_impl = {
+    .destroy = bc_destroy_request,
+    .set_cursor_position_hint = locked_set_hint,
+    .set_region = constraint_set_region,
+};
+
+static const struct zwp_confined_pointer_v1_interface confined_pointer_impl = {
+    .destroy = bc_destroy_request,
+    .set_region = constraint_set_region,
+};
+
+static void constraint_create(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                              struct wl_resource *surface_resource, uint32_t lifetime, int kind)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_surface *surface = wl_resource_get_user_data(surface_resource);
+    struct bc_constraint *c;
+    if (surface->constraint) {
+        wl_resource_post_error(resource, ZWP_POINTER_CONSTRAINTS_V1_ERROR_ALREADY_CONSTRAINED,
+                               "the surface already has a pointer constraint");
+        return;
+    }
+    c = calloc(1, sizeof(*c));
+    if (c == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    c->resource = kind == BC_CONSTRAINT_LOCK
+        ? wl_resource_create(client, &zwp_locked_pointer_v1_interface, wl_resource_get_version(resource), id)
+        : wl_resource_create(client, &zwp_confined_pointer_v1_interface, wl_resource_get_version(resource), id);
+    if (c->resource == NULL) {
+        free(c);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    c->server = s;
+    c->surface = surface;
+    c->kind = kind;
+    c->persistent = lifetime == ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT;
+    wl_list_insert(&s->constraints, &c->link);
+    surface->constraint = c;
+    if (kind == BC_CONSTRAINT_LOCK)
+        wl_resource_set_implementation(c->resource, &locked_pointer_impl, c, constraint_destroyed);
+    else
+        wl_resource_set_implementation(c->resource, &confined_pointer_impl, c, constraint_destroyed);
+    constraint_ask(c);
+}
+
+static void constraints_lock(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                             struct wl_resource *surface, struct wl_resource *pointer,
+                             struct wl_resource *region, uint32_t lifetime)
+{
+    (void)pointer; (void)region;
+    constraint_create(client, resource, id, surface, lifetime, BC_CONSTRAINT_LOCK);
+}
+
+static void constraints_confine(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                struct wl_resource *surface, struct wl_resource *pointer,
+                                struct wl_resource *region, uint32_t lifetime)
+{
+    (void)pointer; (void)region;
+    constraint_create(client, resource, id, surface, lifetime, BC_CONSTRAINT_CONFINE);
+}
+
+static const struct zwp_pointer_constraints_v1_interface constraints_impl = {
+    .destroy = bc_destroy_request,
+    .lock_pointer = constraints_lock,
+    .confine_pointer = constraints_confine,
+};
+
+static void bind_constraints(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zwp_pointer_constraints_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &constraints_impl, data, NULL);
+}
+
 static void input_line(struct bc_server *s, struct bc_input_conn *conn, const char *line)
 {
     BcInput in;
@@ -2528,6 +2771,8 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
     case BC_INPUT_PTR: {
         double lx, ly, ox, oy;
         struct bc_surface *target;
+        /* A locked pointer does not move: only relative motion. */
+        if (window_locked(s, x)) return;
         if (s->buttons_down && s->ptr_focus) {
             /* The implicit grab: the surface a button went down on. */
             target = s->ptr_focus;
@@ -2787,6 +3032,9 @@ static void handle_line(struct bc_server *s, const char *line)
             logf_("WINDOW close for %u, which is no window here", l.id);
         }
         return;
+    case BC_LINE_LOCK:
+        constraints_hold(s, l.id, l.on);
+        return;
     case BC_LINE_ERROR_WINDOW:
         logf_("the desktop refused a WINDOW line for %u: %s", l.id, l.code);
         return;
@@ -2888,6 +3136,7 @@ int main(int argc, char **argv)
     wl_list_init(&server.keyboards);
     wl_list_init(&server.pointers);
     wl_list_init(&server.relative_pointers);
+    wl_list_init(&server.constraints);
     server.input_fd = -1;
     server.keymap_fd = -1;
     for (i = 1; i < argc; ++i) {
@@ -2958,7 +3207,10 @@ int main(int argc, char **argv)
                           BC_VERSION(1, wp_presentation_interface), &server, bind_presentation) ||
         !wl_global_create(server.display, &zwp_relative_pointer_manager_v1_interface,
                           BC_VERSION(1, zwp_relative_pointer_manager_v1_interface), &server,
-                          bind_relative_manager)) {
+                          bind_relative_manager) ||
+        !wl_global_create(server.display, &zwp_pointer_constraints_v1_interface,
+                          BC_VERSION(1, zwp_pointer_constraints_v1_interface), &server,
+                          bind_constraints)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
@@ -2980,12 +3232,13 @@ int main(int argc, char **argv)
     }
     logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
-          "zwp_relative_pointer_manager_v1 %d",
+          "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
           BC_VERSION(1, wp_presentation_interface),
-          BC_VERSION(1, zwp_relative_pointer_manager_v1_interface));
+          BC_VERSION(1, zwp_relative_pointer_manager_v1_interface),
+          BC_VERSION(1, zwp_pointer_constraints_v1_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);

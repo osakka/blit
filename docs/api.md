@@ -2156,7 +2156,7 @@ It speaks the frame channel above as a producer, with these additions.
   the client that has the pointer, the raw counts as both the accelerated
   and the unaccelerated motion.
 - **Pointer lock** (*agreed with Hibr 2026-11-10; blit-compositor offers
-  `zwp_pointer_constraints_v1` from milestone C*). The lock is the desktop's
+  `zwp_pointer_constraints_v1` version 1 from 0.3.72*). The lock is the desktop's
   (ADR 0198), so the compositor asks for it rather than taking it. The
   desktop takes a hold only within its gesture window after a click or key
   in that window (Hibr's `DT_PTRGESTMS`, 2 s): a program asking on its own,
@@ -2179,7 +2179,15 @@ It speaks the frame channel above as a producer, with these additions.
     next `on`).
   - Relative motion while locked is the existing `INPUT rel`; a confined
     pointer's positions are the existing `INPUT ptr` (Blit keeps the
-    pointer inside the picture under `confine`).
+    pointer inside the picture under `confine`). While a lock is active
+    the compositor sends the program no absolute motion, whatever `INPUT
+    ptr` arrives.
+  - The id is the top-level's: a constraint on a popup's surface is asked
+    for with its top-level's id, as the route is the top-level's. A
+    constraint is asked for once, when it is made (or when its window is
+    announced, if later); a oneshot constraint deactivated by `off` is
+    spent, so destroying it afterwards sends nothing, and a program that
+    wants the lock again makes a new constraint, which asks again.
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete

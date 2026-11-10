@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -33,6 +33,15 @@
    tested; a GPU's dmabuf is the live check. It prints each buffer's plane
    as `STANDIN dmabuf <w>x<h> file <dev>:<inode>`, what the default
    feedback offered, and each release as `STANDIN release <w>x<h>`.
+
+   With --lock, after its first frame it takes zwp_pointer_constraints_v1
+   and locks the pointer to its surface, oneshot; each Space pressed (key
+   57) destroys the constraint it has and takes the next: a persistent
+   lock, then a persistent confinement, then nothing more. It prints
+   `STANDIN lock oneshot|persistent`, `STANDIN confine persistent`, and the
+   events `STANDIN locked|unlocked|confined|unconfined`; at exit it destroys
+   its toplevel and surface before the constraint, so the window goes with
+   the constraint still there.
 
    With --animate n, it draws again on each of the next n frame callbacks,
    as games do, and prints `STANDIN animated <n> in <ms> ms` from its first
@@ -74,6 +83,7 @@
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
+#include "pointer-constraints-unstable-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -92,6 +102,12 @@ struct standin {
     struct wp_presentation *presentation;
     struct zwp_relative_pointer_manager_v1 *relative_manager;
     struct zwp_relative_pointer_v1 *relative;
+    /* --lock: the constraints and the step reached (1 oneshot lock, 2
+       persistent lock, 3 persistent confinement) */
+    struct zwp_pointer_constraints_v1 *constraints;
+    struct zwp_locked_pointer_v1 *locked;
+    struct zwp_confined_pointer_v1 *confined;
+    int lock, lock_step;
     unsigned presented, discarded;
     uint32_t refresh;
     int animate, animated;
@@ -419,11 +435,66 @@ static void run_states(struct standin *s)
     printf("STANDIN states requested\n");
 }
 
+static void locked_locked(void *data, struct zwp_locked_pointer_v1 *l)
+{
+    (void)data; (void)l;
+    printf("STANDIN locked\n");
+}
+
+static void locked_unlocked(void *data, struct zwp_locked_pointer_v1 *l)
+{
+    (void)data; (void)l;
+    printf("STANDIN unlocked\n");
+}
+
+static const struct zwp_locked_pointer_v1_listener locked_listener = { locked_locked, locked_unlocked };
+
+static void confined_confined(void *data, struct zwp_confined_pointer_v1 *c)
+{
+    (void)data; (void)c;
+    printf("STANDIN confined\n");
+}
+
+static void confined_unconfined(void *data, struct zwp_confined_pointer_v1 *c)
+{
+    (void)data; (void)c;
+    printf("STANDIN unconfined\n");
+}
+
+static const struct zwp_confined_pointer_v1_listener confined_listener = {
+    confined_confined, confined_unconfined,
+};
+
+/* --lock: the constraint it has destroyed, the next one taken. */
+static void lock_next(struct standin *s)
+{
+    if (!s->constraints || !s->pointer || s->lock_step >= 3) return;
+    if (s->locked) zwp_locked_pointer_v1_destroy(s->locked);
+    if (s->confined) zwp_confined_pointer_v1_destroy(s->confined);
+    s->locked = NULL;
+    s->confined = NULL;
+    ++s->lock_step;
+    if (s->lock_step < 3) {
+        s->locked = zwp_pointer_constraints_v1_lock_pointer(
+            s->constraints, s->surface, s->pointer, NULL,
+            s->lock_step == 1 ? ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_ONESHOT
+                              : ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+        zwp_locked_pointer_v1_add_listener(s->locked, &locked_listener, s);
+        printf("STANDIN lock %s\n", s->lock_step == 1 ? "oneshot" : "persistent");
+    } else {
+        s->confined = zwp_pointer_constraints_v1_confine_pointer(
+            s->constraints, s->surface, s->pointer, NULL, ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+        zwp_confined_pointer_v1_add_listener(s->confined, &confined_listener, s);
+        printf("STANDIN confine persistent\n");
+    }
+}
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
     struct standin *s = data;
     xdg_surface_ack_configure(xs, serial);
     draw(s, s->surface, s->want_w, s->want_h);
+    if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
         s->want_popup = 0;
         open_popup(s);
@@ -485,8 +556,10 @@ static void keyboard_leave(void *data, struct wl_keyboard *k, uint32_t serial,
 static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
                          uint32_t key, uint32_t state)
 {
-    (void)data; (void)k; (void)serial; (void)time;
+    struct standin *s = data;
+    (void)k; (void)serial; (void)time;
     printf("STANDIN key %u %u\n", key, state);
+    if (s->lock && key == 57 && state == WL_KEYBOARD_KEY_STATE_PRESSED) lock_next(s);
 }
 
 static void keyboard_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t dep,
@@ -709,6 +782,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
     } else if (strcmp(interface, zwp_relative_pointer_manager_v1_interface.name) == 0) {
         s->relative_manager = wl_registry_bind(registry, name,
                                                &zwp_relative_pointer_manager_v1_interface, 1);
+    } else if (strcmp(interface, zwp_pointer_constraints_v1_interface.name) == 0) {
+        s->constraints = wl_registry_bind(registry, name, &zwp_pointer_constraints_v1_interface, 1);
     } else if (strcmp(interface, wp_presentation_interface.name) == 0) {
         s->presentation = wl_registry_bind(registry, name, &wp_presentation_interface, 1);
     } else if (strcmp(interface, zwp_linux_dmabuf_v1_interface.name) == 0 && version >= 4) {
@@ -805,6 +880,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
+        else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--animate") == 0 && i + 1 < argc) s.animate = atoi(argv[++i]);
         else title = argv[i];
     }
@@ -825,6 +901,10 @@ int main(int argc, char **argv)
     if (s.relative_manager && s.pointer) {
         s.relative = zwp_relative_pointer_manager_v1_get_relative_pointer(s.relative_manager, s.pointer);
         zwp_relative_pointer_v1_add_listener(s.relative, &relative_listener, &s);
+    }
+    if (s.lock && !s.constraints) {
+        fprintf(stderr, "STANDIN --lock: no zwp_pointer_constraints_v1\n");
+        return 1;
     }
     if (s.use_dmabuf && !s.dmabuf) {
         fprintf(stderr, "STANDIN --dmabuf: no zwp_linux_dmabuf_v1 version 4\n");
@@ -866,6 +946,10 @@ int main(int argc, char **argv)
     xdg_toplevel_destroy(s.toplevel);
     xdg_surface_destroy(s.xdg_surface);
     wl_surface_destroy(s.surface);
+    /* After the window: it goes with its constraint still there. */
+    if (s.locked) zwp_locked_pointer_v1_destroy(s.locked);
+    if (s.confined) zwp_confined_pointer_v1_destroy(s.confined);
+    if (s.constraints) zwp_pointer_constraints_v1_destroy(s.constraints);
     if (s.keyboard) wl_keyboard_release(s.keyboard);
     if (s.pointer) wl_pointer_release(s.pointer);
     if (s.seat) wl_seat_release(s.seat);

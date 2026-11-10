@@ -119,7 +119,8 @@ case "$target" in
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
                    "$protocols/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml" \
                    "$protocols/stable/presentation-time/presentation-time.xml" \
-                   "$protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml"; do
+                   "$protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml" \
+                   "$protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml"; do
             base=$(basename "$xml" .xml)
             wayland-scanner server-header "$xml" "$proto/$base-server-protocol.h"
             wayland-scanner client-header "$xml" "$proto/$base-client-protocol.h"
@@ -132,6 +133,7 @@ case "$target" in
             "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
             "$proto/linux-dmabuf-unstable-v1-protocol.c" "$proto/presentation-time-protocol.c" \
             "$proto/relative-pointer-unstable-v1-protocol.c" \
+            "$proto/pointer-constraints-unstable-v1-protocol.c" \
             "${BLIT_XKBCOMMON_LIBRARY:-/lib/x86_64-linux-gnu/libxkbcommon.so.0}" \
             "${BLIT_WAYLAND_SERVER_LIBRARY:-/lib/x86_64-linux-gnu/libwayland-server.so.0}" \
             -o "$output"

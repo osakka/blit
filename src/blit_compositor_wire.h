@@ -17,11 +17,13 @@
            WINDOW maximize <id> on|off    WINDOW minimize <id>
            WINDOW parent <id> <parent|0>
            WINDOW hide <id>
+           WINDOW lock <id> relative|confine|off
            WINDOW gone <id>
        desktop to compositor
            WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
            WINDOW output <id> <w> <h> <mHz>
            WINDOW close <id>
+           WINDOW lock <id> on|off
            OK window <id>                 ERROR WINDOW <id> <code>
 
    A peer whose hello answer has no `window=1` (Blit itself says
@@ -518,6 +520,7 @@ enum {
     BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] */
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
+    BC_LINE_LOCK,           /* WINDOW lock <id> on|off: the desktop's pointer hold */
     BC_LINE_OK_WINDOW,      /* OK window <id> */
     BC_LINE_ERROR_WINDOW,   /* ERROR WINDOW <id> <code> */
     BC_LINE_RELEASE,        /* RELEASE <id> <sequence>: an FRM3 frame's buffer is free */
@@ -530,6 +533,7 @@ typedef struct {
     uint32_t id;
     int32_t width, height;
     int fullscreen, maximized, activated;
+    int on;                 /* WINDOW lock */
     uint32_t refresh_mhz;   /* WINDOW output */
     uint64_t sequence;      /* RELEASE */
     char code[32];
@@ -683,6 +687,15 @@ static int bc_parse_line(const char *line, BcLine *out)
             (*p != '\0' && *p != '\n'))
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_CLOSE;
+    }
+    if (strncmp(line, "WINDOW lock ", 12) == 0) {
+        p = line + 12;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0 || *p++ != ' ')
+            return out->kind = BC_LINE_UNKNOWN;
+        if (strncmp(p, "on", 2) == 0 && (p[2] == '\0' || p[2] == '\n')) out->on = 1;
+        else if (strncmp(p, "off", 3) != 0 || (p[3] != '\0' && p[3] != '\n'))
+            return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = BC_LINE_LOCK;
     }
     if (strncmp(line, "OK window ", 10) == 0) {
         p = line + 10;
