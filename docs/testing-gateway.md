@@ -357,8 +357,13 @@ physical DRM device:
 
 ```sh
 . tools/tests/gate_display.sh && gate_display_setup
-env $GATE_DISPLAY_ENV ./build/blit/blit-server 8080
+env $GATE_SERVER_ENV $GATE_DISPLAY_ENV ./build/blit/blit-server 8080
 ```
+
+`$GATE_SERVER_ENV` (`tools/tests/gate_env.sh`, run by `gate_display_setup`)
+keeps the server from inheriting a Blit session's `BLIT_*` variables and
+points `BLIT_INPUT_ROOT` at an empty directory, so it opens no real input
+device; it comes first after `env`.
 
 `gate_display_setup` selects the CPU compositor; set `BLIT_GATE_BACKEND=gles`
 before it to compose with GLES on the surfaceless platform.

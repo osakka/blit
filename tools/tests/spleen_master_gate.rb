@@ -60,7 +60,7 @@ def check(ok, why)
 end
 
 def start(env)
-  pid = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  pid = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(20) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   pid
 end

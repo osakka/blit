@@ -203,7 +203,7 @@ end
 
 Dir.mktmpdir('blit-performance-panel') do |root|
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   code, = request('POST', '/v1/terminal-sessions',
                   { command: '/bin/sh', pane_id: 'pane-display-1-1',

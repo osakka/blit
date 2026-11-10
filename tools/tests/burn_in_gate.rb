@@ -229,7 +229,7 @@ Dir.mktmpdir('blit-burn-in') do |root|
         rule.call(100, 0.001).last.zero?, 'the rule: half the fade time is half the levels')
 
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
-  $server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  $server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   output = get('/v1/displays')['displays'].first.dig('state', 'connector')
   run('pane-display-1-2', "printf '\\033[?25l\\033[48;2;#{OTHER.join(';')}m\\033[2J'; sleep 600")

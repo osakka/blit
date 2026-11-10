@@ -155,7 +155,7 @@ SIDECAR
 
 $server = nil
 def start
-  $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  $server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                     'BLIT_INPUT_ROOT' => File.join(INPUT_ROOT, 'nodes'),
                     'BLIT_SETTINGS_PATH' => DOCUMENT,
                     },

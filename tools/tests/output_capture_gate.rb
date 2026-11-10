@@ -40,7 +40,7 @@ Dir.mktmpdir('blit-output-capture') do |root|
     'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
     'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_AUTH_TOKEN' => '',
     'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'))
-  pid = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  pid = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   begin
     Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
     trigger = File.join(root, 'go')

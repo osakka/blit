@@ -161,7 +161,7 @@ Dir.mktmpdir('blit-audio') do |root|
   # hotplug watch observes; the procfs tree only supplies metadata.
   %w[pcmC0D0p pcmC0D3p pcmC0D0c].each { |n| File.write(File.join(snd, n), '') }
 
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_ASOUND_ROOT' => asound, 'BLIT_SND_ROOT' => snd,
                    'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
                    },

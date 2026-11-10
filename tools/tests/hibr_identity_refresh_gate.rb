@@ -49,7 +49,7 @@ Dir.mktmpdir('blit-hibr-identity') do |dir|
     'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_AUTH_TOKEN' => '',
     'BLIT_LOGIN_COMMAND' => hibr, 'BLIT_SETTINGS_PATH' => File.join(dir, 'settings.json'))
   log = File.join(dir, 'server.log')
-  pid = spawn(env, BINARY, PORT.to_s, out: log, err: [:child, :out])
+  pid = gate_spawn(env, BINARY, PORT.to_s, out: log, err: [:child, :out])
   begin
     Timeout.timeout(15) { loop { break if (compat rescue nil); sleep 0.1 } }
     before = compat

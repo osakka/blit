@@ -118,7 +118,7 @@ end
 
 Dir.mktmpdir('blit-route') do |root|
   %w[event0 event1].each { |node| File.write(File.join(root, node), '') }
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    'BLIT_COMMAND_ALLOWLIST' => '/bin/sh',
                    },

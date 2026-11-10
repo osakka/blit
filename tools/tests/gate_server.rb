@@ -19,6 +19,7 @@ require 'digest'
 require 'fileutils'
 require 'tmpdir'
 require_relative 'build_flags'
+require_relative 'gate_env'
 
 GATE_ROOT = File.expand_path('../..', __dir__)
 GATE_BACKEND = ENV.fetch('BLIT_GATE_BACKEND', 'native')

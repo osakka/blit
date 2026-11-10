@@ -202,7 +202,7 @@ Dir.mktmpdir('blit-mask') do |root|
   describe = ->(wrong) { wrong.first(4).map { |x, y, got, w| "(#{x},#{y}) #{got} not #{w}" }.join(', ') }
 
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
-  $server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  $server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   output = get('/v1/displays')['displays'].first.dig('state', 'connector')
   # Pane 1: four rows of stripes three cells wide, two of a white block,

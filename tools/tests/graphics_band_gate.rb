@@ -22,7 +22,7 @@ base = URI("http://127.0.0.1:#{port}")
 binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
 log = "/tmp/blit-band-gate-#{Process.pid}.log"
 env = TestProfile.environment
-pid = Process.spawn(env, binary, port.to_s, out: log, err: [:child, :out])
+pid = gate_spawn(env, binary, port.to_s, out: log, err: [:child, :out])
 
 at_exit do
   Process.kill('TERM', pid) rescue nil

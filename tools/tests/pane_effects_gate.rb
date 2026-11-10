@@ -113,7 +113,7 @@ env = gate_display_env(width: W, height: H).merge(
   'BLIT_PANE_LAYOUT' => '1x2', 'BLIT_AUTH_TOKEN' => '')
 $server = nil
 def start(env)
-  $server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  $server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
 end
 

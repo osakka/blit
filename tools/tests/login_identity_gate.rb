@@ -70,7 +70,7 @@ Dir.mktmpdir('blit-login-identity') do |root|
     env['BLIT_GATE_HOOK']=hook
     env['BLIT_LOGIN_SESSION_COMMAND']='/bin/false' if mode=='custom'
     log=File.join(root,"#{mode}.log")
-    $pid=spawn('sudo','-n','env',*env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:log)
+    $pid=spawn(*gate_sudo_argv(env,BINARY,PORT.to_s),out:log,err:log)
     login=until_ready{request('GET','/v1/login')}
     check(login['identity'].is_a?(Hash),'login identity API absent')
     check(login['desktop'].is_a?(Hash),'native login association API absent')

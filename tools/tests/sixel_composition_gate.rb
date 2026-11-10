@@ -13,7 +13,7 @@ require_relative 'test_profile'
 port = gate_port(Integer(ENV.fetch('BLIT_SIXEL_COMPOSITION_PORT', '19304')))
 base = "http://127.0.0.1:#{port}"
 log = "/tmp/blit-sixel-composition-#{Process.pid}.log"
-pid = Process.spawn(TestProfile.environment, TestProfile.binary, port.to_s,
+pid = gate_spawn(TestProfile.environment, TestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 begin
   diagnostics = Timeout.timeout(10) do

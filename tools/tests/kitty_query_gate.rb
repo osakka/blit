@@ -35,7 +35,7 @@ def surface_text(body)
       .map { |cell| cell.fetch('text') }.join
 end
 
-server = Process.spawn({
+server = gate_spawn({
   **gate_display_env,
   
 }, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

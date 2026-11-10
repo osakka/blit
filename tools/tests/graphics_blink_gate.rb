@@ -126,7 +126,7 @@ Dir.mktmpdir('blit-graphics-blink') do |root|
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
   files = File.join(root, 'files')
   FileUtils.mkdir_p(files)
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
 
   # The steps of a session are lines on its input: cat a file, sleep, make a

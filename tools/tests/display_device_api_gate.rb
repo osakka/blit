@@ -65,7 +65,7 @@ ENVIRONMENT = { **gate_display_env, 'BLIT_PSF_FONT' => FONT, 'BLIT_SETTINGS_PATH
 $server = nil
 
 def start_server
-  $server = spawn(ENVIRONMENT, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
+  $server = gate_spawn(ENVIRONMENT, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   Timeout.timeout(15) do
     loop do
       begin

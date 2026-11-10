@@ -81,6 +81,9 @@ import tempfile
 import time
 import urllib.request
 
+sys.dont_write_bytecode = True  # the helper below is imported from this directory
+import gate_env  # noqa: E402
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 OFFSET = int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0'))
 SEALS = fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
@@ -115,7 +118,7 @@ def wait_for(predicate, why, seconds=8.0):
 class Server:
     def __init__(self, port, work, extra=None):
         self.base = 'http://127.0.0.1:%d' % port
-        env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+        env = gate_env.server_env(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                    BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
                    BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'), BLIT_EXPECT_DESKTOP='0',
                    BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1')

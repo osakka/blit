@@ -25,7 +25,7 @@ base = external_base ? URI(external_base) : URI("http://127.0.0.1:#{port}")
 log = File.join(Dir.tmpdir, "blit-pixel-frame-#{Process.pid}.log")
 pid = nil
 unless external_base
-  pid = Process.spawn(TestProfile.environment,
+  pid = gate_spawn(TestProfile.environment,
                       ENV.fetch('BLIT_GATE_BINARY','build/blit/blit-server'), port.to_s,
                       out: log, err: [:child, :out])
 end

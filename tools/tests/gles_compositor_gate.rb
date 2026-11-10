@@ -31,7 +31,7 @@ frame_line = `#{frame} 2>&1`.strip
 abort "GLES_COMPOSITOR_FAIL #{frame_line}" unless $?.success?
 
 def server(port, env)
-  pid = spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0',
+  pid = gate_spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0',
                         'BLIT_PSF_FONT' => File.join(GATE_ROOT, 'assets/fonts/Blit-Terminus16.psf')),
               ENV.fetch('BLIT_GATE_BINARY', File.join(GATE_ROOT, 'build/blit/blit-server')),
               port.to_s, out: File::NULL, err: File::NULL)
@@ -159,7 +159,7 @@ Dir.mktmpdir('blit-gles-setting') do |root|
   #    already be on disk while it hangs, so that next start is on the CPU
   #    and the API answers; the one after tries the GPU again.
   FileUtils.rm_f(marker)
-  hung = spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_TEST_MODE' => '1',
+  hung = gate_spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_TEST_MODE' => '1',
                          'BLIT_TEST_GLES_HANG_MS' => '60000',
                          'BLIT_PSF_FONT' => File.join(GATE_ROOT, 'assets/fonts/Blit-Terminus16.psf')),
                ENV.fetch('BLIT_GATE_BINARY', File.join(GATE_ROOT, 'build/blit/blit-server')),

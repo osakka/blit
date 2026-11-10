@@ -80,7 +80,7 @@ end
 $server = nil
 def start(env)
   # The font profiles are Blit's own, read from the repository (ADR 0194).
-  $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  $server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                     'BLIT_FONT_ROOT' => File.join(ROOT, 'assets/fonts') }
                     .merge(env),
                   BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

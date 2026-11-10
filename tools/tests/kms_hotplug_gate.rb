@@ -4,6 +4,7 @@ require 'json'
 require 'net/http'
 require 'tmpdir'
 require_relative 'build_flags'
+require_relative 'gate_env'
 require 'fileutils'
 require 'timeout'
 require_relative 'gate_port'
@@ -45,7 +46,7 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
     'BLIT_AUTH_TOKEN'=>'hotplug-test','BLIT_LOGIN_AUTOSTART'=>'0','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf')}
-  log=File.join(root,'server.log');pid=spawn(env,BINARY,PORT.to_s,out:log,err:[:child,:out])
+  log=File.join(root,'server.log');pid=gate_spawn(env,BINARY,PORT.to_s,out:log,err:[:child,:out])
   begin
     await('startup'){req('GET','/v1/version')}
     await('startup migration durable'){req('GET','/v1/settings').dig('storage','state')=='clean'}
@@ -152,7 +153,7 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
     write.call([93])
     req('POST','/v1/control/shutdown');Timeout.timeout(10){Process.wait(pid)};pid=nil
     write.call([])
-    pid=spawn(env,BINARY,PORT.to_s,out:log,err:[:child,:out])
+    pid=gate_spawn(env,BINARY,PORT.to_s,out:log,err:[:child,:out])
     await('initial zero-output startup'){req('GET','/v1/version')}
     check(ids.call.empty?,'headless boot invented output')
     write.call([93]);await('first monitor after headless boot'){ids.call==['display-93']}

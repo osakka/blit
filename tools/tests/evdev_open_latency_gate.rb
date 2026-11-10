@@ -66,7 +66,7 @@ Dir.mktmpdir('blit-open') do |root|
   # passed against the defect. The live 3.46s event was a rescan: inotify sees
   # a node appear and reconnect_evdev_devices runs inside the loop.
   File.write(File.join(root, 'event0'), '')
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    'BLIT_INPUT_OPEN_DELAY_US' => OPEN_DELAY_US.to_s,
                    },

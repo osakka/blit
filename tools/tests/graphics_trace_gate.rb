@@ -62,7 +62,7 @@ def check(condition, message)
   warn "graphics-trace gate: FAIL #{message}"
 end
 
-server = spawn({ **gate_display_env,
+server = gate_spawn({ **gate_display_env,
                  'BLIT_PSF_FONT' => FONT,
                  'BLIT_COMMAND_ALLOWLIST' => "/bin/sh,#{KITTY_PROBE}",
                  },

@@ -113,7 +113,7 @@ Dir.mktmpdir('blit-native-auxiliary') do |root|
     'BLIT_HIBR_OBSERVER'=>observer,'BLIT_HIBR_PLACER'=>placer,'BLIT_AUXILIARY_LAUNCHER'=>launcher}
   log=File.join(root,'server.log')
   begin
-    pid=spawn('sudo','-n','env',*server_env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:[:child,:out])
+    pid=spawn(*gate_sudo_argv(server_env,BINARY,PORT.to_s),out:log,err:[:child,:out])
     login=await('actual native login association'){q=request('GET','/v1/login');q if q.dig('desktop','state')=='ready'}
     display=request('GET','/v1/displays')['displays'].first
     # The client name carries the connector, the output's stable identity; a

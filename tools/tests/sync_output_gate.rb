@@ -119,7 +119,7 @@ BATCH = "printf '\\033[?25lBBBB'; sleep 2.5; " \
 DRIVER = "printf '\\033[?25lAAAA'; " \
          "while :; do sleep 0.25; printf '\\033[2;1Hx'; done"
 
-server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                  },
                BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
 at_exit do

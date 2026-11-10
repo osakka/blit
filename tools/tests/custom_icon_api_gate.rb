@@ -22,7 +22,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
   fonts=File.join(work,'fonts')
   FileUtils.cp_r(File.join(TestProfile::ROOT,'assets/fonts'),fonts)
   env=TestProfile.environment.merge('BLIT_FONT_ROOT'=>fonts)
-  pid=spawn(env,TestProfile.binary,port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
+  pid=gate_spawn(env,TestProfile.binary,port.to_s,out:File.join(work,'server.log'),err:[:child,:out])
   cases=0
   begin
     Timeout.timeout(8) do

@@ -36,8 +36,11 @@ def start(root, extra={})
        'BLIT_PANE_LAYOUT'=>'1x2','BLIT_LOGIN_AUTOSTART'=>'0',
        'BLIT_LOGIN_PANE_ID'=>'pane-display-1-1',
        'BLIT_LOGIN_COMMAND'=>'/bin/cat','BLIT_LOGIN_SCRIPT'=>''}.merge(extra)
-  command=ROOT_OK && !Process.uid.zero? ? ['sudo','-n','env',*env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s] : [env,BINARY,PORT.to_s]
-  $pid=spawn(*command,out:File::NULL,err:File::NULL)
+  $pid=if ROOT_OK && !Process.uid.zero?
+         spawn(*gate_sudo_argv(env,BINARY,PORT.to_s),out:File::NULL,err:File::NULL)
+       else
+         gate_spawn(env,BINARY,PORT.to_s,out:File::NULL,err:File::NULL)
+       end
   Timeout.timeout(15) do
     loop do
       begin; break if request('GET','/v1/version').first==200; rescue SystemCallError, IOError; end

@@ -41,7 +41,7 @@ tcc -Wall -Isrc tools/tests/compositor_wire_unit.c -o "$out/compositor_wire_unit
 . tools/tests/gate_display.sh
 gate_display_setup
 trap gate_display_cleanup EXIT
-env $GATE_DISPLAY_ENV python3 tools/tests/compositor_gate.py "$out/blit-compositor" \
+BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools/tests/compositor_gate.py "$out/blit-compositor" \
     "$out/wl_standin_client" "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}"
 
 san="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
@@ -68,7 +68,7 @@ then
     $norand "$out/compositor_wire_unit-asan"
     # The mock display is preloaded into blit-server only: AddressSanitizer
     # must come first in the sanitized programs.
-    BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV" \
+    BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" \
     ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1 \
         $norand python3 tools/tests/compositor_gate.py "$out/blit-compositor-asan" "$out/wl_standin_client-asan" \
             "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}"

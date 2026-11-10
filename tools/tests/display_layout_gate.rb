@@ -4,6 +4,7 @@ require 'json'
 require 'net/http'
 require 'tmpdir'
 require_relative 'build_flags'
+require_relative 'gate_env'
 require 'timeout'
 ROOT=File.expand_path('../..',__dir__)
 BINARY=ENV.fetch('BLIT_TEST_SERVER',File.join(ROOT,'build/blit/blit-server'))
@@ -36,7 +37,7 @@ Dir.mktmpdir('blit-layout') do |root|
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf')}
   pid=nil
   start=-> do
-    pid=spawn(env,BINARY,PORT.to_s,out:File.join(root,'log'),err:[:child,:out])
+    pid=gate_spawn(env,BINARY,PORT.to_s,out:File.join(root,'log'),err:[:child,:out])
     Timeout.timeout(10){loop{begin get('/v1/version');break;rescue Errno::ECONNREFUSED;sleep 0.02;end}}
   end
   stop=-> {Process.kill('TERM',pid);Process.wait(pid);pid=nil}

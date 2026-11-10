@@ -92,7 +92,7 @@ Dir.mktmpdir('blit-frame-timing') do |root|
   env = { **gate_display_env, 'BLIT_PSF_FONT' => FONT,
           'BLIT_DRM_MOCK_VBLANK_HZ' => HZ.to_s,
           'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json') }
-  server = spawn(env, BINARY, port.to_s, out: '/dev/null', err: '/dev/null')
+  server = gate_spawn(env, BINARY, port.to_s, out: '/dev/null', err: '/dev/null')
   begin
     Timeout.timeout(15) do
       loop do

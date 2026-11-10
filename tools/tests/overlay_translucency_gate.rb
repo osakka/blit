@@ -95,7 +95,7 @@ end
 
 Dir.mktmpdir('blit-overlay-translucency') do |root|
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   # Each line writes one cell on row 40, far below the overlay: a partial
   # repaint that does not touch it.

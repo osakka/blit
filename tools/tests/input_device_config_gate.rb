@@ -129,7 +129,7 @@ end
 
 Dir.mktmpdir('blit-cfg') do |root|
   File.write(File.join(root, 'event0'), '')
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

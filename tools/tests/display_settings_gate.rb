@@ -79,7 +79,7 @@ end
 
 $server = nil
 def start(env)
-  $server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT }.merge(env),
+  $server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT }.merge(env),
                   BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   Timeout.timeout(20) do
     loop do

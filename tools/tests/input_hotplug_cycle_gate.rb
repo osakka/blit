@@ -138,7 +138,7 @@ Dir.mktmpdir('blit-hotplug') do |base|
   plug(root, 'event0', KEYBOARD_IDENTITY)
   plug(root, 'event1', POINTER_IDENTITY)
 
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    'BLIT_SETTINGS_PATH' => settings },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
