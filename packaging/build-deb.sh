@@ -19,6 +19,9 @@ HIBR_ROOT=${BLIT_HIBR_ROOT:-}
 # version 5 cannot reach this Blit's channel, so the two never install
 # together. Hibr's packages carry the matching Breaks on Blit.
 HIBR_FRAME_V5=0.99.482
+# Removed in 0.3.75 with the gamescope path (ADR 0228): blit Breaks them, so
+# an upgrade removes them rather than leaving a bridge Blit no longer serves.
+RETIRED_PACKAGES='blit-gamescope, steamer'
 
 # The adapter is part of the package's ABI boundary. Reusing a .so from the
 # ignored build directory made its Hibr provenance unknowable: a package
@@ -349,8 +352,8 @@ Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
 Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0)
-Suggests: hibr, blit-font-sources, blit-gamescope, blit-compositor
-Breaks: hibr (<< $HIBR_FRAME_V5)
+Suggests: hibr, blit-font-sources, blit-compositor
+Breaks: hibr (<< $HIBR_FRAME_V5), $RETIRED_PACKAGES
 Description: API-driven native KMS text display server
  Blit provides a text-first display server with one terminal surface per
  physical display or pane, HTTP control, streaming, and Hibr integration.
@@ -433,71 +436,6 @@ soutput=$OUT/blit-font-sources_${font_source_version}_all.deb
 dpkg-deb --build --root-owner-group "$sstage" "$soutput" >/dev/null
 echo "$soutput"
 
-# ADR 0225: the gamescope bridge, its own package at Blit's version, suggested
-# by blit. It is the only part of Blit that links PipeWire, so blit itself
-# keeps no PipeWire dependency. Built into the staging tree like the adapter,
-# against the headers tools/build-tcc.sh names (docs/toolchain.md).
-gstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-gamescope-deb.XXXXXX")
-trap 'rm -rf "$stage" "$sstage" "$gstage"' EXIT HUP INT TERM
-gdoc=$gstage/usr/share/doc/blit-gamescope
-mkdir -p "$gstage/usr/bin" "$gdoc" "$gstage/DEBIAN"
-"$ROOT/tools/build-tcc.sh" "$gstage/usr/bin/blit-gamescope" gamescope >/dev/null
-chmod 0755 "$gstage/usr/bin/blit-gamescope"
-cat > "$gdoc/README" <<EOF
-blit-gamescope: games and Steam in a window, through a headless gamescope
-
-  blit-gamescope [--no-place] [--steam] [-W w -H h] [-r hz] [--log file] -- command...
-
-It starts gamescope --backend headless with the command, takes gamescope's
-PipeWire video stream and hands each frame to Blit on the session's frame
-channel, and names gamescope's EIS socket to Blit, which sends the pane's
-keyboard and mouse there itself. Run it in a Blit session (phase 1, a plain
-pane), or with --no-place inside a Hibr desktop app (phase 2), where the
-desktop places the picture and sends INPUT on/off from its focus callback.
-
-The design is ADR 0225, "Steam and games in a window, through a headless
-gamescope" (docs/adr/0225-games-in-a-window-through-gamescope.md, installed
-by the blit package under /usr/share/doc/blit/docs/adr/). On Debian 13
-gamescope comes from trixie-backports.
-EOF
-cat > "$gdoc/copyright" <<EOF
-blit-gamescope is part of Blit, Copyright (C) 2026 Omar Sakka, built from
-src/blit_gamescope.c, src/blit_gamescope_frames.h and src/blit_gamescope_tty.h
-in the Blit source tree. It is free software: you can redistribute it and/or
-modify it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or (at your
-option) any later version. On Debian systems the licence text is in
-/usr/share/common-licenses/GPL-3.
-
-It is compiled against the unmodified public headers of PipeWire 1.4.2
-(Debian 13's libpipewire-0.3-dev and libspa-0.2-dev, Expat licence) and
-links libpipewire-0.3.so.0 at run time; on Debian systems PipeWire's own
-copyright file is /usr/share/doc/libpipewire-0.3-0t64/copyright.
-EOF
-chmod 0644 "$gdoc/README" "$gdoc/copyright"
-cat > "$gstage/DEBIAN/control" <<EOF
-Package: blit-gamescope
-Version: $pkgver
-Section: games
-Priority: optional
-Architecture: amd64
-Maintainer: ITD Labs <itdlabs@localhost>
-Depends: blit (= $pkgver), libc6, libpipewire-0.3-0, libei1, gamescope
-Description: Games and Steam in a Blit window through a headless gamescope
- blit-gamescope runs a game or Steam under gamescope's headless backend and
- shows it in a Blit pane or a Hibr desktop window: frames by dmabuf over
- Blit's frame channel, keyboard and mouse sent by Blit to gamescope's EIS
- socket (ADR 0225). On Debian 13 gamescope comes from trixie-backports.
-EOF
-goutput=$OUT/blit-gamescope_${pkgver}_amd64.deb
-dpkg-deb --build --root-owner-group "$gstage" "$goutput" >/dev/null
-if dpkg-deb --contents "$goutput" | grep -E -f "$ROOT/tools/release/runtime-entrypoints.pattern" >/dev/null; then
-	rm -f "$goutput"
-	echo "blit: blit-gamescope package contains a shell implementation or Hibr launcher" >&2
-	exit 1
-fi
-echo "$goutput"
-
 # ADR 0228: Blit's Wayland compositor for programs, its own package at
 # Blit's version, suggested by blit. It is the only part of Blit that links
 # libwayland-server and libxkbcommon, so blit itself gains neither. Built
@@ -506,7 +444,7 @@ echo "$goutput"
 # area. Xwayland is Recommended, as the ADR decided: phase 2 runs X11
 # programs under it; phase 1 does not start it, so it is not Depended.
 cstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-compositor-deb.XXXXXX")
-trap 'rm -rf "$stage" "$sstage" "$gstage" "$cstage"' EXIT HUP INT TERM
+trap 'rm -rf "$stage" "$sstage" "$cstage"' EXIT HUP INT TERM
 cdoc=$cstage/pkg/usr/share/doc/blit-compositor
 mkdir -p "$cstage/pkg/usr/bin" "$cdoc" "$cstage/pkg/DEBIAN"
 BLIT_PROTOCOL_DIR="$cstage/protocol" "$ROOT/tools/build-tcc.sh" \

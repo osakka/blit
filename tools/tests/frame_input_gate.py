@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
-"""ADR 0225: physical input to a compositor's EIS socket, the frame
-channel's `INPUT` request (docs/api.md, "Picture frames by descriptor").
-
-Two modes, each run by its own shell gate on the mock display:
+"""ADR 0228: physical input to blit-compositor's per-window input socket,
+the frame channel's `INPUT` requests (docs/api.md, "Picture frames by
+descriptor" and "Program windows", "Input straight from Blit").
 
 Every request names its image and every answer carries it, the id the
 third word as everywhere in version 5 of the channel (docs/api.md, "One
-grammar, version 5": `INPUT eis <id> <path>`, `INPUT ok <id>`,
+grammar, version 5": `INPUT sock <id> <path>`, `INPUT ok <id>`,
 `INPUT error <id> <code>`, 0 for a line with no readable id); one channel
-carries one route per image.
+carries one route per image. The gate is the compositor's end: a plain
+listening socket, and for the events a reader of the lines Blit writes.
 
-local (frame_input_gate.sh): what needs no libeis, on any host.
-  - `INPUT error 7 ENOTSUP` where libei.so.1 cannot be loaded (skipped, and
-    said so, where the system has libei);
-  - against a stand-in libei (tools/tests/fixtures/libei_stub.c, which
-    takes the connection and reports nothing): `EINVAL` for a malformed
-    request (id 0), the version 4 shape `INPUT eis <path> <id>` (and a
-    version 4 hello refused `ERROR 0 EINVAL`), the old bare `INPUT
-    on`/`off`, `INPUT on <id>` for an image with no route, an image deleted, a Kitty
+local: the answers and the states, nothing read from the socket.
+  - `EINVAL` for a malformed request (id 0), the version 4 shape
+    `INPUT sock <path> <id>` (and a version 4 hello refused `ERROR 0
+    EINVAL`), `INPUT eis`, retired in 0.3.75 and now an unknown verb
+    (`INPUT error 0 EINVAL`, as `INPUT foo`), the old bare `INPUT on`/`off`,
+    `INPUT on <id>` for an image with no route, an image deleted, a Kitty
     image or id 0; `ENOENT` for a missing path, a file that is not a
     socket, a link to a socket and a socket nobody listens on; `EACCES` for
     a socket another user owns (where one exists and the gate is not
@@ -29,23 +27,25 @@ local (frame_input_gate.sh): what needs no libeis, on any host.
     route, a missing or unknown mode; `INPUT ok 7` for `confine` and
     `relative`, the route's `hold` saying so, `relative` by default.
 
-eis (frame_input_eis_gate.sh): what reaches a compositor, against
-  tools/tests/eis_receiver.c (libeis.so.1) and the system's libei.so.1;
-  exits 77 where either is missing. Every case compares the receiver's
-  canonical log:
+sock: what reaches the compositor, the lines read off the socket, every
+  event followed by its `INPUT frame`:
+  - the keymap (a sealed memfd, what GET /v1/input/keymap serves) once
+    when the route first goes live, and not again;
   - key press and release in order, no repeats (value 2) sent;
   - nothing sent while off, while another session has focus, or while the
     console is given up (BLIT_TEST_VT_SIGNALS);
-  - every key and button pressed through the route released, then
-    emulation stopped, on INPUT off, on a focus change, on the console
-    given up, on the channel closed and on the image deleted;
-  - wheel notches as discrete scroll;
-  - the absolute pointer over the image's drawn rectangle, scaled to the
-    compositor's region (880x440, larger than the 320x160 frames), at two
-    placements and after the placement is resized, the picture's far corner
-    reaching the region's, and nothing outside it;
-  - the compositor dropping the connection: `INPUT error 10 ENOENT` on the
-    channel at once, the route ended (`INPUT on 10` is then EINVAL);
+  - every key and button pressed through the route released on INPUT off,
+    on a focus change, on the console given up, on the channel closed and
+    on the image deleted (then the connection closed);
+  - wheel notches, positive right and down;
+  - the absolute pointer over the image's drawn rectangle, in the
+    picture's own frame pixels (320x160), at two placements, scaled and
+    not, and after the placement is resized, at both corners, and nothing
+    outside it (`miss` `outside-picture`); the `frames.input` diagnostic
+    saying what was sent;
+  - `INPUT member`: its answers, the pointer over a popup mapped into the
+    top-level's pixels, a negative offset, the member ending with its
+    picture;
   - relative motion, summed exactly, while the session holds ?7701, the
     pointer hidden and still (hold `relative`, the default);
   - hold `confine` under ?7701: the pointer shown, moved by the motion and
@@ -55,13 +55,18 @@ eis (frame_input_eis_gate.sh): what reaches a compositor, against
     no longer drawn, the lock is relative again (hidden, raw motion); after
     `?7701l` the pointer stays where it was and moves as an ordinary
     absolute pointer over the picture;
-  - several routes, a compositor each: two images on one channel each get
-    a route; `INPUT on B` releases what A held and stops A before B starts
-    (checked in the stand-in's cross-route order, EI_STUB_ORDER); a late
-    ENOENT on one route leaves the other working; deleting one image ends
-    only its route; two channels of one session keep one route on.
+  - `INPUT on` before the compositor accepted the connection: the keymap
+    and the keys wait in the socket;
+  - the compositor closing its socket under a live route: `INPUT error 10
+    ENOENT` on the channel at once, the route ended (`INPUT on 10` is then
+    EINVAL), `last_error` `sock-disconnected`; a line it would not take:
+    counted in `dropped`, ENOENT;
+  - several routes, a socket each: two images on one channel each get a
+    route; `INPUT on B` releases what A held before B gets anything (A's
+    release lines stamped before B's next event); a late ENOENT on one
+    route leaves the other working; deleting one image ends only its
+    route; two channels of one session keep one route on.
 """
-import ctypes
 import fcntl
 import json
 import os
@@ -81,10 +86,6 @@ OFFSET = int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0'))
 SEALS = fcntl.F_SEAL_SHRINK | fcntl.F_SEAL_GROW | fcntl.F_SEAL_WRITE
 BINARY = os.environ.get('BLIT_GATE_BINARY', os.path.join(ROOT, 'build/blit/blit-server'))
 FRAME_W, FRAME_H = 320, 160   # 2:1, so a c=4r placement of 8x16 cells draws it unletterboxed
-# The compositor's pointer region, larger than the frames it sends (as when
-# gamescope shrinks its stream): the pointer is scaled to this, not to them.
-REGION_W, REGION_H = 880, 440
-BIND = 'bind keyboard,pointer,pointer_absolute,button,scroll'
 TAG = 'FRAME_INPUT'
 
 
@@ -253,14 +254,6 @@ def listening_socket(path, listen=True):
     return s
 
 
-def system_has(library):
-    try:
-        ctypes.CDLL(library)
-        return True
-    except OSError:
-        return False
-
-
 def place(session, image_id, row, column, columns, rows):
     session.write('\033[%d;%dH\033_Ga=p,i=%d,p=1,q=2,C=1,c=%d,r=%d\033\\'
                   % (row, column, image_id, columns, rows))
@@ -282,35 +275,14 @@ def state(server, session, image):
 def local():
     work = tempfile.mkdtemp(prefix='blit-input-gate-')
     results = []
-    own = os.path.join(work, 'own-eis')
+    own = os.path.join(work, 'own-input')
     keep = [listening_socket(own)]
-
-    # Without libei: ENOTSUP, before any file is looked at.
-    if system_has('libei.so.1'):
-        results.append('enotsup=SKIPPED(system_has_libei.so.1)')
-    else:
-        plain = os.path.join(work, 'plain')
-        os.mkdir(plain)
-        server = Server(19834 + OFFSET, plain)
-        try:
-            a = Session(server, plain, 'session')
-            ch = Channel(a)
-            check(ch.hello.startswith(b'OK dmabuf='), 'version 5 hello answered %r' % ch.hello)
-            got = ch.ask('INPUT eis 7 %s\n' % own)
-            check(got == b'INPUT error 7 ENOTSUP\n', 'INPUT without libei was answered %r' % got)
-            info = server.input(a.id)
-            check(info['routes'] == [] and info['last_error'] == 'ENOTSUP', 'frames.input %s' % info)
-            results.append('enotsup=ENOTSUP')
-        finally:
-            server.stop()
-
-    # Against the stand-in libei.
-    stub = os.path.join(ROOT, 'build/tests/libei-stub')
-    server = Server(19834 + OFFSET, work, {'LD_LIBRARY_PATH': stub})
+    server = Server(19834 + OFFSET, work)
     try:
         a = Session(server, work, 'a')
         b = Session(server, work, 'b')
         ch = Channel(a)
+        check(ch.hello.startswith(b'OK dmabuf='), 'version 5 hello answered %r' % ch.hello)
 
         # Version 5 only: a version 4 channel is refused at its hello, so
         # nothing it could ask is read.
@@ -319,16 +291,17 @@ def local():
         v4.close()
 
         # No readable id: answered with 0. A readable one is carried back.
-        # The version 4 shape, the path before the id, has no readable id.
+        # The version 4 shape, the path before the id, has no readable id;
+        # nor has `INPUT eis`, retired in 0.3.75 and now no verb at all.
         malformed = [
-            ('INPUT eis %s 7\n' % own, 0), ('INPUT sock %s 7\n' % own, 0),
-            ('INPUT eis\n', 0), ('INPUT eis 0 %s\n' % own, 0),
-            ('INPUT eis -7 %s\n' % own, 0), ('INPUT eis 07 %s\n' % own, 0),
-            ('INPUT eis 99999999999 %s\n' % own, 0), ('INPUT eis  7 %s\n' % own, 0),
-            ('INPUT eis 7 %s\r\n' % own, 0), ('INPUT eis 7 %s\n\n' % own, 0), ('INPUT foo\n', 0),
+            ('INPUT sock %s 7\n' % own, 0), ('INPUT eis 7 %s\n' % own, 0), ('INPUT eis %s 7\n' % own, 0),
+            ('INPUT sock\n', 0), ('INPUT sock 0 %s\n' % own, 0),
+            ('INPUT sock -7 %s\n' % own, 0), ('INPUT sock 07 %s\n' % own, 0),
+            ('INPUT sock 99999999999 %s\n' % own, 0), ('INPUT sock  7 %s\n' % own, 0),
+            ('INPUT sock 7 %s\r\n' % own, 0), ('INPUT sock 7 %s\n\n' % own, 0), ('INPUT foo\n', 0),
             ('INPUT on\n', 0), ('INPUT off\n', 0), ('INPUT on 0\n', 0), ('INPUT on 7 7\n', 0),
-            ('INPUT eis 7\n', 7), ('INPUT eis 7 \n', 7), ('INPUT eis 7 %s 8\n' % own, 7),
-            ('INPUT eis 7 relative/eis\n', 7), ('INPUT eis 7 /%s\n' % ('x' * 120), 7),
+            ('INPUT sock 7\n', 7), ('INPUT sock 7 \n', 7), ('INPUT sock 7 %s 8\n' % own, 7),
+            ('INPUT sock 7 relative/input\n', 7), ('INPUT sock 7 /%s\n' % ('x' * 120), 7),
             ('INPUT on 7\n', 7), ('INPUT off 7', 7),
             ('INPUT hold 7 confine\n', 7), ('INPUT hold 7 relative', 7), ('INPUT hold\n', 0),
             ('INPUT hold 0 confine\n', 0), ('INPUT hold confine 7\n', 0), ('INPUT hold 07 confine\n', 0),
@@ -337,7 +310,7 @@ def local():
             got = ch.ask(text)
             check(got == b'INPUT error %d EINVAL\n' % image, '%r was answered %r' % (text, got))
         fd = os.memfd_create('blit-input-gate-fd')
-        got = ch.ask('INPUT eis 7 %s\n' % own, [fd])
+        got = ch.ask('INPUT sock 7 %s\n' % own, [fd])
         os.close(fd)
         check(got == b'INPUT error 0 EINVAL\n', 'INPUT with a descriptor was answered %r' % got)
 
@@ -348,11 +321,11 @@ def local():
         wait_for(lambda: a.graphics(9)['placements'], 'image 9 was not placed')
         a.write('\033_Ga=d,d=I,i=9,q=2\033\\')
         wait_for(lambda: a.graphics(9) is None, 'image 9 was not deleted')
-        got = ch.ask('INPUT eis 9 %s\n' % own)
+        got = ch.ask('INPUT sock 9 %s\n' % own)
         check(got == b'INPUT error 9 EINVAL\n', 'a deleted image was answered %r' % got)
         a.write('\033_Ga=T,i=11,f=24,s=1,v=1,q=2;AAAA\033\\')
         wait_for(lambda: a.graphics(11), 'Kitty image 11 did not land')
-        got = ch.ask('INPUT eis 11 %s\n' % own)
+        got = ch.ask('INPUT sock 11 %s\n' % own)
         check(got == b'INPUT error 11 EINVAL\n', 'a Kitty image was answered %r' % got)
 
         # No such socket.
@@ -364,9 +337,10 @@ def local():
         keep.append(listening_socket(dead, listen=False))
         for path, why in ((os.path.join(work, 'missing'), 'missing'), (regular, 'a regular file'),
                           (link, 'a link to a socket'), (dead, 'a socket nobody listens on')):
-            got = ch.ask('INPUT eis 7 %s\n' % path)
+            got = ch.ask('INPUT sock 7 %s\n' % path)
             check(got == b'INPUT error 7 ENOENT\n', '%s was answered %r' % (why, got))
-        results.append('hello_v4=ERROR_0_EINVAL v4_shape=INPUT_error_0_EINVAL einval=%d enoent=4' % (len(malformed) + 4))
+        results.append('hello_v4=ERROR_0_EINVAL v4_shape=INPUT_error_0_EINVAL eis=INPUT_error_0_EINVAL '
+                       'einval=%d enoent=4' % (len(malformed) + 4))
 
         # Another user's socket: refused before Blit connects.
         others = [p for p in ('/run/dbus/system_bus_socket', '/run/systemd/journal/stdout',
@@ -376,7 +350,7 @@ def local():
         if os.getuid() == 0 or not others:
             results.append('eacces=SKIPPED(no_socket_of_another_user)')
         else:
-            got = ch.ask('INPUT eis 7 %s\n' % others[0])
+            got = ch.ask('INPUT sock 7 %s\n' % others[0])
             check(got == b'INPUT error 7 EACCES\n', "another user's socket %s was answered %r" % (others[0], got))
             check(server.input(a.id)['last_error'] == 'EACCES', 'EACCES not reported')
             results.append('eacces=EACCES(%s)' % others[0])
@@ -384,14 +358,15 @@ def local():
         # Accepted: an image whose frame has not come yet may be named, as a
         # placement may come first. The same image again is EBUSY; another
         # image on the same channel gets its own route.
-        got = ch.ask('INPUT eis 7 %s\n' % own)
+        got = ch.ask('INPUT sock 7 %s\n' % own)
         check(got == b'INPUT ok 7\n', 'a well-formed INPUT was answered %r' % got)
         info = server.input(a.id)
-        check([{k: r[k] for k in ('image', 'state', 'hold', 'region')} for r in info['routes']] ==
-              [{'image': 7, 'state': 'off', 'hold': 'relative', 'region': ''}] and info['last_error'] == '' and
-              info['routes'][0]['pointer']['miss'] == 'none-yet',
+        check([{k: r[k] for k in ('image', 'state', 'hold', 'members')} for r in info['routes']] ==
+              [{'image': 7, 'state': 'off', 'hold': 'relative', 'members': []}] and info['last_error'] == '' and
+              info['routes'][0]['pointer']['miss'] == 'none-yet' and
+              'backend' not in info['routes'][0] and 'region' not in info['routes'][0],
               'frames.input after OK %s' % info)
-        got = ch.ask('INPUT eis 7 %s\n' % own)
+        got = ch.ask('INPUT sock 7 %s\n' % own)
         check(got == b'INPUT error 7 EBUSY\n', 'the same image twice was answered %r' % got)
         # The hold mode: answered, shown, and refused for an unknown mode.
         holds = []
@@ -405,7 +380,7 @@ def local():
             check(route(server.input(a.id), 7)['hold'] == hold,
                   'after %r the hold is %s' % (text, route(server.input(a.id), 7)))
             holds.append(got.split()[1].decode())
-        got = ch.ask('INPUT eis 12 %s\n' % own)
+        got = ch.ask('INPUT sock 12 %s\n' % own)
         check(got == b'INPUT ok 12\n', 'a second image on the channel was answered %r' % got)
         check(sorted(r['image'] for r in server.input(a.id)['routes']) == [7, 12],
               'two routes on one channel: %s' % server.input(a.id))
@@ -427,14 +402,14 @@ def local():
                  lambda: 'INPUT on 12 did not turn 7 off: %s' % server.input(a.id))
         # ... and across the session's channels.
         ch2 = Channel(a)
-        check(ch2.ask('INPUT eis 13 %s\n' % own) == b'INPUT ok 13\n', 'a second channel was refused')
+        check(ch2.ask('INPUT sock 13 %s\n' % own) == b'INPUT ok 13\n', 'a second channel was refused')
         ch2.line('INPUT on 13\n')
         wait_for(lambda: state(server, a.id, 13) == 'live' and state(server, a.id, 12) == 'off',
                  lambda: 'the second channel did not turn the first off: %s' % server.input(a.id))
         ch.line('INPUT on 7\n')
         wait_for(lambda: state(server, a.id, 7) == 'live' and state(server, a.id, 13) == 'off',
                  lambda: 'the first channel did not turn the second off: %s' % server.input(a.id))
-        check(server.input(a.id)['events'] == 0, 'the stand-in libei was sent events')
+        check(server.input(a.id)['events'] == 0, 'events were sent with no input')
         ch2.close()
         wait_for(lambda: state(server, a.id, 13) == 'none' and state(server, a.id, 7) == 'live',
                  lambda: 'closing the second channel touched the first: %s' % server.input(a.id))
@@ -449,532 +424,6 @@ def local():
     print('FRAME_INPUT_PASS ' + ' '.join(results))
 
 
-class Receiver:
-    """The compositor's side: tools/tests/eis_receiver.c on libeis, or, with
-    `stub`, the recording stand-in libei, which writes the same lines from
-    inside Blit (Blit then connects to a plain socket the gate holds) to
-    `<socket>.log`, one log per socket as one per receiver."""
-
-    def __init__(self, work, stub=False, name='eis-0'):
-        self.path = os.path.join(work, name)
-        self.log = self.path + '.log'
-        self.seen = 0
-        if stub:
-            self.process = None
-            self.held = listening_socket(self.path)
-            return
-        self.process = subprocess.Popen([os.path.join(ROOT, 'build/tests/eis_receiver'), self.path,
-                                         self.log, str(REGION_W), str(REGION_H)])
-        wait_for(lambda: os.path.exists(self.path), 'the EIS receiver did not start')
-
-    def lines(self):
-        if not os.path.exists(self.log):
-            return []
-        return [l.rstrip('\n') for l in open(self.log) if l.strip() and not l.startswith('#')]
-
-    def expect(self, wanted, why):
-        wait_for(lambda: len(self.lines()) >= self.seen + len(wanted),
-                 '%s: wanted %s, got %s' % (why, wanted, self.lines()[self.seen:]))
-        time.sleep(0.25)
-        got = self.lines()[self.seen:]
-        check(got == wanted, '%s: wanted %s, got %s' % (why, wanted, got))
-        self.seen += len(got)
-
-    def nothing(self, why):
-        time.sleep(0.4)
-        got = self.lines()[self.seen:]
-        check(got == [], '%s: sent %s' % (why, got))
-
-    def drop(self):
-        """The compositor goes away: the receiver killed, or the stand-in's
-        connections closed."""
-        if self.process is not None:
-            self.process.terminate()
-            self.process.wait(5)
-            return
-        self.held.settimeout(0.5)
-        try:
-            while True:
-                self.held.accept()[0].close()
-        except (socket.timeout, BlockingIOError):
-            pass
-
-    def stop(self):
-        if self.process is None:
-            self.held.close()
-        elif self.process.poll() is None:
-            self.process.terminate()
-            self.process.wait(5)
-        return open(self.log).read() if os.path.exists(self.log) else ''
-
-
-def confined(server, a, ch, receiver, place, placement, point, origin):
-    """Hold `confine` (ADR 0225, hold modes): under ?7701 the pointer stays
-    shown, moves inside the picture and is sent as a position."""
-    place(a, 7, 3, 5, 20, 5)
-    at = wait_for(lambda: (lambda p: p if p['width'] == 160 else None)(placement()),
-                  'placement 160x80 was not drawn')
-    check(ch.ask('INPUT hold 7 confine\n') == b'INPUT ok 7\n', 'INPUT hold confine was refused')
-    check(route(server.input(a.id), 7)['hold'] == 'confine', 'hold %s' % server.input(a.id))
-    point(at, 10, 10, 'absolute before the confined lock')
-
-    def at_point(sx, sy):
-        return (origin[0] + at['x'] + sx, origin[1] + at['y'] + sy)
-
-    def abs_line(sx, sy):
-        return 'abs %.2f %.2f' % (sx * REGION_W / at['width'], sy * REGION_H / at['height'])
-
-    def deltas():
-        return re.findall(rb'\x1b\[<35;(-?\d+);(-?\d+)M', a.sent())
-
-    a.write('\033[?7701h')
-    wait_for(lambda: server.locked(a.id), 'the confined lock was not engaged')
-    time.sleep(0.3)
-    check(not server.hidden(), 'the confined lock hid the pointer')
-    check(server.pointer() == at_point(10, 10), 'the pointer moved when the lock engaged: %s' % (server.pointer(),))
-
-    # Motion moves the pointer, and the compositor is sent the same point;
-    # the holder is still sent its raw deltas.
-    before = len(deltas())
-    server.inject({'kind': 'pointer_relative', 'dx': 5, 'dy': 3})
-    receiver.expect([abs_line(15, 13)], 'confined motion')
-    check(server.pointer() == at_point(15, 13), 'the confined pointer is at %s' % (server.pointer(),))
-    wait_for(lambda: deltas()[before:] == [(b'5', b'3')], lambda: 'the holder was sent %r' % deltas()[before:])
-    # Clamped at the far corner, then the near one.
-    server.inject({'kind': 'pointer_relative', 'dx': 10000, 'dy': 10000})
-    receiver.expect([abs_line(at['width'] - 1, at['height'] - 1)], 'confined to the far corner')
-    check(server.pointer() == at_point(at['width'] - 1, at['height'] - 1),
-          'the pointer past the far corner is at %s' % (server.pointer(),))
-    server.inject({'kind': 'pointer_relative', 'dx': 3, 'dy': 0})
-    receiver.nothing('motion against the far edge')
-    server.inject({'kind': 'pointer_relative', 'dx': -10000, 'dy': -10000})
-    receiver.expect([abs_line(0, 0)], 'confined to the top-left corner')
-    check(server.pointer() == at_point(0, 0), 'the pointer past the top-left is at %s' % (server.pointer(),))
-    ptr = route(server.input(a.id), 7)['pointer']
-    check(ptr['miss'] == '' and ptr['sent'] == [0.0, 0.0] and ptr['draw'][2:] == [at['width'], at['height']],
-          'the diagnostic under confine: %s' % ptr)
-    # Buttons still go to the compositor, and to the holder in the lock's form.
-    server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
-    server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
-    receiver.expect(['button 272 press', 'button 272 release'], 'a click under confine')
-    wait_for(lambda: b'\x1b[<0;0;0m' in a.sent(), 'the holder was not sent the click')
-    check(not server.hidden(), 'the pointer was hidden under confine')
-
-    # The picture no longer drawn: the lock is relative again, hidden and
-    # raw, and the pointer does not move; drawn again, confined again.
-    a.write('\033_Ga=d,d=i,i=7,q=2\033\\')
-    wait_for(lambda: a.graphics(7) is not None and not a.graphics(7)['placements'],
-             'the placement was not removed')
-    wait_for(lambda: server.hidden(), 'an undrawn confined picture did not hide the pointer')
-    server.inject({'kind': 'pointer_relative', 'dx': 4, 'dy': 2})
-    receiver.expect(['rel 4 2'], 'relative motion with the picture not drawn')
-    check(server.pointer() == at_point(0, 0), 'the pointer moved with the picture not drawn')
-    place(a, 7, 3, 5, 20, 5)
-    wait_for(lambda: (lambda p: p if p['width'] == 160 else None)(placement()), 'the picture was not drawn again')
-    wait_for(lambda: not server.hidden(), 'the picture drawn again did not show the pointer')
-    server.inject({'kind': 'pointer_relative', 'dx': 30, 'dy': 20})
-    receiver.expect([abs_line(30, 20)], 'confined again')
-
-    # Given back: the pointer stays where it was, and later motion is an
-    # ordinary absolute pointer over the picture.
-    a.write('\033[?7701l')
-    wait_for(lambda: not server.locked(a.id), 'the confined lock was not given back')
-    time.sleep(0.2)
-    check(server.pointer() == at_point(30, 20), 'the pointer moved when the lock ended: %s' % (server.pointer(),))
-    check(not server.hidden(), 'the pointer was hidden after the lock')
-    receiver.nothing('the lock ending')
-    server.inject({'kind': 'pointer_relative', 'dx': 20, 'dy': 10})
-    receiver.expect([abs_line(50, 30)], 'ordinary motion after the confined lock')
-    check(server.pointer() == at_point(50, 30), 'the pointer after the lock is at %s' % (server.pointer(),))
-    check(ch.ask('INPUT hold 7 relative\n') == b'INPUT ok 7\n', 'INPUT hold relative was refused')
-    return 'confine=shown,clamped@0,0+%d,%d,absolute_only,raw_to_holder,buttons,undrawn=relative,released=absolute' % (
-        at['width'] - 1, at['height'] - 1)
-
-
-def multi(server, a, work, stub):
-    """Several routes, a compositor each, as a desktop has one per window's
-    picture over one channel. Returns what the PASS line says of it."""
-    ra, rb, rc, rd = (Receiver(work, stub, name) for name in ('eis-a', 'eis-b', 'eis-c', 'eis-d'))
-    receivers = (ra, rb, rc, rd)
-    order = os.path.join(work, 'order.log')
-
-    def key(code, *values):
-        for v in values:
-            server.inject({'kind': 'key', 'code': code, 'value': v})
-
-    def ordered(wanted, why):
-        """In the stand-in, Blit's lines across routes in the order sent."""
-        if not stub:
-            return
-        lines = [l.rstrip('\n') for l in open(order) if not l.split(' ', 1)[1].startswith('#')]
-        at = [i for i in range(len(lines) - len(wanted) + 1) if lines[i:i + len(wanted)] == wanted]
-        check(at, '%s: %s not in order in %s' % (why, wanted, lines[-12:]))
-
-    try:
-        server.focus(a.id)
-        ch = Channel(a)
-        for image, column in ((20, 1), (21, 21)):
-            ch.frame(image, 1)
-            wait_for(lambda: a.graphics(image), 'image %d did not land' % image)
-            place(a, image, 1, column, 16, 4)
-        # Two images on one channel: a route each, no EBUSY.
-        check(ch.ask('INPUT eis 20 %s\n' % ra.path) == b'INPUT ok 20\n', 'route 20 was refused')
-        check(ch.ask('INPUT eis 21 %s\n' % rb.path) == b'INPUT ok 21\n', 'route 21 on the same channel was refused')
-        ra.expect(['connect', BIND], 'route 20 bound its seat')
-        rb.expect(['connect', BIND], 'route 21 bound its seat')
-        # The same image twice on one channel is EBUSY.
-        check(ch.ask('INPUT eis 20 %s\n' % rb.path) == b'INPUT error 20 EBUSY\n', 'image 20 twice was not EBUSY')
-        rb.nothing('an EBUSY request')
-        ch.line('INPUT on 20\n')
-        ra.expect(['start'], 'INPUT on 20')
-        rb.nothing('route 21 while 20 is on')
-
-        # INPUT on 21: 20 releases what it held and stops before 21 starts.
-        key(30, 1)
-        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
-        ra.expect(['key 30 press', 'button 272 press'], 'held through route 20')
-        rb.nothing('keys while 20 is on')
-        ch.line('INPUT on 21\n')
-        ra.expect(['key 30 release', 'button 272 release', 'stop'], 'release-all on another route on')
-        rb.expect(['start'], 'INPUT on 21')
-        ordered(['eis-a key 30 release', 'eis-a button 272 release', 'eis-a stop', 'eis-b start'],
-                'route 20 released before route 21 started')
-        key(30, 0)
-        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
-        key(31, 1, 0)
-        rb.expect(['key 31 press', 'key 31 release'], 'keys to route 21 only')
-        ra.nothing('the releases of what 20 already released, and keys after 21 on')
-        info = server.input(a.id)
-        check(route(info, 20)['state'] == 'off' and route(info, 21)['state'] == 'live',
-              'frames.input after INPUT on 21 %s' % info)
-
-        # A late ENOENT on route 20 leaves 21 working.
-        ra.drop()
-        got = ch.reply(5.0)
-        check(got == b'INPUT error 20 ENOENT\n', 'a dropped compositor on route 20 was answered %r' % got)
-        wait_for(lambda: route(server.input(a.id), 20) is None, 'route 20 outlived its compositor')
-        key(32, 1, 0)
-        rb.expect(['key 32 press', 'key 32 release'], 'route 21 after route 20 was dropped')
-        check(state(server, a.id, 21) == 'live', 'route 21 after the drop %s' % server.input(a.id))
-        check(ch.ask('INPUT on 20\n') == b'INPUT error 20 EINVAL\n', 'INPUT on 20 after its end was not EINVAL')
-
-        # Deleting one image ends only its route: 22 live and holding a key,
-        # its image deleted; 21 still works.
-        ch.frame(22, 1)
-        wait_for(lambda: a.graphics(22), 'image 22 did not land')
-        place(a, 22, 6, 1, 16, 4)
-        check(ch.ask('INPUT eis 22 %s\n' % rc.path) == b'INPUT ok 22\n', 'route 22 was refused')
-        rc.expect(['connect', BIND], 'route 22 bound its seat')
-        ch.line('INPUT on 22\n')
-        rb.expect(['stop'], 'route 21 off for 22')
-        rc.expect(['start'], 'INPUT on 22')
-        key(33, 1)
-        rc.expect(['key 33 press'], 'held through route 22')
-        a.write('\033_Ga=d,d=I,i=22,q=2\033\\')
-        rc.expect(['key 33 release', 'stop', 'disconnect'], 'release-all and end on image 22 deleted')
-        key(33, 0)
-        wait_for(lambda: route(server.input(a.id), 22) is None, 'route 22 outlived its image')
-        check(state(server, a.id, 21) == 'off', 'route 21 after image 22 went %s' % server.input(a.id))
-        check(ch.ask('INPUT on 22\n') == b'INPUT error 22 EINVAL\n', 'INPUT on 22 after its image went was not EINVAL')
-        ch.line('INPUT on 21\n')
-        rb.expect(['start'], 'route 21 on again')
-        key(34, 1, 0)
-        rb.expect(['key 34 press', 'key 34 release'], 'route 21 after image 22 was deleted')
-        rb.nothing('route 21 after image 22 was deleted')
-
-        # Two channels of the session: one route on between them.
-        ch2 = Channel(a)
-        ch2.frame(23, 1)
-        wait_for(lambda: a.graphics(23), 'image 23 did not land')
-        check(ch2.ask('INPUT eis 23 %s\n' % rd.path) == b'INPUT ok 23\n', 'route 23 on a second channel was refused')
-        rd.expect(['connect', BIND], 'route 23 bound its seat')
-        key(35, 1)
-        rb.expect(['key 35 press'], 'held through route 21')
-        ch2.line('INPUT on 23\n')
-        rb.expect(['key 35 release', 'stop'], 'release-all when the other channel turns its route on')
-        rd.expect(['start'], 'INPUT on 23')
-        ordered(['eis-b key 35 release', 'eis-b stop', 'eis-d start'],
-                'route 21 released before route 23 on another channel started')
-        key(35, 0)
-        key(36, 1, 0)
-        rd.expect(['key 36 press', 'key 36 release'], 'keys to the second channel only')
-        rb.nothing('keys to the first channel while the second is on')
-        ch.line('INPUT on 21\n')
-        rd.expect(['stop'], 'route 23 off for 21')
-        rb.expect(['start'], 'route 21 on again from the first channel')
-        info = server.input(a.id)
-        check(route(info, 21)['state'] == 'live' and route(info, 23)['state'] == 'off',
-              'frames.input across two channels %s' % info)
-        ch2.close()
-        rd.expect(['disconnect'], 'the second channel closed')
-        ch.close()
-        rb.expect(['stop', 'disconnect'], 'the first channel closed, its live route stopped')
-        wait_for(lambda: server.input(a.id)['routes'] == [], 'routes outlived their channels')
-    finally:
-        for r in receivers:
-            r.stop()
-    return ('routes=two_per_channel ebusy=same_image on_releases_other=%s late_enoent=one_route '
-            'delete=one_route one_on=two_channels' % ('ordered' if stub else 'per_route'))
-
-
-def eis(stub=False):
-    work = tempfile.mkdtemp(prefix='blit-input-eis-gate-')
-    receiver = Receiver(work, stub)
-    extra = {}
-    if stub:
-        extra = {'LD_LIBRARY_PATH': os.path.join(ROOT, 'build/tests/libei-stub'),
-                 'EI_STUB_LOG': '1', 'EI_STUB_ORDER': os.path.join(work, 'order.log'),
-                 'EI_STUB_REGION': '%dx%d' % (REGION_W, REGION_H)}
-    server = Server((19836 if stub else 19835) + OFFSET, work, extra)
-    try:
-        a = Session(server, work, 'a')
-        b = Session(server, work, 'b')
-        server.focus(a.id)
-        ch = Channel(a)
-        ch.frame(7, 1)
-        wait_for(lambda: a.graphics(7), 'image 7 did not land')
-        place(a, 7, 3, 5, 20, 5)
-        got = ch.ask('INPUT eis 7 %s\n' % receiver.path)
-        check(got == b'INPUT ok 7\n', 'INPUT was answered %r' % got)
-        receiver.expect(['connect', BIND], 'the route bound its seat')
-        receiver.nothing('a route that starts off')
-        ch.line('INPUT on 7\n')
-        receiver.expect(['start'], 'INPUT on')
-        check(state(server, a.id, 7) == 'live', 'frames.input %s' % server.input(a.id))
-
-        def key(code, *values):
-            for v in values:
-                server.inject({'kind': 'key', 'code': code, 'value': v})
-
-        # Press and release, in order; the kernel's repeats are not sent.
-        key(30, 1, 2, 2, 0)
-        receiver.expect(['key 30 press', 'key 30 release'], 'a key with repeats')
-        key(48, 1)
-        key(46, 1)
-        key(48, 0)
-        key(46, 0)
-        receiver.expect(['key 48 press', 'key 46 press', 'key 48 release', 'key 46 release'], 'overlapping keys')
-
-        # Nothing while off, nor while another session has focus.
-        ch.line('INPUT off 7\n')
-        receiver.expect(['stop'], 'INPUT off')
-        key(31, 1, 0)
-        receiver.nothing('keys while off')
-        ch.line('INPUT on 7\n')
-        receiver.expect(['start'], 'INPUT on again')
-        server.focus(b.id)
-        receiver.expect(['stop'], 'focus to another session')
-        key(31, 1, 0)
-        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
-        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
-        receiver.nothing('input while unfocused')
-        server.focus(a.id)
-        receiver.expect(['start'], 'focus back')
-
-        # Everything held is released before emulation stops: INPUT off ...
-        key(32, 1)
-        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
-        receiver.expect(['key 32 press', 'button 272 press'], 'a key and a button held')
-        ch.line('INPUT off 7\n')
-        receiver.expect(['key 32 release', 'button 272 release', 'stop'], 'release-all on INPUT off')
-        key(32, 0)
-        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
-        receiver.nothing('the physical releases after INPUT off')
-        ch.line('INPUT on 7\n')
-        receiver.expect(['start'], 'on after the off case')
-        # ... a focus change ...
-        key(33, 1)
-        server.inject({'kind': 'pointer_button', 'button': 2, 'pressed': True})
-        receiver.expect(['key 33 press', 'button 273 press'], 'held before the focus change')
-        server.focus(b.id)
-        receiver.expect(['key 33 release', 'button 273 release', 'stop'], 'release-all on focus change')
-        key(33, 0)
-        server.inject({'kind': 'pointer_button', 'button': 2, 'pressed': False})
-        server.focus(a.id)
-        receiver.expect(['start'], 'focus back after the focus case')
-        # ... and Blit giving up the console.
-        key(34, 1)
-        receiver.expect(['key 34 press'], 'held before the console goes')
-        server.process.send_signal(signal.SIGUSR1)
-        receiver.expect(['key 34 release', 'stop'], 'release-all on console release')
-        key(31, 1, 0)
-        receiver.nothing('keys while the console is away')
-        check(state(server, a.id, 7) == 'on', 'frames.input while away %s' % server.input(a.id))
-        server.process.send_signal(signal.SIGUSR2)
-        receiver.expect(['start'], 'the console back')
-        key(34, 0)
-        receiver.nothing('the release of a key already released')
-
-        # Wheel notches.
-        server.inject({'kind': 'pointer_wheel', 'delta': 1})
-        server.inject({'kind': 'pointer_wheel', 'delta': -1})
-        receiver.expect(['scroll 0 -120', 'scroll 0 120'], 'wheel up then down')
-
-        # The absolute pointer. The surface's origin on the display, from the
-        # session's own pixel reports.
-        # Session a is stacked first on the display, near its top-left.
-        # One motion, so the newest report is the one for this point.
-        server.inject({'kind': 'pointer_motion', 'x': 301, 'y': 101})
-        report = wait_for(lambda: re.findall(rb'\x1b\[<35;(\d+);(\d+)M', a.sent()),
-                          'no pixel report: %r' % a.sent()[-200:])[-1]
-        origin = (301 - (int(report[0]) - 1), 101 - (int(report[1]) - 1))
-        receiver.seen = len(receiver.lines())  # motion so far was outside the picture
-
-        def placement():
-            g = wait_for(lambda: a.graphics(7), 'image 7 is gone')
-            p = [p for p in g['placements'] if p['id'] == 1]
-            check(len(p) == 1, 'placement 1 of image 7: %s' % g['placements'])
-            return p[0]
-
-        def point(at, sx, sy, why):
-            server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
-                           'y': origin[1] + at['y'] + sy})
-            receiver.expect(['abs %.2f %.2f' % (sx * REGION_W / at['width'], sy * REGION_H / at['height'])], why)
-            # The diagnostic says the same as what the compositor received.
-            ptr = [r for r in server.input(a.id)['routes'] if r['image'] == 7][0]['pointer']
-            check(ptr['miss'] == '' and ptr['draw'][2:] == [at['width'], at['height']] and
-                  abs(ptr['sent'][0] - sx * REGION_W / at['width']) < 0.06 and
-                  abs(ptr['sent'][1] - sy * REGION_H / at['height']) < 0.06,
-                  'frames.input pointer diagnostic for %s: %s' % (why, ptr))
-
-        cases = []
-        for row, column, columns, rows, sx, sy in ((3, 5, 20, 5, 40, 20), (1, 1, 40, 10, 100, 50)):
-            place(a, 7, row, column, columns, rows)
-            at = wait_for(lambda: (lambda p: p if p['width'] == columns * 8 else None)(placement()),
-                          'placement %dx%d was not drawn' % (columns, rows))
-            point(at, sx, sy, 'absolute at %d,%d %dx%d' % (at['x'], at['y'], at['width'], at['height']))
-            point(at, 0, 0, 'the top-left of %dx%d' % (at['width'], at['height']))
-            # The picture's far corner reaches the region's: its last pixel
-            # maps into the region's last pixel's worth.
-            far = ((at['width'] - 1) * REGION_W / at['width'], (at['height'] - 1) * REGION_H / at['height'])
-            check(far[0] >= REGION_W - REGION_W / at['width'] and far[1] >= REGION_H - REGION_H / at['height'],
-                  'far corner arithmetic %s' % (far,))
-            point(at, at['width'] - 1, at['height'] - 1, 'the far corner of %dx%d' % (at['width'], at['height']))
-            cases.append('%dx%d@%d,%d' % (at['width'], at['height'], at['x'], at['y']))
-        # Resized in place: the same placement, smaller.
-        place(a, 7, 1, 1, 8, 2)
-        at = wait_for(lambda: (lambda p: p if p['width'] == 64 else None)(placement()), 'the resize was not drawn')
-        point(at, 10, 5, 'absolute after the resize')
-        cases.append('resized:%dx%d' % (at['width'], at['height']))
-        # INPUT member through EIS: popup 24 (a 160x80 frame), drawn past
-        # the top-level, is its offset (12, 63) plus the point within it in
-        # the top-level's pixels, scaled to the region as the top-level is.
-        ch.frame(24, 1, 160, 80)
-        wait_for(lambda: a.graphics(24), 'image 24 did not land')
-        a.write('\033[6;12H\033_Ga=p,i=24,p=1,q=2,C=1,c=8,r=2,z=1\033\\')
-        p24 = wait_for(lambda: [p for p in (a.graphics(24) or {}).get('placements', []) if p['id'] == 1],
-                       'image 24 was not placed')[0]
-        check(ch.ask('INPUT member 24 7 12 63\n') == b'INPUT ok 24\n', 'INPUT member through EIS')
-        for sx, sy in ((0, 0), (p24['width'] - 1, p24['height'] - 1)):
-            server.inject({'kind': 'pointer_motion', 'x': origin[0] + p24['x'] + sx,
-                           'y': origin[1] + p24['y'] + sy})
-            receiver.expect(['abs %.2f %.2f' % ((12 + sx * 160 / p24['width']) * REGION_W / FRAME_W,
-                                                (63 + sy * 80 / p24['height']) * REGION_H / FRAME_H)],
-                            'the pointer at %d,%d of member 24' % (sx, sy))
-        a.write('\033_Ga=d,d=I,i=24,q=2\033\\')
-        wait_for(lambda: route(server.input(a.id), 7)['members'] == [], 'member 24 outlived its picture')
-        cases.append('member:24@12,63')
-        server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 200, 'y': origin[1] + at['y'] + 100})
-        receiver.nothing('the pointer outside the picture')
-        miss = [r for r in server.input(a.id)['routes'] if r['image'] == 7][0]['pointer']['miss']
-        check(miss == 'outside-picture', 'the diagnostic for a pointer outside the picture: %r' % miss)
-
-        # Pointer lock: relative motion, the raw sum, and no absolute; the
-        # pointer hidden and still (hold relative, the default).
-        check(route(server.input(a.id), 7)['hold'] == 'relative', 'the default hold %s' % server.input(a.id))
-        check(not server.hidden(), 'the pointer was hidden before the lock')
-        a.write('\033[?7701h')
-        wait_for(lambda: server.locked(a.id), 'the lock was not engaged')
-        wait_for(lambda: server.hidden(), 'the relative lock did not hide the pointer')
-        still = server.pointer()
-        for _ in range(10):
-            server.inject({'kind': 'pointer_relative', 'dx': 7, 'dy': -3})
-
-        def summed():
-            moves = [l for l in receiver.lines()[receiver.seen:]]
-            sums = [0, 0]
-            for l in moves:
-                check(l.startswith('rel '), 'under lock: %s' % moves)
-                dx, dy = l.split()[1:]
-                sums[0] += int(dx)
-                sums[1] += int(dy)
-            return moves if sums == [70, -30] else None
-        moves = wait_for(summed, 'relative motion did not sum to 70,-30: %s' % receiver.lines()[receiver.seen:])
-        receiver.seen += len(moves)
-        check(server.pointer() == still, 'the relative lock moved the pointer: %s -> %s' % (still, server.pointer()))
-        a.write('\033[?7701l')
-        wait_for(lambda: not server.locked(a.id), 'the lock was not given back')
-        wait_for(lambda: not server.hidden(), 'the pointer was not shown after the lock')
-
-        confine = confined(server, a, ch, receiver, place, placement, point, origin)
-
-        # The channel closed: released, stopped, disconnected.
-        key(36, 1)
-        receiver.expect(['key 36 press'], 'held before the channel closes')
-        events = server.input(a.id)['events']
-        ch.close()
-        receiver.expect(['key 36 release', 'stop', 'disconnect'], 'release-all on channel close')
-        wait_for(lambda: server.input(a.id)['routes'] == [], 'the route outlived its channel')
-        key(36, 0)
-
-        # The image deleted, on a new channel and image.
-        ch = Channel(a)
-        ch.frame(8, 1)
-        wait_for(lambda: a.graphics(8), 'image 8 did not land')
-        place(a, 8, 1, 1, 8, 2)
-        # As the bridge does: INPUT on as soon as INPUT ok is read, before
-        # the compositor has offered a seat; emulation starts when its
-        # device is resumed.
-        check(ch.ask('INPUT eis 8 %s\n' % receiver.path) == b'INPUT ok 8\n', 'the second route was refused')
-        ch.line('INPUT on 8\n')
-        receiver.expect(['connect', BIND, 'start'], 'INPUT on before the seat was bound')
-        key(35, 1)
-        receiver.expect(['key 35 press'], 'held before the image goes')
-        # The route ends with its image: released, stopped, disconnected.
-        a.write('\033_Ga=d,d=I,i=8,q=2\033\\')
-        receiver.expect(['key 35 release', 'stop', 'disconnect'], 'release-all and end on image delete')
-        key(35, 0, 1, 0)
-        receiver.nothing('keys after the image was deleted')
-        info = server.input(a.id)
-        check(info['routes'] == [] and info['events'] > events, 'frames.input after the delete %s' % info)
-        check(ch.ask('INPUT on 8\n') == b'INPUT error 8 EINVAL\n', 'INPUT on after the image went was not EINVAL')
-        ch.close()
-
-        # The compositor goes away under a live route: the client is told
-        # INPUT error ENOENT at once, and the route ends.
-        ch = Channel(a)
-        ch.frame(10, 1)
-        wait_for(lambda: a.graphics(10), 'image 10 did not land')
-        place(a, 10, 1, 1, 8, 2)
-        check(ch.ask('INPUT eis 10 %s\n' % receiver.path) == b'INPUT ok 10\n', 'the third route was refused')
-        ch.line('INPUT on 10\n')
-        receiver.expect(['connect', BIND, 'start'], 'the third route on')
-        check(ch.reply(0.3) == b'', 'a live route was answered')
-        receiver.drop()
-        got = ch.reply(5.0)
-        check(got == b'INPUT error 10 ENOENT\n', 'a dropped compositor was answered %r' % got)
-        info = wait_for(lambda: (lambda i: i if i['routes'] == [] else None)(server.input(a.id)),
-                        'the route outlived its compositor')
-        check(info['last_error'] == 'eis-disconnected', 'frames.input after the drop %s' % info)
-        check(ch.ask('INPUT on 10\n') == b'INPUT error 10 EINVAL\n', 'INPUT on after the route ended was not EINVAL')
-        ch.close()
-
-        several = multi(server, a, work, stub)
-    finally:
-        server.stop()
-        log = receiver.stop()
-    sent = len([l for l in log.splitlines() if l.split(' ')[0] in ('key', 'button', 'abs', 'rel', 'scroll')])
-    frames = len([l for l in log.splitlines() if l == '# frame'])
-    check(frames >= sent, '%d events in %d frames' % (sent, frames))
-    names = re.search(r'# names=(\w+)', log).group(1)
-    check('# libeis names' not in log, 'event numbers disagree with libeis: %s' % log)
-    print('%s_PASS keys=ordered repeats=dropped off+unfocused+console=silent '
-          'release_all=off,focus,console,close,delete scroll=discrete region=%dx%d absolute=%s '
-          'far_corner=region_far_corner outside=silent dropped=INPUT_error_10_ENOENT '
-          'relative=70,-30_in_%d,hidden,still %s events=%d frames=%d names=%s %s'
-          % (TAG, REGION_W, REGION_H, ','.join(cases), len(moves), confine, sent, frames, names, several))
-
-
 class LineReceiver:
     """blit-compositor's end of an `INPUT sock` route: a stream socket whose
     connection carries `INPUT <kind> <id> ...` lines, each event followed by
@@ -984,21 +433,37 @@ class LineReceiver:
 
     def __init__(self, work, name='input-0'):
         self.path = os.path.join(work, name)
+        self.name = name
         self.listener = listening_socket(self.path)
         self.listener.settimeout(5)
         self.conn = None
         self.buffer = b''
         self.events = []      # the lines, frames apart
+        self.stamps = []      # (event, the monotonic us of its frame), every one read
         self.notices = []     # `keymap <id> <revision>`
         self.keymaps = []     # (text, rate, delay) of each keymap line
         self.fds = []         # passed and not yet matched to a line
         self.frames = 0
         self.total = 0        # every event line read
+        self.eof = False
 
     def accept(self):
         self.conn, _ = self.listener.accept()
 
+    def connected(self, wait=0.3):
+        """Whether Blit connected (an accept pending), taking it if so."""
+        self.listener.settimeout(wait)
+        try:
+            self.accept()
+            return True
+        except (socket.timeout, BlockingIOError):
+            return False
+        finally:
+            self.listener.settimeout(5)
+
     def read(self, wait):
+        if self.eof:
+            return False
         self.conn.settimeout(wait)
         try:
             data, fds, _, _ = socket.recv_fds(self.conn, 65536, 8)
@@ -1006,6 +471,7 @@ class LineReceiver:
             return False
         self.fds += fds
         if not data:
+            self.eof = True
             return False
         self.buffer += data
         while b'\n' in self.buffer:
@@ -1015,6 +481,7 @@ class LineReceiver:
             if words[1] == 'frame':
                 check(len(words) == 4 and int(words[3]) > 0, 'a frame line %r' % line)
                 self.frames += 1
+                self.stamps[-1] = (self.stamps[-1][0], int(words[3]))
             elif words[1] == 'keymap':
                 check(len(words) == 7 and int(words[3]) > 0 and self.total == self.frames,
                       'a keymap line %r' % line)
@@ -1037,30 +504,264 @@ class LineReceiver:
                 check(self.total == self.frames, 'an event before the last one\'s frame: %r' % line)
                 self.total += 1
                 self.events.append(' '.join(words[1:]))
+                self.stamps.append((' '.join(words[1:]), 0))
         return True
 
     def expect(self, wanted, why):
         deadline = time.time() + 5
-        while len(self.events) < len(wanted) and time.time() < deadline:
+        while len(self.events) < len(wanted) and time.time() < deadline and not self.eof:
             self.read(0.2)
         got, self.events = self.events[:len(wanted)], self.events[len(wanted):]
-        check(got == wanted, '%s: got %s, expected %s' % (why, got, wanted))
+        check(got == wanted, '%s: %s got %s, expected %s' % (why, self.name, got, wanted))
 
     def nothing(self, why):
         self.read(0.4)
-        check(self.events == [], '%s: got %s' % (why, self.events))
+        check(self.events == [], '%s: %s got %s' % (why, self.name, self.events))
+
+    def ended(self, why):
+        """Blit closed the connection, with nothing more sent."""
+        deadline = time.time() + 5
+        while not self.eof and time.time() < deadline:
+            self.read(0.2)
+        check(self.eof and self.events == [], '%s: %s eof=%s, got %s' % (why, self.name, self.eof, self.events))
+
+    def drain(self):
+        self.read(0.3)
+        self.events = []
+
+    def stamp(self, event, last=True):
+        """The frame stamp of the last (or first) `event` read."""
+        found = [us for e, us in self.stamps if e == event]
+        check(found, '%s was never sent %s' % (self.name, event))
+        return found[-1] if last else found[0]
+
+    def close(self):
+        if self.conn is not None:
+            self.conn.close()
+        self.listener.close()
+
+
+def confined(server, a, ch, receiver, placement, point, origin):
+    """Hold `confine` (ADR 0225's hold modes, on the sock route): under
+    ?7701 the pointer stays shown, moves inside the picture and is sent as
+    a position."""
+    place(a, 7, 3, 5, 20, 5)
+    at = wait_for(lambda: (lambda p: p if p['width'] == 160 else None)(placement()),
+                  'placement 160x80 was not drawn')
+    check(ch.ask('INPUT hold 7 confine\n') == b'INPUT ok 7\n', 'INPUT hold confine was refused')
+    check(route(server.input(a.id), 7)['hold'] == 'confine', 'hold %s' % server.input(a.id))
+    point(at, 10, 10, 'absolute before the confined lock')
+
+    def at_point(sx, sy):
+        return (origin[0] + at['x'] + sx, origin[1] + at['y'] + sy)
+
+    def ptr_line(sx, sy):
+        return 'ptr 7 %.2f %.2f' % (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])
+
+    def deltas():
+        return re.findall(rb'\x1b\[<35;(-?\d+);(-?\d+)M', a.sent())
+
+    a.write('\033[?7701h')
+    wait_for(lambda: server.locked(a.id), 'the confined lock was not engaged')
+    time.sleep(0.3)
+    check(not server.hidden(), 'the confined lock hid the pointer')
+    check(server.pointer() == at_point(10, 10), 'the pointer moved when the lock engaged: %s' % (server.pointer(),))
+
+    # Motion moves the pointer, and the compositor is sent the same point;
+    # the holder is still sent its raw deltas.
+    before = len(deltas())
+    server.inject({'kind': 'pointer_relative', 'dx': 5, 'dy': 3})
+    receiver.expect([ptr_line(15, 13)], 'confined motion')
+    check(server.pointer() == at_point(15, 13), 'the confined pointer is at %s' % (server.pointer(),))
+    wait_for(lambda: deltas()[before:] == [(b'5', b'3')], lambda: 'the holder was sent %r' % deltas()[before:])
+    # Clamped at the far corner, then the near one.
+    server.inject({'kind': 'pointer_relative', 'dx': 10000, 'dy': 10000})
+    receiver.expect([ptr_line(at['width'] - 1, at['height'] - 1)], 'confined to the far corner')
+    check(server.pointer() == at_point(at['width'] - 1, at['height'] - 1),
+          'the pointer past the far corner is at %s' % (server.pointer(),))
+    server.inject({'kind': 'pointer_relative', 'dx': 3, 'dy': 0})
+    receiver.nothing('motion against the far edge')
+    server.inject({'kind': 'pointer_relative', 'dx': -10000, 'dy': -10000})
+    receiver.expect([ptr_line(0, 0)], 'confined to the top-left corner')
+    check(server.pointer() == at_point(0, 0), 'the pointer past the top-left is at %s' % (server.pointer(),))
+    ptr = route(server.input(a.id), 7)['pointer']
+    check(ptr['miss'] == '' and ptr['sent'] == [0.0, 0.0] and ptr['draw'][2:] == [at['width'], at['height']],
+          'the diagnostic under confine: %s' % ptr)
+    # Buttons still go to the compositor, and to the holder in the lock's form.
+    server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+    server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+    receiver.expect(['btn 7 272 press', 'btn 7 272 release'], 'a click under confine')
+    wait_for(lambda: b'\x1b[<0;0;0m' in a.sent(), 'the holder was not sent the click')
+    check(not server.hidden(), 'the pointer was hidden under confine')
+
+    # The picture no longer drawn: the lock is relative again, hidden and
+    # raw, and the pointer does not move; drawn again, confined again.
+    a.write('\033_Ga=d,d=i,i=7,q=2\033\\')
+    wait_for(lambda: a.graphics(7) is not None and not a.graphics(7)['placements'],
+             'the placement was not removed')
+    wait_for(lambda: server.hidden(), 'an undrawn confined picture did not hide the pointer')
+    server.inject({'kind': 'pointer_relative', 'dx': 4, 'dy': 2})
+    receiver.expect(['rel 7 4 2'], 'relative motion with the picture not drawn')
+    check(server.pointer() == at_point(0, 0), 'the pointer moved with the picture not drawn')
+    place(a, 7, 3, 5, 20, 5)
+    wait_for(lambda: (lambda p: p if p['width'] == 160 else None)(placement()), 'the picture was not drawn again')
+    wait_for(lambda: not server.hidden(), 'the picture drawn again did not show the pointer')
+    server.inject({'kind': 'pointer_relative', 'dx': 30, 'dy': 20})
+    receiver.expect([ptr_line(30, 20)], 'confined again')
+
+    # Given back: the pointer stays where it was, and later motion is an
+    # ordinary absolute pointer over the picture.
+    a.write('\033[?7701l')
+    wait_for(lambda: not server.locked(a.id), 'the confined lock was not given back')
+    time.sleep(0.2)
+    check(server.pointer() == at_point(30, 20), 'the pointer moved when the lock ended: %s' % (server.pointer(),))
+    check(not server.hidden(), 'the pointer was hidden after the lock')
+    receiver.nothing('the lock ending')
+    server.inject({'kind': 'pointer_relative', 'dx': 20, 'dy': 10})
+    receiver.expect([ptr_line(50, 30)], 'ordinary motion after the confined lock')
+    check(server.pointer() == at_point(50, 30), 'the pointer after the lock is at %s' % (server.pointer(),))
+    check(ch.ask('INPUT hold 7 relative\n') == b'INPUT ok 7\n', 'INPUT hold relative was refused')
+    return 'confine=shown,clamped@0,0+%d,%d,absolute_only,raw_to_holder,buttons,undrawn=relative,released=absolute' % (
+        at['width'] - 1, at['height'] - 1)
+
+
+def multi(server, a, work):
+    """Several routes, a socket each, as a desktop has one per window's
+    picture over one channel. Returns what the PASS line says of it."""
+    ra, rb, rc, rd = (LineReceiver(work, name) for name in ('input-a', 'input-b', 'input-c', 'input-d'))
+    receivers = (ra, rb, rc, rd)
+
+    def key(code, *values):
+        for v in values:
+            server.inject({'kind': 'key', 'code': code, 'value': v})
+
+    def live(image):
+        wait_for(lambda: state(server, a.id, image) == 'live',
+                 lambda: 'route %d is not live: %s' % (image, server.input(a.id)))
+
+    try:
+        server.focus(a.id)
+        ch = Channel(a)
+        for image, column in ((20, 1), (21, 21)):
+            ch.frame(image, 1)
+            wait_for(lambda: a.graphics(image), 'image %d did not land' % image)
+            place(a, image, 1, column, 16, 4)
+        # Two images on one channel: a route each, no EBUSY.
+        check(ch.ask('INPUT sock 20 %s\n' % ra.path) == b'INPUT ok 20\n', 'route 20 was refused')
+        check(ch.ask('INPUT sock 21 %s\n' % rb.path) == b'INPUT ok 21\n', 'route 21 on the same channel was refused')
+        ra.accept()
+        rb.accept()
+        # The same image twice on one channel is EBUSY, before any connect.
+        check(ch.ask('INPUT sock 20 %s\n' % rb.path) == b'INPUT error 20 EBUSY\n', 'image 20 twice was not EBUSY')
+        check(not rb.connected(), 'an EBUSY request connected')
+        ch.line('INPUT on 20\n')
+        live(20)
+        ra.read(0.3)
+        check(len(ra.notices) == 1, 'route 20 live without its keymap: %s' % ra.notices)
+        rb.nothing('route 21 while 20 is on')
+        check(rb.notices == [], 'route 21 sent a keymap while off: %s' % rb.notices)
+
+        # INPUT on 21: 20 releases what it held before 21 gets anything.
+        key(30, 1)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+        ra.expect(['key 20 30 press', 'btn 20 272 press'], 'held through route 20')
+        rb.nothing('keys while 20 is on')
+        ch.line('INPUT on 21\n')
+        ra.expect(['key 20 30 release', 'btn 20 272 release'], 'release-all on another route on')
+        live(21)
+        rb.read(0.3)
+        check(len(rb.notices) == 1, 'route 21 live without its keymap: %s' % rb.notices)
+        rb.nothing('route 21 before its first key')
+        key(30, 0)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+        key(31, 1, 0)
+        rb.expect(['key 21 31 press', 'key 21 31 release'], 'keys to route 21 only')
+        ra.nothing('the releases of what 20 already released, and keys after 21 on')
+        check(ra.stamp('btn 20 272 release') <= rb.stamp('key 21 31 press', last=False),
+              'route 20 released after route 21 was sent a key')
+        info = server.input(a.id)
+        check(route(info, 20)['state'] == 'off' and route(info, 21)['state'] == 'live',
+              'frames.input after INPUT on 21 %s' % info)
+
+        # A late ENOENT on route 20 leaves 21 working.
+        ra.conn.close()
+        got = ch.reply(5.0)
+        check(got == b'INPUT error 20 ENOENT\n', 'a closed socket on route 20 was answered %r' % got)
+        wait_for(lambda: route(server.input(a.id), 20) is None, 'route 20 outlived its compositor')
+        key(32, 1, 0)
+        rb.expect(['key 21 32 press', 'key 21 32 release'], 'route 21 after route 20 was dropped')
+        check(state(server, a.id, 21) == 'live', 'route 21 after the drop %s' % server.input(a.id))
+        check(ch.ask('INPUT on 20\n') == b'INPUT error 20 EINVAL\n', 'INPUT on 20 after its end was not EINVAL')
+
+        # Deleting one image ends only its route: 22 live and holding a key,
+        # its image deleted; 21 still works.
+        ch.frame(22, 1)
+        wait_for(lambda: a.graphics(22), 'image 22 did not land')
+        place(a, 22, 6, 1, 16, 4)
+        check(ch.ask('INPUT sock 22 %s\n' % rc.path) == b'INPUT ok 22\n', 'route 22 was refused')
+        rc.accept()
+        ch.line('INPUT on 22\n')
+        live(22)
+        check(state(server, a.id, 21) == 'off', 'route 21 still on with 22 on: %s' % server.input(a.id))
+        key(33, 1)
+        rc.expect(['key 22 33 press'], 'held through route 22')
+        rb.nothing('route 21 while 22 is on')
+        a.write('\033_Ga=d,d=I,i=22,q=2\033\\')
+        rc.expect(['key 22 33 release'], 'release-all on image 22 deleted')
+        rc.ended('route 22 ended with its image')
+        key(33, 0)
+        wait_for(lambda: route(server.input(a.id), 22) is None, 'route 22 outlived its image')
+        check(state(server, a.id, 21) == 'off', 'route 21 after image 22 went %s' % server.input(a.id))
+        check(ch.ask('INPUT on 22\n') == b'INPUT error 22 EINVAL\n', 'INPUT on 22 after its image went was not EINVAL')
+        ch.line('INPUT on 21\n')
+        live(21)
+        key(34, 1, 0)
+        rb.expect(['key 21 34 press', 'key 21 34 release'], 'route 21 after image 22 was deleted')
+        rb.nothing('route 21 after image 22 was deleted')
+
+        # Two channels of the session: one route on between them.
+        ch2 = Channel(a)
+        ch2.frame(23, 1)
+        wait_for(lambda: a.graphics(23), 'image 23 did not land')
+        check(ch2.ask('INPUT sock 23 %s\n' % rd.path) == b'INPUT ok 23\n', 'route 23 on a second channel was refused')
+        rd.accept()
+        key(35, 1)
+        rb.expect(['key 21 35 press'], 'held through route 21')
+        ch2.line('INPUT on 23\n')
+        rb.expect(['key 21 35 release'], 'release-all when the other channel turns its route on')
+        live(23)
+        key(35, 0)
+        key(36, 1, 0)
+        rd.expect(['key 23 36 press', 'key 23 36 release'], 'keys to the second channel only')
+        rb.nothing('keys to the first channel while the second is on')
+        check(rb.stamp('key 21 35 release') <= rd.stamp('key 23 36 press', last=False),
+              'route 21 released after route 23 was sent a key')
+        ch.line('INPUT on 21\n')
+        live(21)
+        info = server.input(a.id)
+        check(route(info, 21)['state'] == 'live' and route(info, 23)['state'] == 'off',
+              'frames.input across two channels %s' % info)
+        ch2.close()
+        rd.ended('the second channel closed')
+        key(37, 1)
+        rb.expect(['key 21 37 press'], 'held before the first channel closes')
+        ch.close()
+        rb.expect(['key 21 37 release'], 'the first channel closed, its live route released')
+        rb.ended('the first channel closed')
+        key(37, 0)
+        wait_for(lambda: server.input(a.id)['routes'] == [], 'routes outlived their channels')
+    finally:
+        for r in receivers:
+            r.close()
+    return ('routes=two_per_channel ebusy=same_image,no_connect on_releases_other=stamped_before '
+            'late_enoent=one_route delete=one_route one_on=two_channels')
 
 
 def sock():
-    """`INPUT sock`: the same route, its events as lines on blit-compositor's
-    own input socket (docs/api.md, "Program windows", "Input straight from
-    Blit"): the answers and the uid-checked connect, the live rule (off,
-    unfocused, console away), release-all on off and on a focus change, the
-    wheel, the absolute pointer in the picture's own frame pixels, relative
-    motion under ?7701, the compositor's end (INPUT error ENOENT,
-    sock-disconnected) and a line it would not take (dropped, ENOENT)."""
+    """`INPUT sock`: every input case, read off the socket (see the top)."""
     work = tempfile.mkdtemp(prefix='blit-input-sock-gate-')
     server = Server(19837 + OFFSET, work)
+    receivers = []
     try:
         a = Session(server, work, 'a')
         b = Session(server, work, 'b')
@@ -1073,12 +774,12 @@ def sock():
               'a missing input socket was not ENOENT')
         check(ch.ask('INPUT sock 7 relative\n') == b'INPUT error 7 EINVAL\n', 'a relative path was not EINVAL')
         receiver = LineReceiver(work)
+        receivers.append(receiver)
         got = ch.ask('INPUT sock 7 %s\n' % receiver.path)
         check(got == b'INPUT ok 7\n', 'INPUT sock was answered %r' % got)
         receiver.accept()
         check(ch.ask('INPUT sock 7 %s\n' % receiver.path) == b'INPUT error 7 EBUSY\n', 'a second route was not EBUSY')
-        r = route(server.input(a.id), 7)
-        check(r['backend'] == 'sock' and r['state'] == 'off', 'frames.input %s' % r)
+        check(state(server, a.id, 7) == 'off', 'frames.input %s' % server.input(a.id))
         receiver.nothing('a route that starts off')
         check(receiver.notices == [], 'a keymap notice to a route that is off: %s' % receiver.notices)
         ch.line('INPUT on 7\n')
@@ -1103,17 +804,39 @@ def sock():
             for v in values:
                 server.inject({'kind': 'key', 'code': code, 'value': v})
 
+        def live(image=7):
+            # The channel and the API are two sockets: an injected event
+            # only once the route is live.
+            wait_for(lambda: state(server, a.id, image) == 'live',
+                     lambda: 'route %d is not live: %s' % (image, server.input(a.id)))
+
+        # Press and release, in order; the kernel's repeats are not sent.
         key(30, 1, 2, 2, 0)
         receiver.expect(['key 7 30 press', 'key 7 30 release'], 'a key with repeats')
+        key(48, 1)
+        key(46, 1)
+        key(48, 0)
+        key(46, 0)
+        receiver.expect(['key 7 48 press', 'key 7 46 press', 'key 7 48 release', 'key 7 46 release'],
+                        'overlapping keys')
+
+        # Nothing while off, nor while another session has focus.
         ch.line('INPUT off 7\n')
+        wait_for(lambda: state(server, a.id, 7) == 'off', 'INPUT off did not take')
         key(31, 1, 0)
         receiver.nothing('keys while off')
         ch.line('INPUT on 7\n')
+        live()
         server.focus(b.id)
         key(31, 1, 0)
-        receiver.nothing('keys while unfocused')
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+        server.inject({'kind': 'pointer_wheel', 'delta': 1})
+        receiver.nothing('input while unfocused')
         server.focus(a.id)
-        # Release-all, on INPUT off and on a focus change.
+        live()
+
+        # Everything held is released: INPUT off ...
         key(32, 1)
         server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
         receiver.expect(['key 7 32 press', 'btn 7 272 press'], 'a key and a button held')
@@ -1123,34 +846,71 @@ def sock():
         server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
         receiver.nothing('the physical releases after INPUT off')
         ch.line('INPUT on 7\n')
-        # The channel and the API are two sockets: the key only once the
-        # route is live, as the eis part waits for `start`.
-        wait_for(lambda: state(server, a.id, 7) == 'live', 'the route did not go live again')
+        live()
+        # ... a focus change ...
         key(33, 1)
-        receiver.expect(['key 7 33 press'], 'held before the focus change')
+        server.inject({'kind': 'pointer_button', 'button': 2, 'pressed': True})
+        receiver.expect(['key 7 33 press', 'btn 7 273 press'], 'held before the focus change')
         server.focus(b.id)
-        receiver.expect(['key 7 33 release'], 'release-all on focus change')
+        receiver.expect(['key 7 33 release', 'btn 7 273 release'], 'release-all on focus change')
         key(33, 0)
+        server.inject({'kind': 'pointer_button', 'button': 2, 'pressed': False})
+        receiver.nothing('the physical releases after the focus change')
         server.focus(a.id)
+        live()
+        # ... and Blit giving up the console.
+        key(34, 1)
+        receiver.expect(['key 7 34 press'], 'held before the console goes')
+        server.process.send_signal(signal.SIGUSR1)
+        receiver.expect(['key 7 34 release'], 'release-all on console release')
+        key(31, 1, 0)
+        receiver.nothing('keys while the console is away')
+        check(state(server, a.id, 7) == 'on', 'frames.input while away %s' % server.input(a.id))
+        server.process.send_signal(signal.SIGUSR2)
+        live()
+        key(34, 0)
+        receiver.nothing('the release of a key already released')
+
+        # Wheel notches, positive right and down.
         server.inject({'kind': 'pointer_wheel', 'delta': 1})
         server.inject({'kind': 'pointer_wheel', 'delta': -1})
         receiver.expect(['wheel 7 0 -1', 'wheel 7 0 1'], 'wheel up then down')
 
         # The absolute pointer, in the picture's own pixels (its 320x160
-        # frame), wherever and however large it is drawn.
+        # frame), wherever and however large it is drawn. The surface's
+        # origin on the display, from the session's own pixel reports.
         server.inject({'kind': 'pointer_motion', 'x': 301, 'y': 101})
         report = wait_for(lambda: re.findall(rb'\x1b\[<35;(\d+);(\d+)M', a.sent()),
                           'no pixel report: %r' % a.sent()[-200:])[-1]
         origin = (301 - (int(report[0]) - 1), 101 - (int(report[1]) - 1))
-        receiver.read(0.3)
-        receiver.events = []
-        g = wait_for(lambda: a.graphics(7), 'image 7 is gone')
-        at = [p for p in g['placements'] if p['id'] == 1][0]
-        for sx, sy in ((40, 20), (0, 0), (at['width'] - 1, at['height'] - 1)):
+        receiver.drain()  # motion so far was outside the picture
+
+        def placement():
+            g = wait_for(lambda: a.graphics(7), 'image 7 is gone')
+            p = [p for p in g['placements'] if p['id'] == 1]
+            check(len(p) == 1, 'placement 1 of image 7: %s' % g['placements'])
+            return p[0]
+
+        def point(at, sx, sy, why):
             server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
                            'y': origin[1] + at['y'] + sy})
-            receiver.expect(['ptr 7 %.2f %.2f' % (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])],
-                            'the pointer at %d,%d of %dx%d' % (sx, sy, at['width'], at['height']))
+            want = (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])
+            receiver.expect(['ptr 7 %.2f %.2f' % want], why)
+            # The diagnostic says the same as what the compositor received.
+            ptr = route(server.input(a.id), 7)['pointer']
+            check(ptr['miss'] == '' and ptr['over'] == 7 and ptr['draw'][2:] == [at['width'], at['height']] and
+                  abs(ptr['sent'][0] - want[0]) < 0.06 and abs(ptr['sent'][1] - want[1]) < 0.06,
+                  'frames.input pointer diagnostic for %s: %s' % (why, ptr))
+
+        cases = []
+        for row, column, columns, rows, sx, sy in ((3, 5, 20, 5, 40, 20), (1, 1, 40, 10, 100, 50)):
+            place(a, 7, row, column, columns, rows)
+            at = wait_for(lambda: (lambda p: p if p['width'] == columns * 8 else None)(placement()),
+                          'placement %dx%d was not drawn' % (columns, rows))
+            point(at, sx, sy, 'absolute at %d,%d %dx%d' % (at['x'], at['y'], at['width'], at['height']))
+            point(at, 0, 0, 'the top-left of %dx%d' % (at['width'], at['height']))
+            point(at, at['width'] - 1, at['height'] - 1, 'the far corner of %dx%d' % (at['width'], at['height']))
+            cases.append('%dx%d@%d,%d' % (at['width'], at['height'], at['x'], at['y']))
 
         # INPUT member: popup 9 (a 160x80 frame) joins 7's route; the
         # pointer over it is its offset plus the point within it, in 7's
@@ -1171,8 +931,7 @@ def sock():
             check(got == want, '%r was answered %r, not %r' % (line, got, want))
         r = route(server.input(a.id), 7)
         check(r['members'] == [{'image': 9, 'x': 12, 'y': 63}], 'frames.input members %s' % r)
-        receiver.read(0.2)
-        receiver.events = []
+        receiver.drain()
         for sx, sy in ((0, 0), (p9['width'] - 1, p9['height'] - 1)):
             server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'] + sx,
                            'y': origin[1] + p9['y'] + sy})
@@ -1191,14 +950,31 @@ def sock():
                                               (p9['y'] - at['y']) * FRAME_H / at['height'])],
                         'the pointer where the member was')
         check(ch.ask('INPUT member 9 7 0 0\n') == b'INPUT error 9 EINVAL\n', 'a deleted member was taken')
+        cases.append('member:9@12,63+-4,-6')
 
-        # Relative motion under the lock, the raw sum.
+        # Resized in place: the same placement, smaller.
+        place(a, 7, 1, 1, 8, 2)
+        at = wait_for(lambda: (lambda p: p if p['width'] == 64 else None)(placement()), 'the resize was not drawn')
+        point(at, 10, 5, 'absolute after the resize')
+        point(at, at['width'] - 1, at['height'] - 1, 'the far corner after the resize')
+        cases.append('resized:%dx%d' % (at['width'], at['height']))
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 200, 'y': origin[1] + at['y'] + 100})
+        receiver.nothing('the pointer outside the picture')
+        miss = route(server.input(a.id), 7)['pointer']['miss']
+        check(miss == 'outside-picture', 'the diagnostic for a pointer outside the picture: %r' % miss)
+
+        # Pointer lock: relative motion, the raw sum, and no absolute; the
+        # pointer hidden and still (hold relative, the default).
+        check(route(server.input(a.id), 7)['hold'] == 'relative', 'the default hold %s' % server.input(a.id))
+        check(not server.hidden(), 'the pointer was hidden before the lock')
         a.write('\033[?7701h')
         wait_for(lambda: server.locked(a.id), 'the lock was not engaged')
+        wait_for(lambda: server.hidden(), 'the relative lock did not hide the pointer')
+        still = server.pointer()
         for _ in range(10):
             server.inject({'kind': 'pointer_relative', 'dx': 7, 'dy': -3})
         deadline = time.time() + 5
-        total = [0, 0]
+        total, moves = [0, 0], 0
         while total != [70, -30] and time.time() < deadline:
             receiver.read(0.2)
             for e in receiver.events:
@@ -1206,47 +982,110 @@ def sock():
                 check(w[0] == 'rel' and w[1] == '7', 'under the lock: %s' % e)
                 total[0] += int(w[2])
                 total[1] += int(w[3])
+                moves += 1
             receiver.events = []
         check(total == [70, -30], 'relative motion summed to %s' % total)
+        check(server.pointer() == still, 'the relative lock moved the pointer: %s -> %s' % (still, server.pointer()))
         a.write('\033[?7701l')
-        wait_for(lambda: not server.locked(a.id), 'the lock was not released')
+        wait_for(lambda: not server.locked(a.id), 'the lock was not given back')
+        wait_for(lambda: not server.hidden(), 'the pointer was not shown after the lock')
+        receiver.drain()
+
+        confine = confined(server, a, ch, receiver, placement, point, origin)
         notices = ','.join(receiver.notices)
         check(len(receiver.notices) == 1, 'keymap notices with no keyboard change: %s' % receiver.notices)
-        check(receiver.frames == receiver.total and receiver.total >= 15,
+
+        # The channel closed: released, then the connection closed.
+        key(36, 1)
+        receiver.expect(['key 7 36 press'], 'held before the channel closes')
+        events = server.input(a.id)['events']
+        ch.close()
+        receiver.expect(['key 7 36 release'], 'release-all on channel close')
+        receiver.ended('the channel closed')
+        wait_for(lambda: server.input(a.id)['routes'] == [], 'the route outlived its channel')
+        key(36, 0)
+        check(receiver.frames == receiver.total and receiver.total >= 40,
               'events and frames: %d events, %d frames' % (receiver.total, receiver.frames))
+        frames = receiver.frames
+
+        # The image deleted, on a new channel and image. As a desktop may:
+        # INPUT on as soon as INPUT ok is read, before the compositor has
+        # accepted the connection; what is written waits in the socket.
+        ch = Channel(a)
+        ch.frame(8, 1)
+        wait_for(lambda: a.graphics(8), 'image 8 did not land')
+        place(a, 8, 1, 1, 8, 2)
+        r8 = LineReceiver(work, 'input-8')
+        receivers.append(r8)
+        check(ch.ask('INPUT sock 8 %s\n' % r8.path) == b'INPUT ok 8\n', 'the second route was refused')
+        ch.line('INPUT on 8\n')
+        live(8)
+        key(35, 1)
+        r8.accept()
+        r8.expect(['key 8 35 press'], 'a key before the compositor accepted')
+        check(len(r8.notices) == 1, 'the keymap before the compositor accepted: %s' % r8.notices)
+        # The route ends with its image: released, then closed.
+        a.write('\033_Ga=d,d=I,i=8,q=2\033\\')
+        r8.expect(['key 8 35 release'], 'release-all on image delete')
+        r8.ended('the route ended with its image')
+        key(35, 0, 1, 0)
+        info = server.input(a.id)
+        check(info['routes'] == [] and info['events'] > events, 'frames.input after the delete %s' % info)
+        check(ch.ask('INPUT on 8\n') == b'INPUT error 8 EINVAL\n', 'INPUT on after the image went was not EINVAL')
+        ch.close()
+
+        # The compositor goes away under a live route: the client is told
+        # INPUT error ENOENT at once, and the route ends.
+        ch = Channel(a)
+        ch.frame(10, 1)
+        wait_for(lambda: a.graphics(10), 'image 10 did not land')
+        place(a, 10, 1, 1, 8, 2)
+        r10 = LineReceiver(work, 'input-10')
+        receivers.append(r10)
+        check(ch.ask('INPUT sock 10 %s\n' % r10.path) == b'INPUT ok 10\n', 'the third route was refused')
+        r10.accept()
+        ch.line('INPUT on 10\n')
+        live(10)
+        check(ch.reply(0.3) == b'', 'a live route was answered')
+        r10.conn.close()
+        got = ch.reply(5.0)
+        check(got == b'INPUT error 10 ENOENT\n', 'a closed input socket was answered %r' % got)
+        info = wait_for(lambda: (lambda i: i if i['routes'] == [] else None)(server.input(a.id)),
+                        'the route outlived its compositor')
+        check(info['last_error'] == 'sock-disconnected', 'frames.input after the close %s' % info)
+        check(ch.ask('INPUT on 10\n') == b'INPUT error 10 EINVAL\n', 'INPUT on after the route ended was not EINVAL')
 
         # A line the compositor will not take: written into a socket whose
         # reader shut down, it is counted, and the route ends.
-        receiver.read(0.2)
-        receiver.events = []
+        r11 = LineReceiver(work, 'input-11')
+        receivers.append(r11)
+        check(ch.ask('INPUT sock 10 %s\n' % r11.path) == b'INPUT ok 10\n', 'a route again')
+        r11.accept()
+        ch.line('INPUT on 10\n')
+        live(10)
+        r11.read(0.3)
         before = server.input(a.id)['dropped']
-        receiver.conn.shutdown(socket.SHUT_RD)
-        key(35, 1)
+        r11.conn.shutdown(socket.SHUT_RD)
+        key(38, 1)
         got = ch.reply(5.0)
-        check(got == b'INPUT error 7 ENOENT\n', 'a socket that took no line was answered %r' % got)
+        check(got == b'INPUT error 10 ENOENT\n', 'a socket that took no line was answered %r' % got)
         info = server.input(a.id)
         check(info['dropped'] == before + 1 and info['last_error'] == 'sock-disconnected' and
-              route(info, 7) is None, 'frames.input after a line was not taken %s' % info)
-        key(35, 0)
-
-        # The compositor's end: a new route, its socket closed.
-        receiver2 = LineReceiver(work, 'input-1')
-        check(ch.ask('INPUT sock 7 %s\n' % receiver2.path) == b'INPUT ok 7\n', 'a route again')
-        receiver2.accept()
-        receiver2.conn.close()
-        got = ch.reply(5.0)
-        check(got == b'INPUT error 7 ENOENT\n', 'a closed input socket was answered %r' % got)
-        info = wait_for(lambda: (lambda i: i if route(i, 7) is None else None)(server.input(a.id)),
-                        'the route outlived its compositor')
-        check(info['last_error'] == 'sock-disconnected', 'frames.input after the close %s' % info)
+              route(info, 10) is None, 'frames.input after a line was not taken %s' % info)
+        key(38, 0)
         ch.close()
+
+        several = multi(server, a, work)
     finally:
         server.stop()
-    print('FRAME_INPUT_SOCK_PASS answers=OK,ENOENT,EINVAL,EBUSY backend=sock keys=ordered,repeats-dropped '
-          'off+unfocused=silent release_all=off,focus wheel=0,-1/0,1 ptr=frame-pixels '
-          'member=EINVALx6,OK,offset+point,negative,ends-with-picture rel=70,-30 '
-          'keymap=memfd,at-live,once,=api(%s) '
-          'not-taken=dropped+ENOENT closed=ENOENT frames=%d' % (notices, receiver.frames))
+        for r in receivers:
+            r.close()
+    print('FRAME_INPUT_SOCK_PASS answers=OK,ENOENT,EINVAL,EBUSY keys=ordered repeats=dropped '
+          'off+unfocused+console=silent release_all=off,focus,console,close,delete wheel=0,-1/0,1 '
+          'ptr=frame-pixels absolute=%s outside=silent relative=70,-30_in_%d,hidden,still %s '
+          'keymap=memfd,at-live,once,=api(%s) on_before_accept=queued closed=ENOENT '
+          'not-taken=dropped+ENOENT frames=%d %s'
+          % (','.join(cases), moves, confine, notices, frames, several))
 
 
 if __name__ == '__main__':
@@ -1254,11 +1093,5 @@ if __name__ == '__main__':
     if mode == 'sock':
         TAG = 'FRAME_INPUT_SOCK'
         sock()
-    elif mode == 'eis':
-        TAG = 'FRAME_INPUT_EIS'
-        eis()
-    elif mode == 'stub':
-        TAG = 'FRAME_INPUT_STUB'
-        eis(stub=True)
     else:
         local()

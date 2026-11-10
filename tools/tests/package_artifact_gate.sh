@@ -208,14 +208,20 @@ for needle in blit-font-sources https://ftp.gnu.org/gnu/freefont/freefont-src-20
 done
 # The frame channel's version 5 is a flag day with Hibr (docs/api.md, "One
 # grammar, version 5"): blit Breaks every Hibr before Hibr's version 5, the
-# version packaging/build-deb.sh names.
+# version packaging/build-deb.sh names. And the packages retired in 0.3.75
+# with the gamescope path (ADR 0228), so an upgrade removes them.
 hibr_frame_v5=$(sed -n 's/^HIBR_FRAME_V5=//p' "$root/packaging/build-deb.sh")
 test -n "$hibr_frame_v5"
-test "$(dpkg-deb -f "$package" Breaks)" = "hibr (<< $hibr_frame_v5)" || {
+breaks="hibr (<< $hibr_frame_v5), blit-gamescope, steamer"
+test "$(dpkg-deb -f "$package" Breaks)" = "$breaks" || {
     echo "PACKAGE_ARTIFACT_FAIL blit Breaks is '$(dpkg-deb -f "$package" Breaks)'," \
-         "not 'hibr (<< $hibr_frame_v5)'" >&2
+         "not '$breaks'" >&2
     exit 1
 }
+if dpkg-deb -f "$package" Suggests | grep -Fq blit-gamescope; then
+    echo "PACKAGE_ARTIFACT_FAIL blit still suggests blit-gamescope" >&2
+    exit 1
+fi
 dpkg-deb -f "$package" Suggests | grep -Fq blit-font-sources || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-font-sources" >&2
     exit 1
@@ -245,53 +251,6 @@ if [ -f "$sources_package" ]; then
         echo "PACKAGE_ARTIFACT_FAIL unexpected files in blit-font-sources: $extra" >&2
         exit 1
     }
-fi
-dpkg-deb -f "$package" Suggests | grep -Fq blit-gamescope || {
-    echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-gamescope" >&2
-    exit 1
-}
-# ADR 0225: the gamescope bridge's package, checked when it sits beside the
-# main one, as packaging/build-deb.sh writes it. Running the bridge needs
-# libpipewire-0.3.so.0, which building it needed too.
-gamescope_package=$(dirname "$package")/blit-gamescope_${version}_amd64.deb
-gamescope=absent
-if [ -f "$gamescope_package" ]; then
-    test "$(dpkg-deb -f "$gamescope_package" Package)" = blit-gamescope
-    test "$(dpkg-deb -f "$gamescope_package" Architecture)" = amd64
-    test "$(dpkg-deb -f "$gamescope_package" Version)" = "$version"
-    test "$(dpkg-deb -f "$gamescope_package" Depends)" = \
-        "blit (= $version), libc6, libpipewire-0.3-0, libei1, gamescope" || {
-        echo "PACKAGE_ARTIFACT_FAIL blit-gamescope Depends is" \
-             "$(dpkg-deb -f "$gamescope_package" Depends)" >&2
-        exit 1
-    }
-    dpkg-deb -f "$gamescope_package" Description | grep -Fq gamescope
-    gstage=$(mktemp -d /tmp/blit-gamescope-gate.XXXXXX)
-    trap 'rm -rf "$stage" "${sstage:-}" "$gstage"' EXIT HUP INT TERM
-    dpkg-deb -x "$gamescope_package" "$gstage"
-    files=$(cd "$gstage" && find . -type f | sort | tr '\n' ' ')
-    test "$files" = "./usr/bin/blit-gamescope ./usr/share/doc/blit-gamescope/README ./usr/share/doc/blit-gamescope/copyright " || {
-        echo "PACKAGE_ARTIFACT_FAIL blit-gamescope carries: $files" >&2
-        exit 1
-    }
-    test -x "$gstage/usr/bin/blit-gamescope"
-    test "$(stat -c %a "$gstage/usr/bin/blit-gamescope")" = 755
-    "$gstage/usr/bin/blit-gamescope" --help | grep -q '^usage: blit-gamescope ' || {
-        echo "PACKAGE_ARTIFACT_FAIL /usr/bin/blit-gamescope is not the bridge" >&2
-        exit 1
-    }
-    test "$("$gstage/usr/bin/blit-gamescope" --version)" = "blit-gamescope $release" || {
-        echo "PACKAGE_ARTIFACT_FAIL blit-gamescope is not version $release" >&2
-        exit 1
-    }
-    grep -Fq 'ADR 0225' "$gstage/usr/share/doc/blit-gamescope/README"
-    grep -Fq 'blit-gamescope [--no-place] [--steam] [-W w -H h] [-r hz] [--log file] -- command...' \
-        "$gstage/usr/share/doc/blit-gamescope/README"
-    if dpkg-deb --contents "$gamescope_package" | grep -E -f "$root/tools/release/runtime-entrypoints.pattern" >/dev/null; then
-        echo "PACKAGE_ARTIFACT_FAIL shell implementation or launcher in blit-gamescope" >&2
-        exit 1
-    fi
-    gamescope=checked
 fi
 dpkg-deb -f "$package" Suggests | grep -Fq blit-compositor || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-compositor" >&2
@@ -401,13 +360,6 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
             rm -rf "$rebuild"
             exit 1
         fi
-        if [ "$gamescope" = checked ] &&
-           ! cmp -s "$gamescope_package" "$rebuild/$(basename "$gamescope_package")"; then
-            echo "PACKAGE_ARTIFACT_FAIL a rebuild of the same tree produced" \
-                 "a different $(basename "$gamescope_package")" >&2
-            rm -rf "$rebuild"
-            exit 1
-        fi
         if [ "$compositor" = checked ] &&
            ! cmp -s "$compositor_package" "$rebuild/$(basename "$compositor_package")"; then
             echo "PACKAGE_ARTIFACT_FAIL a rebuild of the same tree produced" \
@@ -424,5 +376,5 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     rm -rf "$rebuild"
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s gamescope=%s compositor=%s breaks=hibr<<%s\n' \
-    "$version" "$actual_hash" "$reproducible" "$gamescope" "$compositor" "$hibr_frame_v5"
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-gamescope,steamer\n' \
+    "$version" "$actual_hash" "$reproducible" "$compositor" "$hibr_frame_v5"

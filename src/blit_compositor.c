@@ -4264,7 +4264,7 @@ static void input_sockets_clear(struct bc_server *s)
 /* `FRAME error <id> <code>`. Replies come in the order frames are
    read and an accepted frame gets none, so a refusal is the newest frame
    of the picture -- an FRM3 still held, unless an FRM1 went after it
-   (blit-gamescope's rule). ENOTSUP (Blit cannot import now) copies that
+   (a producer's rule, ADR 0223). ENOTSUP (Blit cannot import now) copies that
    frame as FRM1 and every later dmabuf frame of the connection (ADR
    0223); any other code gives the buffer back unshown. */
 static void frame_refused(struct bc_server *s, uint32_t id, const char *code)
