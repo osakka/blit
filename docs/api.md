@@ -1715,16 +1715,34 @@ character is its first character, since an xkb level is one keysym; the
 keypad is its Num Lock-on keysyms.
 
 The keyboard is `?device=<id>` when given (404 `input_device_not_found` for
-none such), else the first enabled device Blit reads as a keyboard, else
-none, which is the built-in table alone; `X-Blit-Keymap-Device` names it
-(`builtin`). The `ETag` is the SHA-256 of the text, quoted, so it changes
-exactly when the keymap does; `If-None-Match` with it is answered 304 with
-no body. A compositor reads it again on `device_changed` (the event stream's
-input events) and compares the ETag.
+none such), else the keyboard whose key came last -- the one whose keys
+reach the window -- while it is there and enabled, else the first enabled
+device Blit reads as a keyboard, else none, which is the built-in table
+alone; `X-Blit-Keymap-Device` names it (`builtin`). A key pressed on
+another keyboard makes it the default from that key on. The `ETag` is the
+SHA-256 of the text, quoted, so it changes exactly when the keymap does;
+`If-None-Match` with it is answered 304 with no body.
+
+Both answers, 200 and 304, carry that keyboard's repeat, as the kernel
+holds it ("Keyboard settings": the read-back, one source):
+`X-Blit-Repeat-Rate`, repeats a second (from `repeat_period_ms`, as
+`repeat_rate_hz` reports it), and `X-Blit-Repeat-Delay`, milliseconds
+(`repeat_delay_ms`); `0` and `0` for a keyboard the kernel does not
+autorepeat (no `repeat` capability), and for none. Repeat is not part of the
+keymap's text, so a change of repeat alone keeps the ETag: a client asking
+with `If-None-Match` reads the new repeat from the 304. These are what
+`wl_keyboard.repeat_info` carries (rate 0: no repeat).
+
+blit-compositor is told when what this serves may have changed -- a
+keyboard's settings, a keyboard enabled, disabled, plugged or gone, or the
+default moving to another keyboard -- by `INPUT keymap` on its input routes
+("Input straight from Blit"); a client of the event stream sees the same
+changes as `device_changed`.
 
 ```text
 GET /v1/input/keymap
   -> 200 text/plain  ETag: "<sha-256>"  X-Blit-Keymap-Device: <id>
+     X-Blit-Repeat-Rate: 30  X-Blit-Repeat-Delay: 250
      xkb_keymap {
      xkb_keycodes "blit" { minimum = 8; maximum = 255; <K1> = 9; ... };
      ...
@@ -1967,17 +1985,22 @@ trailing newline is optional.
   `region` (`WxH+X+Y`, empty until it offers one), and `pointer`, the last absolute pointer for diagnosing its
   mapping: `surface` (where it was on the session's surface, in pixels),
   `draw` (the picture's drawn rectangle it was mapped through, x, y, width,
-  height), `sent` (the position sent to the compositor), and `miss` (empty
-  once a position was sent; `other-session`, `no-image` or
-  `outside-picture` when the last pointer sent nothing; `none-yet`).
+  height), `over` (the picture it was over: the route's own or a member's,
+  0 before any), `sent` (the position sent to the compositor), and `miss`
+  (empty once a position was sent; `other-session`, `no-image` or
+  `outside-picture` when the last pointer sent nothing; `none-yet`); and
+  `members`, the route's member pictures (`INPUT member`, "Program
+  windows"), each `{"image","x","y"}`.
 
 ## Program windows (draft, ADR 0228 phase 1)
 
 *Draft for review with Hibr.* `blit-compositor` implements the compositor's
 side from 0.3.71 (ADR 0228 phase 1: milestone A, `wl_shm` windows as FRM1;
 milestone B, the window states, `WINDOW output`, dmabuf as FRM3, pacing,
-the keymap and input), and Blit its `window=0` answer, `GET
-/v1/input/keymap` and `INPUT sock`; no desktop implements its side yet. `blit-compositor`
+the keymap and input; milestone C, 0.3.72, pointer lock and confinement,
+Blit's key repeat and the keymap re-read on Blit's notice), and Blit its
+`window=0` answer, `GET /v1/input/keymap`, `INPUT sock`, `INPUT member`
+and `INPUT keymap`; no desktop implements its side yet. `blit-compositor`
 is Blit's Wayland compositor for programs (and, in phase 2, their X window
 manager). It composites nothing: each window is one picture by descriptor.
 It speaks the frame channel above as a producer, with these additions.
@@ -2088,8 +2111,19 @@ It speaks the frame channel above as a producer, with these additions.
     over a member picture into the top-level's surface coordinates, so the
     compositor sees one coordinate space per top-level and hit-tests its
     own popups; keyboard focus stays the top-level's. The member ends with
-    the popup's picture. Answers are `OK window <id>` or
-    `ERROR WINDOW <id> <code>`.
+    the popup's picture (deleted, or gone after it was shown), or with the
+    top-level's route. Answers follow the other INPUT requests, with the
+    popup's id: `OK input <popup-id>`, or `ERROR INPUT <popup-id> <code>`
+    (id 0 when the line has no readable one): `EINVAL` for a malformed line
+    (an offset is a decimal, optionally negative, at most 32767 either
+    way), a top-level with no route on this connection, the popup the
+    top-level itself, or a popup that is a deleted or Kitty image; `EBUSY`
+    for a popup with a route of its own on this connection, or a route with
+    16 members already. Sent again, it moves the member (a popup
+    repositioned); a member of another route on the connection moves to
+    this one. Both backends, `eis` and `sock`: the top-level's pixels are
+    then scaled to the EIS region as the top-level's own are. Where draws of
+    the top-level and its members overlap, the topmost wins.
 - **Sizes are the program's to honour.** A Wayland client is told a size
   and commits the buffer it draws; most draw exactly that size, but a
   client with a fixed size, or one mid-resize, commits another. The
@@ -2143,10 +2177,13 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT btn   <id> <BTN_code> press|release
   INPUT wheel <id> <dx> <dy>           notches
   INPUT frame <id> <monotonic-us>      ends one batch of events
+  INPUT keymap <id> <revision>         the keymap or repeat changed
   ```
   Keys are raw evdev codes; the compositor derives modifiers and characters
   with the keymap below, so there is one source. `ptr` is in pixels of the
-  picture's latest frame, a decimal with two fractional digits; `rel` the
+  picture's latest frame, a decimal with two fractional digits (over a
+  member, the top-level's pixels, negative where a popup reaches past the
+  top-level's left or top); `rel` the
   raw counts; `wheel` whole notches, positive right and down (as Wayland
   and EIS count them); each event is one batch, its `frame` after it. Input
   is never dropped silently: if the socket cannot take a line (full, or its
@@ -2155,8 +2192,24 @@ It speaks the frame channel above as a producer, with these additions.
   route whose socket ends -- and ends the route with `ERROR INPUT <id>
   ENOENT`, as when the compositor closes the socket itself
   (`last_error` `sock-disconnected`, or `sock-full`). Each route in
-  `frames.input` says its `backend`, `eis` or `sock`. `INPUT member` is not
-  implemented in Blit yet.
+  `frames.input` says its `backend`, `eis` or `sock`.
+  `INPUT keymap` is a notice, not an event: no `frame` follows it, it is
+  not counted in `events`, and it may come between batches. It says that
+  what `GET /v1/input/keymap` serves by default ("Keyboard map (xkb)") --
+  the keymap or the repeat of the keyboard whose keys reach the window --
+  has changed, to `revision`, a number that only grows while Blit runs.
+  Blit writes it on a route when the route is live and has not been told
+  the current revision: at once when the revision changes (a keyboard's
+  settings, a keyboard enabled, disabled, plugged or gone, or a key from
+  another keyboard, written before that key), and when the route goes live
+  after a change, its first line. The compositor reads the keymap again for
+  a revision it has not read for (with `If-None-Match`, from whichever
+  route says it first), synchronously with a 250 ms bound on loopback, so
+  the key that follows the notice is read with the new keymap: it sends its
+  clients the new keymap after a 200 and new `repeat_info` when the repeat
+  headers change. A read that fails keeps the last keymap and is tried
+  again at the next keyboard enter; otherwise the compositor reads the
+  keymap only at start and on a notice.
   blit-compositor's input socket is `$XDG_RUNTIME_DIR/<display>-input`
   (mode 0600), and it sends `INPUT sock` for each top-level right after its
   `WINDOW new` hints. It gives the keyboard to the window whose route sends
@@ -2164,16 +2217,17 @@ It speaks the frame channel above as a producer, with these additions.
   the desktop's `WINDOW size` for it drops `activated`, or when its route's
   socket ends (releasing what was down); a popup of the top-level under
   the pointer gets the pointer in its own pixels, and the surface a button
-  went down on keeps it until the last button is up. Clients are told key
-  repeat 25 a second after 600 ms (Blit's per-device repeat is not on the
-  wire yet).
+  went down on keeps it until the last button is up. Clients are told the
+  key repeat Blit's keymap answer carries (`X-Blit-Repeat-Rate`,
+  `X-Blit-Repeat-Delay`: the active keyboard's), and again when it
+  changes; none (rate 0) without Blit's answer.
 - **Relative pointer.** `zwp_relative_pointer_manager_v1` is offered: the
   `INPUT rel` lines of a route under Blit's relative hold (the desktop's
   `?7701` with `INPUT hold <id> relative`) go to the relative pointers of
   the client that has the pointer, the raw counts as both the accelerated
   and the unaccelerated motion.
 - **Pointer lock** (*agreed with Hibr 2026-11-10; blit-compositor offers
-  `zwp_pointer_constraints_v1` from milestone C*). The lock is the desktop's
+  `zwp_pointer_constraints_v1` version 1 from 0.3.72*). The lock is the desktop's
   (ADR 0198), so the compositor asks for it rather than taking it. The
   desktop takes a hold only within its gesture window after a click or key
   in that window (Hibr's `DT_PTRGESTMS`, 2 s): a program asking on its own,
@@ -2196,14 +2250,23 @@ It speaks the frame channel above as a producer, with these additions.
     next `on`).
   - Relative motion while locked is the existing `INPUT rel`; a confined
     pointer's positions are the existing `INPUT ptr` (Blit keeps the
-    pointer inside the picture under `confine`).
+    pointer inside the picture under `confine`). While a lock is active
+    the compositor sends the program no absolute motion, whatever `INPUT
+    ptr` arrives.
+  - The id is the top-level's: a constraint on a popup's surface is asked
+    for with its top-level's id, as the route is the top-level's. A
+    constraint is asked for once, when it is made (or when its window is
+    announced, if later); a oneshot constraint deactivated by `off` is
+    spent, so destroying it afterwards sends nothing, and a program that
+    wants the lock again makes a new constraint, which asks again.
 - **The keyboard map** comes from Blit's API, generated from Blit's own
   keyboard tables (its evdev-to-character maps and modifier roles) -- one
   source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete
   xkb keymap as text (`xkb_v1`), which the compositor compiles with
-  libxkbcommon and hands to clients; it reads it again, conditionally
-  (`If-None-Match`), whenever the keyboard enters a window, so a change of
-  Blit's keyboard settings reaches the next window focused. It finds Blit
+  libxkbcommon and hands to clients, with its repeat; it reads it again,
+  conditionally (`If-None-Match`), on Blit's `INPUT keymap` notice, so a
+  change of Blit's keyboard settings, or keys from another keyboard,
+  reach the windows at once. It finds Blit
   by `BLIT_SERVER_PORT` (and `BLIT_API_TOKEN`), which every program in a
   Blit session has; without a keymap its clients are sent `no_keymap`. The
   desktop never touches it.

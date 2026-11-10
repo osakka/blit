@@ -15,6 +15,9 @@
        INPUT hold <image id> relative|confine\n
            OK input <image id> / ERROR INPUT <image id> EINVAL
            what the route does while its session holds the pointer
+       INPUT member <popup id> <top-level id> <x> <y>\n
+           OK input <popup id> / ERROR INPUT <popup id> <code>
+           a popup's picture joins its top-level's route, at that offset
 
    Each route is one image's, so one channel carries the routes of several
    pictures (a desktop multiplexes its windows over one channel per display,
@@ -43,9 +46,28 @@
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
        INPUT frame <id> <monotonic us> after each event
+       INPUT keymap <id> <revision>    no frame: a notice, not an event
+
+   `INPUT keymap` tells the compositor that what GET /v1/input/keymap
+   serves (the default keyboard's keymap and repeat) has changed: it is
+   written when the route is live and has not been told the current
+   revision -- at once when the revision changes (a keyboard configured,
+   plugged or gone, or a key from another keyboard, before that key), and
+   when the route goes live after a change -- and the compositor reads the
+   keymap again (If-None-Match).
 
    Everything else -- the checks on the socket, the live rule, focus,
-   holds, release of everything held, diagnostics -- is the route's, shared.
+   holds, members, release of everything held, diagnostics -- is the
+   route's, shared.
+
+   Members (ADR 0228, "One input route per top-level"): a popup's picture
+   joins its top-level's route with `INPUT member`, at the popup's offset in
+   the top-level's surface pixels. The pointer over a member's drawn
+   rectangle is mapped into the member's frame and then by that offset into
+   the top-level's surface pixels, so the compositor sees one coordinate
+   space per top-level and hit-tests its own popups; the topmost draw of the
+   route's pictures wins. Keys stay the top-level's. A member ends with its
+   picture (deleted, or gone after it was held), or with its route.
    A line the socket cannot take (full, or the compositor gone) is never
    dropped silently: the route is broken, counted in frames.input
    `dropped`, what it held is forgotten (the compositor releases all on the
@@ -140,6 +162,16 @@ typedef struct {
 
 typedef struct BlitFrameInput BlitFrameInput;
 
+/* A popup's picture in its top-level's route (INPUT member). More popups
+   than this open at once over one window are refused EBUSY. */
+#define BLIT_FRAME_INPUT_MEMBERS 16
+
+typedef struct {
+    unsigned int image_id;
+    int x, y;               /* its offset in the top-level's surface pixels */
+    int seen;               /* the picture has existed: its absence is a delete */
+} BlitFrameMember;
+
 struct BlitFrameInput {
     struct ei *ei;          /* the libei context, for the route's life */
     int sock;               /* INPUT sock: the compositor's input socket, else -1 */
@@ -161,7 +193,11 @@ struct BlitFrameInput {
     int last_surface[2];
     int last_draw[4];
     double last_sent[2];
+    unsigned int last_over;     /* the picture the pointer was over: the route's or a member's */
+    unsigned long long keymap_told; /* the keymap revision this `sock` route was told */
     const char *last_miss;
+    BlitFrameMember members[BLIT_FRAME_INPUT_MEMBERS];
+    int member_count;
 };
 
 /* Every symbol or none: a libei without one of them is not one Blit can
@@ -267,30 +303,15 @@ static int frame_input_open_backend(const BlitFrameInput *in)
     return in->broken == NULL && (in->ei != NULL || in->sock >= 0);
 }
 
-/* One event on a `sock` route: its line and the frame after it, in one
-   write. A socket that cannot take all of it breaks the route (see the top
-   of this file). Returns 0 when written. */
-static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
+/* Bytes on a `sock` route, in one write. A socket that cannot take all of
+   them breaks the route (see the top of this file). Returns 0 when
+   written. */
+static int frame_input_write(BlitSession *session, BlitFrameInput *in, const char *text,
+                             size_t length)
 {
-    char text[160];
-    va_list ap;
-    int n, m;
-    ssize_t sent;
-    if (in->sock < 0 || in->broken != NULL)
-        return -1;
-    va_start(ap, fmt);
-    n = vsnprintf(text, sizeof(text), fmt, ap);
-    va_end(ap);
-    if (n < 0 || (size_t)n >= sizeof(text) - 48)
-        return -1;
-    m = snprintf(text + n, sizeof(text) - (size_t)n, "INPUT frame %u %llu\n", in->image_id,
-                 (unsigned long long)monotonic_us());
-    sent = send(in->sock, text, (size_t)(n + m), MSG_NOSIGNAL | MSG_DONTWAIT);
-    if (sent == (ssize_t)(n + m)) {
-        if (session != NULL)
-            ++session->frame_input_events;
+    ssize_t sent = send(in->sock, text, length, MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (sent == (ssize_t)length)
         return 0;
-    }
     in->broken = sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) ? "sock-full"
                                                                        : "sock-disconnected";
     memset(in->keys, 0, sizeof(in->keys));
@@ -300,6 +321,29 @@ static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char
         frame_input_error(session, in->broken);
     }
     return -1;
+}
+
+/* One event on a `sock` route: its line and the frame after it, in one
+   write. Returns 0 when written. */
+static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
+{
+    char text[160];
+    va_list ap;
+    int n, m;
+    if (in->sock < 0 || in->broken != NULL)
+        return -1;
+    va_start(ap, fmt);
+    n = vsnprintf(text, sizeof(text), fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= sizeof(text) - 48)
+        return -1;
+    m = snprintf(text + n, sizeof(text) - (size_t)n, "INPUT frame %u %llu\n", in->image_id,
+                 (unsigned long long)monotonic_us());
+    if (frame_input_write(session, in, text, (size_t)(n + m)) != 0)
+        return -1;
+    if (session != NULL)
+        ++session->frame_input_events;
+    return 0;
 }
 
 /* Whether the image the route names is gone: deleted by Kitty, or no longer
@@ -312,6 +356,17 @@ static int frame_input_image_gone(BlitSession *session, BlitFrameInput *in)
         return 0;
     }
     return in->image_seen || frame_was_deleted(session, in->image_id);
+}
+
+/* Whether a member's picture is gone, by the same rule. */
+static int frame_input_member_gone(BlitSession *session, BlitFrameMember *m)
+{
+    BlitGraphicsImage *image = graphics_image_find(session, m->image_id);
+    if (image != NULL && image->descriptor) {
+        m->seen = 1;
+        return 0;
+    }
+    return m->seen || frame_was_deleted(session, m->image_id);
 }
 
 /* The one rule: on, the focused session's, the console Blit's, the image
@@ -384,8 +439,20 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
         frame_input_end(runtime, client, in);
         return 0;
     }
-    if (in->sock >= 0)
-        return 1;  /* lines need nothing started */
+    if (in->sock >= 0) {
+        /* Lines need nothing started; a live route is told the keymap's
+           revision when it has not been (ADR 0228). */
+        if (in->keymap_told != runtime->keymap_revision) {
+            char text[64];
+            int n = snprintf(text, sizeof(text), "INPUT keymap %u %llu\n", in->image_id,
+                             runtime->keymap_revision);
+            in->keymap_told = runtime->keymap_revision;
+            if (frame_input_write(find_session_id(runtime, client->session_id), in, text,
+                                  (size_t)n) != 0)
+                return 0;
+        }
+        return 1;
+    }
     for (i = 0; i < BLIT_EI_DEVICES; ++i)
         if (in->devices[i].device != NULL && in->devices[i].resumed &&
             !in->devices[i].emulating) {
@@ -457,6 +524,15 @@ static void frame_input_reconcile(BlitRuntime *runtime)
                 continue;
             }
             frame_input_sync(runtime, client, in);
+            if (session != NULL) {
+                /* A member ends with its picture. */
+                int m = 0;
+                while (m < in->member_count)
+                    if (frame_input_member_gone(session, &in->members[m]))
+                        in->members[m] = in->members[--in->member_count];
+                    else
+                        ++m;
+            }
             if (session != NULL && frame_input_image_gone(session, in)) {
                 frame_input_end(runtime, client, in);
                 frame_input_free(client, k);
@@ -740,15 +816,18 @@ static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int directi
    latest frame when the device has no bounded region (gamescope offers one
    INT32_MAX square, meaning its own output pixels): wherever the picture is
    placed and however large it is drawn, through the same placement and draw
-   rectangle the compositors use. */
+   rectangle the compositors use. The route's members are hit-tested with
+   it, the topmost draw winning: a point on a member's picture is the
+   member's offset plus the point within it, in the top-level's pixels
+   (negative where a popup reaches past the top-level's left or top). */
 static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *client, BlitFrameInput *in)
 {
     BlitSession *session, *under;
-    BlitGraphicsImage *image;
+    BlitGraphicsImage *image, *images[1 + BLIT_FRAME_INPUT_MEMBERS];
     static BlitGraphicsDrawList list;
     BlitGraphicsDraw *draws;
     struct ei_device *device;
-    int column, row, px = 0, py = 0, count, k;
+    int column, row, px = 0, py = 0, count, k, m, n;
     device = in->ei != NULL ? frame_input_device(in, BLIT_EI_CAP_POINTER_ABSOLUTE) : NULL;
     session = find_session_id(runtime, client->session_id);
     if ((device == NULL && in->sock < 0) || session == NULL || !runtime->pointer_valid)
@@ -766,24 +845,44 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
     in->last_surface[0] = px;
     in->last_surface[1] = py;
     in->last_miss = "outside-picture";
-    count = blit_graphics_collect(&image, 1, &list);
+    images[0] = image;
+    n = 1;
+    for (m = 0; m < in->member_count; ++m) {
+        BlitGraphicsImage *member = graphics_image_find(session, in->members[m].image_id);
+        if (member != NULL && member->descriptor)
+            images[n++] = member;
+    }
+    count = blit_graphics_collect(images, n, &list);
     draws = list.draws;
     for (k = count - 1; k >= 0; --k) {
         const BlitGraphicsDraw *d = &draws[k];
+        const BlitGraphicsImage *over = d->image;
         struct ei_region *r;
-        double fx, fy, rx = 0, ry = 0, rw = image->width, rh = image->height;
-        if (d->width < 1 || d->height < 1 || image->width < 1 || image->height < 1 ||
+        double fx, fy, tx, ty, rx = 0, ry = 0, rw = image->width, rh = image->height;
+        if (d->width < 1 || d->height < 1 || over->width < 1 || over->height < 1 ||
+            image->width < 1 || image->height < 1 ||
             px < d->x || py < d->y || px >= d->x + d->width || py >= d->y + d->height)
             continue;
-        /* Where in the frame, as a fraction of it. */
-        fx = (d->src_x + (double)(px - d->x) * d->src_w / d->width) / image->width;
-        fy = (d->src_y + (double)(py - d->y) * d->src_h / d->height) / image->height;
+        /* Where in the picture drawn, as a fraction of its frame. */
+        fx = (d->src_x + (double)(px - d->x) * d->src_w / d->width) / over->width;
+        fy = (d->src_y + (double)(py - d->y) * d->src_h / d->height) / over->height;
+        /* That point in the top-level's surface pixels. */
+        tx = fx * over->width;
+        ty = fy * over->height;
+        if (over != image)
+            for (m = 0; m < in->member_count; ++m)
+                if (in->members[m].image_id == d->image_id) {
+                    tx += in->members[m].x;
+                    ty += in->members[m].y;
+                    break;
+                }
+        in->last_over = d->image_id;
         in->last_draw[0] = d->x; in->last_draw[1] = d->y;
         in->last_draw[2] = d->width; in->last_draw[3] = d->height;
         if (in->sock >= 0) {
-            /* Lines: the picture's own surface pixels, its latest frame. */
-            in->last_sent[0] = fx * rw;
-            in->last_sent[1] = fy * rh;
+            /* Lines: the top-level's own surface pixels, its latest frame. */
+            in->last_sent[0] = tx;
+            in->last_sent[1] = ty;
             in->last_miss = "";
             frame_input_line(session, in, "INPUT ptr %u %.2f %.2f\n", in->image_id,
                              in->last_sent[0], in->last_sent[1]);
@@ -797,6 +896,9 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
             rw = blit_ei.region_get_width(r);
             rh = blit_ei.region_get_height(r);
         }
+        /* The top-level's pixels scaled to the compositor's region. */
+        fx = tx / image->width;
+        fy = ty / image->height;
         blit_ei.pointer_motion_absolute(device, rx + fx * rw, ry + fy * rh);
         in->last_sent[0] = rx + fx * rw;
         in->last_sent[1] = ry + fy * rh;
@@ -918,6 +1020,24 @@ static void frame_input_relative(BlitRuntime *runtime, int dx, int dy)
     }
 }
 
+/* What GET /v1/input/keymap serves has changed: a new revision, told at
+   once to every live `sock` route (and to the others when they go live). */
+static void frame_input_keymap_changed(BlitRuntime *runtime)
+{
+    int i, k;
+    ++runtime->keymap_revision;
+    if (!frame_input_routes)
+        return;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        if (!client->used)
+            continue;
+        for (k = 0; k < client->input_capacity; ++k)
+            if (client->inputs[k] != NULL && client->inputs[k]->sock >= 0)
+                frame_input_sync(runtime, client, client->inputs[k]);
+    }
+}
+
 /* ---- The requests, on an authenticated channel. ---- */
 
 /* `ERROR INPUT <image id> <code>`; the id is 0 when the line named none or
@@ -940,9 +1060,17 @@ static int frame_input_holds(const BlitSession *session, unsigned int image_id)
         const BlitFrameClient *client = &graphics_memory.frame_clients[i];
         if (!client->used || client->session_id != session->id)
             continue;
-        for (k = 0; k < client->input_capacity; ++k)
-            if (client->inputs[k] != NULL && client->inputs[k]->image_id == image_id)
+        for (k = 0; k < client->input_capacity; ++k) {
+            const BlitFrameInput *in = client->inputs[k];
+            int m;
+            if (in == NULL)
+                continue;
+            if (in->image_id == image_id)
                 return 1;
+            for (m = 0; m < in->member_count; ++m)
+                if (in->members[m].image_id == image_id)
+                    return 1;
+        }
     }
     return 0;
 }
@@ -1124,6 +1252,74 @@ static unsigned int frame_input_parse_id(const char *text)
     return id > 0xffffffffUL ? 0 : (unsigned int)id;
 }
 
+/* A signed pixel offset as the wire writes it: an optional '-', 1 to 5
+   digits, |v| <= 32767; 0 with *ok cleared when it is not one. */
+static int frame_input_parse_offset(const char *text, int *ok)
+{
+    const char *digits = text[0] == '-' ? text + 1 : text;
+    size_t length = strlen(digits);
+    long v;
+    *ok = length >= 1 && length <= 5 && strspn(digits, "0123456789") == length;
+    if (!*ok)
+        return 0;
+    v = strtol(text, NULL, 10);
+    if (v < -32767 || v > 32767) {
+        *ok = 0;
+        return 0;
+    }
+    return (int)v;
+}
+
+/* `INPUT member <popup> <top-level> <x> <y>`: the popup's picture joins the
+   top-level's route on this channel at that offset (again: moved there).
+   EINVAL for a top-level with no route here, the popup the top-level
+   itself, or a popup that is a deleted or Kitty image; EBUSY for a popup
+   with a route of its own here, or a route with BLIT_FRAME_INPUT_MEMBERS
+   already. A member of another route here moves to this one. */
+static void frame_input_member(BlitRuntime *runtime, BlitFrameClient *client, unsigned int popup,
+                               unsigned int toplevel, int x, int y)
+{
+    BlitSession *session = find_session_id(runtime, client->session_id);
+    BlitGraphicsImage *image = session != NULL ? graphics_image_find(session, popup) : NULL;
+    int slot = frame_input_slot(client, toplevel), k, m;
+    BlitFrameInput *route;
+    if (session == NULL || slot < 0 || popup == toplevel || (image != NULL && !image->descriptor) ||
+        (image == NULL && frame_was_deleted(session, popup))) {
+        frame_input_refuse(runtime, client, popup, "EINVAL");
+        return;
+    }
+    if (frame_input_slot(client, popup) >= 0) {
+        frame_input_refuse(runtime, client, popup, "EBUSY");
+        return;
+    }
+    route = client->inputs[slot];
+    for (m = 0; m < route->member_count && route->members[m].image_id != popup; ++m) {}
+    if (m == route->member_count && m == BLIT_FRAME_INPUT_MEMBERS) {
+        frame_input_refuse(runtime, client, popup, "EBUSY");
+        return;
+    }
+    /* A member of another route here leaves it. */
+    for (k = 0; k < client->input_capacity; ++k) {
+        BlitFrameInput *other = client->inputs[k];
+        int o;
+        if (other == NULL || other == route)
+            continue;
+        for (o = 0; o < other->member_count; ++o)
+            if (other->members[o].image_id == popup) {
+                other->members[o] = other->members[--other->member_count];
+                break;
+            }
+    }
+    if (m == route->member_count) {
+        ++route->member_count;
+        route->members[m].seen = image != NULL;
+    }
+    route->members[m].image_id = popup;
+    route->members[m].x = x;
+    route->members[m].y = y;
+    frame_input_accept(client, popup);
+}
+
 /* One INPUT message: a line, its newline optional. The image id is read
    from a line of a request's form; a line that has none, or is not one,
    is answered with 0. */
@@ -1134,8 +1330,10 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     const char *id_text = NULL, *path_text = NULL;
     size_t path_length = 0;
     unsigned int id;
-    int kind = 0;  /* 'e' eis, 's' sock, 'n' on, 'f' off, 'h' hold */
+    int kind = 0;  /* 'e' eis, 's' sock, 'n' on, 'f' off, 'h' hold, 'm' member */
     int confine = -1;  /* INPUT hold's mode: 0 relative, 1 confine */
+    unsigned int toplevel = 0;  /* INPUT member's */
+    int member_x = 0, member_y = 0, member_ok = 0;
     ssize_t i;
 
     if (length > 0 && message[length - 1] == '\n')
@@ -1164,6 +1362,24 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
             *mode++ = '\0';
             confine = strcmp(mode, "confine") == 0 ? 1 : strcmp(mode, "relative") == 0 ? 0 : -1;
         }
+    } else if (strncmp(line, "INPUT member ", 13) == 0) {
+        /* Four words: each cut out so it reads alone. */
+        char *words[4], *p = line + 13;
+        int w;
+        kind = 'm';
+        for (w = 0; w < 4 && p != NULL; ++w) {
+            words[w] = p;
+            p = strchr(p, ' ');
+            if (p != NULL) *p++ = '\0';
+        }
+        id_text = words[0];
+        if (w == 4 && p == NULL) {
+            int x_ok, y_ok;
+            toplevel = frame_input_parse_id(words[1]);
+            member_x = frame_input_parse_offset(words[2], &x_ok);
+            member_y = frame_input_parse_offset(words[3], &y_ok);
+            member_ok = toplevel != 0 && x_ok && y_ok;
+        }
     } else if (strncmp(line, "INPUT eis ", 10) == 0 || strncmp(line, "INPUT sock ", 11) == 0) {
         kind = line[6];
         path_text = line + (kind == 'e' ? 10 : 11);
@@ -1175,6 +1391,14 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     /* A version 2 channel's INPUT is not read at all. */
     if (client->version < 3 || id == 0) {
         frame_input_refuse(runtime, client, 0, "EINVAL");
+        return;
+    }
+    if (kind == 'm') {
+        if (!member_ok) {
+            frame_input_refuse(runtime, client, id, "EINVAL");
+            return;
+        }
+        frame_input_member(runtime, client, id, toplevel, member_x, member_y);
         return;
     }
     if (kind == 'n' || kind == 'f' || kind == 'h') {
@@ -1226,19 +1450,26 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            char entry[400];
+            char entry[400 + BLIT_FRAME_INPUT_MEMBERS * 48], members[BLIT_FRAME_INPUT_MEMBERS * 48 + 2];
+            size_t mu = 0;
+            int m;
             if (in == NULL)
                 continue;
+            members[0] = '\0';
+            for (m = 0; m < in->member_count; ++m)
+                mu += (size_t)snprintf(members + mu, sizeof(members) - mu,
+                                       "%s{\"image\":%u,\"x\":%d,\"y\":%d}", m ? "," : "",
+                                       in->members[m].image_id, in->members[m].x, in->members[m].y);
             n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"backend\":\"%s\",\"state\":\"%s\","
-                         "\"hold\":\"%s\","
+                         "\"hold\":\"%s\",\"members\":[%s],"
                          "\"region\":\"%s\",\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
-                         "\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
+                         "\"over\":%u,\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
                          first ? "" : ",", in->image_id, in->sock >= 0 ? "sock" : "eis",
                          !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
-                         in->confine ? "confine" : "relative", in->region,
+                         in->confine ? "confine" : "relative", members, in->region,
                          in->last_surface[0], in->last_surface[1],
                          in->last_draw[0], in->last_draw[1], in->last_draw[2], in->last_draw[3],
-                         in->last_sent[0], in->last_sent[1],
+                         in->last_over, in->last_sent[0], in->last_sent[1],
                          in->last_miss != NULL ? in->last_miss : "none-yet");
             if (n < 0 || (size_t)n >= sizeof(entry) || used + (size_t)n + 3 > capacity)
                 continue;

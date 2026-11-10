@@ -1623,6 +1623,12 @@ typedef struct {
     unsigned long long input_routes_revision;
     BlitInputDevice input_devices[BLIT_MAX_INPUT_DEVICES];
     unsigned long long input_devices_revision;
+    /* ADR 0228: the keyboard GET /v1/input/keymap serves by default -- the
+       one whose key came last ("" before any) -- and the revision of what
+       it serves (its keymap and repeat), told to blit-compositor's input
+       routes as `INPUT keymap <id> <revision>` when it changes. */
+    char keymap_device_id[BLIT_INPUT_ID_CAPACITY];
+    unsigned long long keymap_revision;
     BlitAudioDevice audio_devices[BLIT_MAX_AUDIO_DEVICES];
     BlitAudioCard audio_cards[BLIT_MAX_AUDIO_CARDS];
     unsigned long long audio_cards_revision;
@@ -11539,6 +11545,7 @@ static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
 }
 
 static int frame_input_holds(const BlitSession *session, unsigned int image_id);
+static void frame_input_keymap_changed(BlitRuntime *runtime);
 
 /* ADR 0226: whether a picture counts as shown, and so is never freed for
    room: placed and not deleted, or with a placement held for its next
@@ -19572,6 +19579,12 @@ static void broadcast_input_device_changed(BlitRuntime *runtime,
     broadcast_device_changed(runtime, "input", change, device->id,
                              device->name, device->node, device->revision,
                              runtime->input_devices_revision);
+    /* A keyboard's change (its keymap, modifiers or repeat configured, it
+       enabled, disabled, plugged or gone) may change what GET
+       /v1/input/keymap serves: blit-compositor is told on its routes, as
+       the event stream is told here (ADR 0228). */
+    if (input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD))
+        frame_input_keymap_changed(runtime);
 }
 
 static void replay_stream(BlitRuntime *runtime, int fd,
@@ -29989,21 +30002,43 @@ static int evdev_key_character(const BlitInputDevice *device,
 
 #include "blit_xkb_keymap.h"
 
+/* The keyboard GET /v1/input/keymap serves by default: the one whose key
+   came last while it is still there and enabled, else the first enabled
+   device Blit reads as a keyboard, else none (NULL). */
+static const BlitInputDevice *input_keymap_device(const BlitRuntime *runtime)
+{
+    int i;
+    if (runtime->keymap_device_id[0] != '\0')
+        for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+            if (runtime->input_devices[i].used && runtime->input_devices[i].enabled &&
+                (runtime->input_devices[i].kinds & BLIT_INPUT_KIND_KEYBOARD) &&
+                strcmp(runtime->input_devices[i].id, runtime->keymap_device_id) == 0)
+                return &runtime->input_devices[i];
+    for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
+        if (runtime->input_devices[i].used && runtime->input_devices[i].enabled &&
+            (runtime->input_devices[i].kinds & BLIT_INPUT_KIND_KEYBOARD))
+            return &runtime->input_devices[i];
+    return NULL;
+}
+
 /* GET /v1/input/keymap[?device=<id>] (blit_xkb_keymap.h): the keyboard's
-   xkb keymap as text. The keyboard is the one named, else the first
-   enabled device Blit reads as a keyboard, else none: the built-in US
-   table with no overrides. Its ETag is the SHA-256 of the text, so it
-   changes exactly when the keymap does (a PATCH of the device's `keymap`
-   or `modifiers`), and If-None-Match is answered 304. */
+   xkb keymap as text. The keyboard is the one named, else
+   input_keymap_device's, else none: the built-in US table with no
+   overrides. Its ETag is the SHA-256 of the text, so it changes exactly
+   when the keymap does (a PATCH of the device's `keymap` or `modifiers`),
+   and If-None-Match is answered 304. Both answers carry the keyboard's
+   repeat as the kernel holds it (the keyboard settings' one source):
+   X-Blit-Repeat-Rate (per second) and X-Blit-Repeat-Delay (ms), 0 and 0
+   for a keyboard the kernel does not autorepeat, or none. */
 static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
                                   const char *path, char *body, size_t capacity)
 {
     static BlitInputDevice builtin;
     const BlitInputDevice *device = NULL;
     const char *query = strstr(path, "device=");
-    char revision[65], etag[96], extra[128 + BLIT_INPUT_ID_CAPACITY], match[512];
+    char revision[65], etag[96], extra[192 + BLIT_INPUT_ID_CAPACITY], match[512];
     size_t length;
-    int i;
+    int rate = 0, delay = 0;
 
     if (query != NULL) {
         char id[BLIT_INPUT_ID_CAPACITY];
@@ -30022,14 +30057,14 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
             return;
         }
     } else {
-        for (i = 0; i < BLIT_MAX_INPUT_DEVICES; ++i)
-            if (runtime->input_devices[i].used && runtime->input_devices[i].enabled &&
-                (runtime->input_devices[i].kinds & BLIT_INPUT_KIND_KEYBOARD)) {
-                device = &runtime->input_devices[i];
-                break;
-            }
+        device = input_keymap_device(runtime);
     }
     if (device == NULL) device = &builtin;
+    if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) && device->repeat_period_ms > 0 &&
+        device->repeat_delay_ms > 0) {
+        rate = input_repeat_rate_for_period(device->repeat_period_ms);
+        delay = device->repeat_delay_ms;
+    }
     length = xkb_keymap_text(device, body, capacity);
     if (length == 0) {
         send_problem(fd, 500, "Internal Server Error", "input_keymap_unserialisable",
@@ -30038,8 +30073,10 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
     }
     blit_sha256_hex(body, length, revision);
     snprintf(etag, sizeof(etag), "\"%s\"", revision);
-    snprintf(extra, sizeof(extra), "ETag: %s\r\nX-Blit-Keymap-Device: %s\r\n", etag,
-             device == &builtin ? "builtin" : device->id);
+    snprintf(extra, sizeof(extra),
+             "ETag: %s\r\nX-Blit-Keymap-Device: %s\r\nX-Blit-Repeat-Rate: %d\r\n"
+             "X-Blit-Repeat-Delay: %d\r\n", etag, device == &builtin ? "builtin" : device->id,
+             rate, delay);
     if ((request_header(request, "If-None-Match:", match, sizeof(match)) ||
          request_header(request, "if-none-match:", match, sizeof(match))) &&
         (strcmp(match, "*") == 0 || strstr(match, revision) != NULL)) {
@@ -30499,6 +30536,17 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
 
     if (event->type != EV_KEY)
         return;
+    /* ADR 0228: a press on another keyboard makes it the keymap's default,
+       and blit-compositor is told before the key reaches it. */
+    if (event->value == 1 && runtime->input_source != NULL &&
+        input_device_supports(runtime->input_source, BLIT_INPUT_KIND_KEYBOARD) &&
+        strcmp(runtime->keymap_device_id, runtime->input_source->id) != 0) {
+        const BlitInputDevice *before = input_keymap_device(runtime);
+        snprintf(runtime->keymap_device_id, sizeof(runtime->keymap_device_id), "%s",
+                 runtime->input_source->id);
+        if (input_keymap_device(runtime) != before)
+            frame_input_keymap_changed(runtime);
+    }
     /* Autorepeat does not change what is held. */
     if (event->value != 2)
         evdev_key_set_held(keyboard, event->code, event->value != 0);
@@ -31669,6 +31717,7 @@ int main(int argc, char **argv)
     runtime.topology_revision = 1;
     runtime.input_routes_revision = 1;
     runtime.input_devices_revision = 1;
+    runtime.keymap_revision = 1;
     runtime.audio_devices_revision = 1;
     runtime.displays_revision = 1;
     runtime.next_overlay_id = 1;

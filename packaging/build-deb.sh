@@ -344,7 +344,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
 Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0)
-Suggests: hibr, blit-font-sources, blit-gamescope
+Suggests: hibr, blit-font-sources, blit-gamescope, blit-compositor
 Description: API-driven native KMS text display server
  Blit provides a text-first display server with one terminal surface per
  physical display or pane, HTTP control, streaming, and Hibr integration.
@@ -491,3 +491,79 @@ if dpkg-deb --contents "$goutput" | grep -E -f "$ROOT/tools/release/runtime-entr
 	exit 1
 fi
 echo "$goutput"
+
+# ADR 0228: Blit's Wayland compositor for programs, its own package at
+# Blit's version, suggested by blit. It is the only part of Blit that links
+# libwayland-server and libxkbcommon, so blit itself gains neither. Built
+# by tools/build-tcc.sh from the system's protocol XML (libwayland-bin,
+# wayland-protocols), into a protocol directory of its own in the staging
+# area. Xwayland is Recommended, as the ADR decided: phase 2 runs X11
+# programs under it; phase 1 does not start it, so it is not Depended.
+cstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-compositor-deb.XXXXXX")
+trap 'rm -rf "$stage" "$sstage" "$gstage" "$cstage"' EXIT HUP INT TERM
+cdoc=$cstage/pkg/usr/share/doc/blit-compositor
+mkdir -p "$cstage/pkg/usr/bin" "$cdoc" "$cstage/pkg/DEBIAN"
+BLIT_PROTOCOL_DIR="$cstage/protocol" "$ROOT/tools/build-tcc.sh" \
+	"$cstage/pkg/usr/bin/blit-compositor" compositor >/dev/null
+chmod 0755 "$cstage/pkg/usr/bin/blit-compositor"
+cat > "$cdoc/README" <<EOF
+blit-compositor: Blit's Wayland compositor for programs
+
+  blit-compositor [--log path]
+
+One per desktop session, started by the desktop with the BLIT_FRAME_SOCKET
+and BLIT_FRAME_TOKEN of the frame channel it serves. It listens on
+\$XDG_RUNTIME_DIR/blit-<n>, says that name to the desktop, and the desktop
+puts it in its programs' environment as WAYLAND_DISPLAY. It composites
+nothing: each Wayland window is one picture by descriptor on Blit's frame
+channel (wl_shm copied, dmabuf by its own planes), placed and sized by the
+desktop, and its keyboard and mouse come straight from Blit, with the
+keymap and key repeat of Blit's own keyboard settings.
+
+The design is ADR 0228, "Blit is the compositor for programs"
+(docs/adr/0228-blit-is-the-compositor-for-programs.md), and the wire is
+docs/api.md, "Program windows", both installed by the blit package under
+/usr/share/doc/blit/docs/. Phase 2 runs X11 programs under Xwayland, which
+this package recommends.
+EOF
+cat > "$cdoc/copyright" <<EOF
+blit-compositor is part of Blit, Copyright (C) 2026 Omar Sakka, built from
+src/blit_compositor.c and src/blit_compositor_wire.h in the Blit source
+tree. It is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version. On Debian systems the licence text is in
+/usr/share/common-licenses/GPL-3.
+
+Its protocol code is generated at build time by wayland-scanner from the
+Wayland protocol descriptions of Debian's wayland-protocols (xdg-shell,
+xdg-decoration, linux-dmabuf, presentation-time, relative-pointer,
+pointer-constraints; Expat/MIT licence, see
+/usr/share/doc/wayland-protocols/copyright on a system that has it). It
+links libwayland-server.so.0 and libxkbcommon.so.0 at run time (MIT
+licences; their own copyright files are under /usr/share/doc/).
+EOF
+chmod 0644 "$cdoc/README" "$cdoc/copyright"
+cat > "$cstage/pkg/DEBIAN/control" <<EOF
+Package: blit-compositor
+Version: $pkgver
+Section: x11
+Priority: optional
+Architecture: amd64
+Maintainer: ITD Labs <itdlabs@localhost>
+Depends: blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0
+Recommends: xwayland
+Description: Blit's Wayland compositor for programs in Hibr windows
+ blit-compositor is the Wayland compositor for the programs of one Blit
+ desktop session: each window is a picture on Blit's frame channel, placed
+ and sized by the desktop, with keyboard and mouse straight from Blit and
+ Blit's keymap (ADR 0228). Xwayland, recommended, is for X11 programs.
+EOF
+coutput=$OUT/blit-compositor_${pkgver}_amd64.deb
+dpkg-deb --build --root-owner-group "$cstage/pkg" "$coutput" >/dev/null
+if dpkg-deb --contents "$coutput" | grep -E -f "$ROOT/tools/release/runtime-entrypoints.pattern" >/dev/null; then
+	rm -f "$coutput"
+	echo "blit: blit-compositor package contains a shell implementation or Hibr launcher" >&2
+	exit 1
+fi
+echo "$coutput"

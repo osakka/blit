@@ -283,6 +283,64 @@ if [ -f "$gamescope_package" ]; then
     fi
     gamescope=checked
 fi
+dpkg-deb -f "$package" Suggests | grep -Fq blit-compositor || {
+    echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-compositor" >&2
+    exit 1
+}
+# ADR 0228: the Wayland compositor's package, checked when it sits beside
+# the main one. Running it needs libwayland-server.so.0 and
+# libxkbcommon.so.0, which building it needed too. Its binary records no
+# build path (tools/build-tcc.sh compiles it without tcc's -g).
+compositor_package=$(dirname "$package")/blit-compositor_${version}_amd64.deb
+compositor=absent
+if [ -f "$compositor_package" ]; then
+    test "$(dpkg-deb -f "$compositor_package" Package)" = blit-compositor
+    test "$(dpkg-deb -f "$compositor_package" Architecture)" = amd64
+    test "$(dpkg-deb -f "$compositor_package" Version)" = "$version"
+    test "$(dpkg-deb -f "$compositor_package" Depends)" = \
+        "blit (= $version), libc6, libwayland-server0, libxkbcommon0" || {
+        echo "PACKAGE_ARTIFACT_FAIL blit-compositor Depends is" \
+             "$(dpkg-deb -f "$compositor_package" Depends)" >&2
+        exit 1
+    }
+    test "$(dpkg-deb -f "$compositor_package" Recommends)" = xwayland || {
+        echo "PACKAGE_ARTIFACT_FAIL blit-compositor Recommends is" \
+             "$(dpkg-deb -f "$compositor_package" Recommends)" >&2
+        exit 1
+    }
+    dpkg-deb -f "$compositor_package" Description | grep -Fq 'ADR 0228'
+    cstage=$(mktemp -d /tmp/blit-compositor-gate.XXXXXX)
+    trap 'rm -rf "$stage" "${sstage:-}" "${gstage:-}" "$cstage"' EXIT HUP INT TERM
+    dpkg-deb -x "$compositor_package" "$cstage"
+    files=$(cd "$cstage" && find . -type f | sort | tr '\n' ' ')
+    test "$files" = "./usr/bin/blit-compositor ./usr/share/doc/blit-compositor/README ./usr/share/doc/blit-compositor/copyright " || {
+        echo "PACKAGE_ARTIFACT_FAIL blit-compositor carries: $files" >&2
+        exit 1
+    }
+    test -x "$cstage/usr/bin/blit-compositor"
+    test "$(stat -c %a "$cstage/usr/bin/blit-compositor")" = 755
+    "$cstage/usr/bin/blit-compositor" --help | grep -q '^usage: blit-compositor ' || {
+        echo "PACKAGE_ARTIFACT_FAIL /usr/bin/blit-compositor is not the compositor" >&2
+        exit 1
+    }
+    test "$("$cstage/usr/bin/blit-compositor" --version)" = "blit-compositor $release" || {
+        echo "PACKAGE_ARTIFACT_FAIL blit-compositor is not version $release" >&2
+        exit 1
+    }
+    if strings "$cstage/usr/bin/blit-compositor" | grep -F -e "$root" -e /tmp/ >/dev/null; then
+        echo "PACKAGE_ARTIFACT_FAIL blit-compositor records a build path" >&2
+        exit 1
+    fi
+    grep -Fq 'ADR 0228' "$cstage/usr/share/doc/blit-compositor/README"
+    grep -Fq 'blit-compositor [--log path]' "$cstage/usr/share/doc/blit-compositor/README"
+    grep -Fq 'GNU General Public License' "$cstage/usr/share/doc/blit-compositor/copyright"
+    grep -Fq 'either version 3 of the License, or (at your' "$cstage/usr/share/doc/blit-compositor/copyright"
+    if dpkg-deb --contents "$compositor_package" | grep -E -f "$root/tools/release/runtime-entrypoints.pattern" >/dev/null; then
+        echo "PACKAGE_ARTIFACT_FAIL shell implementation or launcher in blit-compositor" >&2
+        exit 1
+    fi
+    compositor=checked
+fi
 # The manual pages are the repository's, with the package's version in
 # their title line.
 for page in blit.8 blit.env.5 blit-update-helper.8; do
@@ -340,6 +398,13 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
             rm -rf "$rebuild"
             exit 1
         fi
+        if [ "$compositor" = checked ] &&
+           ! cmp -s "$compositor_package" "$rebuild/$(basename "$compositor_package")"; then
+            echo "PACKAGE_ARTIFACT_FAIL a rebuild of the same tree produced" \
+                 "a different $(basename "$compositor_package")" >&2
+            rm -rf "$rebuild"
+            exit 1
+        fi
         reproducible=yes
     else
         echo "PACKAGE_ARTIFACT_FAIL the rebuild did not produce a package" >&2
@@ -349,5 +414,5 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     rm -rf "$rebuild"
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s gamescope=%s\n' \
-    "$version" "$actual_hash" "$reproducible" "$gamescope"
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s gamescope=%s compositor=%s\n' \
+    "$version" "$actual_hash" "$reproducible" "$gamescope" "$compositor"

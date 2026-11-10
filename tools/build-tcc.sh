@@ -119,19 +119,27 @@ case "$target" in
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
                    "$protocols/unstable/linux-dmabuf/linux-dmabuf-unstable-v1.xml" \
                    "$protocols/stable/presentation-time/presentation-time.xml" \
-                   "$protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml"; do
+                   "$protocols/unstable/relative-pointer/relative-pointer-unstable-v1.xml" \
+                   "$protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml"; do
             base=$(basename "$xml" .xml)
             wayland-scanner server-header "$xml" "$proto/$base-server-protocol.h"
             wayland-scanner client-header "$xml" "$proto/$base-client-protocol.h"
             wayland-scanner private-code "$xml" "$proto/$base-protocol.c"
         done
-        tcc -O2 -g -std=c99 \
+        # No -g: the package (packaging/build-deb.sh, blit-compositor) must
+        # be the same bytes from any checkout, and tcc 0.9.27 records the
+        # compiler's working directory and each source's path in its stabs
+        # and has no -ffile-prefix-map (it accepts the flag and ignores it,
+        # measured: the path stays in the binary). Without debug
+        # information nothing records a path.
+        tcc -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             -I"$ROOT/src" -I"$proto" \
             "$ROOT/src/blit_compositor.c" \
             "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
             "$proto/linux-dmabuf-unstable-v1-protocol.c" "$proto/presentation-time-protocol.c" \
             "$proto/relative-pointer-unstable-v1-protocol.c" \
+            "$proto/pointer-constraints-unstable-v1-protocol.c" \
             "${BLIT_XKBCOMMON_LIBRARY:-/lib/x86_64-linux-gnu/libxkbcommon.so.0}" \
             "${BLIT_WAYLAND_SERVER_LIBRARY:-/lib/x86_64-linux-gnu/libwayland-server.so.0}" \
             -o "$output"

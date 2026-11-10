@@ -33,6 +33,11 @@ import tempfile
 import time
 import urllib.request
 
+# The frame channel's session, channel and placement helpers, shared with
+# the INPUT gate (same directory).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frame_input_gate as fig  # noqa: E402
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 PORT = (int(os.environ.get('BLIT_GATE_PORT', '19823')) +
         int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0')))
@@ -305,9 +310,20 @@ def input_part(server, compositor, standin, work):
     events: the gate plays the desktop on the channel and Blit on the input
     socket (docs/api.md, "Input straight from Blit"), and a real blit-server
     serves the keymap (GET /v1/input/keymap, BLIT_SERVER_PORT)."""
+    # Two fabricated keyboards (keymap_gate's sidecars): A, the first, and
+    # B, given a Q that types a-umlaut, each with its own repeat.
+    nodes = os.path.join(work, 'nodes')
+    os.mkdir(nodes)
+    for node, identity in (('event1', 'name=Keyboard A\nkinds=keyboard\ncapabilities=keys,repeat\nrepeat=250,33\n'),
+                           ('event2', 'name=Keyboard B\nkinds=keyboard\ncapabilities=keys,repeat\nrepeat=500,50\n')):
+        open(os.path.join(nodes, node), 'w').close()
+        with open(os.path.join(nodes, node + '.identity'), 'w') as out:
+            out.write('bustype=3\nvendor=05ac\nproduct=0256\nversion=0100\nphys=usb-gate/%s\n%s' % (node, identity))
     env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                           BLIT_SETTINGS_PATH=os.path.join(work, 'settings-input.json'),
-                          BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts')))
+                          BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'),
+                          BLIT_EXPECT_DESKTOP='0', BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1',
+                          BLIT_INPUT_ROOT=nodes))
     blit = subprocess.Popen([server, str(PORT)], env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     runtime = os.path.join(work, 'run-input')
@@ -319,7 +335,13 @@ def input_part(server, compositor, standin, work):
     comp = client = None
     try:
         wait_for(lambda: api('GET', '/v1/version'), 'the server did not start', 15)
-        keymap = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10).read()
+        named = dict((d['name'], d['id']) for d in api('GET', '/v1/input/devices')['devices'])
+        keyboards = (named['Keyboard A'], named['Keyboard B'])
+        api('PATCH', '/v1/input/devices/%s' % keyboards[1],
+            {'configuration': {'keymap': {'base': 'us', 'keys': {'16': ['ä', 'Ä', '', '']}}}})
+        answer = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10)
+        keymap = answer.read()
+        check(answer.headers['X-Blit-Keymap-Device'] == keyboards[0], 'the default is not keyboard A')
         cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                     XDG_RUNTIME_DIR=runtime, BLIT_SERVER_PORT=str(PORT))
         cenv.pop('WAYLAND_DISPLAY', None)
@@ -343,7 +365,8 @@ def input_part(server, compositor, standin, work):
         check(stat.S_IMODE(os.stat(desk.input_socks[1]).st_mode) == 0o600, 'the input socket is not 0600')
         check('STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
               lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
-        check('STANDIN repeat 25 600' in printed(), 'no repeat info')
+        # Repeat is Blit's, keyboard A's: 250 ms, a 33 ms period.
+        check('STANDIN repeat 30 250' in printed(), lambda: 'no repeat info from Blit:\n' + printed())
 
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[1])
@@ -396,6 +419,13 @@ def input_part(server, compositor, standin, work):
         # Relative motion (Blit's relative hold) to the client with the pointer.
         lines_to('rel 1 7 -3', 'rel 1 -2 5')
         seen('relative 7.00 -3.00', 'pointer frame', 'relative -2.00 5.00', 'pointer frame')
+        e2e = popup_end_to_end(desk, work, seen, keyboards, printed, mark)
+        # Blit's route ended with its channel: the keyboard left with it.
+        # Back by a key on the gate's route, so `!activated` below is what
+        # takes it away.
+        seen('keyboard leave main')
+        lines_to('key 1 31 press', 'key 1 31 release')
+        seen('keyboard enter main', 'modifiers 0 0 0 0', 'key 31 1', 'key 31 0')
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         # The desktop takes the window's focus: the keyboard leaves it.
@@ -415,8 +445,13 @@ def input_part(server, compositor, standin, work):
         comp.wait(5)
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
+        # Read at start and on each notice only, never at a keyboard enter.
+        notices, reads = text.count("keymap: Blit's revision"), (text.count('keymap: unchanged (304)') +
+                                                                 text.count('bytes from Blit'))
+        check(notices >= 3 and reads == notices + 1,
+              '%d notices, %d reads of the keymap:\n%s' % (notices, reads, text))
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
-                'relative=7,-3+-2,5 focus=line,!activated,route-end' % len(keymap))
+                'relative=7,-3+-2,5 focus=line,!activated,route-end %s' % (len(keymap), e2e))
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -428,6 +463,202 @@ def input_part(server, compositor, standin, work):
             blit.wait(5)
         except subprocess.TimeoutExpired:
             blit.kill()
+
+
+def lock_part(compositor, standin, work):
+    """zwp_pointer_constraints_v1 asked of the desktop (docs/api.md, "Pointer
+    lock"), with `--lock`: a oneshot lock pending until `WINDOW lock 1 on`
+    (an `off` before it, no gesture yet, leaves it pending), then locked,
+    relative motion and no absolute motion, `off` -> unlocked and defunct
+    (a second `on` does nothing, and its destroy says nothing); a
+    persistent lock locked again after `off`, its destroy `WINDOW lock 1
+    off`; a persistent confinement whose pointer moves; and the window going
+    with it still there: `WINDOW lock 1 off`, then `WINDOW gone 1`. The gate
+    plays the desktop and Blit's route on the input socket."""
+    runtime = os.path.join(work, 'run-lock')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-lock-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    env.pop('BLIT_SERVER_PORT', None)
+    log = os.path.join(work, 'compositor-lock.log')
+    comp = start([compositor, '--log', log], env, open(os.path.join(work, 'compositor-lock.out'), 'w'))
+    client = None
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        out_path = os.path.join(work, 'standin-lock.out')
+        client = start([standin, '--lock', 'Lock'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        count = lambda what: printed().splitlines().count('STANDIN ' + what)
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Lock', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.send('WINDOW size 1 120 80 activated')
+        desk.frame(120, 80)
+        desk.line('WINDOW lock 1 relative')
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        frame = [0]
+
+        def lines_to(*lines):
+            text = ''
+            for line in lines:
+                frame[0] += 1
+                text += 'INPUT %s\nINPUT frame 1 %d\n' % (line, frame[0])
+            route.sendall(text.encode())
+
+        def settle(what, n):
+            wait_for(lambda: count(what) >= n, lambda: 'no STANDIN %s #%d:\n%s' % (what, n, printed()))
+
+        lines_to('ptr 1 10.00 10.00')
+        settle('pointer enter main 10.00 10.00', 1)
+        # Pending: no gesture yet, the desktop says off; nothing activates.
+        desk.send('WINDOW lock 1 off')
+        lines_to('rel 1 3 4')
+        settle('relative 3.00 4.00', 1)
+        desk.nothing(0.3)
+        check(count('locked') == 0 and count('unlocked') == 0,
+              lambda: 'a pending lock was activated or deactivated:\n' + printed())
+        # On: locked; relative motion, and an absolute position is dropped.
+        desk.send('WINDOW lock 1 on')
+        settle('locked', 1)
+        lines_to('ptr 1 20.00 20.00', 'rel 1 5 -2')
+        settle('relative 5.00 -2.00', 1)
+        check(count('pointer motion 20.00 20.00') == 0, lambda: 'a locked pointer moved:\n' + printed())
+        # Off: unlocked, and the oneshot is defunct: on again does nothing.
+        desk.send('WINDOW lock 1 off')
+        settle('unlocked', 1)
+        desk.send('WINDOW lock 1 on')
+        lines_to('ptr 1 30.00 30.00')
+        settle('pointer motion 30.00 30.00', 1)
+        check(count('locked') == 1, lambda: 'a defunct oneshot lock was locked again:\n' + printed())
+        # Space: the defunct oneshot destroyed (nothing said), a persistent lock.
+        lines_to('key 1 57 press', 'key 1 57 release')
+        settle('lock persistent', 1)
+        desk.line('WINDOW lock 1 relative')
+        desk.send('WINDOW lock 1 on')
+        settle('locked', 2)
+        desk.send('WINDOW lock 1 off')
+        settle('unlocked', 2)
+        desk.send('WINDOW lock 1 on')
+        settle('locked', 3)
+        # Space: the persistent lock destroyed, `off`; a confinement asked for.
+        lines_to('key 1 57 press', 'key 1 57 release')
+        desk.line('WINDOW lock 1 off')
+        desk.line('WINDOW lock 1 confine')
+        settle('confine persistent', 1)
+        desk.send('WINDOW lock 1 on')
+        settle('confined', 1)
+        lines_to('ptr 1 40.00 40.00')
+        settle('pointer motion 40.00 40.00', 1)
+        desk.send('WINDOW lock 1 off')
+        settle('unconfined', 1)
+        desk.send('WINDOW lock 1 on')
+        settle('confined', 2)
+        # The window goes with the confinement still there.
+        desk.send('WINDOW close 1')
+        desk.line('WINDOW lock 1 off')
+        desk.line('WINDOW gone 1')
+        desk.nothing(0.3)
+        check(client.wait(5) == 0, 'the lock stand-in failed:\n' + printed())
+        check(count('global zwp_pointer_constraints_v1 1') == 1, 'no pointer constraints 1:\n' + printed())
+        tally = dict((w, count(w)) for w in ('locked', 'unlocked', 'confined', 'unconfined'))
+        check(tally == {'locked': 3, 'unlocked': 2, 'confined': 2, 'unconfined': 1},
+              'the constraint events: %s\n%s' % (tally, printed()))
+        route.close()
+        desk.sock.close()
+        comp.wait(5)
+        return ('oneshot=pending(off ignored)->on:locked+rel,ptr-dropped->off:unlocked,defunct '
+                'persistent=on/off/on,destroy->off confine=on+motion/off/on gone=off->gone')
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
+class _Blit:
+    """frame_input_gate's Session wants an object with api()."""
+    api = staticmethod(lambda method, path, body=None: api(method, path, body))
+
+
+def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
+    """A real Blit's route into the compositor's input socket, as a desktop
+    sets it up (docs/api.md, "One input route per top-level"): the gate,
+    as the desktop, shows windows 1 and 2 (the stand-in's toplevel and its
+    popup) as pictures 1 and 2 of a Blit session, asks `INPUT sock` for 1
+    and `INPUT member 2 1 12 63`, and turns the route on; the pointer over
+    picture 2 reaches the popup surface at its own pixels.
+
+    Then the keyboard (milestone C): a repeat PATCH of keyboard A while the
+    route is live reaches the client as repeat info (Blit's `INPUT keymap`
+    notice, a 304); a key from keyboard B makes its keymap (Q types
+    a-umlaut) and repeat the client's before that key; one from A, A's
+    again. The compositor reads the keymap only on Blit's notices."""
+    session = fig.Session(_Blit, work, 'e2e')
+    api('PATCH', '/v1/terminal-sessions/%s' % session.id, {'focused': True})
+    wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session.id)['focused'], 'no focus')
+    ch = fig.Channel(session)
+    ch.frame(1, 1, 200, 100)
+    ch.frame(2, 1, 80, 60)
+    wait_for(lambda: session.graphics(1) and session.graphics(2), 'pictures 1 and 2 did not land')
+    fig.place(session, 1, 3, 5, 20, 5)
+    session.write('\033[4;8H\033_Ga=p,i=2,p=1,q=2,C=1,c=8,r=3,z=1\033\\')
+    at = wait_for(lambda: [p for p in (session.graphics(2) or {}).get('placements', []) if p['id'] == 1],
+                  'picture 2 was not placed')[0]
+    check(ch.ask('INPUT sock %s 1\n' % desk.input_socks[1]) == b'OK input 1\n', 'Blit took no route')
+    check(ch.ask('INPUT member 2 1 12 63\n') == b'OK input 2\n', 'Blit took no member')
+    ch.line('INPUT on 1\n')
+    wait_for(lambda: [r for r in api('GET', '/v1/terminal-sessions/%s' % session.id)['frames']['input']['routes']
+                      if r['image'] == 1 and r['state'] == 'live'], 'the route did not go live')
+    # The session's surface origin on the display, from its pixel reports.
+    api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': 301, 'y': 101})
+    report = wait_for(lambda: __import__('re').findall(rb'\x1b\[<35;(\d+);(\d+)M', session.sent()),
+                      'no pixel report')[-1]
+    origin = (301 - (int(report[0]) - 1), 101 - (int(report[1]) - 1))
+    sx, sy = 8, 8
+    api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
+                                     'y': origin[1] + at['y'] + sy})
+    x, y = sx * 80 / at['width'], sy * 60 / at['height']
+    seen('pointer leave main', 'pointer frame', 'pointer enter popup %.2f %.2f' % (x, y), 'pointer frame')
+    api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 2 * sx,
+                                     'y': origin[1] + at['y'] + sy // 2})
+    seen('pointer motion %.2f %.2f' % (2 * x, y / 2), 'pointer frame')
+
+    # Repeat changed while the route is live: the notice, a 304, repeat info.
+    api('PATCH', '/v1/input/devices/%s' % keyboards[0],
+        {'configuration': {'repeat_delay_ms': 400, 'repeat_rate_hz': 20}})
+    wait_for(lambda: 'STANDIN repeat 20 400' in printed(), lambda: 'no new repeat:\n' + printed())
+    texts = [urllib.request.urlopen(BASE + '/v1/input/keymap?device=%s' % k, timeout=10).read()
+             for k in keyboards]
+    check(texts[0] != texts[1], 'the two keyboards have one keymap')
+    order = []
+    for device, text, repeat in ((keyboards[1], texts[1], 'repeat 20 500'),
+                                 (keyboards[0], texts[0], 'repeat 20 400')):
+        before = len(printed().splitlines())
+        for value in (1, 0):
+            api('POST', '/v1/input/inject', {'kind': 'key', 'code': 16, 'value': value, 'device_id': device})
+        wait_for(lambda: 'STANDIN key 16 0' in printed().splitlines()[before:],
+                 lambda: 'no key from %s:\n%s' % (device, printed()))
+        lines = printed().splitlines()[before:]
+        want = ['STANDIN keymap format=1 size=%d xkb=1' % (len(text) + 1), 'STANDIN ' + repeat,
+                'STANDIN key 16 1']
+        got = [l for l in lines if l in want]
+        check(got == want, 'a key from %s: %s, expected %s in that order:\n%s'
+              % (device, got, want, '\n'.join(lines)))
+        order.append('%dB' % len(text))
+    mark[0] = len(printed().splitlines())
+    ch.line('INPUT off 1\n')
+    ch.close()
+    api('DELETE', '/v1/terminal-sessions/%s' % session.id)
+    return ('blit-member-e2e=popup@%.2f,%.2f repeat=blit:30/250,patch->20/400 '
+            'keyboard-switch=B:%s+20/500,A:%s+20/400 before-the-key' % (x, y, order[0], order[1]))
 
 
 def dmabuf_part(compositor, standin, work):
@@ -626,13 +857,13 @@ def desktop_part(compositor, standin, work):
         versions = dict(l.split()[2:4] for l in output.splitlines() if l.startswith('STANDIN global '))
         for global_ in ('wl_compositor', 'wl_subcompositor', 'wl_shm', 'wl_output', 'wl_seat',
                         'xdg_wm_base', 'zxdg_decoration_manager_v1', 'wp_presentation',
-                        'zwp_relative_pointer_manager_v1'):
+                        'zwp_relative_pointer_manager_v1', 'zwp_pointer_constraints_v1'):
             check(global_ in versions, 'no global %s: %s' % (global_, versions))
         check(int(versions['wl_output']) == 4 and int(versions['wl_seat']) == 8,
               'wl_output or wl_seat at another version: %s' % versions)
         check('zwp_linux_dmabuf_v1' not in versions, 'linux-dmabuf offered without dmabuf=1: %s' % versions)
-        # Pointer constraints wait on WINDOW lock (docs/api.md, a proposal).
-        check('zwp_pointer_constraints_v1' not in versions, 'pointer constraints offered: %s' % versions)
+        # Pointer constraints, asked of the desktop with WINDOW lock.
+        check(versions.get('zwp_pointer_constraints_v1') == '1', 'pointer constraints: %s' % versions)
         check(versions.get('wp_presentation') == '1', 'no wp_presentation 1: %s' % versions)
         check('STANDIN presentation presented=4 discarded=0 refresh=16666666' in output,
               'the stand-in\'s frames were not each presented at 60 Hz:\n%s' % output)
@@ -794,6 +1025,7 @@ def main():
     try:
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
+        print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
             # A server of its own, for its keymap.

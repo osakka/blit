@@ -17,11 +17,13 @@
            WINDOW maximize <id> on|off    WINDOW minimize <id>
            WINDOW parent <id> <parent|0>
            WINDOW hide <id>
+           WINDOW lock <id> relative|confine|off
            WINDOW gone <id>
        desktop to compositor
            WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
            WINDOW output <id> <w> <h> <mHz>
            WINDOW close <id>
+           WINDOW lock <id> on|off
            OK window <id>                 ERROR WINDOW <id> <code>
 
    A peer whose hello answer has no `window=1` (Blit itself says
@@ -48,11 +50,13 @@
    each toplevel, Blit connects to that stream socket, and writes
 
        INPUT key <id> <evdev code> press|release
-       INPUT ptr <id> <x> <y>          the picture's own pixels, decimals
+       INPUT ptr <id> <x> <y>          the toplevel's own pixels, decimals
+                                       (negative over a popup past its left or top)
        INPUT rel <id> <dx> <dy>
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
        INPUT frame <id> <monotonic us>
+       INPUT keymap <id> <revision>    what GET /v1/input/keymap serves changed
 
    read by bc_parse_input.
 
@@ -518,6 +522,7 @@ enum {
     BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] */
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
+    BC_LINE_LOCK,           /* WINDOW lock <id> on|off: the desktop's pointer hold */
     BC_LINE_OK_WINDOW,      /* OK window <id> */
     BC_LINE_ERROR_WINDOW,   /* ERROR WINDOW <id> <code> */
     BC_LINE_RELEASE,        /* RELEASE <id> <sequence>: an FRM3 frame's buffer is free */
@@ -530,6 +535,7 @@ typedef struct {
     uint32_t id;
     int32_t width, height;
     int fullscreen, maximized, activated;
+    int on;                 /* WINDOW lock */
     uint32_t refresh_mhz;   /* WINDOW output */
     uint64_t sequence;      /* RELEASE */
     char code[32];
@@ -560,7 +566,8 @@ enum {
     BC_INPUT_REL,           /* dx, dy */
     BC_INPUT_BTN,           /* code, pressed */
     BC_INPUT_WHEEL,         /* dx, dy (notches) */
-    BC_INPUT_FRAME          /* time_us */
+    BC_INPUT_FRAME,         /* time_us */
+    BC_INPUT_KEYMAP         /* revision: a notice, not an event (no frame follows) */
 };
 
 typedef struct {
@@ -570,6 +577,7 @@ typedef struct {
     int pressed;
     double x, y;            /* ptr: pixels; rel: counts; wheel: notches */
     uint64_t time_us;
+    uint64_t revision;      /* keymap */
 } BcInput;
 
 /* A decimal number as Blit writes it: an optional '-', digits, and an
@@ -593,6 +601,7 @@ static int bc_parse_input(const char *line, BcInput *out)
     static const struct { const char *word; int kind; } kinds[] = {
         { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
         { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
+        { "keymap ", BC_INPUT_KEYMAP },
     };
     const char *p;
     size_t i;
@@ -618,8 +627,6 @@ static int bc_parse_input(const char *line, BcInput *out)
     case BC_INPUT_WHEEL:
         if (bc_read_number(&p, &out->x) != 0 || *p++ != ' ' || bc_read_number(&p, &out->y) != 0)
             return out->kind = BC_INPUT_UNKNOWN;
-        if (kinds[i].kind == BC_INPUT_PTR && (out->x < 0 || out->y < 0))
-            return out->kind = BC_INPUT_UNKNOWN;
         break;
     default: {
         char *end;
@@ -627,6 +634,10 @@ static int bc_parse_input(const char *line, BcInput *out)
         errno = 0;
         out->time_us = strtoull(p, &end, 10);
         if (errno != 0) return out->kind = BC_INPUT_UNKNOWN;
+        if (kinds[i].kind == BC_INPUT_KEYMAP) {
+            out->revision = out->time_us;
+            out->time_us = 0;
+        }
         p = end;
         break;
     }
@@ -683,6 +694,15 @@ static int bc_parse_line(const char *line, BcLine *out)
             (*p != '\0' && *p != '\n'))
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_CLOSE;
+    }
+    if (strncmp(line, "WINDOW lock ", 12) == 0) {
+        p = line + 12;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0 || *p++ != ' ')
+            return out->kind = BC_LINE_UNKNOWN;
+        if (strncmp(p, "on", 2) == 0 && (p[2] == '\0' || p[2] == '\n')) out->on = 1;
+        else if (strncmp(p, "off", 3) != 0 || (p[3] != '\0' && p[3] != '\n'))
+            return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = BC_LINE_LOCK;
     }
     if (strncmp(line, "OK window ", 10) == 0) {
         p = line + 10;

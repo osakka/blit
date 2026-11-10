@@ -98,6 +98,11 @@ static void lines(void)
            "flags out of the draft's order");
     EXPECT(bc_parse_line("WINDOW close 9\n", &l) == BC_LINE_CLOSE && l.id == 9, "close");
     EXPECT(bc_parse_line("WINDOW close 9 x", &l) == BC_LINE_UNKNOWN, "close with a tail");
+    EXPECT(bc_parse_line("WINDOW lock 4 on\n", &l) == BC_LINE_LOCK && l.id == 4 && l.on, "lock on");
+    EXPECT(bc_parse_line("WINDOW lock 4 off", &l) == BC_LINE_LOCK && l.id == 4 && !l.on, "lock off");
+    EXPECT(bc_parse_line("WINDOW lock 4 relative", &l) == BC_LINE_UNKNOWN, "lock relative is the compositor's");
+    EXPECT(bc_parse_line("WINDOW lock 4 onx", &l) == BC_LINE_UNKNOWN, "lock, a tail");
+    EXPECT(bc_parse_line("WINDOW lock 0 on", &l) == BC_LINE_UNKNOWN, "lock, id 0");
     EXPECT(bc_parse_line("ERROR WINDOW 3 EINVAL\n", &l) == BC_LINE_ERROR_WINDOW && l.id == 3 &&
            strcmp(l.code, "EINVAL") == 0, "ERROR WINDOW");
     EXPECT(bc_parse_line("OK window 3", &l) == BC_LINE_OK_WINDOW && l.id == 3, "OK window");
@@ -122,13 +127,18 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT btn 3 272 press", &in) == BC_INPUT_BTN && in.code == 272, "btn");
     EXPECT(bc_parse_input("INPUT ptr 3 10.50 20.25", &in) == BC_INPUT_PTR && in.x == 10.5 &&
            in.y == 20.25, "ptr");
-    EXPECT(bc_parse_input("INPUT ptr 3 -1.00 2", &in) == BC_INPUT_UNKNOWN, "ptr negative");
+    EXPECT(bc_parse_input("INPUT ptr 3 -1.00 2", &in) == BC_INPUT_PTR && in.x == -1,
+           "ptr negative: a popup past the toplevel's left");
     EXPECT(bc_parse_input("INPUT ptr 3 1e5 2", &in) == BC_INPUT_UNKNOWN, "ptr exponent");
     EXPECT(bc_parse_input("INPUT rel 3 -7 3", &in) == BC_INPUT_REL && in.x == -7 && in.y == 3, "rel");
     EXPECT(bc_parse_input("INPUT wheel 3 0 -1", &in) == BC_INPUT_WHEEL && in.y == -1, "wheel");
     EXPECT(bc_parse_input("INPUT frame 3 123456789012", &in) == BC_INPUT_FRAME &&
            in.time_us == 123456789012ull, "frame");
     EXPECT(bc_parse_input("INPUT frame 3 12x", &in) == BC_INPUT_UNKNOWN, "frame tail");
+    EXPECT(bc_parse_input("INPUT keymap 3 42\n", &in) == BC_INPUT_KEYMAP && in.id == 3 &&
+           in.revision == 42 && in.time_us == 0, "keymap notice");
+    EXPECT(bc_parse_input("INPUT keymap 3", &in) == BC_INPUT_UNKNOWN, "keymap, no revision");
+    EXPECT(bc_parse_input("INPUT keymap 3 -1", &in) == BC_INPUT_UNKNOWN, "keymap, negative");
     EXPECT(bc_parse_input("INPUT on 3", &in) == BC_INPUT_UNKNOWN, "not an input line");
 }
 
