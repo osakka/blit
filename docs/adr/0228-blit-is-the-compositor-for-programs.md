@@ -274,9 +274,11 @@ section; `docs/api.md`, "X programs"):
   side of xwayland-shell, never committed -- `xwayland_gate.py` passed end
   to end under tcc and ASan/UBSan in each order of the association (the
   commit first, the X message first, and buffers committed with the serial
-  before the X message, which is the held-buffer path), and a scratch check
+  before the X message, which is the held-buffer path), and scratch checks
   passed the restart, a desktop reconnect re-announcing `:0`, the give-up
-  after three quick deaths and the sockets' removal. Commit to frame sent
+  after three quick deaths and the sockets' removal, X off (`none`, absent,
+  older than 23.1: `WINDOW display blit-0 -` and the reason logged), and a
+  window mapped before the window manager, mapped again and shown. Commit to frame sent
   there, 400x300 by wl_shm: median 1.3-2.4 ms, minimum 0.4-0.9 ms.
 - **Pending:** the gate against Xwayland 24.1 on the owner's Debian 13
   desktop (`sh tools/tests/xwayland_gate.sh`); Hibr's side (exporting
@@ -316,6 +318,10 @@ section; `docs/api.md`, "X programs"):
   a synthetic ConfigureNotify (ICCCM 4.1.5); wlroots hands it to its
   compositor.
 - Override-redirect windows are matched and not shown until milestone C.
+- Windows mapped before the window manager started (an X program waiting
+  in the socket's backlog while Xwayland got ready) are unmapped and
+  mapped again under it, so Xwayland sends a serial someone hears; wlroots
+  starts lazily, its window manager up before the first client.
 - `_NET_SUPPORTED` names what the ADR lists (state, full screen,
   maximized, active window, move/resize, name, the check window), not
   wlroots' focused, modal, hidden and client lists, which nothing keeps
