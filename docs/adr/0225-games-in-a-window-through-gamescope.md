@@ -9,6 +9,7 @@
   [ADR 0202](0202-local-frames-by-descriptor.md) (the frame channel),
   [ADR 0198](0198-pointer-lock.md) (pointer lock),
   [ADR 0206](0206-hand-the-display-to-gamescope.md) (full screen by hand-over)
+- Amended: lines in v5 grammar since 0.3.73 (ADR 0228)
 
 ## Context
 
