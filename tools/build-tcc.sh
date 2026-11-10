@@ -126,7 +126,13 @@ case "$target" in
             wayland-scanner client-header "$xml" "$proto/$base-client-protocol.h"
             wayland-scanner private-code "$xml" "$proto/$base-protocol.c"
         done
-        tcc -O2 -g -std=c99 \
+        # No -g: the package (packaging/build-deb.sh, blit-compositor) must
+        # be the same bytes from any checkout, and tcc 0.9.27 records the
+        # compiler's working directory and each source's path in its stabs
+        # and has no -ffile-prefix-map (it accepts the flag and ignores it,
+        # measured: the path stays in the binary). Without debug
+        # information nothing records a path.
+        tcc -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             -I"$ROOT/src" -I"$proto" \
             "$ROOT/src/blit_compositor.c" \
