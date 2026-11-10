@@ -2145,6 +2145,16 @@ It speaks the frame channel above as a producer, with these additions.
     released and it gets no motion during the drag, `INPUT on <id>` after.
   - `WINDOW menu <id> <x> <y>`: the window menu, asked for at x, y in its
     surface pixels (`xdg_toplevel.show_window_menu`, the same press rule).
+  - `WINDOW appmenu <id> <service> <path>`: the global menu (ADR 0229). The
+    program serves its menus over the session bus
+    (`com.canonical.dbusmenu`: Qt and KDE programs, GTK 3 with the appmenu
+    module) and says where with `org_kde_kwin_appmenu`: a D-Bus service
+    name (`:1.42`, `org.kde.app`) and an object path (`/MenuBar/1`). Sent
+    when the program sets it, when the window is announced again, and as
+    `WINDOW appmenu <id> - -` when the program releases it. Names that are
+    not D-Bus syntax are ignored. The desktop reads the menus and shows the
+    focused window's in its bar; Firefox and GTK 4 programs send none and
+    keep their own.
   - `WINDOW cursor <id> <name>`: the pointer shape the program asks for over
     that window, in Blit's own OSC 22 vocabulary -- one source of cursors,
     Blit's pointer art: a CSS cursor name (`default`, `text`, `pointer`,
