@@ -142,10 +142,17 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT frame 3 123456789012", &in) == BC_INPUT_FRAME &&
            in.time_us == 123456789012ull, "frame");
     EXPECT(bc_parse_input("INPUT frame 3 12x", &in) == BC_INPUT_UNKNOWN, "frame tail");
-    EXPECT(bc_parse_input("INPUT keymap 3 42\n", &in) == BC_INPUT_KEYMAP && in.id == 3 &&
-           in.revision == 42 && in.time_us == 0, "keymap notice");
+    EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 600\n", &in) == BC_INPUT_KEYMAP && in.id == 3 &&
+           in.revision == 42 && in.size == 9607 && in.rate == 25 && in.delay == 600 &&
+           in.time_us == 0, "keymap");
+    EXPECT(bc_parse_input("INPUT keymap 3 42 9607 0 0", &in) == BC_INPUT_KEYMAP && in.rate == 0 &&
+           in.delay == 0, "keymap, no repeat");
+    EXPECT(bc_parse_input("INPUT keymap 3 42\n", &in) == BC_INPUT_UNKNOWN, "keymap, the old notice");
     EXPECT(bc_parse_input("INPUT keymap 3", &in) == BC_INPUT_UNKNOWN, "keymap, no revision");
-    EXPECT(bc_parse_input("INPUT keymap 3 -1", &in) == BC_INPUT_UNKNOWN, "keymap, negative");
+    EXPECT(bc_parse_input("INPUT keymap 3 -1 9607 25 600", &in) == BC_INPUT_UNKNOWN, "keymap, negative");
+    EXPECT(bc_parse_input("INPUT keymap 3 42 9607 1001 600", &in) == BC_INPUT_UNKNOWN, "keymap, rate");
+    EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 60001", &in) == BC_INPUT_UNKNOWN, "keymap, delay");
+    EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 600 1", &in) == BC_INPUT_UNKNOWN, "keymap, extra");
     EXPECT(bc_parse_input("INPUT on 3", &in) == BC_INPUT_UNKNOWN, "not an input line");
 }
 

@@ -46,15 +46,19 @@
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
        INPUT frame <id> <monotonic us> after each event
-       INPUT keymap <id> <revision>    no frame: a notice, not an event
+       INPUT keymap <id> <revision> <size> <rate> <delay>
+                                       no frame: the keymap itself, below
 
-   `INPUT keymap` tells the compositor that what GET /v1/input/keymap
-   serves (the default keyboard's keymap and repeat) has changed: it is
-   written when the route is live and has not been told the current
-   revision -- at once when the revision changes (a keyboard configured,
-   plugged or gone, or a key from another keyboard, before that key), and
-   when the route goes live after a change -- and the compositor reads the
-   keymap again (If-None-Match).
+   `INPUT keymap` carries the keymap of the keyboard whose keys reach the
+   window (what GET /v1/input/keymap serves by default; one source,
+   input_keymap_of): a sealed memfd of `size` bytes, its xkb text and a
+   NUL, passed with the line (SCM_RIGHTS), and its repeat (per second and
+   ms; 0 0 none). It is written when the route is live and has not been
+   sent the current revision -- at once when the revision changes (a
+   keyboard configured, plugged or gone, or a key from another keyboard,
+   before that key), and when the route goes live after a change. The
+   compositor needs nothing else of Blit's to have a keymap: no API, no
+   token (ADR 0228).
 
    Everything else -- the checks on the socket, the live rule, focus,
    holds, members, release of everything held, diagnostics -- is the
@@ -194,7 +198,7 @@ struct BlitFrameInput {
     int last_draw[4];
     double last_sent[2];
     unsigned int last_over;     /* the picture the pointer was over: the route's or a member's */
-    unsigned long long keymap_told; /* the keymap revision this `sock` route was told */
+    unsigned long long keymap_told; /* the keymap revision this `sock` route was sent */
     const char *last_miss;
     BlitFrameMember members[BLIT_FRAME_INPUT_MEMBERS];
     int member_count;
@@ -306,10 +310,28 @@ static int frame_input_open_backend(const BlitFrameInput *in)
 /* Bytes on a `sock` route, in one write. A socket that cannot take all of
    them breaks the route (see the top of this file). Returns 0 when
    written. */
-static int frame_input_write(BlitSession *session, BlitFrameInput *in, const char *text,
-                             size_t length)
+static int frame_input_write_fd(BlitSession *session, BlitFrameInput *in, const char *text,
+                                size_t length, int fd)
 {
-    ssize_t sent = send(in->sock, text, length, MSG_NOSIGNAL | MSG_DONTWAIT);
+    char control[CMSG_SPACE(sizeof(int))];
+    struct iovec iov = { (void *)text, length };
+    struct msghdr msg;
+    ssize_t sent;
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    if (fd >= 0) {
+        struct cmsghdr *cmsg;
+        memset(control, 0, sizeof(control));
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof(control);
+        cmsg = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type = SCM_RIGHTS;
+        cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(cmsg), &fd, sizeof(int));
+    }
+    sent = sendmsg(in->sock, &msg, MSG_NOSIGNAL | MSG_DONTWAIT);
     if (sent == (ssize_t)length)
         return 0;
     in->broken = sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) ? "sock-full"
@@ -325,6 +347,37 @@ static int frame_input_write(BlitSession *session, BlitFrameInput *in, const cha
 
 /* One event on a `sock` route: its line and the frame after it, in one
    write. Returns 0 when written. */
+static int frame_input_write(BlitSession *session, BlitFrameInput *in, const char *text,
+                             size_t length)
+{
+    return frame_input_write_fd(session, in, text, length, -1);
+}
+
+/* The keymap of the keyboard whose keys reach the window, and its repeat,
+   to a `sock` route: `INPUT keymap <id> <revision> <size> <rate> <delay>`
+   with a sealed memfd of its text and a NUL. Returns 0 when written. */
+static int frame_input_send_keymap(BlitRuntime *runtime, BlitSession *session, BlitFrameInput *in)
+{
+    static char keymap[256 * 1024];
+    char text[128];
+    size_t length;
+    int rate, delay, fd, n, result;
+    length = input_keymap_of(input_keymap_device(runtime), keymap, sizeof(keymap), &rate, &delay);
+    if (length == 0)
+        return -1;
+    fd = memfd_create("blit-keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    if (fd < 0 || write(fd, keymap, length + 1) != (ssize_t)(length + 1) ||
+        fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL) != 0) {
+        if (fd >= 0) close(fd);
+        return -1;
+    }
+    n = snprintf(text, sizeof(text), "INPUT keymap %u %llu %zu %d %d\n", in->image_id,
+                 runtime->keymap_revision, length + 1, rate, delay);
+    result = frame_input_write_fd(session, in, text, (size_t)n, fd);
+    close(fd);
+    return result;
+}
+
 static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
 {
     char text[160];
@@ -440,15 +493,12 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
         return 0;
     }
     if (in->sock >= 0) {
-        /* Lines need nothing started; a live route is told the keymap's
-           revision when it has not been (ADR 0228). */
+        /* Lines need nothing started; a live route is sent the keymap
+           when it has not been sent this revision (ADR 0228). */
         if (in->keymap_told != runtime->keymap_revision) {
-            char text[64];
-            int n = snprintf(text, sizeof(text), "INPUT keymap %u %llu\n", in->image_id,
-                             runtime->keymap_revision);
             in->keymap_told = runtime->keymap_revision;
-            if (frame_input_write(find_session_id(runtime, client->session_id), in, text,
-                                  (size_t)n) != 0)
+            if (frame_input_send_keymap(runtime, find_session_id(runtime, client->session_id),
+                                        in) != 0)
                 return 0;
         }
         return 1;

@@ -972,8 +972,9 @@ def eis(stub=False):
 class LineReceiver:
     """blit-compositor's end of an `INPUT sock` route: a stream socket whose
     connection carries `INPUT <kind> <id> ...` lines, each event followed by
-    `INPUT frame <id> <us>`, and `INPUT keymap <id> <revision>` notices,
-    which are no event and have no frame."""
+    `INPUT frame <id> <us>`, and `INPUT keymap <id> <revision> <size>
+    <rate> <delay>`, which is no event and has no frame, with a sealed
+    memfd of the keymap passed with it."""
 
     def __init__(self, work, name='input-0'):
         self.path = os.path.join(work, name)
@@ -983,6 +984,8 @@ class LineReceiver:
         self.buffer = b''
         self.events = []      # the lines, frames apart
         self.notices = []     # `keymap <id> <revision>`
+        self.keymaps = []     # (text, rate, delay) of each keymap line
+        self.fds = []         # passed and not yet matched to a line
         self.frames = 0
         self.total = 0        # every event line read
 
@@ -992,9 +995,10 @@ class LineReceiver:
     def read(self, wait):
         self.conn.settimeout(wait)
         try:
-            data = self.conn.recv(65536)
+            data, fds, _, _ = socket.recv_fds(self.conn, 65536, 8)
         except socket.timeout:
             return False
+        self.fds += fds
         if not data:
             return False
         self.buffer += data
@@ -1006,9 +1010,23 @@ class LineReceiver:
                 check(len(words) == 4 and int(words[3]) > 0, 'a frame line %r' % line)
                 self.frames += 1
             elif words[1] == 'keymap':
-                check(len(words) == 4 and int(words[3]) > 0 and self.total == self.frames,
-                      'a keymap notice %r' % line)
-                self.notices.append(' '.join(words[1:]))
+                check(len(words) == 7 and int(words[3]) > 0 and self.total == self.frames,
+                      'a keymap line %r' % line)
+                check(self.fds, 'no memfd passed with %r' % line)
+                fd = self.fds.pop(0)
+                try:
+                    seals = fcntl.fcntl(fd, 1034)  # F_GET_SEALS
+                    check(seals & 0x0e == 0x0e, 'the keymap memfd is not sealed: %#x' % seals)
+                    size = int(words[4])
+                    check(os.fstat(fd).st_size == size, 'the keymap memfd holds %d bytes, the line says %d'
+                          % (os.fstat(fd).st_size, size))
+                    text = os.pread(fd, size, 0)
+                finally:
+                    os.close(fd)
+                check(text.endswith(b'\0') and text.startswith(b'xkb_keymap'),
+                      'the keymap memfd is not xkb text and a NUL: %r' % text[:40])
+                self.keymaps.append((text[:-1].decode(), int(words[5]), int(words[6])))
+                self.notices.append(' '.join(words[1:4]))
             else:
                 check(self.total == self.frames, 'an event before the last one\'s frame: %r' % line)
                 self.total += 1
@@ -1063,6 +1081,17 @@ def sock():
         receiver.read(0.3)
         check(len(receiver.notices) == 1 and receiver.notices[0].startswith('keymap 7 '),
               'the keymap notice when the route went live: %s' % receiver.notices)
+        # The keymap itself, one source with GET /v1/input/keymap: its text
+        # and its repeat headers.
+        with urllib.request.urlopen(server.base + '/v1/input/keymap', timeout=10) as response:
+            served = response.read().decode()
+            served_repeat = (int(response.headers['X-Blit-Repeat-Rate']),
+                             int(response.headers['X-Blit-Repeat-Delay']))
+        text, rate, delay = receiver.keymaps[0]
+        check(text == served, 'the route\'s keymap (%d bytes) is not what GET /v1/input/keymap serves '
+              '(%d bytes)' % (len(text), len(served)))
+        check((rate, delay) == served_repeat, 'the route\'s repeat %s, the API\'s %s'
+              % ((rate, delay), served_repeat))
 
         def key(code, *values):
             for v in values:
@@ -1207,7 +1236,7 @@ def sock():
     print('FRAME_INPUT_SOCK_PASS answers=OK,ENOENT,EINVAL,EBUSY backend=sock keys=ordered,repeats-dropped '
           'off+unfocused=silent release_all=off,focus wheel=0,-1/0,1 ptr=frame-pixels '
           'member=EINVALx6,OK,offset+point,negative,ends-with-picture rel=70,-30 '
-          'keymap-notice=at-live,once(%s) '
+          'keymap=memfd,at-live,once,=api(%s) '
           'not-taken=dropped+ENOENT closed=ENOENT frames=%d' % (notices, receiver.frames))
 
 

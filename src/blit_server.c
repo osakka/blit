@@ -19,6 +19,7 @@
 #include "blit_ink.h"
 
 #include <arpa/inet.h>
+#include <sys/mman.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1628,8 +1629,8 @@ typedef struct {
     unsigned long long input_devices_revision;
     /* ADR 0228: the keyboard GET /v1/input/keymap serves by default -- the
        one whose key came last ("" before any) -- and the revision of what
-       it serves (its keymap and repeat), told to blit-compositor's input
-       routes as `INPUT keymap <id> <revision>` when it changes. */
+       it serves (its keymap and repeat), sent to blit-compositor's input
+       routes as `INPUT keymap` with the keymap itself when it changes. */
     char keymap_device_id[BLIT_INPUT_ID_CAPACITY];
     unsigned long long keymap_revision;
     BlitAudioDevice audio_devices[BLIT_MAX_AUDIO_DEVICES];
@@ -30050,6 +30051,26 @@ static const BlitInputDevice *input_keymap_device(const BlitRuntime *runtime)
     return NULL;
 }
 
+/* A keyboard's keymap as xkb text into `out`, and its repeat as the kernel
+   holds it (per second, ms; 0 0 for a keyboard the kernel does not
+   autorepeat). NULL is the built-in US table with no overrides and no
+   repeat. The one source for GET /v1/input/keymap and for blit-compositor's
+   `INPUT keymap` (ADR 0228). Returns the text's length, 0 when it did not
+   fit. */
+static size_t input_keymap_of(const BlitInputDevice *device, char *out, size_t capacity,
+                              int *rate, int *delay)
+{
+    static BlitInputDevice builtin;
+    if (device == NULL) device = &builtin;
+    *rate = *delay = 0;
+    if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) && device->repeat_period_ms > 0 &&
+        device->repeat_delay_ms > 0) {
+        *rate = input_repeat_rate_for_period(device->repeat_period_ms);
+        *delay = device->repeat_delay_ms;
+    }
+    return xkb_keymap_text(device, out, capacity);
+}
+
 /* GET /v1/input/keymap[?device=<id>] (blit_xkb_keymap.h): the keyboard's
    xkb keymap as text. The keyboard is the one named, else
    input_keymap_device's, else none: the built-in US table with no
@@ -30062,7 +30083,6 @@ static const BlitInputDevice *input_keymap_device(const BlitRuntime *runtime)
 static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
                                   const char *path, char *body, size_t capacity)
 {
-    static BlitInputDevice builtin;
     const BlitInputDevice *device = NULL;
     const char *query = strstr(path, "device=");
     char revision[65], etag[96], extra[192 + BLIT_INPUT_ID_CAPACITY], match[512];
@@ -30088,13 +30108,7 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
     } else {
         device = input_keymap_device(runtime);
     }
-    if (device == NULL) device = &builtin;
-    if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) && device->repeat_period_ms > 0 &&
-        device->repeat_delay_ms > 0) {
-        rate = input_repeat_rate_for_period(device->repeat_period_ms);
-        delay = device->repeat_delay_ms;
-    }
-    length = xkb_keymap_text(device, body, capacity);
+    length = input_keymap_of(device, body, capacity, &rate, &delay);
     if (length == 0) {
         send_problem(fd, 500, "Internal Server Error", "input_keymap_unserialisable",
                      "The keymap did not fit its response buffer.");
@@ -30104,7 +30118,7 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
     snprintf(etag, sizeof(etag), "\"%s\"", revision);
     snprintf(extra, sizeof(extra),
              "ETag: %s\r\nX-Blit-Keymap-Device: %s\r\nX-Blit-Repeat-Rate: %d\r\n"
-             "X-Blit-Repeat-Delay: %d\r\n", etag, device == &builtin ? "builtin" : device->id,
+             "X-Blit-Repeat-Delay: %d\r\n", etag, device == NULL ? "builtin" : device->id,
              rate, delay);
     if ((request_header(request, "If-None-Match:", match, sizeof(match)) ||
          request_header(request, "if-none-match:", match, sizeof(match))) &&

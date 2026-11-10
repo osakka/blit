@@ -1733,11 +1733,12 @@ keymap's text, so a change of repeat alone keeps the ETag: a client asking
 with `If-None-Match` reads the new repeat from the 304. These are what
 `wl_keyboard.repeat_info` carries (rate 0: no repeat).
 
-blit-compositor is told when what this serves may have changed -- a
-keyboard's settings, a keyboard enabled, disabled, plugged or gone, or the
-default moving to another keyboard -- by `INPUT keymap` on its input routes
-("Input straight from Blit"); a client of the event stream sees the same
-changes as `device_changed`.
+blit-compositor is sent this same keymap and repeat (one source) by
+`INPUT keymap` on its input routes ("Input straight from Blit") whenever it
+may have changed -- a keyboard's settings, a keyboard enabled, disabled,
+plugged or gone, or the default moving to another keyboard -- so it needs
+neither this endpoint nor a token; a client of the event stream sees the
+same changes as `device_changed`.
 
 ```text
 GET /v1/input/keymap
@@ -2239,7 +2240,8 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT btn   <id> <BTN_code> press|release
   INPUT wheel <id> <dx> <dy>           notches
   INPUT frame <id> <monotonic-us>      ends one batch of events
-  INPUT keymap <id> <revision>         the keymap or repeat changed
+  INPUT keymap <id> <revision> <size> <rate> <delay>
+                                       the keymap (a memfd passed with it)
   ```
   Keys are raw evdev codes; the compositor derives modifiers and characters
   with the keymap below, so there is one source. `ptr` is in pixels of the
@@ -2255,23 +2257,23 @@ It speaks the frame channel above as a producer, with these additions.
   ENOENT`, as when the compositor closes the socket itself
   (`last_error` `sock-disconnected`, or `sock-full`). Each route in
   `frames.input` says its `backend`, `eis` or `sock`.
-  `INPUT keymap` is a notice, not an event: no `frame` follows it, it is
-  not counted in `events`, and it may come between batches. It says that
-  what `GET /v1/input/keymap` serves by default ("Keyboard map (xkb)") --
-  the keymap or the repeat of the keyboard whose keys reach the window --
-  has changed, to `revision`, a number that only grows while Blit runs.
-  Blit writes it on a route when the route is live and has not been told
-  the current revision: at once when the revision changes (a keyboard's
-  settings, a keyboard enabled, disabled, plugged or gone, or a key from
-  another keyboard, written before that key), and when the route goes live
-  after a change, its first line. The compositor reads the keymap again for
-  a revision it has not read for (with `If-None-Match`, from whichever
-  route says it first), synchronously with a 250 ms bound on loopback, so
-  the key that follows the notice is read with the new keymap: it sends its
-  clients the new keymap after a 200 and new `repeat_info` when the repeat
-  headers change. A read that fails keeps the last keymap and is tried
-  again at the next keyboard enter; otherwise the compositor reads the
-  keymap only at start and on a notice.
+  `INPUT keymap` is no event: no `frame` follows it, it is not counted in
+  `events`, and it may come between batches. It carries the keymap of the
+  keyboard whose keys reach the window -- what `GET /v1/input/keymap`
+  serves by default ("Keyboard map (xkb)"), the same bytes -- as a sealed
+  memfd passed with the line (SCM_RIGHTS) of `size` bytes, the xkb text and
+  a NUL, and that keyboard's repeat, `rate` per second after `delay` ms (0
+  0: no repeat). `revision` only grows while Blit runs. Blit writes it on a
+  route when the route is live and has not been sent the current revision:
+  at once when the revision changes (a keyboard's settings, a keyboard
+  enabled, disabled, plugged or gone, or a key from another keyboard,
+  written before that key), and when the route goes live after a change,
+  its first line. So the key that follows is read with the new keymap. The
+  compositor compiles it, sends its clients the new keymap and, when the
+  repeat changes, `repeat_info`; the same bytes as the keymap it has
+  change only the repeat (compared by bytes: a restarted Blit counts
+  revisions afresh). Until a route's first keymap its clients are sent
+  `no_keymap`, and keys still reach them.
   blit-compositor's input socket is `$XDG_RUNTIME_DIR/<display>-input`
   (mode 0600), and it sends `INPUT sock` for each top-level right after its
   `WINDOW new` hints. It gives the keyboard to the window whose route sends
@@ -2321,17 +2323,17 @@ It speaks the frame channel above as a producer, with these additions.
     announced, if later); a oneshot constraint deactivated by `off` is
     spent, so destroying it afterwards sends nothing, and a program that
     wants the lock again makes a new constraint, which asks again.
-- **The keyboard map** comes from Blit's API, generated from Blit's own
-  keyboard tables (its evdev-to-character maps and modifier roles) -- one
-  source: `GET /v1/input/keymap` ("Keyboard map (xkb)" above) returns a complete
-  xkb keymap as text (`xkb_v1`), which the compositor compiles with
-  libxkbcommon and hands to clients, with its repeat; it reads it again,
-  conditionally (`If-None-Match`), on Blit's `INPUT keymap` notice, so a
-  change of Blit's keyboard settings, or keys from another keyboard,
-  reach the windows at once. It finds Blit
-  by `BLIT_SERVER_PORT` (and `BLIT_API_TOKEN`), which every program in a
-  Blit session has; without a keymap its clients are sent `no_keymap`. The
-  desktop never touches it.
+- **The keyboard map** is generated from Blit's own keyboard tables (its
+  evdev-to-character maps and modifier roles) -- one source -- and comes on
+  the input route itself: `INPUT keymap` with a sealed memfd of the xkb
+  text (`xkb_v1`, the bytes `GET /v1/input/keymap` serves) and the repeat,
+  which the compositor compiles with libxkbcommon and hands to clients. A
+  change of Blit's keyboard settings, or keys from another keyboard, reach
+  the windows at once. The compositor needs no API, no port and no token
+  for it (the desktop session has none of Blit's: the login screen keeps
+  its own, ADR 0228), and with several displays each route's Blit is the
+  one whose keys it carries. Without a keymap its clients are sent
+  `no_keymap`. The desktop never touches it.
 - **Open in this draft:** the clipboard, which phase 2 decides with the X
   window manager's selections.
 

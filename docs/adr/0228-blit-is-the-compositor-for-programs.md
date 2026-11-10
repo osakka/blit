@@ -371,7 +371,9 @@ Blit-side work that closes phase 1, apart from the owner's live check.
   the ETag keeps its meaning and a 304 still brings a new repeat.
   blit-compositor sends `wl_keyboard.repeat_info` from them; its 25 a
   second after 600 ms is gone.
-- **The keymap read only when it changes.** Blit keeps a keymap revision,
+- **The keymap read only when it changes** (superseded on 2026-11-10: the
+  keymap now comes on the route itself; see "The keymap on the route, not
+  the API" below). Blit keeps a keymap revision,
   bumped by any keyboard's device change (the event stream's
   `device_changed` and this are one signal) and when the default keyboard
   moves, and writes `INPUT keymap <id> <revision>` on each live `sock`
@@ -504,3 +506,25 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   its initial commit within one roundtrip, and its scripted steps
   (popup, states, lock, animation) wait for a configure that carries the
   desktop's size.
+- **The keymap on the route, not the API (2026-11-10).** On the mini PC
+  the compositor logged `keymap: GET /v1/input/keymap answered 0
+  (BLIT_SERVER_PORT unset): clients get no_keymap`. The desktop session
+  has no BLIT_SERVER_PORT or BLIT_API_TOKEN by design: the login screen
+  passes only BLIT_VERSION and the frame socket and token into the PAM
+  session, its API token being the login screen's own (Hibr's
+  login.hibr, a decision of 0.99.357). Passing the greeter's token on, or
+  minting a session token, would have kept two hops (a notice on the
+  route, then an HTTP read) and a credential the compositor has no other
+  use for, and with several displays one held desktop's environment names
+  one Blit session's API. Blit already writes to the compositor directly,
+  so the keymap goes with the notice: `INPUT keymap <id> <revision> <size>
+  <rate> <delay>` and a sealed memfd of the text and a NUL (SCM_RIGHTS),
+  built by the one function GET /v1/input/keymap serves from
+  (input_keymap_of). The compositor's HTTP client, its 250 ms synchronous
+  read, the retry at keyboard enter and its environment lookup are gone;
+  it installs a keymap whose bytes differ from the one it has (revisions
+  restart with Blit) and otherwise applies only the repeat.
+  `frame_input_gate` checks the memfd is sealed and byte-for-byte the
+  API's keymap and repeat; `compositor_gate` runs the compositor with no
+  port or token, the gate sending a real Blit's keymap as Blit does, then
+  a real Blit's route switching keyboards B and A before their keys.

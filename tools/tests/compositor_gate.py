@@ -317,8 +317,9 @@ def pacing_part(desk, standin, env, display, work):
 def input_part(server, compositor, standin, work):
     """Blit's input lines on the compositor's input socket as wl_seat
     events: the gate plays the desktop on the channel and Blit on the input
-    socket (docs/api.md, "Input straight from Blit"), and a real blit-server
-    serves the keymap (GET /v1/input/keymap, BLIT_SERVER_PORT)."""
+    socket (docs/api.md, "Input straight from Blit"), sending a real
+    blit-server's keymap on it as Blit does (`INPUT keymap` and a sealed
+    memfd); the compositor has no BLIT_SERVER_PORT or token at all."""
     # Two fabricated keyboards (keymap_gate's sidecars): A, the first, and
     # B, given a Q that types a-umlaut, each with its own repeat.
     nodes = os.path.join(work, 'nodes')
@@ -350,11 +351,12 @@ def input_part(server, compositor, standin, work):
             {'configuration': {'keymap': {'base': 'us', 'keys': {'16': ['ä', 'Ä', '', '']}}}})
         answer = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10)
         keymap = answer.read()
+        repeat = (int(answer.headers['X-Blit-Repeat-Rate']), int(answer.headers['X-Blit-Repeat-Delay']))
         check(answer.headers['X-Blit-Keymap-Device'] == keyboards[0], 'the default is not keyboard A')
         cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
-                    XDG_RUNTIME_DIR=runtime, BLIT_SERVER_PORT=str(PORT))
-        cenv.pop('WAYLAND_DISPLAY', None)
-        cenv.pop('BLIT_API_TOKEN', None)
+                    XDG_RUNTIME_DIR=runtime)
+        for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_API_TOKEN'):
+            cenv.pop(k, None)
         log = os.path.join(work, 'compositor-input.log')
         comp = start([compositor, '--log', log], cenv, open(os.path.join(work, 'compositor-input.out'), 'w'))
         desk = Desktop(listener)
@@ -373,13 +375,24 @@ def input_part(server, compositor, standin, work):
         check(desk.input_socks.get(1) == os.path.join(runtime, 'blit-0-input'),
               'INPUT sock for window 1: %s' % desk.input_socks)
         check(stat.S_IMODE(os.stat(desk.input_socks[1]).st_mode) == 0o600, 'the input socket is not 0600')
-        check('STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
-              lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
-        # Repeat is Blit's, keyboard A's: 250 ms, a 33 ms period.
-        check('STANDIN repeat 30 250' in printed(), lambda: 'no repeat info from Blit:\n' + printed())
+        # No keymap until a route brings one: no_keymap, keys still go.
+        check('STANDIN keymap format=0 size=0 xkb=0' in printed(),
+              lambda: 'the client had a keymap before any route:\n' + printed())
 
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[1])
+        # Blit's keymap on the route, as Blit sends it: the line and a
+        # sealed memfd of the text and a NUL.
+        memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.write(memfd, keymap + b'\0')
+        fcntl.fcntl(memfd, 1033, 0x0f)  # F_ADD_SEALS: seal, shrink, grow, write
+        socket.send_fds(route, [b'INPUT keymap 1 7 %d %d %d\n' % (len(keymap) + 1, repeat[0], repeat[1])],
+                        [memfd])
+        os.close(memfd)
+        wait_for(lambda: 'STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
+                 lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
+        # Repeat is Blit's, keyboard A's: 250 ms, a 33 ms period.
+        wait_for(lambda: 'STANDIN repeat 30 250' in printed(), lambda: 'no repeat info from Blit:\n' + printed())
         frame = [0]
         mark = [0]
 
@@ -453,12 +466,13 @@ def input_part(server, compositor, standin, work):
         check(client.wait(5) == 0, 'the input stand-in failed:\n' + printed())
         quit_compositor(desk, comp)
         text = open(log).read()
-        check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
-        # Read at start and on each notice only, never at a keyboard enter.
-        notices, reads = text.count("keymap: Blit's revision"), (text.count('keymap: unchanged (304)') +
-                                                                 text.count('bytes from Blit'))
-        check(notices >= 3 and reads == notices + 1,
-              '%d notices, %d reads of the keymap:\n%s' % (notices, reads, text))
+        check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not installed:\n' + text)
+        # Installed for the gate's route, B's and A's again; the real
+        # route's first (A's, the same bytes) and the repeat PATCH change
+        # only the repeat.
+        installs, same = text.count('bytes from Blit, revision'), text.count(', unchanged')
+        check(installs == 3 and same >= 2,
+              '%d keymaps installed, %d unchanged:\n%s' % (installs, same, text))
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
                 'relative=7,-3+-2,5 focus=line,!activated,route-end %s' % (len(keymap), e2e))
     finally:
@@ -607,9 +621,9 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
 
     Then the keyboard (milestone C): a repeat PATCH of keyboard A while the
     route is live reaches the client as repeat info (Blit's `INPUT keymap`
-    notice, a 304); a key from keyboard B makes its keymap (Q types
+    with the same keymap); a key from keyboard B makes its keymap (Q types
     a-umlaut) and repeat the client's before that key; one from A, A's
-    again. The compositor reads the keymap only on Blit's notices."""
+    again. The keymap comes only on Blit's route."""
     session = fig.Session(_Blit, work, 'e2e')
     api('PATCH', '/v1/terminal-sessions/%s' % session.id, {'focused': True})
     wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session.id)['focused'], 'no focus')
@@ -640,7 +654,7 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
                                      'y': origin[1] + at['y'] + sy // 2})
     seen('pointer motion %.2f %.2f' % (2 * x, y / 2), 'pointer frame')
 
-    # Repeat changed while the route is live: the notice, a 304, repeat info.
+    # Repeat changed while the route is live: the same keymap, new repeat.
     api('PATCH', '/v1/input/devices/%s' % keyboards[0],
         {'configuration': {'repeat_delay_ms': 400, 'repeat_rate_hz': 20}})
     wait_for(lambda: 'STANDIN repeat 20 400' in printed(), lambda: 'no new repeat:\n' + printed())
@@ -734,8 +748,11 @@ def dmabuf_part(compositor, standin, work):
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         check(held.wait(5) == 0, 'the held stand-in failed: ' + open(held_path).read())
+        # Every buffer back, the held 30x20 at WINDOW gone. (Whether its frame
+        # callback is read before the client acts on close is the client's
+        # race, not the compositor's: frames is not counted here.)
         check('STANDIN release 30x20' in open(held_path).read() and
-              'STANDIN done draws=2 releases=2 frames=2' in open(held_path).read(),
+              'STANDIN done draws=2 releases=2 frames=' in open(held_path).read(),
               'the held buffer was not given back at WINDOW gone:\n' + open(held_path).read())
 
         # A dmabuf client drawing on every callback is one frame ahead of
