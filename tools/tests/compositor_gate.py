@@ -420,6 +420,12 @@ def input_part(server, compositor, standin, work):
         lines_to('rel 1 7 -3', 'rel 1 -2 5')
         seen('relative 7.00 -3.00', 'pointer frame', 'relative -2.00 5.00', 'pointer frame')
         e2e = popup_end_to_end(desk, work, seen, keyboards, printed, mark)
+        # Blit's route ended with its channel: the keyboard left with it.
+        # Back by a key on the gate's route, so `!activated` below is what
+        # takes it away.
+        seen('keyboard leave main')
+        lines_to('key 1 31 press', 'key 1 31 release')
+        seen('keyboard enter main', 'modifiers 0 0 0 0', 'key 31 1', 'key 31 0')
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         # The desktop takes the window's focus: the keyboard leaves it.
