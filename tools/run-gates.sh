@@ -54,6 +54,10 @@ Environment:
   PKG_CONFIG_PATH    where pkg-config finds the build dependencies
                      (tools/build-flags.sh, docs/toolchain.md)
   BLIT_GATE_BACKEND  native (default) or gles
+  BLIT_GATE_SERVER_ENV  NAME=value words given to every gate server. Gate
+                     servers inherit no other BLIT_*, HIBR_*, LISTEN_* or
+                     WAYLAND_DISPLAY and open no real input device
+                     (tools/tests/gate_env.rb, .py, .sh)
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
   BLIT_GATE_LIVE_DMABUF  live host whose GPU imports dmabufs (BLIT_AUTH_TOKEN
@@ -383,6 +387,7 @@ suite_schema() {
     run_gate package_entrypoint_policy_gate.rb ruby tools/tests/package_entrypoint_policy_gate.rb
     run_gate api_schema_gate.rb ruby tools/tests/api_schema_gate.rb
     run_gate run_gates_gate.rb ruby tools/tests/run_gates_gate.rb
+    run_gate gate_env_gate.rb ruby tools/tests/gate_env_gate.rb
     run_gate documentation_gate.rb ruby tools/tests/documentation_gate.rb
     run_gate observation_api_gate.rb ruby tools/tests/observation_api_gate.rb
     run_gate stream_replay_gate.rb ruby tools/tests/stream_replay_gate.rb

@@ -169,6 +169,20 @@ The runner is measured, bounded and parallel (ADR 0216):
 | `BLIT_GATE_JOBS` | Gates run at once; default `min(4, nproc/2)`. `1` is the plain serial run. |
 | `BLIT_GATE_TIMEOUT` | Seconds one gate may take; default 300, with more for the few gates that wait on purpose. A gate over it is killed with its server and reported `FAIL ... TIMEOUT`; it is never retried. |
 | `BLIT_GATE_PORT_OFFSET` | Added to every fixed gate port. Parallel workers add a stride of 1000 each. Give each checkout or agent running gates at the same time its own offset: 0, 4000, 8000 (the runner refuses offsets that reach the ephemeral port range). |
+| `BLIT_GATE_SERVER_ENV` | `NAME=value` words given to every gate server, e.g. `BLIT_GATE_SERVER_ENV='BLIT_FOO=1'`. The one way to give gate servers a variable on purpose; a gate's own settings still win. |
+
+Gate servers are sealed from the host they run on. Every gate starts
+blit-server (and blit-compositor) through one helper per language --
+`gate_spawn`/`gate_sudo_argv` in `tools/tests/gate_env.rb`,
+`server_env`/`process_env` in `tools/tests/gate_env.py`, `$GATE_SERVER_ENV` from
+`tools/tests/gate_env.sh` -- with the same rule: the caller's environment minus
+every `BLIT_*`, `HIBR_*` and `LISTEN_*` variable, `WAYLAND_DISPLAY`,
+`WAYLAND_SOCKET` and `NOTIFY_SOCKET`; then `BLIT_INPUT_ROOT` set to an empty
+directory, so no real `/dev/input` device is opened; then the
+`BLIT_GATE_SERVER_ENV` words; then what the gate sets. Running the gates from
+inside a Blit session therefore changes nothing, and `gate_env_gate.rb` proves
+it with a polluted environment. A new gate that starts a server uses the
+helper; it never spawns one with the inherited environment.
 
 Gates that depend on a quiet machine (cadence, frame rate, "saved within N
 ms", the soak, update/restart timing) are marked `run_serial_gate`: they run
