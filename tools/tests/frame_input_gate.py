@@ -972,7 +972,8 @@ def eis(stub=False):
 class LineReceiver:
     """blit-compositor's end of an `INPUT sock` route: a stream socket whose
     connection carries `INPUT <kind> <id> ...` lines, each event followed by
-    `INPUT frame <id> <us>`."""
+    `INPUT frame <id> <us>`, and `INPUT keymap <id> <revision>` notices,
+    which are no event and have no frame."""
 
     def __init__(self, work, name='input-0'):
         self.path = os.path.join(work, name)
@@ -981,6 +982,7 @@ class LineReceiver:
         self.conn = None
         self.buffer = b''
         self.events = []      # the lines, frames apart
+        self.notices = []     # `keymap <id> <revision>`
         self.frames = 0
         self.total = 0        # every event line read
 
@@ -1003,6 +1005,10 @@ class LineReceiver:
             if words[1] == 'frame':
                 check(len(words) == 4 and int(words[3]) > 0, 'a frame line %r' % line)
                 self.frames += 1
+            elif words[1] == 'keymap':
+                check(len(words) == 4 and int(words[3]) > 0 and self.total == self.frames,
+                      'a keymap notice %r' % line)
+                self.notices.append(' '.join(words[1:]))
             else:
                 check(self.total == self.frames, 'an event before the last one\'s frame: %r' % line)
                 self.total += 1
@@ -1050,8 +1056,13 @@ def sock():
         r = route(server.input(a.id), 7)
         check(r['backend'] == 'sock' and r['state'] == 'off', 'frames.input %s' % r)
         receiver.nothing('a route that starts off')
+        check(receiver.notices == [], 'a keymap notice to a route that is off: %s' % receiver.notices)
         ch.line('INPUT on 7\n')
         wait_for(lambda: state(server, a.id, 7) == 'live', 'the route did not go live')
+        # Live: told the keymap's revision once (ADR 0228), and not again.
+        receiver.read(0.3)
+        check(len(receiver.notices) == 1 and receiver.notices[0].startswith('keymap 7 '),
+              'the keymap notice when the route went live: %s' % receiver.notices)
 
         def key(code, *values):
             for v in values:
@@ -1161,6 +1172,8 @@ def sock():
         check(total == [70, -30], 'relative motion summed to %s' % total)
         a.write('\033[?7701l')
         wait_for(lambda: not server.locked(a.id), 'the lock was not released')
+        notices = ','.join(receiver.notices)
+        check(len(receiver.notices) == 1, 'keymap notices with no keyboard change: %s' % receiver.notices)
         check(receiver.frames == receiver.total and receiver.total >= 15,
               'events and frames: %d events, %d frames' % (receiver.total, receiver.frames))
 
@@ -1194,7 +1207,8 @@ def sock():
     print('FRAME_INPUT_SOCK_PASS answers=OK,ENOENT,EINVAL,EBUSY backend=sock keys=ordered,repeats-dropped '
           'off+unfocused=silent release_all=off,focus wheel=0,-1/0,1 ptr=frame-pixels '
           'member=EINVALx6,OK,offset+point,negative,ends-with-picture rel=70,-30 '
-          'not-taken=dropped+ENOENT closed=ENOENT frames=%d' % receiver.frames)
+          'keymap-notice=at-live,once(%s) '
+          'not-taken=dropped+ENOENT closed=ENOENT frames=%d' % (notices, receiver.frames))
 
 
 if __name__ == '__main__':

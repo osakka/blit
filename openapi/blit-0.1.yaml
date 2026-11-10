@@ -1209,11 +1209,14 @@ paths:
         types with them, the device's `keymap` overrides on the built-in US
         table, and a code with a `modifiers` role is that modifier -- so it
         has no second source. Keycodes are evdev codes plus 8. The keyboard
-        is `device` when given, else the first enabled device Blit reads as
+        is `device` when given, else the keyboard whose key came last while
+        it is there and enabled, else the first enabled device Blit reads as
         a keyboard, else the built-in table alone; `X-Blit-Keymap-Device`
         names it (`builtin` for none). The ETag is the SHA-256 of the text,
         so it changes exactly when the keymap does; `If-None-Match` is
-        answered 304.
+        answered 304. Both answers carry the keyboard's repeat as the kernel
+        holds it, `X-Blit-Repeat-Rate` (a second) and `X-Blit-Repeat-Delay`
+        (ms), 0 and 0 for a keyboard without autorepeat or none.
       parameters:
         - name: device
           in: query
@@ -1226,10 +1229,18 @@ paths:
           headers:
             ETag: {schema: {type: string}}
             X-Blit-Keymap-Device: {schema: {type: string}}
+            X-Blit-Repeat-Rate: {schema: {type: integer, minimum: 0}}
+            X-Blit-Repeat-Delay: {schema: {type: integer, minimum: 0}}
           content:
             text/plain:
               schema: {type: string}
-        '304': {description: The keymap is the one If-None-Match names}
+        '304':
+          description: The keymap is the one If-None-Match names; the repeat may not be
+          headers:
+            ETag: {schema: {type: string}}
+            X-Blit-Keymap-Device: {schema: {type: string}}
+            X-Blit-Repeat-Rate: {schema: {type: integer, minimum: 0}}
+            X-Blit-Repeat-Delay: {schema: {type: integer, minimum: 0}}
         '404':
           $ref: '#/components/responses/Problem'
         default:

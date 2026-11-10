@@ -51,6 +51,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -191,6 +192,9 @@ struct bc_server {
     uint32_t keymap_size;
     char keymap_etag[96];
     int keymap_warned;
+    uint64_t keymap_revision;         /* the last `INPUT keymap` revision read for */
+    int keymap_stale;                 /* a notice's read failed: read again at the next enter */
+    int32_t repeat_rate, repeat_delay;    /* Blit's, from the keymap's headers; 0 0 none */
     uint32_t mods[4];
     int mods_sent;
     unsigned char keys_down[96];      /* evdev codes down, through KEY_MAX */
@@ -203,11 +207,6 @@ struct bc_server {
 };
 
 static struct bc_server *g_server;
-
-/* The key repeat clients are told (Blit's per-device repeat is not on the
-   wire): 25 a second after 600 ms. */
-#define BC_REPEAT_RATE 25
-#define BC_REPEAT_DELAY 600
 
 static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r);
 static void keyboard_send_modifiers(struct bc_server *s, int force);
@@ -1469,7 +1468,7 @@ static void seat_get_keyboard(struct wl_client *client, struct wl_resource *reso
     wl_list_insert(&s->keyboards, wl_resource_get_link(r));
     keyboard_send_keymap(s, r);
     if (wl_resource_get_version(r) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
-        wl_keyboard_send_repeat_info(r, BC_REPEAT_RATE, BC_REPEAT_DELAY);
+        wl_keyboard_send_repeat_info(r, s->repeat_rate, s->repeat_delay);
     if (s->kbd_focus && wl_resource_get_client(s->kbd_focus->resource) == client) {
         struct wl_array keys;
         wl_array_init(&keys);
@@ -2186,16 +2185,27 @@ static struct bc_xdg *window_by_id(struct bc_server *s, uint32_t id)
      wl_pointer.frame at Blit's INPUT frame.
    - relative motion: zwp_relative_pointer_v1 (below).
 
-   The keymap is read at start and again, conditionally (If-None-Match),
-   whenever the keyboard enters a window, so a change of Blit's keyboard
-   settings reaches the next window focused; a client is sent the new one
-   at once. It needs BLIT_SERVER_PORT (and BLIT_API_TOKEN when Blit has a
-   token), which every program in a Blit session has; without a keymap the
-   keyboard is sent `no_keymap` and keys are still delivered. Repeat is the
-   client's: 25 a second after 600 ms (Blit's per-device repeat is not on
-   the wire). */
+   The keymap is read at start, and again, conditionally (If-None-Match),
+   on Blit's notice `INPUT keymap <id> <revision>` (a revision not read for
+   yet): Blit sends it on a live route when what GET /v1/input/keymap
+   serves has changed -- a keyboard configured, plugged or gone, or a key
+   from another keyboard, before that key -- so the key that follows is
+   read with the new keymap. The read is synchronous with a short bound
+   (BC_KEYMAP_NOTICE_MS on loopback, only on a notice; a read that fails
+   keeps the last keymap and is tried again at the next keyboard enter).
+   Clients are sent a new keymap at once, and new repeat info when Blit's
+   X-Blit-Repeat-Rate and X-Blit-Repeat-Delay change (on a 200 or a 304:
+   repeat is not part of the keymap's text); those are the active
+   keyboard's repeat, its kernel's (0 0: no repeat). It needs
+   BLIT_SERVER_PORT (and BLIT_API_TOKEN when Blit has a token), which every
+   program in a Blit session has; without a keymap the keyboard is sent
+   `no_keymap` and no repeat, and keys are still delivered. */
 
 #define BC_KEYMAP_BYTES (512 * 1024)
+/* How long the keymap is read for: at start, before any client, and on a
+   notice, when the event loop waits for it. */
+#define BC_KEYMAP_START_MS 1000
+#define BC_KEYMAP_NOTICE_MS 250
 
 struct bc_input_conn {
     struct wl_list link;              /* bc_server.input_conns */
@@ -2207,24 +2217,51 @@ struct bc_input_conn {
     size_t len;
 };
 
-/* A minimal HTTP/1.0 GET of Blit's API on loopback, bounded in time and
-   size. Returns the status (0 when unreachable), the body (NUL ended,
-   malloc'd, the caller frees) and the ETag. */
-static int bc_http_get(const char *path, const char *if_none_match, char **body, size_t *length,
-                       char *etag, size_t etag_cap)
+/* A response header's value into `out` ("" without one). */
+static void bc_http_header(const char *head, const char *name, char *out, size_t cap)
+{
+    const char *p = head;
+    size_t n = strlen(name);
+    out[0] = '\0';
+    while ((p = strstr(p, "\r\n")) != NULL) {
+        p += 2;
+        if (strncasecmp(p, name, n) == 0 && p[n] == ':') {
+            size_t m;
+            p += n + 1;
+            while (*p == ' ') ++p;
+            m = strcspn(p, "\r\n");
+            if (m < cap) {
+                memcpy(out, p, m);
+                out[m] = '\0';
+            }
+            return;
+        }
+    }
+}
+
+/* A minimal HTTP/1.0 GET of Blit's API on loopback, bounded in size and,
+   all of it, by `timeout_ms`. Returns the status (0 when unreachable or
+   late), the body (NUL ended, malloc'd, the caller frees) and the header
+   block (the status line and headers, NUL ended, cut to head_cap). */
+static int bc_http_get(const char *path, const char *if_none_match, int timeout_ms, char **body,
+                       size_t *length, char *head, size_t head_cap)
 {
     const char *port = getenv("BLIT_SERVER_PORT"), *token = getenv("BLIT_API_TOKEN");
     struct sockaddr_in addr;
-    struct timeval tv = { 1, 0 };
-    char request[1024], *buffer = NULL, *head_end, *p;
+    struct timeval tv;
+    char request[1024], *buffer = NULL, *head_end;
     size_t used = 0, cap = 0;
+    uint64_t deadline = now_us() + (uint64_t)timeout_ms * 1000u;
     int fd, status = 0, n;
     *body = NULL;
     *length = 0;
+    head[0] = '\0';
     if (port == NULL || atoi(port) <= 0 || atoi(port) > 65535) return 0;
     fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (fd < 0) return 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    /* The connect and the request on loopback, each within the bound. */
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -2241,7 +2278,10 @@ static int bc_http_get(const char *path, const char *if_none_match, char **body,
         close(fd);
         return 0;
     }
+    /* The answer, until Blit closes the connection or the bound passes. */
     for (;;) {
+        struct pollfd pfd = { fd, POLLIN, 0 };
+        uint64_t now = now_us();
         ssize_t got;
         if (used + 4096 + 1 > cap) {
             char *grown;
@@ -2250,7 +2290,13 @@ static int bc_http_get(const char *path, const char *if_none_match, char **body,
             if ((grown = realloc(buffer, cap)) == NULL) break;
             buffer = grown;
         }
-        got = recv(fd, buffer + used, cap - used - 1, 0);
+        if (now >= deadline || poll(&pfd, 1, (int)((deadline - now + 999) / 1000)) <= 0) {
+            free(buffer);
+            close(fd);
+            return 0;
+        }
+        got = recv(fd, buffer + used, cap - used - 1, MSG_DONTWAIT);
+        if (got < 0 && (errno == EAGAIN || errno == EINTR)) continue;
         if (got <= 0) break;
         used += (size_t)got;
     }
@@ -2262,14 +2308,7 @@ static int bc_http_get(const char *path, const char *if_none_match, char **body,
         return 0;
     }
     *head_end = '\0';
-    etag[0] = '\0';
-    if ((p = strstr(buffer, "\r\nETag: ")) != NULL) {
-        size_t m = strcspn(p + 8, "\r\n");
-        if (m < etag_cap) {
-            memcpy(etag, p + 8, m);
-            etag[m] = '\0';
-        }
-    }
+    snprintf(head, head_cap, "%s\r\n", buffer);
     *length = used - (size_t)(head_end + 4 - buffer);
     memmove(buffer, head_end + 4, *length + 1);
     *body = buffer;
@@ -2288,22 +2327,47 @@ static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r)
     }
 }
 
-/* Blit's keymap, read again if it changed (304 otherwise): compiled, put
-   in a sealed memfd, and sent to every keyboard. */
-static void keymap_refresh(struct bc_server *s)
+/* Blit's repeat for the active keyboard, from the keymap's headers: sent
+   to every keyboard when it changes. */
+static void repeat_apply(struct bc_server *s, const char *head)
 {
-    char *body = NULL, etag[96];
+    char rate_text[16], delay_text[16];
+    struct wl_resource *r;
+    int32_t rate, delay;
+    bc_http_header(head, "X-Blit-Repeat-Rate", rate_text, sizeof(rate_text));
+    bc_http_header(head, "X-Blit-Repeat-Delay", delay_text, sizeof(delay_text));
+    rate = atoi(rate_text);
+    delay = atoi(delay_text);
+    if (rate < 0 || rate > 1000 || delay < 0 || delay > 60000 || rate == 0) rate = delay = 0;
+    if (rate == s->repeat_rate && delay == s->repeat_delay) return;
+    s->repeat_rate = rate;
+    s->repeat_delay = delay;
+    logf_("keymap: repeat %d a second after %d ms, Blit's", rate, delay);
+    wl_resource_for_each(r, &s->keyboards)
+        if (wl_resource_get_version(r) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
+            wl_keyboard_send_repeat_info(r, rate, delay);
+}
+
+/* Blit's keymap, read again if it changed (304 otherwise): compiled, put
+   in a sealed memfd, and sent to every keyboard; and its repeat. Returns
+   0 when Blit answered (200 or 304), -1 otherwise. */
+static int keymap_refresh(struct bc_server *s, int timeout_ms)
+{
+    char *body = NULL, etag[96], head[2048];
     size_t length = 0;
     struct xkb_keymap *keymap;
     struct wl_resource *r;
     unsigned char *map;
     int status, fd;
-    if (s->xkb == NULL) return;
-    status = bc_http_get("/v1/input/keymap", s->keymap_etag[0] ? s->keymap_etag : NULL, &body,
-                         &length, etag, sizeof(etag));
+    if (s->xkb == NULL) return -1;
+    status = bc_http_get("/v1/input/keymap", s->keymap_etag[0] ? s->keymap_etag : NULL, timeout_ms,
+                         &body, &length, head, sizeof(head));
+    bc_http_header(head, "ETag", etag, sizeof(etag));
     if (status == 304) {
         free(body);
-        return;
+        logf_("keymap: unchanged (304)");
+        repeat_apply(s, head);
+        return 0;
     }
     if (status != 200 || length == 0) {
         if (!s->keymap_warned)
@@ -2312,14 +2376,15 @@ static void keymap_refresh(struct bc_server *s)
                   s->keymap_fd >= 0 ? "keeping the last one" : "clients get no_keymap");
         s->keymap_warned = 1;
         free(body);
-        return;
+        return -1;
     }
     keymap = xkb_keymap_new_from_string(s->xkb, body, XKB_KEYMAP_FORMAT_TEXT_V1,
                                         XKB_KEYMAP_COMPILE_NO_FLAGS);
     if (keymap == NULL) {
         logf_("keymap: Blit's keymap did not compile (%zu bytes)", length);
         free(body);
-        return;
+        repeat_apply(s, head);
+        return 0;
     }
     fd = memfd_create("blit-compositor-keymap", MFD_CLOEXEC | MFD_ALLOW_SEALING);
     if (fd < 0 || ftruncate(fd, (off_t)length + 1) != 0 ||
@@ -2327,7 +2392,7 @@ static void keymap_refresh(struct bc_server *s)
         if (fd >= 0) close(fd);
         xkb_keymap_unref(keymap);
         free(body);
-        return;
+        return -1;
     }
     memcpy(map, body, length + 1);
     munmap(map, length + 1);
@@ -2345,6 +2410,31 @@ static void keymap_refresh(struct bc_server *s)
     logf_("keymap: %zu bytes from Blit, ETag %s", length, etag);
     wl_resource_for_each(r, &s->keyboards)
         keyboard_send_keymap(s, r);
+    repeat_apply(s, head);
+    /* Keys down stay down in the new state (a modifier held across a
+       keyboard switch), and the focused client is told its modifiers. */
+    if (s->xkb_state) {
+        uint32_t code;
+        for (code = 0; code < sizeof(s->keys_down) * 8; ++code)
+            if (s->keys_down[code / 8] & (1u << (code % 8)))
+                xkb_state_update_key(s->xkb_state, code + 8, XKB_KEY_DOWN);
+    }
+    keyboard_send_modifiers(s, 1);
+    return 0;
+}
+
+/* Blit's `INPUT keymap <id> <revision>`: what GET /v1/input/keymap serves
+   has changed. Read once per revision, whichever route says it first. */
+static void keymap_notice(struct bc_server *s, uint64_t revision)
+{
+    if (revision == s->keymap_revision && !s->keymap_stale) return;
+    logf_("keymap: Blit's revision %llu", (unsigned long long)revision);
+    if (keymap_refresh(s, BC_KEYMAP_NOTICE_MS) == 0) {
+        s->keymap_revision = revision;
+        s->keymap_stale = 0;
+    } else {
+        s->keymap_stale = 1;
+    }
 }
 
 /* Every resource in `list` (keyboards, pointers) of the surface's client. */
@@ -2399,7 +2489,9 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
     }
     s->kbd_focus = surface;
     if (surface == NULL) return;
-    keymap_refresh(s);
+    /* Only after a notice whose read failed: the keymap is read on Blit's
+       notice, not at every enter. */
+    if (s->keymap_stale && keymap_refresh(s, BC_KEYMAP_NOTICE_MS) == 0) s->keymap_stale = 0;
     wl_array_init(&keys);
     seat_for_client(r, &s->keyboards, surface)
         wl_keyboard_send_enter(r, wl_display_next_serial(s->display), surface->resource, &keys);
@@ -2749,6 +2841,10 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         return;
     }
     conn->id = in.id;
+    if (in.kind == BC_INPUT_KEYMAP) {
+        keymap_notice(s, in.revision);
+        return;
+    }
     x = window_by_id(s, in.id);
     if (x == NULL || x->toplevel == NULL || x->surface == NULL) return;  /* gone meanwhile */
     switch (in.kind) {
@@ -3188,7 +3284,7 @@ int main(int argc, char **argv)
     }
     server.loop = wl_display_get_event_loop(server.display);
     server.xkb = xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES | XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
-    keymap_refresh(&server);
+    keymap_refresh(&server, BC_KEYMAP_START_MS);
     input_listen(&server);
     if (wl_display_init_shm(server.display) != 0 ||
         !wl_global_create(server.display, &wl_compositor_interface,

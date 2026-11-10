@@ -135,6 +135,10 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT frame 3 123456789012", &in) == BC_INPUT_FRAME &&
            in.time_us == 123456789012ull, "frame");
     EXPECT(bc_parse_input("INPUT frame 3 12x", &in) == BC_INPUT_UNKNOWN, "frame tail");
+    EXPECT(bc_parse_input("INPUT keymap 3 42\n", &in) == BC_INPUT_KEYMAP && in.id == 3 &&
+           in.revision == 42 && in.time_us == 0, "keymap notice");
+    EXPECT(bc_parse_input("INPUT keymap 3", &in) == BC_INPUT_UNKNOWN, "keymap, no revision");
+    EXPECT(bc_parse_input("INPUT keymap 3 -1", &in) == BC_INPUT_UNKNOWN, "keymap, negative");
     EXPECT(bc_parse_input("INPUT on 3", &in) == BC_INPUT_UNKNOWN, "not an input line");
 }
 

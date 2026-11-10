@@ -310,10 +310,20 @@ def input_part(server, compositor, standin, work):
     events: the gate plays the desktop on the channel and Blit on the input
     socket (docs/api.md, "Input straight from Blit"), and a real blit-server
     serves the keymap (GET /v1/input/keymap, BLIT_SERVER_PORT)."""
+    # Two fabricated keyboards (keymap_gate's sidecars): A, the first, and
+    # B, given a Q that types a-umlaut, each with its own repeat.
+    nodes = os.path.join(work, 'nodes')
+    os.mkdir(nodes)
+    for node, identity in (('event1', 'name=Keyboard A\nkinds=keyboard\ncapabilities=keys,repeat\nrepeat=250,33\n'),
+                           ('event2', 'name=Keyboard B\nkinds=keyboard\ncapabilities=keys,repeat\nrepeat=500,50\n')):
+        open(os.path.join(nodes, node), 'w').close()
+        with open(os.path.join(nodes, node + '.identity'), 'w') as out:
+            out.write('bustype=3\nvendor=05ac\nproduct=0256\nversion=0100\nphys=usb-gate/%s\n%s' % (node, identity))
     env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                           BLIT_SETTINGS_PATH=os.path.join(work, 'settings-input.json'),
                           BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'),
-                          BLIT_EXPECT_DESKTOP='0', BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1'))
+                          BLIT_EXPECT_DESKTOP='0', BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1',
+                          BLIT_INPUT_ROOT=nodes))
     blit = subprocess.Popen([server, str(PORT)], env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     runtime = os.path.join(work, 'run-input')
@@ -325,7 +335,13 @@ def input_part(server, compositor, standin, work):
     comp = client = None
     try:
         wait_for(lambda: api('GET', '/v1/version'), 'the server did not start', 15)
-        keymap = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10).read()
+        named = dict((d['name'], d['id']) for d in api('GET', '/v1/input/devices')['devices'])
+        keyboards = (named['Keyboard A'], named['Keyboard B'])
+        api('PATCH', '/v1/input/devices/%s' % keyboards[1],
+            {'configuration': {'keymap': {'base': 'us', 'keys': {'16': ['ä', 'Ä', '', '']}}}})
+        answer = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10)
+        keymap = answer.read()
+        check(answer.headers['X-Blit-Keymap-Device'] == keyboards[0], 'the default is not keyboard A')
         cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                     XDG_RUNTIME_DIR=runtime, BLIT_SERVER_PORT=str(PORT))
         cenv.pop('WAYLAND_DISPLAY', None)
@@ -349,7 +365,8 @@ def input_part(server, compositor, standin, work):
         check(stat.S_IMODE(os.stat(desk.input_socks[1]).st_mode) == 0o600, 'the input socket is not 0600')
         check('STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
               lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
-        check('STANDIN repeat 25 600' in printed(), 'no repeat info')
+        # Repeat is Blit's, keyboard A's: 250 ms, a 33 ms period.
+        check('STANDIN repeat 30 250' in printed(), lambda: 'no repeat info from Blit:\n' + printed())
 
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[1])
@@ -402,7 +419,7 @@ def input_part(server, compositor, standin, work):
         # Relative motion (Blit's relative hold) to the client with the pointer.
         lines_to('rel 1 7 -3', 'rel 1 -2 5')
         seen('relative 7.00 -3.00', 'pointer frame', 'relative -2.00 5.00', 'pointer frame')
-        e2e = popup_end_to_end(desk, work, seen)
+        e2e = popup_end_to_end(desk, work, seen, keyboards, printed, mark)
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         # The desktop takes the window's focus: the keyboard leaves it.
@@ -422,6 +439,11 @@ def input_part(server, compositor, standin, work):
         comp.wait(5)
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
+        # Read at start and on each notice only, never at a keyboard enter.
+        notices, reads = text.count("keymap: Blit's revision"), (text.count('keymap: unchanged (304)') +
+                                                                 text.count('bytes from Blit'))
+        check(notices >= 3 and reads == notices + 1,
+              '%d notices, %d reads of the keymap:\n%s' % (notices, reads, text))
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
                 'relative=7,-3+-2,5 focus=line,!activated,route-end %s' % (len(keymap), e2e))
     finally:
@@ -560,13 +582,19 @@ class _Blit:
     api = staticmethod(lambda method, path, body=None: api(method, path, body))
 
 
-def popup_end_to_end(desk, work, seen):
+def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
     """A real Blit's route into the compositor's input socket, as a desktop
     sets it up (docs/api.md, "One input route per top-level"): the gate,
     as the desktop, shows windows 1 and 2 (the stand-in's toplevel and its
     popup) as pictures 1 and 2 of a Blit session, asks `INPUT sock` for 1
     and `INPUT member 2 1 12 63`, and turns the route on; the pointer over
-    picture 2 reaches the popup surface at its own pixels."""
+    picture 2 reaches the popup surface at its own pixels.
+
+    Then the keyboard (milestone C): a repeat PATCH of keyboard A while the
+    route is live reaches the client as repeat info (Blit's `INPUT keymap`
+    notice, a 304); a key from keyboard B makes its keymap (Q types
+    a-umlaut) and repeat the client's before that key; one from A, A's
+    again. The compositor reads the keymap only on Blit's notices."""
     session = fig.Session(_Blit, work, 'e2e')
     api('PATCH', '/v1/terminal-sessions/%s' % session.id, {'focused': True})
     wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session.id)['focused'], 'no focus')
@@ -596,10 +624,35 @@ def popup_end_to_end(desk, work, seen):
     api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 2 * sx,
                                      'y': origin[1] + at['y'] + sy // 2})
     seen('pointer motion %.2f %.2f' % (2 * x, y / 2), 'pointer frame')
+
+    # Repeat changed while the route is live: the notice, a 304, repeat info.
+    api('PATCH', '/v1/input/devices/%s' % keyboards[0],
+        {'configuration': {'repeat_delay_ms': 400, 'repeat_rate_hz': 20}})
+    wait_for(lambda: 'STANDIN repeat 20 400' in printed(), lambda: 'no new repeat:\n' + printed())
+    texts = [urllib.request.urlopen(BASE + '/v1/input/keymap?device=%s' % k, timeout=10).read()
+             for k in keyboards]
+    check(texts[0] != texts[1], 'the two keyboards have one keymap')
+    order = []
+    for device, text, repeat in ((keyboards[1], texts[1], 'repeat 20 500'),
+                                 (keyboards[0], texts[0], 'repeat 20 400')):
+        before = len(printed().splitlines())
+        for value in (1, 0):
+            api('POST', '/v1/input/inject', {'kind': 'key', 'code': 16, 'value': value, 'device_id': device})
+        wait_for(lambda: 'STANDIN key 16 0' in printed().splitlines()[before:],
+                 lambda: 'no key from %s:\n%s' % (device, printed()))
+        lines = printed().splitlines()[before:]
+        want = ['STANDIN keymap format=1 size=%d xkb=1' % (len(text) + 1), 'STANDIN ' + repeat,
+                'STANDIN key 16 1']
+        got = [l for l in lines if l in want]
+        check(got == want, 'a key from %s: %s, expected %s in that order:\n%s'
+              % (device, got, want, '\n'.join(lines)))
+        order.append('%dB' % len(text))
+    mark[0] = len(printed().splitlines())
     ch.line('INPUT off 1\n')
     ch.close()
     api('DELETE', '/v1/terminal-sessions/%s' % session.id)
-    return 'blit-member-e2e=popup@%.2f,%.2f' % (x, y)
+    return ('blit-member-e2e=popup@%.2f,%.2f repeat=blit:30/250,patch->20/400 '
+            'keyboard-switch=B:%s+20/500,A:%s+20/400 before-the-key' % (x, y, order[0], order[1]))
 
 
 def dmabuf_part(compositor, standin, work):

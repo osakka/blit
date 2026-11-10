@@ -56,6 +56,7 @@
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
        INPUT frame <id> <monotonic us>
+       INPUT keymap <id> <revision>    what GET /v1/input/keymap serves changed
 
    read by bc_parse_input.
 
@@ -565,7 +566,8 @@ enum {
     BC_INPUT_REL,           /* dx, dy */
     BC_INPUT_BTN,           /* code, pressed */
     BC_INPUT_WHEEL,         /* dx, dy (notches) */
-    BC_INPUT_FRAME          /* time_us */
+    BC_INPUT_FRAME,         /* time_us */
+    BC_INPUT_KEYMAP         /* revision: a notice, not an event (no frame follows) */
 };
 
 typedef struct {
@@ -575,6 +577,7 @@ typedef struct {
     int pressed;
     double x, y;            /* ptr: pixels; rel: counts; wheel: notches */
     uint64_t time_us;
+    uint64_t revision;      /* keymap */
 } BcInput;
 
 /* A decimal number as Blit writes it: an optional '-', digits, and an
@@ -598,6 +601,7 @@ static int bc_parse_input(const char *line, BcInput *out)
     static const struct { const char *word; int kind; } kinds[] = {
         { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
         { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
+        { "keymap ", BC_INPUT_KEYMAP },
     };
     const char *p;
     size_t i;
@@ -630,6 +634,10 @@ static int bc_parse_input(const char *line, BcInput *out)
         errno = 0;
         out->time_us = strtoull(p, &end, 10);
         if (errno != 0) return out->kind = BC_INPUT_UNKNOWN;
+        if (kinds[i].kind == BC_INPUT_KEYMAP) {
+            out->revision = out->time_us;
+            out->time_us = 0;
+        }
         p = end;
         break;
     }

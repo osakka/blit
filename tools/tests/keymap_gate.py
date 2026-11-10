@@ -11,6 +11,14 @@ and type what Blit types: for the US default, KEY_A is 'a' and with Shift
 PATCH of the keyboard's `keymap` and `modifiers` (docs/api.md, input
 devices) the overridden key and the remapped modifier appear, and the ETag
 changes. If-None-Match is answered 304; an unknown device 404.
+
+Repeat (milestone C): every answer, 200 and 304, carries the keyboard's
+repeat as X-Blit-Repeat-Rate and X-Blit-Repeat-Delay (the fabricated
+keyboard's 250 ms and 33 ms period: 30 a second), 0 and 0 for the pointer;
+a PATCH of repeat changes them and not the ETag. Which keyboard: a second
+fabricated keyboard; the default is the first enabled one until a key comes
+from another (POST /v1/input/inject with its device_id), then that one,
+and back.
 """
 import json
 import os
@@ -59,6 +67,13 @@ def patch(path, body):
         return json.loads(response.read())
 
 
+def post(path, body):
+    request = urllib.request.Request(BASE + path, method='POST', data=json.dumps(body).encode(),
+                                     headers={'Content-Type': 'application/json'})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return response.read()
+
+
 def compile_check(checker, text, work, cases):
     path = os.path.join(work, 'keymap.xkb')
     with open(path, 'wb') as out:
@@ -80,7 +95,9 @@ def main():
     for name, identity in (('event0', 'name=Fabricated Pointer\nkinds=pointer\n'
                                       'capabilities=rel-x,rel-y,buttons\n'),
                            ('event1', 'name=Fabricated Keyboard\nkinds=keyboard\n'
-                                      'capabilities=keys,repeat\nrepeat=250,33\n')):
+                                      'capabilities=keys,repeat\nrepeat=250,33\n'),
+                           ('event2', 'name=Second Keyboard\nkinds=keyboard\n'
+                                      'capabilities=keys,repeat\nrepeat=500,50\n')):
         open(os.path.join(nodes, name), 'w').close()
         with open(os.path.join(nodes, name + '.identity'), 'w') as out:
             out.write('bustype=3\nvendor=05ac\nproduct=0256\nversion=0100\n'
@@ -105,6 +122,7 @@ def main():
         check('Fabricated Keyboard' in named and 'Fabricated Pointer' in named,
               'no fabricated keyboard and pointer: %s' % devices)
         keyboard, pointer_id = named['Fabricated Keyboard'], named['Fabricated Pointer']
+        second = named['Second Keyboard']
 
         status, headers, text = get('/v1/input/keymap')
         check(status == 200, 'GET /v1/input/keymap -> %d %r' % (status, text[:200]))
@@ -131,8 +149,37 @@ def main():
             # No character and no role in Blit: no key.
             (KEY_102ND, '-', 'sym:NoSymbol'),
         ])
-        status, _, body = get('/v1/input/keymap', {'If-None-Match': etag})
+        status, h304, body = get('/v1/input/keymap', {'If-None-Match': etag})
         check(status == 304 and body == b'', 'If-None-Match -> %d' % status)
+        repeat = lambda h: (h.get('X-Blit-Repeat-Rate'), h.get('X-Blit-Repeat-Delay'))
+        check(repeat(headers) == ('30', '250') and repeat(h304) == ('30', '250'),
+              'the repeat headers: 200 %s, 304 %s' % (repeat(headers), repeat(h304)))
+        # A repeat PATCH: the headers change, the keymap's ETag does not.
+        patch('/v1/input/devices/%s' % keyboard, {'configuration': {'repeat_delay_ms': 400,
+                                                                    'repeat_rate_hz': 20}})
+        status, h304, _ = get('/v1/input/keymap', {'If-None-Match': etag})
+        check(status == 304 and repeat(h304) == ('20', '400'),
+              'after a repeat PATCH: %d %s' % (status, repeat(h304)))
+        check(repeat(get('/v1/input/keymap?device=%s' % pointer_id)[1]) == ('0', '0'),
+              'the pointer has a repeat')
+        # Which keyboard: the first enabled, until a key comes from another.
+        default = lambda: get('/v1/input/keymap')[1].get('X-Blit-Keymap-Device')
+        check(default() == keyboard, 'the default before any key: %s' % default())
+        for device, rate in ((second, ('20', '500')), (keyboard, ('20', '400'))):
+            for value in (1, 0):
+                post('/v1/input/inject', {'kind': 'key', 'code': KEY_A, 'value': value, 'device_id': device})
+            status, h, _ = get('/v1/input/keymap')
+            check(h.get('X-Blit-Keymap-Device') == device and repeat(h) == rate,
+                  'after a key from %s: %s %s' % (device, h.get('X-Blit-Keymap-Device'), repeat(h)))
+        post('/v1/input/inject', {'kind': 'key', 'code': KEY_A, 'value': 1, 'device_id': second})
+        post('/v1/input/inject', {'kind': 'key', 'code': KEY_A, 'value': 0, 'device_id': second})
+        patch('/v1/input/devices/%s' % second, {'configuration': {'enabled': False}})
+        check(default() == keyboard, 'the last key\'s keyboard disabled: %s' % default())
+        patch('/v1/input/devices/%s' % second, {'configuration': {'enabled': True}})
+        check(default() == second, 'the last key\'s keyboard enabled again: %s' % default())
+        post('/v1/input/inject', {'kind': 'key', 'code': KEY_A, 'value': 1, 'device_id': keyboard})
+        post('/v1/input/inject', {'kind': 'key', 'code': KEY_A, 'value': 0, 'device_id': keyboard})
+        check(default() == keyboard, 'the first keyboard again: %s' % default())
 
         # The keyboard settings, Blit's own: Q types a-umlaut, A-umlaut with
         # Shift, '@' with AltGr; CapsLock is Control; the 102nd key types
@@ -159,7 +206,9 @@ def main():
         check(status == 200 and pointer != remapped, 'the pointer\'s keymap: %d' % status)
         check(get('/v1/input/keymap?device=nope')[0] == 404, 'an unknown device is not 404')
         print('KEYMAP_GATE_OK xkb_v1 compiles keys=%s us:a/A,1/!,caps,altgr remap:q->ä/Ä/@,'
-              '102nd-></>,caps->control etag=changes,304 unknown=404' % keys.split('=')[1])
+              '102nd-></>,caps->control etag=changes,304 unknown=404 repeat=30/250,304-too,'
+              'patch->20/400,pointer=0/0 default=first,last-key(second,first),disabled->first,enabled->last-key'
+              % keys.split('=')[1])
     finally:
         blit.terminate()
         try:

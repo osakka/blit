@@ -46,6 +46,15 @@
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
        INPUT frame <id> <monotonic us> after each event
+       INPUT keymap <id> <revision>    no frame: a notice, not an event
+
+   `INPUT keymap` tells the compositor that what GET /v1/input/keymap
+   serves (the default keyboard's keymap and repeat) has changed: it is
+   written when the route is live and has not been told the current
+   revision -- at once when the revision changes (a keyboard configured,
+   plugged or gone, or a key from another keyboard, before that key), and
+   when the route goes live after a change -- and the compositor reads the
+   keymap again (If-None-Match).
 
    Everything else -- the checks on the socket, the live rule, focus,
    holds, members, release of everything held, diagnostics -- is the
@@ -185,6 +194,7 @@ struct BlitFrameInput {
     int last_draw[4];
     double last_sent[2];
     unsigned int last_over;     /* the picture the pointer was over: the route's or a member's */
+    unsigned long long keymap_told; /* the keymap revision this `sock` route was told */
     const char *last_miss;
     BlitFrameMember members[BLIT_FRAME_INPUT_MEMBERS];
     int member_count;
@@ -293,30 +303,15 @@ static int frame_input_open_backend(const BlitFrameInput *in)
     return in->broken == NULL && (in->ei != NULL || in->sock >= 0);
 }
 
-/* One event on a `sock` route: its line and the frame after it, in one
-   write. A socket that cannot take all of it breaks the route (see the top
-   of this file). Returns 0 when written. */
-static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
+/* Bytes on a `sock` route, in one write. A socket that cannot take all of
+   them breaks the route (see the top of this file). Returns 0 when
+   written. */
+static int frame_input_write(BlitSession *session, BlitFrameInput *in, const char *text,
+                             size_t length)
 {
-    char text[160];
-    va_list ap;
-    int n, m;
-    ssize_t sent;
-    if (in->sock < 0 || in->broken != NULL)
-        return -1;
-    va_start(ap, fmt);
-    n = vsnprintf(text, sizeof(text), fmt, ap);
-    va_end(ap);
-    if (n < 0 || (size_t)n >= sizeof(text) - 48)
-        return -1;
-    m = snprintf(text + n, sizeof(text) - (size_t)n, "INPUT frame %u %llu\n", in->image_id,
-                 (unsigned long long)monotonic_us());
-    sent = send(in->sock, text, (size_t)(n + m), MSG_NOSIGNAL | MSG_DONTWAIT);
-    if (sent == (ssize_t)(n + m)) {
-        if (session != NULL)
-            ++session->frame_input_events;
+    ssize_t sent = send(in->sock, text, length, MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (sent == (ssize_t)length)
         return 0;
-    }
     in->broken = sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) ? "sock-full"
                                                                        : "sock-disconnected";
     memset(in->keys, 0, sizeof(in->keys));
@@ -326,6 +321,29 @@ static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char
         frame_input_error(session, in->broken);
     }
     return -1;
+}
+
+/* One event on a `sock` route: its line and the frame after it, in one
+   write. Returns 0 when written. */
+static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
+{
+    char text[160];
+    va_list ap;
+    int n, m;
+    if (in->sock < 0 || in->broken != NULL)
+        return -1;
+    va_start(ap, fmt);
+    n = vsnprintf(text, sizeof(text), fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= sizeof(text) - 48)
+        return -1;
+    m = snprintf(text + n, sizeof(text) - (size_t)n, "INPUT frame %u %llu\n", in->image_id,
+                 (unsigned long long)monotonic_us());
+    if (frame_input_write(session, in, text, (size_t)(n + m)) != 0)
+        return -1;
+    if (session != NULL)
+        ++session->frame_input_events;
+    return 0;
 }
 
 /* Whether the image the route names is gone: deleted by Kitty, or no longer
@@ -421,8 +439,20 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
         frame_input_end(runtime, client, in);
         return 0;
     }
-    if (in->sock >= 0)
-        return 1;  /* lines need nothing started */
+    if (in->sock >= 0) {
+        /* Lines need nothing started; a live route is told the keymap's
+           revision when it has not been (ADR 0228). */
+        if (in->keymap_told != runtime->keymap_revision) {
+            char text[64];
+            int n = snprintf(text, sizeof(text), "INPUT keymap %u %llu\n", in->image_id,
+                             runtime->keymap_revision);
+            in->keymap_told = runtime->keymap_revision;
+            if (frame_input_write(find_session_id(runtime, client->session_id), in, text,
+                                  (size_t)n) != 0)
+                return 0;
+        }
+        return 1;
+    }
     for (i = 0; i < BLIT_EI_DEVICES; ++i)
         if (in->devices[i].device != NULL && in->devices[i].resumed &&
             !in->devices[i].emulating) {
@@ -987,6 +1017,24 @@ static void frame_input_relative(BlitRuntime *runtime, int dx, int dy)
             blit_ei.pointer_motion(device, (double)dx, (double)dy);
             frame_input_sent(holder, device);
         }
+    }
+}
+
+/* What GET /v1/input/keymap serves has changed: a new revision, told at
+   once to every live `sock` route (and to the others when they go live). */
+static void frame_input_keymap_changed(BlitRuntime *runtime)
+{
+    int i, k;
+    ++runtime->keymap_revision;
+    if (!frame_input_routes)
+        return;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        if (!client->used)
+            continue;
+        for (k = 0; k < client->input_capacity; ++k)
+            if (client->inputs[k] != NULL && client->inputs[k]->sock >= 0)
+                frame_input_sync(runtime, client, client->inputs[k]);
     }
 }
 
