@@ -10,13 +10,23 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 out=build/tests/compositor
 proto=$out/protocol
+# Version 5 of the frame channel only (docs/api.md, "One grammar, version
+# 5"): none of the version 4 line forms is read or written by the
+# compositor, and its hello says 5.
+if grep -nE '"(RELEASE|ERROR|OK input|OK window)|"ERROR (INPUT|WINDOW)|INPUT sock %s' \
+        src/blit_compositor.c src/blit_compositor_wire.h ||
+        ! grep -q '^#define BC_WIRE_VERSION 5$' src/blit_compositor_wire.h; then
+    echo "COMPOSITOR_GATE_FAIL blit-compositor still speaks a version 4 line form" >&2
+    exit 1
+fi
 mkdir -p "$out"
 BLIT_PROTOCOL_DIR=$proto sh tools/build-tcc.sh "$out/blit-compositor" compositor >/dev/null
 # The protocol code build-tcc.sh generated, for the client and the
 # sanitized builds alike.
 protocol_sources="$proto/xdg-shell-protocol.c $proto/xdg-decoration-unstable-v1-protocol.c
     $proto/linux-dmabuf-unstable-v1-protocol.c $proto/presentation-time-protocol.c
-    $proto/relative-pointer-unstable-v1-protocol.c $proto/pointer-constraints-unstable-v1-protocol.c"
+    $proto/relative-pointer-unstable-v1-protocol.c $proto/pointer-constraints-unstable-v1-protocol.c
+    $proto/primary-selection-unstable-v1-protocol.c"
 client_sources="tools/tests/wl_standin_client.c $protocol_sources"
 # shellcheck disable=SC2086
 tcc -std=c99 -Wall -I"$proto" $client_sources -lwayland-client -o "$out/wl_standin_client"

@@ -20,16 +20,24 @@
    memfd. The GPU compositor imports them as an EGLImage bound to the
    image's texture -- never mapped, read or copied by the CPU -- and keeps
    them until a newer frame of the image has been presented, then answers
-   RELEASE so the producer may reuse the buffer. Offered in the hello's
-   answer only while the GPU compositor can import.
+   `FRAME release` so the producer may reuse the buffer. Offered in the
+   hello's answer only while the GPU compositor can import.
 
    Version 4 (ADR 0228) is version 3 plus the WINDOW lines between
-   blit-compositor and a desktop (docs/api.md, "Program windows"). Blit
-   reached directly answers its hello as version 3's with ` window=0` and
-   every WINDOW line `ERROR WINDOW <id> ENOTSUP`. */
+   blit-compositor and a desktop (docs/api.md, "Program windows").
+
+   Version 5 (docs/api.md, "One grammar, version 5") is the only version:
+   version 4 with every line that concerns a picture
+   `<WORD> <verb> <id> [arguments]`, the picture id the third word --
+   `FRAME release <id> <seq>`, `FRAME error <id> <code>`, `INPUT ok|error
+   <id>`, `WINDOW ok|error <id>`. A hello of any other version is refused
+   `ERROR 0 EINVAL`, the hello's own refusal. Blit reached directly answers
+   ` window=0` and every WINDOW line `WINDOW error <id> ENOTSUP`. */
 
 #define BLIT_FRAME_CLIENTS 32
 #define BLIT_FRAME_HELLO_BYTES 16
+/* The one version a hello may say. */
+#define BLIT_FRAME_VERSION 5
 #define BLIT_FRAME_HEADER_BYTES 48
 #define BLIT_FRAME_V3_HEADER_BYTES 72
 /* Descriptors one message may carry: a memfd, or up to four dmabuf planes
@@ -67,8 +75,9 @@ static void frame_client_close(BlitRuntime *runtime, int index)
             if (session != NULL && session->frame_connections > 0)
                 --session->frame_connections;
         }
-        /* A dmabuf image keeps a duplicate of the socket for its RELEASE
-           lines; shutting it down ends the connection for the peer too. */
+        /* A dmabuf image keeps a duplicate of the socket for its
+           `FRAME release` lines; shutting it down ends the connection for
+           the peer too. */
         shutdown(runtime->frame_clients[index].fd, SHUT_RDWR);
         close(runtime->frame_clients[index].fd);
     }
@@ -106,7 +115,7 @@ static void frame_refuse(BlitRuntime *runtime, BlitSession *session, int fd,
     }
     ++runtime->frames_refused;
     snprintf(runtime->frames_last_error, sizeof(runtime->frames_last_error), "%s", reason);
-    snprintf(line, sizeof(line), "ERROR %u %s\n", image_id, code);
+    snprintf(line, sizeof(line), "FRAME error %u %s\n", image_id, code);
     frame_reply(fd, line);
 }
 
@@ -193,13 +202,13 @@ static void frame_landed(BlitRuntime *runtime, BlitSession *session,
 #define FRAME_FOURCC(a, b, c, d) \
     ((uint32_t)(a) | (uint32_t)(b) << 8 | (uint32_t)(c) << 16 | (uint32_t)(d) << 24)
 
-/* RELEASE <id> <sequence>: the producer may reuse that frame's buffer. */
+/* FRAME release <id> <sequence>: the producer may reuse that frame's buffer. */
 static void frame_send_release(int fd, unsigned int image_id, unsigned long long sequence)
 {
     char line[64];
     if (fd < 0)
         return;
-    snprintf(line, sizeof(line), "RELEASE %u %llu\n", image_id, sequence);
+    snprintf(line, sizeof(line), "FRAME release %u %llu\n", image_id, sequence);
     frame_reply(fd, line);
 }
 
@@ -409,7 +418,7 @@ static void frame_dmabuf_apply(BlitRuntime *runtime, BlitSession *session,
         image->dmabuf->runtime_released = &runtime->dmabuf_released;
     }
     d = image->dmabuf;
-    /* RELEASE goes to the connection that sent the newest frame. */
+    /* FRAME release goes to the connection that sent the newest frame. */
     if (d->reply_fd < 0 || d->reply_serial != client->serial) {
         if (d->reply_fd >= 0)
             close(d->reply_fd);
@@ -725,7 +734,7 @@ static int frame_hud_applies(BlitRuntime *runtime, const BlitSession *session)
         hud_shows_output(runtime, session_output_index(runtime, session));
 }
 
-/* ADR 0203: tell each version 2 client when that changes, one line, HUD1
+/* ADR 0203: tell each client when that changes, one line, HUD1
    on or HUD1 off. Called at the hello and once a turn (hud_reconcile), so
    a settings change or a session that moves displays is told too. */
 static void frame_hud_notify(BlitRuntime *runtime)
@@ -734,7 +743,7 @@ static void frame_hud_notify(BlitRuntime *runtime)
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         BlitFrameClient *client = &runtime->frame_clients[i];
         int on;
-        if (!client->used || !client->authenticated || client->version < 2)
+        if (!client->used || !client->authenticated)
             continue;
         on = frame_hud_applies(runtime, find_session_id(runtime, client->session_id));
         if (on == client->hud_on)
@@ -744,7 +753,7 @@ static void frame_hud_notify(BlitRuntime *runtime)
     }
 }
 
-/* ADR 0228: `WINDOW <event> <id> ...` is answered `ERROR WINDOW <id>
+/* ADR 0228: `WINDOW <event> <id> ...` is answered `WINDOW error <id>
    ENOTSUP`: Blit reached directly places no program windows, the desktop
    does. The id is the line's third word, 0 when it has none or it cannot
    be read (`WINDOW display <name>`), as for INPUT. */
@@ -765,12 +774,15 @@ static void frame_window_refuse(int fd, const unsigned char *message, ssize_t le
         if (errno != 0 || id > 0xffffffffUL || (*end != '\0' && *end != ' ' && *end != '\n'))
             id = 0;
     }
-    snprintf(reply, sizeof(reply), "ERROR WINDOW %lu ENOTSUP\n", id);
+    snprintf(reply, sizeof(reply), "WINDOW error %lu ENOTSUP\n", id);
     frame_reply(fd, reply);
 }
 
 /* The hello: magic, version, token. On success the client is bound to the
-   session the token names, if its uid may send that session frames. */
+   session the token names, if its uid may send that session frames. The
+   hello's answers -- `OK ...`, `ERROR 0 EINVAL` (not a version 5 hello),
+   `ERROR 0 EACCES` -- are not picture lines and keep their shape, so a
+   client of any version can read its refusal. */
 static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *message,
                         ssize_t length)
 {
@@ -782,7 +794,7 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
     int i;
 
     if (length < BLIT_FRAME_HELLO_BYTES || memcmp(message, "BLITFRM1", 8) != 0 ||
-        frame_u32(message + 8) < 1 || frame_u32(message + 8) > 4) {
+        frame_u32(message + 8) != BLIT_FRAME_VERSION) {
         frame_reply(client->fd, "ERROR 0 EINVAL\n");
         frame_client_close(runtime, index);
         return;
@@ -805,26 +817,22 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
             client->session_id = session->id;
             client->authenticated = 1;
             client->uid = peer.uid;
-            client->version = (int)frame_u32(message + 8);
             client->serial = ++runtime->frame_serial;
             ++session->frame_connections;
-            if (client->version < 3) {
-                frame_reply(client->fd, "OK\n");
-            } else {
+            {
                 /* ADR 0223: dmabuf frames are offered only while the GPU
                    compositor can import them, with what it can import.
-                   ADR 0228: version 4 is version 3 plus the WINDOW lines,
-                   which are the desktop's to answer, not Blit's: Blit says
-                   window=0 and refuses each one (frame_window_refuse). */
+                   ADR 0228: the WINDOW lines are the desktop's to answer,
+                   not Blit's: Blit says window=0 and refuses each one
+                   (frame_window_refuse). */
                 char answer[1300];
                 int fences = 0;
                 const char *formats = blit_kms_dmabuf_formats(runtime->kms, &fences, NULL);
-                const char *window = client->version >= 4 ? " window=0" : "";
                 if (formats != NULL)
-                    snprintf(answer, sizeof(answer), "OK dmabuf=1 fence=%d formats=%s%s\n",
-                             fences, formats, window);
+                    snprintf(answer, sizeof(answer), "OK dmabuf=1 fence=%d formats=%s window=0\n",
+                             fences, formats);
                 else
-                    snprintf(answer, sizeof(answer), "OK dmabuf=0%s\n", window);
+                    snprintf(answer, sizeof(answer), "OK dmabuf=0 window=0\n");
                 frame_reply(client->fd, answer);
             }
             frame_hud_notify(runtime);
@@ -901,16 +909,15 @@ static void frame_client_service(BlitRuntime *runtime, int index)
                 snprintf(session->frames_last_error, sizeof(session->frames_last_error),
                          "%s", "frame-peer-signed-out");
             }
-            frame_reply(client->fd, "ERROR 0 EACCES\n");
+            frame_reply(client->fd, "FRAME error 0 EACCES\n");
             frame_client_close(runtime, index);
             break;
         }
         if (got >= 4 && memcmp(message, "STA1", 4) == 0) {
             for (j = 0; j < fd_count; ++j) close(fds[j]);
-            if (client->version < 2 || fd_count != 0 ||
-                (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) ||
+            if (fd_count != 0 || (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) ||
                 !frame_status(session, message, got))
-                frame_reply(client->fd, "ERROR 0 EINVAL\n");
+                frame_reply(client->fd, "FRAME error 0 EINVAL\n");
             continue;
         }
         if (got >= 6 && memcmp(message, "INPUT ", 6) == 0) {
@@ -930,9 +937,9 @@ static void frame_client_service(BlitRuntime *runtime, int index)
             continue;
         }
         if (got >= 4 && memcmp(message, "FRM3", 4) == 0) {
-            /* ADR 0223: a version 3 client's dmabuf frame, 72 bytes, one
-               descriptor per plane and optionally a fence after them. */
-            if (client->version < 3 || got != BLIT_FRAME_V3_HEADER_BYTES ||
+            /* ADR 0223: a dmabuf frame, 72 bytes, one descriptor per
+               plane and optionally a fence after them. */
+            if (got != BLIT_FRAME_V3_HEADER_BYTES ||
                 fd_count < 1 || fd_count > BLIT_DMABUF_PLANES + 1 ||
                 (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {
                 for (j = 0; j < fd_count; ++j) close(fds[j]);

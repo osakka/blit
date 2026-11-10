@@ -16,8 +16,8 @@ What it proves:
   covers its 256x128 image in a screenshot of the display it is on (the
   GPU composes that screenshot; the CPU never had the pixels), while
   `image_upload_bytes` of that output does not grow by a frame's bytes;
-- every frame is RELEASEd, in order, the newest only once the image is
-  deleted, so a producer's pool of three never starves;
+- every frame is released (`FRAME release`), in order, the newest only
+  once the image is deleted, so a producer's pool of three never starves;
 - a modifier Blit did not list is refused ENOTSUP;
 - the session's dmabuf counts.
 Not proved: the acquire fence (the producer sends none: making a sync_file

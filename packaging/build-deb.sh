@@ -14,6 +14,11 @@ HIBR_ABI_FILE=$ROOT/packaging/HIBR_ABI
 OUT=${1:-$ROOT}
 VERSION_FILE=$ROOT/packaging/VERSION
 HIBR_ROOT=${BLIT_HIBR_ROOT:-}
+# The frame channel speaks version 5 only, one grammar with no compatibility
+# forms (docs/api.md, "One grammar, version 5"): a Hibr from before its own
+# version 5 cannot reach this Blit's channel, so the two never install
+# together. Hibr's packages carry the matching Breaks on Blit.
+HIBR_FRAME_V5=0.99.482
 
 # The adapter is part of the package's ABI boundary. Reusing a .so from the
 # ignored build directory made its Hibr provenance unknowable: a package
@@ -345,6 +350,7 @@ Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
 Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0)
 Suggests: hibr, blit-font-sources, blit-gamescope, blit-compositor
+Breaks: hibr (<< $HIBR_FRAME_V5)
 Description: API-driven native KMS text display server
  Blit provides a text-first display server with one terminal surface per
  physical display or pane, HTTP control, streaming, and Hibr integration.

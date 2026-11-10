@@ -1,6 +1,8 @@
 # ADR 0225: Steam and games in a window, through a headless gamescope
 
-- Status: proposed
+- Status: superseded by [ADR 0228](0228-blit-is-the-compositor-for-programs.md);
+  deprecated 2026-11-10 by the owner, removed in 0.3.75 (blit-gamescope,
+  the libei input path and their gates)
 - Date: 2026-11-07
 - Scope: a new producer program for the frame channel (`blit-gamescope`),
   input forwarding from a Blit session to a nested compositor, gamepad
@@ -9,6 +11,7 @@
   [ADR 0202](0202-local-frames-by-descriptor.md) (the frame channel),
   [ADR 0198](0198-pointer-lock.md) (pointer lock),
   [ADR 0206](0206-hand-the-display-to-gamescope.md) (full screen by hand-over)
+- Amended: lines in v5 grammar since 0.3.73 (ADR 0228)
 
 ## Context
 

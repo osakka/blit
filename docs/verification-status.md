@@ -9,6 +9,31 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.74 frame channel version 5, and programs as whole windows (ADR 0228, ADR 0229)
+
+- **Version 5, a flag day with Hibr 0.99.482:** one grammar on the frame
+  channel, `<WORD> <verb> <id>`; `blit` Breaks `hibr (<< 0.99.482)`, Hibr
+  Breaks `blit (<< 0.3.74)`; published together.
+- **blit-compositor:** an input socket per window (keys and the pointer had
+  been dropped under the desktop's picture ids); subsurfaces as pictures
+  (`WINDOW sub`, Firefox's page); `WINDOW geometry`, `move`, `resize`,
+  `menu` and tiled states for programs that draw their own frame; the
+  clipboard and primary selection bridged to Hibr's (`CLIP`), the Vault's
+  secrets kept out of history and cleared both ways. The interop map is
+  ADR 0229, agreed with Hibr.
+- **Documentation:** README, architecture, roadmap and features brought up
+  to the compositor; blit-gamescope marked deprecated (removed in 0.3.75 by
+  the owner's decision).
+- **Suites** (frame-v5 08d0b74; then documentation only, re-checked by the
+  documentation and API schema gates): `all` 188 pass, 12 skip, 0 fail; GLES
+  `renderer` 82 pass, 1 skip, 0 fail; `compositor_gate` with ASan/UBSan
+  (`--sub`, `--csd`, `--clip`, restarts); `package_artifact_gate` passes.
+  Hibr 0.99.482's suites (native, 36 checks, end to end through the real
+  desktop against this compositor) green on its side.
+- **Published** to hibr-apt with hibr 0.99.482 in one call (blit,
+  blit-gamescope, blit-compositor, hibr). Not deployed by Blit: the owner
+  upgrades with apt and restarts the desktop.
+
 ## 2026-11-10: 0.3.73 programs' windows, live: the first configure and the keymap (ADR 0228 phase 1)
 
 - **The first configure:** a toplevel's initial commit is answered at once

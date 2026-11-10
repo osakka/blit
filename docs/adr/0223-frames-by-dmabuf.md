@@ -9,6 +9,7 @@
   its authentication and its ordering rules, unchanged),
   [ADR 0181](0181-gles-compositor-inside-native-kms.md) (the GPU compositor),
   [ADR 0066](0066-the-terminal-names-no-file-blit-opens.md) (no names)
+- Amended: lines in v5 grammar since 0.3.73 (ADR 0228)
 
 ## Context
 

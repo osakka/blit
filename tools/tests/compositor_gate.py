@@ -4,7 +4,7 @@
     compositor_gate.py <blit-compositor> <wl_standin_client> [blit-server]
 
 Part one plays the desktop: a fake frame-channel peer that answers the
-version 4 hello with window=1, reads WINDOW lines and FRM1 frames, and sends
+version 5 hello with window=1, reads WINDOW lines and FRM1 frames, and sends
 `WINDOW size` and `WINDOW close`, while blit-compositor serves the in-repo
 stand-in client (tools/tests/wl_standin_client.c). It checks the draft in
 docs/api.md, "Program windows": `WINDOW display` first, the new window and
@@ -19,9 +19,14 @@ served again; every window announced again with its newest frame; the
 `WINDOW quit 0` ending; no desktop coming back; `--display`.
 
 Part two, with a blit-server (on the mock display, gate_display.sh), checks
-Blit's side: a version 4 hello is answered as version 3's plus ` window=0`,
-each WINDOW line `ERROR WINDOW <id> ENOTSUP`, and blit-compositor reaching
-Blit directly keeps running and shows nothing.
+Blit's side: a version 5 hello is answered with ` window=0`, each WINDOW
+line `WINDOW error <id> ENOTSUP`, a version 3 or 4 hello `ERROR 0 EINVAL`,
+and blit-compositor reaching Blit directly keeps running and shows nothing.
+
+Every line about a picture is version 5's `<WORD> <verb> <id> [arguments]`
+(docs/api.md, "One grammar, version 5"): the compositor asks
+`INPUT sock <id> <path>`, and takes `FRAME release` and `FRAME error`; the
+version 4 forms (`RELEASE`, `ERROR <id>`) release nothing.
 """
 import array
 import fcntl
@@ -95,16 +100,17 @@ class Desktop:
     """The desktop's end of a frame channel: one accepted connection."""
 
     def __init__(self, listener, answer=b'OK dmabuf=0 window=1\n'):
+        self.clip_fds = []
         listener.settimeout(10)
         self.sock, _ = listener.accept()
         self.sock.settimeout(5)
         hello = self.sock.recv(128)
         check(hello[:8] == b'BLITFRM1', 'not a hello: %r' % hello[:16])
         version, length = struct.unpack_from('<II', hello, 8)
-        check(version == 4, 'the hello says version %d, not 4' % version)
+        check(version == 5, 'the hello says version %d, not 5' % version)
         check(hello[16:16 + length].decode() == TOKEN, 'the hello has the wrong token')
         self.sock.send(answer)
-        # `INPUT sock <path> <id>`, one per toplevel: for Blit, which the
+        # `INPUT sock <id> <path>`, one per toplevel: for Blit, which the
         # desktop relays it to; recorded, not part of the WINDOW sequence.
         self.input_socks = {}
 
@@ -114,7 +120,7 @@ class Desktop:
             got = self.next_any(wait)
             if got is None or got[0] != 'line' or not got[1].startswith('INPUT sock '):
                 return got
-            path, image = got[1].split(' ')[2:4]
+            image, path = got[1].split(' ')[2:4]
             # Each toplevel its own socket, <display>-input-<id>.
             check(path.startswith('/') and path.endswith('-input-%s' % image) and
                   int(image) not in self.input_socks, 'an INPUT sock line %r' % got[1])
@@ -136,9 +142,14 @@ class Desktop:
             check(len(data) == 48 and len(fds) == 1, 'FRM1 of %d bytes with %d fds' % (len(data), len(fds)))
             fields = struct.unpack_from('<IQIIIIIIII', data, 4)
             return ('frame', fields, fds[0])
-        for fd in fds:
-            os.close(fd)
         check(data.endswith(b'\n') and data.count(b'\n') == 1, 'not one line: %r' % data)
+        if data.startswith(b'CLIP read '):
+            # The reader's pipe, passed with the line: the gate writes into it.
+            check(len(fds) == 1, 'CLIP read with %d fds' % len(fds))
+            self.clip_fds.append(fds[0])
+        else:
+            for fd in fds:
+                os.close(fd)
         return ('line', data[:-1].decode())
 
     def line(self, expected, wait=5.0):
@@ -273,6 +284,245 @@ def states_part(desk, standin, env, display, work):
             client.wait()
     return ('maximize+minimize+parent(5->4,->0)+hide->frame maximized output=BLIT-2:1280x720@30000,'
             'BLIT-1,BLIT-2:800x600@75000')
+
+
+def clip_part(desk, standin, env, display, work):
+    """The clipboard (ADR 0229), with `--clip`, window 10, the gate as Hibr's
+    clipboard: a program's copy offered to the desktop as one text type and
+    read through a pipe; the desktop's offer pasted by the program as
+    UTF8_STRING through a `CLIP read`; a secret offered and cleared both
+    ways; a source destroyed clears; the primary selection the same."""
+    out_path = os.path.join(work, 'standin-clip.out')
+    client = start([standin, '--clip', 'Clip'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    frame = [0]
+
+    def key(code):
+        frame[0] += 1
+        route.sendall(b'INPUT key %d %d press\nINPUT frame %d %d\nINPUT key %d %d release\nINPUT frame %d %d\n'
+                      % (BLIT_PICTURE, code, BLIT_PICTURE, frame[0], BLIT_PICTURE, code, BLIT_PICTURE,
+                         frame[0] + 1))
+        frame[0] += 1
+
+    def seen(text):
+        wait_for(lambda: text in printed(), lambda: 'the program did not print %r:\n%s' % (text, printed()))
+
+    def desktop_reads(seq, type_):
+        r, w = os.pipe()
+        socket.send_fds(desk.sock, [b'CLIP read %d %s\n' % (seq, type_.encode())], [w])
+        os.close(w)
+        out = b''
+        while True:
+            chunk = os.read(r, 4096)
+            if not chunk:
+                break
+            out += chunk
+        os.close(r)
+        return out
+
+    def desktop_answers(text):
+        fd = desk.clip_fds.pop(0)
+        os.write(fd, text)
+        os.close(fd)
+
+    aliases = 'text/plain;charset=utf-8,UTF8_STRING,text/plain,STRING,TEXT'
+    try:
+        for want in ('WINDOW new 10 0', 'WINDOW title 10 Clip', 'WINDOW appid 10 blit.standin',
+                     'WINDOW limits 10 64 48 0 0', 'WINDOW decor 10 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=10)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[10])
+        # A program copies: one text type to the desktop, read through a pipe.
+        key(46)
+        desk.line('CLIP offer 1 clipboard text/plain;charset=utf-8')
+        seen('STANDIN selection clipboard text/plain;charset=utf-8,text/plain,x-standin/other')
+        got = desktop_reads(1, 'text/plain;charset=utf-8')
+        check(got == b'copied: text/plain;charset=utf-8', 'the desktop read %r' % got)
+        check(desktop_reads(1, 'image/png') == b'', 'a type nobody offers was answered')
+        check(desktop_reads(99, 'text/plain;charset=utf-8') == b'', 'a stale offer was answered')
+        # The desktop copies: the program's source cancelled, the aliases offered,
+        # its paste a CLIP read the desktop answers.
+        desk.send('CLIP offer 7 clipboard text/plain;charset=utf-8')
+        seen('STANDIN source cancelled clipboard')
+        seen('STANDIN selection clipboard ' + aliases + '\n')
+        key(47)
+        desk.line('CLIP read 7 text/plain;charset=utf-8')
+        desktop_answers(b'hello from hibr')
+        seen('STANDIN pasted clipboard hello from hibr')
+        # A secret (the Vault), offered and cleared.
+        desk.send('CLIP offer 8 clipboard text/plain;charset=utf-8 x-kde-passwordManagerHint')
+        seen('STANDIN selection clipboard ' + aliases + ',x-kde-passwordManagerHint')
+        desk.send('CLIP clear 8')
+        wait_for(lambda: printed().rstrip().endswith('STANDIN selection clipboard none') or
+                 printed().splitlines()[-1] == 'STANDIN selection clipboard none',
+                 lambda: 'the secret was not cleared:\n' + printed())
+        # A program's secret, then its source destroyed: offered, then cleared.
+        key(45)
+        desk.line('CLIP offer 2 clipboard text/plain;charset=utf-8 x-kde-passwordManagerHint')
+        key(32)
+        desk.line('CLIP clear 2')
+        # The primary selection, both ways.
+        key(25)
+        desk.line('CLIP offer 3 primary text/plain;charset=utf-8')
+        desk.send('CLIP offer 9 primary text/plain;charset=utf-8')
+        seen('STANDIN source cancelled primary')
+        seen('STANDIN selection primary ' + aliases)
+        key(24)
+        desk.line('CLIP read 9 text/plain;charset=utf-8')
+        desktop_answers(b'middle')
+        seen('STANDIN pasted primary middle')
+        desk.nothing(0.3)
+        desk.send('WINDOW close 10')
+        desk.line('WINDOW gone 10')
+        check(client.wait(5) == 0, 'the clip stand-in failed:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('copy->CLIP offer text,read-by-pipe paste<-CLIP read aliases=5 secret=offer+clear-both-ways '
+            'source-gone->clear primary=both-ways stale/unknown=empty')
+
+
+def csd_part(desk, standin, env, display, work):
+    """A program that draws its own frame (ADR 0229), with `--csd`, window 9:
+    `WINDOW decor client`, its geometry inside its buffer, tiled states
+    passed on, and move, menu and resize asked from its own frame with a
+    press's serial -- one asked with no press comes to nothing."""
+    out_path = os.path.join(work, 'standin-csd.out')
+    client = start([standin, '--csd', 'Csd'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    try:
+        for want in ('WINDOW new 9 0', 'WINDOW title 9 Csd', 'WINDOW appid 9 blit.standin',
+                     'WINDOW limits 9 64 48 0 0', 'WINDOW decor 9 client'):
+            desk.line(want)
+        desk.line('WINDOW geometry 9 10 10 236 140')
+        desk.frame(256, 160, image_id=9)
+        desk.send('WINDOW size 9 200 120 tiled-left tiled-top')
+        desk.line('WINDOW geometry 9 10 10 180 100')
+        desk.frame(200, 120, image_id=9)
+        wait_for(lambda: 'STANDIN csd asked to move with no press' in printed(),
+                 lambda: 'no unsolicited move:\n' + printed())
+        desk.nothing(0.3)  # no WINDOW move: there was no press
+        check('STANDIN configure 200x120 tiled-left tiled-top' in printed(),
+              lambda: 'the tiled states did not reach the program:\n' + printed())
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[9])
+        frame = [0]
+
+        def lines(*events):
+            text = b''
+            for e in events:
+                frame[0] += 1
+                text += b'INPUT %s\nINPUT frame %d %d\n' % (e.encode() % BLIT_PICTURE, BLIT_PICTURE, frame[0])
+            route.sendall(text)
+
+        lines('ptr %d 50.00 50.00', 'btn %d 272 press')
+        desk.line('WINDOW move 9')
+        lines('btn %d 272 release', 'btn %d 273 press')
+        desk.line('WINDOW menu 9 15 16')
+        lines('btn %d 273 release', 'btn %d 274 press')
+        desk.line('WINDOW resize 9 bottom-right')
+        lines('btn %d 274 release')
+        wait_for(lambda: printed().count('STANDIN csd asked with serial') == 3,
+                 lambda: 'the frame did not ask three times:\n' + printed())
+        desk.nothing(0.3)
+        desk.send('WINDOW close 9')
+        desk.line('WINDOW gone 9')
+        check(client.wait(5) == 0, 'the csd stand-in failed:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('decor=client geometry=10,10+236x140->180x100 tiled=left,top '
+            'move/menu@15,16/resize=bottom-right on a press only')
+
+
+def sub_part(desk, standin, env, display, work):
+    """Subsurfaces (docs/api.md, "Subsurfaces"), with `--sub`: window 7 and
+    its subsurface, picture 8. Synchronized, the subsurface's frame waits
+    for the parent's commit, then `WINDOW sub` and the frame; desynchronized,
+    its frame and size come at once and its position at the parent's
+    commit; the input region decides who takes the pointer; place_below
+    makes it `below`; destroying the wl_subsurface ends picture 8."""
+    out_path = os.path.join(work, 'standin-sub.out')
+    client = start([standin, '--sub', 'Sub'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    try:
+        for want in ('WINDOW new 7 0', 'WINDOW title 7 Sub', 'WINDOW appid 7 blit.standin',
+                     'WINDOW limits 7 64 48 0 0', 'WINDOW decor 7 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=7)
+        # 1: synchronized. The parent's frame, then nothing while the
+        # subsurface's commit is only cached, then the line and its frame.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        # (the stand-in waits 400 ms between the two commits)
+        desk.nothing(0.25)
+        desk.line('WINDOW sub 8 7 20 30 64 40 above')
+        desk.frame(64, 40, image_id=8)
+        wait_for(lambda: 'STANDIN sub step 1' in printed(), lambda: 'no sub step 1:\n' + printed())
+        # 2: desynchronized. Its new size and frame at once, at the old
+        # position; the new position only at the parent's commit.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        desk.line('WINDOW sub 8 7 20 30 48 24 above')
+        desk.frame(48, 24, image_id=8)
+        desk.line('WINDOW sub 8 7 40 10 48 24 above')
+        wait_for(lambda: 'STANDIN sub step 2' in printed(), lambda: 'no sub step 2:\n' + printed())
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[7])
+        frame = [0]
+
+        def pointer(x, y, *wanted):
+            frame[0] += 1
+            before = len(printed().splitlines())
+            route.sendall(b'INPUT ptr %d %.2f %.2f\nINPUT frame %d %d\n'
+                          % (BLIT_PICTURE, x, y, BLIT_PICTURE, frame[0]))
+            want = ['STANDIN ' + w for w in wanted]
+            wait_for(lambda: [l for l in printed().splitlines()[before:] if l in want] == want,
+                     lambda: 'the pointer at %s,%s: expected %s:\n%s'
+                     % (x, y, want, '\n'.join(printed().splitlines()[before:])))
+
+        # 3: an empty input region: over the subsurface, the parent has it.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        wait_for(lambda: 'STANDIN sub step 3' in printed(), lambda: 'no sub step 3:\n' + printed())
+        desk.nothing(0.3)
+        pointer(45, 15, 'pointer enter main 45.00 15.00')
+        # 4: the whole surface again: the subsurface has it, in its pixels.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        wait_for(lambda: 'STANDIN sub step 4' in printed(), lambda: 'no sub step 4:\n' + printed())
+        pointer(46, 16, 'pointer leave main', 'pointer enter sub 6.00 6.00')
+        # 5: below the parent: `below`, and the parent over it has the pointer.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        desk.line('WINDOW sub 8 7 40 10 48 24 below')
+        wait_for(lambda: 'STANDIN sub step 5' in printed(), lambda: 'no sub step 5:\n' + printed())
+        pointer(47, 17, 'pointer leave sub', 'pointer enter main 47.00 17.00')
+        # 6: the wl_subsurface destroyed: its picture gone at once.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        desk.line('WINDOW gone 8')
+        wait_for(lambda: 'STANDIN sub step 6' in printed(), lambda: 'no sub step 6:\n' + printed())
+        desk.send('WINDOW close 7')
+        desk.line('WINDOW gone 7')
+        check(client.wait(5) == 0, 'the sub stand-in failed:\n' + printed())
+        check('STANDIN drew sub 64x40' in printed() and 'STANDIN drew sub 48x24' in printed(),
+              'the subsurface did not draw:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('sync=cached-until-parent desync=frame+size-at-once,position-at-parent '
+            'input-region=empty->main,all->sub below->main destroy->gone')
 
 
 def pacing_part(desk, standin, env, display, work):
@@ -648,8 +898,8 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
     session.write('\033[4;8H\033_Ga=p,i=42,p=1,q=2,C=1,c=8,r=3,z=1\033\\')
     at = wait_for(lambda: [p for p in (session.graphics(42) or {}).get('placements', []) if p['id'] == 1],
                   'picture 42 was not placed')[0]
-    check(ch.ask('INPUT sock %s 41\n' % desk.input_socks[1]) == b'OK input 41\n', 'Blit took no route')
-    check(ch.ask('INPUT member 42 41 12 63\n') == b'OK input 42\n', 'Blit took no member')
+    check(ch.ask('INPUT sock 41 %s\n' % desk.input_socks[1]) == b'INPUT ok 41\n', 'Blit took no route')
+    check(ch.ask('INPUT member 42 41 12 63\n') == b'INPUT ok 42\n', 'Blit took no member')
     ch.line('INPUT on 41\n')
     wait_for(lambda: [r for r in api('GET', '/v1/terminal-sessions/%s' % session.id)['frames']['input']['routes']
                       if r['image'] == 41 and r['state'] == 'live'], 'the route did not go live')
@@ -700,9 +950,10 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
-    copy), its buffer released only at Blit's RELEASE, given back when its
-    window goes; ERROR ENOTSUP copies that frame as FRM1 and every later
-    one. This host has no GPU: the stand-in's planes are memfds."""
+    copy), its buffer released only at Blit's `FRAME release`, given back
+    when its window goes; `FRAME error <id> ENOTSUP` copies that frame as
+    FRM1 and every later one. This host has no GPU: the stand-in's planes
+    are memfds."""
     runtime = os.path.join(work, 'run-dmabuf')
     os.mkdir(runtime, 0o700)
     name = 'blit-compositor-gate-dmabuf-%d' % os.getpid()
@@ -729,8 +980,8 @@ def dmabuf_part(compositor, standin, work):
         # Its own size first, at the initial commit's configure; Blit shows
         # and releases it, and the cases below start from there.
         seq0, _ = desk.frm3(256, 160, 1)
-        desk.send('RELEASE 1 %d' % seq0)
-        wait_for(lambda: 'STANDIN release 256x160' in printed(), 'RELEASE did not release the first buffer')
+        desk.send('FRAME release 1 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in printed(), 'FRAME release did not release the first buffer')
         desk.send('WINDOW size 1 64 32')
         seq1, file1 = desk.frm3(64, 32, 1)
         check('STANDIN dmabuf 64x32 file %d:%d' % file1 in printed(),
@@ -740,9 +991,15 @@ def dmabuf_part(compositor, standin, work):
         check(seq2 > seq1 and file2 != file1, 'the second FRM3: sequence %d file %s' % (seq2, file2))
         desk.nothing(0.3)
         check('STANDIN release 64x32' not in printed() and 'STANDIN release 80x40' not in printed(),
-              lambda: 'released before RELEASE:\n' + printed())
+              lambda: 'released before FRAME release:\n' + printed())
+        # The version 4 forms are no line of version 5: they release nothing.
         desk.send('RELEASE 1 %d' % seq1)
-        wait_for(lambda: 'STANDIN release 64x32' in printed(), 'RELEASE did not release the buffer')
+        desk.send('ERROR 1 ENOTSUP')
+        desk.nothing(0.3)
+        check('STANDIN release 64x32' not in printed() and 'STANDIN release 80x40' not in printed(),
+              lambda: 'a version 4 line released a buffer:\n' + printed())
+        desk.send('FRAME release 1 %d' % seq1)
+        wait_for(lambda: 'STANDIN release 64x32' in printed(), 'FRAME release did not release the buffer')
         check('STANDIN release 80x40' not in printed(), 'the held 80x40 buffer was released too')
 
         # A window that goes while Blit holds its frame gives the buffer back.
@@ -753,9 +1010,9 @@ def dmabuf_part(compositor, standin, work):
                      'WINDOW limits 2 64 48 0 0', 'WINDOW decor 2 server'):
             desk.line(want)
         seq0, _ = desk.frm3(256, 160, 2)
-        desk.send('RELEASE 2 %d' % seq0)
+        desk.send('FRAME release 2 %d' % seq0)
         wait_for(lambda: 'STANDIN release 256x160' in open(held_path).read(),
-                 'RELEASE did not release the held client\'s first buffer')
+                 'FRAME release did not release the held client\'s first buffer')
         desk.send('WINDOW size 2 30 20')
         desk.frm3(30, 20, 2)
         desk.send('WINDOW close 2')
@@ -769,7 +1026,7 @@ def dmabuf_part(compositor, standin, work):
               'the held buffer was not given back at WINDOW gone:\n' + open(held_path).read())
 
         # A dmabuf client drawing on every callback is one frame ahead of
-        # Blit: its third frame waits for Blit's RELEASE of its first.
+        # Blit: its third frame waits for Blit's FRAME release of its first.
         paced_path = os.path.join(work, 'standin-paced.out')
         paced = start([standin, '--dmabuf', '--animate', '2', 'Paced'], cenv, open(paced_path, 'w'))
         clients.append(paced)
@@ -777,18 +1034,18 @@ def dmabuf_part(compositor, standin, work):
                      'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
             desk.line(want)
         seq0, _ = desk.frm3(256, 160, 3)
-        desk.send('RELEASE 3 %d' % seq0)
+        desk.send('FRAME release 3 %d' % seq0)
         wait_for(lambda: 'STANDIN release 256x160' in open(paced_path).read(),
-                 'RELEASE did not release the paced client\'s first buffer')
+                 'FRAME release did not release the paced client\'s first buffer')
         desk.send('WINDOW size 3 40 30')
         seq_a, _ = desk.frm3(40, 30, 3)
         seq_b, _ = desk.frm3(40, 30, 3)
         desk.nothing(0.4)
-        desk.send('RELEASE 3 %d' % seq_a)
+        desk.send('FRAME release 3 %d' % seq_a)
         seq_c, _ = desk.frm3(40, 30, 3)
-        # RELEASE of the second takes the third: its callback and feedback
+        # FRAME release of the second takes the third: its callback and feedback
         # come, and the client, done animating, draws no more.
-        desk.send('RELEASE 3 %d' % seq_b)
+        desk.send('FRAME release 3 %d' % seq_b)
         desk.nothing(0.3)
         desk.send('WINDOW close 3')
         desk.line('WINDOW gone 3')
@@ -800,13 +1057,13 @@ def dmabuf_part(compositor, standin, work):
 
         # ENOTSUP: the refused (newest held) frame again as FRM1, and every
         # later one copied.
-        desk.send('ERROR 1 ENOTSUP')
+        desk.send('FRAME error 1 ENOTSUP')
         desk.frame(80, 40)
         wait_for(lambda: 'STANDIN release 80x40' in printed(), 'the refused buffer was not released')
         desk.send('WINDOW size 1 100 50')
         desk.frame(100, 50)
         wait_for(lambda: 'STANDIN release 100x50' in printed(), 'the copied buffer was not released')
-        desk.send('RELEASE 1 %d' % seq2)  # stale: nothing
+        desk.send('FRAME release 1 %d' % seq2)  # stale: nothing
         desk.nothing(0.3)
         desk.send('WINDOW close 1')
         desk.line('WINDOW gone 1')
@@ -820,7 +1077,11 @@ def dmabuf_part(compositor, standin, work):
         text = open(log).read()
         check('dmabuf 9 sent, 6 released, 1 refused, 2 copied' in text,
               'the log does not count the dmabuf frames:\n' + text)
-        return ('FRM3=client-file,64x32+80x40 RELEASE->release gone->release paced=3rd-after-RELEASE-of-1st '
+        check(text.count('an unknown line from the channel: RELEASE 1 ') == 1 and
+              text.count('an unknown line from the channel: ERROR 1 ENOTSUP') == 1,
+              'the version 4 lines were not logged as unknown:\n' + text)
+        return ('FRM3=client-file,64x32+80x40 FRAME_release->release v4_RELEASE+ERROR=unknown,released_nothing '
+                'gone->release paced=3rd-after-FRAME_release-of-1st '
                 'ENOTSUP->FRM1 80x40,100x50 feedback=2')
     finally:
         for p in clients + [comp]:
@@ -849,10 +1110,85 @@ def listen(name):
     return listener
 
 
+def sub_restart_part(compositor, standin, work):
+    """Subsurfaces survive a desktop restart: a top-level with a subsurface
+    shown, the channel closed and served again; the re-announcement is the
+    top-level's lines, then `WINDOW sub` with the same id, offset, size and
+    side, then both newest frames (the subsurface's too)."""
+    runtime = os.path.join(work, 'run-sub-restart')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-sub-restart-%d' % os.getpid()
+    listener = listen(name)
+    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    for k in ('WAYLAND_DISPLAY', 'BLIT_COMPOSITOR_RECONNECT_MS'):
+        env.pop(k, None)
+    log = os.path.join(work, 'compositor-sub-restart.log')
+    comp = start([compositor, '--log', log], env, open(os.path.join(work, 'compositor-sub-restart.out'), 'w'))
+    client = None
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        out_path = os.path.join(work, 'standin-sub-restart.out')
+        client = start([standin, '--sub', '--clip', 'Subbed'], dict(env, WAYLAND_DISPLAY='blit-0'),
+                       open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        hints = ('WINDOW new 1 0', 'WINDOW title 1 Subbed', 'WINDOW appid 1 blit.standin',
+                 'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server')
+        for want in hints:
+            desk.line(want)
+        desk.frame(256, 160)
+        desk.send('WINDOW size 1 200 120')
+        desk.frame(200, 120)
+        desk.line('WINDOW sub 2 1 20 30 64 40 above')
+        desk.frame(64, 40, image_id=2)
+        wait_for(lambda: 'STANDIN sub step 1' in printed(), lambda: 'no sub step 1:\n' + printed())
+        # Its copy, and the desktop's offer of the primary (which lapses).
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        route.sendall(b'INPUT key %d 46 press\nINPUT frame %d 1\n' % (BLIT_PICTURE, BLIT_PICTURE))
+        desk.line('CLIP offer 1 clipboard text/plain;charset=utf-8')
+        desk.send('CLIP offer 5 primary text/plain;charset=utf-8')
+        wait_for(lambda: 'STANDIN selection primary text/plain;charset=utf-8' in printed(),
+                 lambda: 'no primary from the desktop:\n' + printed())
+        # Restart Desktop (the route kept: the program keeps the keyboard): the channel and its socket go, then come back.
+        desk.sock.close()
+        listener.close()
+        time.sleep(0.5)
+        listener = listen(name)
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        for want in hints:
+            desk.line(want)
+        desk.line('WINDOW sub 2 1 20 30 64 40 above')
+        desk.frame(200, 120)
+        desk.frame(64, 40, image_id=2)
+        # The program's selection offered to the new desktop, the old
+        # desktop's primary gone from the program.
+        desk.line('CLIP offer 2 clipboard text/plain;charset=utf-8')
+        desk.nothing(0.3)
+        check(printed().splitlines().count('STANDIN selection primary none') >= 2,
+              lambda: 'the lost desktop\'s primary was not withdrawn:\n' + printed())
+        route.close()
+        quit_compositor(desk, comp)
+        client.wait(5)
+        text = open(log).read()
+        check('reconnect: 2 windows announced again, 2 frames sent again' in text,
+              'the re-announcement in the log:\n' + text)
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+    return ('reconnect=new+hints,WINDOW-sub-same-id,frames(top-level,sub),'
+            'program-selection-offered-again,desktop-offer-lapsed')
+
+
 def restart_part(compositor, standin, work):
     """docs/api.md, "Programs survive a desktop restart". The desktop picks
     the display (`--display`); a dmabuf program (window 1, drawing on every
-    callback, so one frame ahead of Blit and stalled until a RELEASE) and a
+    callback, so one frame ahead of Blit and stalled until a FRAME release) and a
     wl_shm one (window 2, drawing 60 frames on its callbacks, and asking for
     a pointer lock the desktop has not granted) are shown; the channel
     closes. Both keep drawing at the output's refresh with
@@ -911,12 +1247,12 @@ def restart_part(compositor, standin, work):
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
             desk.line(want)
         seq0, _ = desk.frm3(256, 160, 1)
-        desk.send('RELEASE 1 %d' % seq0)
-        wait_for(lambda: 'STANDIN release 256x160' in held(), 'RELEASE did not release the first buffer')
+        desk.send('FRAME release 1 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in held(), 'FRAME release did not release the first buffer')
         desk.send('WINDOW size 1 64 32')
         desk.frm3(64, 32, 1)
         desk.frm3(64, 32, 1)
-        desk.nothing(0.3)  # one frame ahead of Blit: no RELEASE, no third
+        desk.nothing(0.3)  # one frame ahead of Blit: no FRAME release, no third
         kept_path = os.path.join(work, 'standin-restart-kept.out')
         clients.append(start([standin, '--animate', '60', '--lock', 'Kept'], cenv,
                              open(kept_path, 'w')))
@@ -1039,7 +1375,11 @@ def restart_part(compositor, standin, work):
             except socket.timeout:
                 continue
             peer.settimeout(2)
-            if peer.recv(128)[:8] == b'BLITFRM1':
+            hello = peer.recv(128)
+            if hello[:8] == b'BLITFRM1':
+                # Each redial is a version 5 hello, as the first was.
+                check(struct.unpack_from('<I', hello, 8)[0] == 5,
+                      'a redial says version %d, not 5' % struct.unpack_from('<I', hello, 8)[0])
                 peer.send(b'OK dmabuf=0 window=0\n')
                 windowless += 1
             peer.close()
@@ -1182,6 +1522,9 @@ def desktop_part(compositor, standin, work):
 
         states = states_part(desk, standin, env, display, work)
         pacing = pacing_part(desk, standin, env, display, work)
+        subs = sub_part(desk, standin, env, display, work)
+        csd = csd_part(desk, standin, env, display, work)
+        clip = clip_part(desk, standin, env, display, work)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1195,13 +1538,16 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('24 frames sent, 0 failed' in text, 'the log does not count 24 frames:\n%s' % text)
+        check('36 frames sent, 0 failed' in text, 'the log does not count 36 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
                  ','.join('%s:%s' % kv for kv in sorted(versions.items()))))
         print('COMPOSITOR_STATES_OK %s' % states)
         print('COMPOSITOR_PACING_OK %s' % pacing)
+        print('COMPOSITOR_SUB_OK %s' % subs)
+        print('COMPOSITOR_CSD_OK %s' % csd)
+        print('COMPOSITOR_CLIP_OK %s' % clip)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -1265,17 +1611,18 @@ def blit_part(server, compositor, standin, work):
         child = dict(l.rstrip('\n').split('=', 1) for l in open(os.path.join(work, 'env')) if '=' in l)
         name, token = child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN']
 
-        v3 = Peer(name, token, 3)
-        v4 = Peer(name, token, 4)
-        check(v3.hello == b'OK dmabuf=0\n', 'a version 3 hello was answered %r' % v3.hello)
-        check(v4.hello == b'OK dmabuf=0 window=0\n', 'a version 4 hello was answered %r' % v4.hello)
-        for line, want in ((b'WINDOW display blit-0\n', b'ERROR WINDOW 0 ENOTSUP\n'),
-                           (b'WINDOW new 7 0\n', b'ERROR WINDOW 7 ENOTSUP\n'),
-                           (b'WINDOW size 7 320 200', b'ERROR WINDOW 7 ENOTSUP\n'),
-                           (b'WINDOW gone x\n', b'ERROR WINDOW 0 ENOTSUP\n')):
-            got = v4.ask(line)
+        for version in (3, 4):
+            got = Peer(name, token, version).hello
+            check(got == b'ERROR 0 EINVAL\n', 'a version %d hello was answered %r' % (version, got))
+        v5 = Peer(name, token, 5)
+        check(v5.hello == b'OK dmabuf=0 window=0\n', 'a version 5 hello was answered %r' % v5.hello)
+        for line, want in ((b'WINDOW display blit-0\n', b'WINDOW error 0 ENOTSUP\n'),
+                           (b'WINDOW new 7 0\n', b'WINDOW error 7 ENOTSUP\n'),
+                           (b'WINDOW size 7 320 200', b'WINDOW error 7 ENOTSUP\n'),
+                           (b'WINDOW gone x\n', b'WINDOW error 0 ENOTSUP\n')):
+            got = v5.ask(line)
             check(got == want, '%r was answered %r, not %r' % (line, got, want))
-        check(Peer(name, token, 5).hello.startswith(b'ERROR 0 EINVAL'), 'a version 5 hello was accepted')
+        check(Peer(name, token, 6).hello == b'ERROR 0 EINVAL\n', 'a version 6 hello was accepted')
 
         # blit-compositor reaching Blit directly: it runs, says why it shows
         # nothing, and sends Blit no WINDOW line and no frame. The client
@@ -1303,8 +1650,8 @@ def blit_part(server, compositor, standin, work):
         check(frames.get('refused', 0) == 0 and not frames.get('last_error'),
               'blit-compositor sent Blit something it refused: %s' % frames)
         api('DELETE', '/v1/terminal-sessions/%s' % session)
-        print('COMPOSITOR_BLIT_OK hello_v3="OK dmabuf=0" hello_v4="OK dmabuf=0 window=0" '
-              'WINDOW=ENOTSUPx4 v5=EINVAL compositor=runs,shows-nothing')
+        print('COMPOSITOR_BLIT_OK hello_v3_v4_v6="ERROR 0 EINVAL" hello_v5="OK dmabuf=0 window=0" '
+              'WINDOW="WINDOW error <id> ENOTSUP"x4 compositor=runs,shows-nothing')
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -1330,6 +1677,7 @@ def main():
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
+        print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
             # A server of its own, for its keymap.

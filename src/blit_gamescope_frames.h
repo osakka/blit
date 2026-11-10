@@ -2,23 +2,24 @@
    needs no PipeWire, so tools/tests/gamescope_bridge_gate.c can drive it with
    fake buffers against a socketpair or a real Blit.
 
-   It speaks version 3 of the frame channel (ADR 0202, ADR 0223): the hello,
-   FRM3 frames whose plane is a buffer's dmabuf (held until Blit's
-   `RELEASE <id> <seq>` or an `ERROR`, then handed back through `requeue`),
-   FRM1 frames copied into a fresh sealed memfd when Blit says `dmabuf=0` or
+   It speaks version 5 of the frame channel (ADR 0202, ADR 0223; docs/api.md,
+   "One grammar, version 5"): the hello, FRM3 frames whose plane is a
+   buffer's dmabuf (held until Blit's `FRAME release <id> <seq>` or a
+   `FRAME error <id> <code>`, then handed back through `requeue`), FRM1
+   frames copied into a fresh sealed memfd when Blit says `dmabuf=0` or
    refuses FRM3 with ENOTSUP, and the INPUT request that names gamescope's EIS
    socket for Blit to send the pane's input to (docs/api.md, "Picture frames
    by descriptor"; ADR 0225), each one SOCK_SEQPACKET message, no descriptor:
 
-       INPUT eis <absolute socket path> <image id>\n
-           answered `OK input <image id>\n` or
-           `ERROR INPUT <image id> <code>\n`; an `ERROR INPUT <id> ENOENT\n`
-           after `OK input <id>` means the compositor went and Blit ended
+       INPUT eis <image id> <absolute socket path>\n
+           answered `INPUT ok <image id>\n` or
+           `INPUT error <image id> <code>\n`; an `INPUT error <id> ENOENT\n`
+           after `INPUT ok <id>` means the compositor went and Blit ended
            that route
        INPUT on <image id>\n   INPUT off <image id>\n
            whether that picture's window has the keyboard; a route starts
            off. In phase 1 (a plain Blit pane) the bridge sends
-           `INPUT on <id>` right after `OK input <id>`. In phase 2
+           `INPUT on <id>` right after `INPUT ok <id>`. In phase 2
            (`--no-place`, the bridge inside a Hibr desktop app) the desktop
            owns window focus: the app sends `INPUT on`/`INPUT off` itself
            from its focus callback, through Hibr's listener, and the bridge
@@ -27,11 +28,6 @@
    Answers are per image because one channel may carry several pictures'
    routes (a desktop's); the bridge has one picture, and an answer naming
    another image is not its own.
-
-   A Blit from before INPUT (0.3.60) treats the request as a malformed frame
-   and answers `ERROR <u32 of bytes 4..7> EINVAL\n` -- "T ei" read
-   little-endian, 1768235092 -- which counts here as ENOTSUP: the bridge then
-   runs frames only.
 
    Header-only and static like Blit's other units; C99 plus POSIX/Linux. */
 #ifndef BLIT_GAMESCOPE_FRAMES_H
@@ -52,13 +48,15 @@
 #include <unistd.h>
 
 #define GS_HOLD_MAX 16
+/* The frame channel's one version (docs/api.md, "One grammar, version 5"). */
+#define GS_FRAME_VERSION 5
 #define GS_FOURCC_XR24 0x34325258u /* 'X' 'R' '2' '4' */
 
 enum gs_input_state {
     GS_INPUT_NONE = 0,     /* not asked */
     GS_INPUT_SENT,         /* asked, no answer yet */
     GS_INPUT_OK,           /* Blit sends the pane's input to the socket */
-    GS_INPUT_UNSUPPORTED,  /* this Blit has no INPUT: frames only */
+    GS_INPUT_UNSUPPORTED,  /* Blit cannot send to EIS (ENOTSUP): frames only */
     GS_INPUT_REFUSED       /* Blit refused it (input_error says why) */
 };
 
@@ -83,10 +81,10 @@ typedef struct {
     void *context;
     int input_state;
     int focus_by_desktop;   /* --no-place: the desktop sends INPUT on/off,
-                               so OK input is not followed by INPUT on */
+                               so INPUT ok is not followed by INPUT on */
     int input_on;           /* INPUT on sent */
-    int input_was_ok;       /* this request was answered OK input: a later
-                               ERROR INPUT ends a live route, not a refusal */
+    int input_was_ok;       /* this request was answered INPUT ok: a later
+                               INPUT error ends a live route, not a refusal */
     char input_error[32];
     /* counters, for the log and the gates */
     uint64_t last_memfd_sequence; /* the newest FRM1 sent */
@@ -103,9 +101,10 @@ static void gs_frames_init(GsFrames *f, uint32_t image_id, gs_requeue_fn requeue
     f->context = context;
 }
 
-/* The hello's answer: "OK\n", "OK dmabuf=0\n" or
-   "OK dmabuf=1 fence=<0|1> formats=<list>\n". dmabuf counts only when the
-   list offers XR24 with modifier 0 (LINEAR), which is what gamescope sends. */
+/* The hello's answer: "OK dmabuf=0 window=0\n" or
+   "OK dmabuf=1 fence=<0|1> formats=<list> window=0\n". dmabuf counts only
+   when the list offers XR24 with modifier 0 (LINEAR), which is what
+   gamescope sends. */
 static int gs_frames_parse_hello(GsFrames *f, const char *answer)
 {
     const char *p;
@@ -137,13 +136,13 @@ static int gs_frames_parse_hello(GsFrames *f, const char *answer)
 }
 
 /* Connects to the abstract socket `name` (BLIT_FRAME_SOCKET without its
-   leading '@') and says hello as a version 3 client. Returns 0, or -1 with
+   leading '@') and says hello as a version 5 client. Returns 0, or -1 with
    last_error set. */
 static int gs_frames_connect(GsFrames *f, const char *name, const char *token)
 {
     struct sockaddr_un addr;
     unsigned char hello[16 + 64];
-    uint32_t version = 3, length;
+    uint32_t version = GS_FRAME_VERSION, length;
     char answer[512];
     ssize_t got;
     struct timeval tv = { 3, 0 };
@@ -326,7 +325,7 @@ static int gs_frames_send_pixels(GsFrames *f, const unsigned char *bgrx, uint32_
 /* The INPUT request (see the top of this file). */
 static int gs_frames_format_input(char *out, size_t cap, const char *path, uint32_t image_id)
 {
-    int n = snprintf(out, cap, "INPUT eis %s %u\n", path, image_id);
+    int n = snprintf(out, cap, "INPUT eis %u %s\n", image_id, path);
     return n > 0 && (size_t)n < cap ? n : -1;
 }
 
@@ -379,7 +378,7 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
     unsigned int image;
     char code[32], tail;
     int i;
-    if (sscanf(line, "RELEASE %llu %llu", &id, &seq) == 2) {
+    if (sscanf(line, "FRAME release %llu %llu", &id, &seq) == 2) {
         ++f->released;
         for (i = 0; i < GS_HOLD_MAX; ++i)
             if (f->held[i].used && f->held[i].sequence == seq) {
@@ -389,7 +388,7 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
         ++f->stale_releases;
         return 1;
     }
-    if (sscanf(line, "OK input %u%c", &image, &tail) == 1) {
+    if (sscanf(line, "INPUT ok %u%c", &image, &tail) == 1) {
         if (image != f->image_id) return 1; /* another picture's route */
         f->input_state = GS_INPUT_OK;
         f->input_was_ok = 1;
@@ -398,10 +397,10 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
         if (!f->focus_by_desktop) gs_frames_send_input_focus(f, 1);
         return 1;
     }
-    if (sscanf(line, "ERROR INPUT %u %31s", &image, code) == 2) {
+    if (sscanf(line, "INPUT error %u %31s", &image, code) == 2) {
         /* 0 answers a line Blit could not read, which is this one's. */
         if (image != f->image_id && image != 0) return 1;
-        /* After OK input this is the route ending (ENOENT: the compositor
+        /* After INPUT ok this is the route ending (ENOENT: the compositor
            refused the handshake late or went away); input_was_ok stays. */
         snprintf(f->input_error, sizeof(f->input_error), "%s", code);
         f->input_on = 0;
@@ -412,9 +411,9 @@ static int gs_frames_handle_line(GsFrames *f, const char *line)
         f->hud = strncmp(line + 5, "on", 2) == 0;
         return 1;
     }
-    if (sscanf(line, "ERROR %llu %31s", &id, code) == 2) {
+    if (sscanf(line, "FRAME error %llu %31s", &id, code) == 2) {
         ++f->errors;
-        snprintf(f->last_error, sizeof(f->last_error), "ERROR %llu %s", id, code);
+        snprintf(f->last_error, sizeof(f->last_error), "FRAME error %llu %s", id, code);
         if (id != f->image_id) return 1;
         /* A refused frame is the producer's again. Replies come in the order
            frames are read, and an accepted frame gets no reply, so the

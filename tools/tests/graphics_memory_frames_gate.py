@@ -6,7 +6,7 @@ that arrived before the picture) or while it holds an input route (ADR
 
 One session, a 1 MiB picture budget, set live:
   - frame picture 30 (192 KiB) lands, unshown, and gets a route
-    (`OK input 30`); it is the least recently shown picture of all;
+    (`INPUT ok 30`); it is the least recently shown picture of all;
   - Kitty picture 41 (256 KiB) arrives, unshown;
   - `a=p,i=20,C=1` is held for picture 20, whose frame then lands
     (192 KiB) and is placed;
@@ -79,8 +79,8 @@ def main():
         # The routed picture: unshown, and the oldest.
         ch.frame(30, 1, 256, 256)
         wait_for(lambda: a.graphics(30), 'frame picture 30 did not land')
-        got = ch.ask('INPUT eis %s 30\n' % own)
-        check(got == b'OK input 30\n', 'INPUT for 30 was answered %r' % got)
+        got = ch.ask('INPUT eis 30 %s\n' % own)
+        check(got == b'INPUT ok 30\n', 'INPUT for 30 was answered %r' % got)
         # An unshown Kitty picture.
         a.write(kitty_picture('a=t,i=41,q=1', 256, 256, (200, 30, 30, 255)))
         wait_for(lambda: a.graphics(41), 'Kitty picture 41 did not land')

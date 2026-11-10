@@ -1,10 +1,12 @@
 /* blit-compositor's frame channel (ADR 0228, phase 1), the part that needs
    no Wayland, so tools/tests/compositor_wire_unit.c can drive it alone.
 
-   It speaks version 4 of the frame channel (docs/api.md, "Picture frames by
-   descriptor" and "Program windows"): version 3 plus the WINDOW lines
-   between the compositor and the desktop that serves the channel. Each is
-   one SOCK_SEQPACKET message, one line, no descriptor:
+   It speaks version 5 of the frame channel (docs/api.md, "Picture frames by
+   descriptor" and "Program windows"; "One grammar, version 5": every line
+   about a picture is `<WORD> <verb> <id> [arguments]`): the frames, the
+   INPUT lines, and the WINDOW lines between the compositor and the desktop
+   that serves the channel. Each is one SOCK_SEQPACKET message, one line, no
+   descriptor:
 
        compositor to desktop
            WINDOW display <name>          first, after the hello's OK
@@ -21,11 +23,12 @@
            WINDOW gone <id>
        desktop to compositor
            WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
+                       [tiled-left] [tiled-right] [tiled-top] [tiled-bottom]
            WINDOW output <id> <w> <h> <mHz>
            WINDOW close <id>
            WINDOW lock <id> on|off
            WINDOW quit 0                  the person quit the desktop: end now
-           OK window <id>                 ERROR WINDOW <id> <code>
+           WINDOW ok <id>                 WINDOW error <id> <code>
 
    A peer whose hello answer has no `window=1` (Blit itself says
    `window=0`) does not speak WINDOW: the compositor sends it no WINDOW line
@@ -39,16 +42,18 @@
 
    A linux-dmabuf buffer is FRM3 (ADR 0223), zero copy: the client's plane
    descriptors themselves go in SCM_RIGHTS, and the buffer is held until
-   Blit's `RELEASE <id> <seq>`. Only the formats and modifiers the hello's
-   `formats=` list names are offered to clients (bc_formats_parse). A frame
-   Blit refuses `ERROR <id> ENOTSUP` (it cannot import now) is sent again
-   as a copy, FRM1, when its one linear plane can be mapped, and every
-   later dmabuf frame on the connection is copied too (BcWire.refused,
+   Blit's `FRAME release <id> <seq>`. Only the formats and modifiers the
+   hello's `formats=` list names are offered to clients (bc_formats_parse). A
+   frame Blit refuses `FRAME error <id> ENOTSUP` (it cannot import now) is
+   sent again as a copy, FRM1, when its one linear plane can be mapped, and
+   every later dmabuf frame on the connection is copied too (BcWire.refused,
    blit-gamescope's rule).
 
    Input comes straight from Blit (docs/api.md, "Input straight from
-   Blit"): the compositor asks `INPUT sock <path> <id>` on the channel for
-   each toplevel, Blit connects to that stream socket, and writes
+   Blit"): the compositor asks `INPUT sock <id> <path>` on the channel for
+   each toplevel (bc_wire_input_sock), answered `INPUT ok <id>` or
+   `INPUT error <id> <code>`; Blit connects to that stream socket, and
+   writes
 
        INPUT key <id> <evdev code> press|release
        INPUT ptr <id> <x> <y>          the toplevel's own pixels, decimals
@@ -86,7 +91,7 @@
 #include <dirent.h>
 #include <unistd.h>
 
-#define BC_WIRE_VERSION 4
+#define BC_WIRE_VERSION 5
 /* Titles and app ids: control characters stripped, at most 256 bytes. */
 #define BC_TEXT_BYTES 256
 /* The largest size the desktop may ask for, either way, in pixels. */
@@ -227,7 +232,7 @@ static int bc_wire_parse_hello(BcWire *w, const char *answer)
 }
 
 /* Connects to the abstract socket `name` (BLIT_FRAME_SOCKET, its leading
-   '@' optional) and says hello as a version 4 client, without waiting: the
+   '@' optional) and says hello as a version 5 client, without waiting: the
    socket is non-blocking from the connect on (a listener whose backlog is
    full is a failed attempt, not a wait). Returns the socket, whose first
    message is the answer (bc_wire_answer), or -1 with last_error set. */
@@ -381,24 +386,49 @@ static void bc_text_clean(char *out, const char *in)
 }
 
 /* One WINDOW line (the caller's format has no newline; one is added). */
-static int bc_wire_line(BcWire *w, const char *fmt, ...)
+static int bc_wire_vline(BcWire *w, int fd, const char *fmt, va_list ap)
 {
     char line[64 + BC_TEXT_BYTES];
-    va_list ap;
     int n;
     if (w->fd < 0 || !w->window) return -1;
-    va_start(ap, fmt);
     n = vsnprintf(line, sizeof(line) - 1, fmt, ap);
-    va_end(ap);
     if (n < 0 || (size_t)n >= sizeof(line) - 1) return -1;
     line[n++] = '\n';
-    if (bc_wire_sendmsg(w->fd, line, (size_t)n, -1) != 0) {
+    if (bc_wire_sendmsg(w->fd, line, (size_t)n, fd) != 0) {
         ++w->lines_failed;
         snprintf(w->last_error, sizeof(w->last_error), "send WINDOW: %s", strerror(errno));
         return -1;
     }
     ++w->lines_sent;
     return 0;
+}
+
+static int bc_wire_line(BcWire *w, const char *fmt, ...)
+{
+    va_list ap;
+    int rc;
+    va_start(ap, fmt);
+    rc = bc_wire_vline(w, -1, fmt, ap);
+    va_end(ap);
+    return rc;
+}
+
+/* A line with a descriptor passed with it (CLIP read's pipe), one packet. */
+static int bc_wire_line_fd(BcWire *w, int fd, const char *fmt, ...)
+{
+    va_list ap;
+    int rc;
+    va_start(ap, fmt);
+    rc = bc_wire_vline(w, fd, fmt, ap);
+    va_end(ap);
+    return rc;
+}
+
+/* `INPUT sock <id> <path>`: a toplevel's input route, straight from Blit to
+   the input socket at `path` (docs/api.md, "Input straight from Blit"). */
+static int bc_wire_input_sock(BcWire *w, uint32_t id, const char *path)
+{
+    return bc_wire_line(w, "INPUT sock %u %s", id, path);
 }
 
 /* Converts `height` rows of a wl_shm buffer to FRM1 pixels: XRGB8888 (B, G,
@@ -545,7 +575,7 @@ static int bc_wire_send_shm(BcWire *w, uint32_t id, const void *pixels, uint32_t
 
 /* One dmabuf frame of picture `id` as FRM3 (ADR 0223, "Wire format,
    version 3"): the planes' own descriptors, no copy, no fence. The caller
-   holds the buffer until RELEASE <id> <sequence>. Returns the sequence
+   holds the buffer until FRAME release <id> <sequence>. Returns the sequence
    sent, or 0 with last_error set. */
 static uint64_t bc_wire_send_dmabuf(BcWire *w, uint32_t id, uint32_t width, uint32_t height,
                                     uint32_t fourcc, uint64_t modifier, int planes, const int *fds,
@@ -589,28 +619,51 @@ static uint64_t bc_wire_send_dmabuf(BcWire *w, uint32_t id, uint32_t width, uint
 /* One line from the desktop (or from Blit) on the channel. */
 enum {
     BC_LINE_UNKNOWN = 0,
-    BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] */
+    BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] [tiled-*] */
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
     BC_LINE_LOCK,           /* WINDOW lock <id> on|off: the desktop's pointer hold */
     BC_LINE_QUIT,           /* WINDOW quit 0: end every program, exit, no reconnect */
-    BC_LINE_OK_WINDOW,      /* OK window <id> */
-    BC_LINE_ERROR_WINDOW,   /* ERROR WINDOW <id> <code> */
-    BC_LINE_RELEASE,        /* RELEASE <id> <sequence>: an FRM3 frame's buffer is free */
-    BC_LINE_ERROR,          /* ERROR <id> <code>: a refused frame */
-    BC_LINE_OTHER           /* understood, nothing to do (HUD1, OK input, ...) */
+    BC_LINE_OK_WINDOW,      /* WINDOW ok <id> */
+    BC_LINE_ERROR_WINDOW,   /* WINDOW error <id> <code> */
+    BC_LINE_RELEASE,        /* FRAME release <id> <sequence>: an FRM3 frame's buffer is free */
+    BC_LINE_ERROR,          /* FRAME error <id> <code>: a refused frame */
+    BC_LINE_OTHER,          /* understood, nothing to do (HUD1, INPUT ok|error) */
+    BC_LINE_CLIP_OFFER,     /* CLIP offer <seq> clipboard|primary [<type> ...] */
+    BC_LINE_CLIP_READ,      /* CLIP read <seq> <type>, a pipe's write end with it */
+    BC_LINE_CLIP_CLEAR      /* CLIP clear <seq> */
 };
+
+/* The clipboard's lines (ADR 0229): media types are printable ASCII words. */
+#define BC_CLIP_TYPE_BYTES 127
+#define BC_CLIP_TYPES 16
 
 typedef struct {
     int kind;
     uint32_t id;
     int32_t width, height;
     int fullscreen, maximized, activated;
+    unsigned tiled;         /* BC_TILED_*: the edges the desktop put it against */
     int on;                 /* WINDOW lock */
     uint32_t refresh_mhz;   /* WINDOW output */
-    uint64_t sequence;      /* RELEASE */
+    uint64_t sequence;      /* FRAME release */
     char code[32];
+    int primary;            /* CLIP offer: the primary selection, not the clipboard */
+    char types[BC_TEXT_BYTES + 1];  /* CLIP offer: its types, one space apart; read: the type */
+    int ntypes;
 } BcLine;
+
+/* One media type word at *p into out (BC_CLIP_TYPE_BYTES + 1); advances. */
+static int bc_read_type(const char **p, char *out)
+{
+    size_t n = 0;
+    while ((unsigned char)**p > ' ' && (unsigned char)**p < 0x7f) {
+        if (n >= BC_CLIP_TYPE_BYTES) return -1;
+        out[n++] = *(*p)++;
+    }
+    out[n] = '\0';
+    return n ? 0 : -1;
+}
 
 /* Reads an unsigned decimal word at *p (no sign, no leading space), at most
    `max`; advances *p past it. */
@@ -630,6 +683,9 @@ static int bc_read_u32(const char **p, unsigned long max, uint32_t *out)
 }
 
 /* One line from Blit on an input socket. */
+/* WINDOW size's tiled words, in their order: bits of BcLine.tiled. */
+enum { BC_TILED_LEFT = 1, BC_TILED_RIGHT = 2, BC_TILED_TOP = 4, BC_TILED_BOTTOM = 8 };
+
 enum {
     BC_INPUT_UNKNOWN = 0,
     BC_INPUT_KEY,           /* code, pressed */
@@ -731,6 +787,42 @@ static int bc_parse_line(const char *line, BcLine *out)
     const char *p;
     uint32_t a, b;
     memset(out, 0, sizeof(*out));
+    if (strncmp(line, "CLIP ", 5) == 0) {
+        char type[BC_CLIP_TYPE_BYTES + 1];
+        int kind;
+        p = line + 5;
+        if (strncmp(p, "offer ", 6) == 0) { kind = BC_LINE_CLIP_OFFER; p += 6; }
+        else if (strncmp(p, "read ", 5) == 0) { kind = BC_LINE_CLIP_READ; p += 5; }
+        else if (strncmp(p, "clear ", 6) == 0) { kind = BC_LINE_CLIP_CLEAR; p += 6; }
+        else return out->kind = BC_LINE_UNKNOWN;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0)
+            return out->kind = BC_LINE_UNKNOWN;
+        if (kind == BC_LINE_CLIP_OFFER) {
+            size_t used = 0;
+            if (strncmp(p, " clipboard", 10) == 0) p += 10;
+            else if (strncmp(p, " primary", 8) == 0) { out->primary = 1; p += 8; }
+            else return out->kind = BC_LINE_UNKNOWN;
+            while (*p == ' ') {
+                size_t n;
+                ++p;
+                if (bc_read_type(&p, type) != 0 || out->ntypes >= BC_CLIP_TYPES)
+                    return out->kind = BC_LINE_UNKNOWN;
+                n = strlen(type);
+                if (used + n + 1 > BC_TEXT_BYTES) return out->kind = BC_LINE_UNKNOWN;
+                if (used) out->types[used++] = ' ';
+                memcpy(out->types + used, type, n);
+                used += n;
+                out->types[used] = '\0';
+                ++out->ntypes;
+            }
+        } else if (kind == BC_LINE_CLIP_READ) {
+            if (*p++ != ' ' || bc_read_type(&p, type) != 0) return out->kind = BC_LINE_UNKNOWN;
+            snprintf(out->types, sizeof(out->types), "%s", type);
+            out->ntypes = 1;
+        }
+        if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = kind;
+    }
     if (strncmp(line, "WINDOW size ", 12) == 0) {
         p = line + 12;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' ||
@@ -751,6 +843,18 @@ static int bc_parse_line(const char *line, BcLine *out)
         if (strncmp(p, " activated", 10) == 0 && (p[10] == '\0' || p[10] == ' ' || p[10] == '\n')) {
             out->activated = 1;
             p += 10;
+        }
+        {
+            static const char *const tiled[] = { " tiled-left", " tiled-right", " tiled-top",
+                                                 " tiled-bottom" };
+            size_t k;
+            for (k = 0; k < sizeof(tiled) / sizeof(tiled[0]); ++k) {
+                size_t n = strlen(tiled[k]);
+                if (strncmp(p, tiled[k], n) == 0 && (p[n] == '\0' || p[n] == ' ' || p[n] == '\n')) {
+                    out->tiled |= 1u << k;
+                    p += n;
+                }
+            }
         }
         if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_SIZE;
@@ -792,21 +896,21 @@ static int bc_parse_line(const char *line, BcLine *out)
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_QUIT;
     }
-    if (strncmp(line, "OK window ", 10) == 0) {
+    if (strncmp(line, "WINDOW ok ", 10) == 0) {
         p = line + 10;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0) return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_OK_WINDOW;
     }
-    if (strncmp(line, "ERROR WINDOW ", 13) == 0) {
+    if (strncmp(line, "WINDOW error ", 13) == 0) {
         p = line + 13;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' ||
             sscanf(p, "%31s", out->code) != 1)
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_ERROR_WINDOW;
     }
-    if (strncmp(line, "RELEASE ", 8) == 0) {
+    if (strncmp(line, "FRAME release ", 14) == 0) {
         char *end;
-        p = line + 8;
+        p = line + 14;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' || *p < '0' || *p > '9')
             return out->kind = BC_LINE_UNKNOWN;
         errno = 0;
@@ -814,15 +918,15 @@ static int bc_parse_line(const char *line, BcLine *out)
         if (errno != 0 || (*end != '\0' && *end != '\n')) return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_RELEASE;
     }
-    if (strncmp(line, "ERROR ", 6) == 0) {
-        p = line + 6;
-        if (strncmp(p, "INPUT ", 6) == 0) return out->kind = BC_LINE_OTHER;
+    if (strncmp(line, "FRAME error ", 12) == 0) {
+        p = line + 12;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' ||
             sscanf(p, "%31s", out->code) != 1)
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_ERROR;
     }
-    if (strncmp(line, "HUD1 ", 5) == 0 || strncmp(line, "OK input ", 9) == 0)
+    if (strncmp(line, "HUD1 ", 5) == 0 || strncmp(line, "INPUT ok ", 9) == 0 ||
+        strncmp(line, "INPUT error ", 12) == 0)
         return out->kind = BC_LINE_OTHER;
     return out->kind = BC_LINE_UNKNOWN;
 }

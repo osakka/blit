@@ -5,7 +5,7 @@
 
    One per desktop session, started by the desktop with the
    BLIT_FRAME_SOCKET/BLIT_FRAME_TOKEN of the frame channel it serves. It
-   connects there as a version 4 producer (blit_compositor_wire.h), listens
+   connects there as a version 5 producer (blit_compositor_wire.h), listens
    on $XDG_RUNTIME_DIR/<name> (--display's, else blit-<n>, the first free n)
    and says that name with `WINDOW display <name>`; the desktop puts it in
    its programs' environment as WAYLAND_DISPLAY.
@@ -21,14 +21,14 @@
    hints, the desktop answers `WINDOW size`, and the compositor configures
    the client at exactly that size. A committed wl_shm buffer becomes one
    FRM1 frame of that picture, copied, and is released at once; a dmabuf
-   one becomes one FRM3 of its own planes, released at Blit's RELEASE (the
-   dmabuf section). Frame callbacks and presentation feedback follow when
-   Blit has taken the frame, at most once per output refresh (the frame
-   pacing section). Input comes straight from Blit to the compositor's
+   one becomes one FRM3 of its own planes, released at Blit's
+   `FRAME release` (the dmabuf section). Frame callbacks and presentation
+   feedback follow when Blit has taken the frame, at most once per output
+   refresh (the frame pacing section). Input comes straight from Blit to the compositor's
    input socket as lines and becomes wl_seat events (the input section).
 
-   Globals: wl_compositor, wl_subcompositor (subsurfaces accepted and
-   logged, not composited), wl_shm (ARGB8888, XRGB8888, libwayland's own),
+   Globals: wl_compositor, wl_subcompositor (each subsurface a picture of
+   its own, `WINDOW sub`: the subsurface section), wl_shm (ARGB8888, XRGB8888, libwayland's own),
    wl_output (one global per display mode the desktop names with `WINDOW
    output`; a window is on the first, 1920x1080 at 60 Hz, until then, and
    its surface enters and leaves them as the desktop moves it),
@@ -71,6 +71,7 @@
 #include "presentation-time-server-protocol.h"
 #include "relative-pointer-unstable-v1-server-protocol.h"
 #include "pointer-constraints-unstable-v1-server-protocol.h"
+#include "primary-selection-unstable-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -103,11 +104,31 @@ struct bc_output {
     int number;                       /* its name, BLIT-<number>, from 1 */
 };
 
+/* A wl_region: its add and subtract rectangles in order. A point is in it
+   when the last rectangle holding it was added. */
+struct bc_rect_op {
+    int32_t x, y, w, h;
+    int add;
+};
+
+struct bc_region {
+    struct bc_rect_op *ops;
+    int count;
+};
+
 struct bc_surface {
     struct wl_resource *resource;
     struct bc_server *server;
     int role;
     struct bc_xdg *xdg;               /* while it has an xdg_surface */
+    struct bc_xdg *sub;               /* while it is a subsurface (its picture) */
+    /* Its subsurfaces, bottom to top, with `self` among them where this
+       surface's own picture is (the subsurface section). */
+    struct wl_list subs;
+    struct wl_list self;
+    /* The input region, applied at commit: all of the surface when `input_all`. */
+    struct bc_region input, pending_input;
+    int input_all, pending_input_all, pending_input_set;
     /* pending state, applied at commit */
     struct wl_resource *pending_buffer;
     int pending_attach;               /* attach seen since the last commit */
@@ -167,6 +188,7 @@ struct bc_xdg {
                                          client draws from its next commit */
     int32_t size_w, size_h;
     int size_fullscreen, size_maximized, size_activated;
+    unsigned size_tiled;              /* BC_TILED_* */
     struct bc_output *output;         /* the display it is on */
     uint64_t last_copy;               /* the sequence of its newest FRM1 */
     BcCopy kept;                      /* its newest frame when it is a copy (fd -1
@@ -177,6 +199,47 @@ struct bc_xdg {
     /* popup */
     struct bc_positioner positioner;
     int32_t px, py;                   /* relative to the parent's geometry */
+    /* subsurface (the subsurface section): its picture, `WINDOW sub` */
+    struct wl_resource *subsurface;
+    struct bc_surface *sub_parent;    /* NULL once the parent surface is gone */
+    struct wl_list sub_link;          /* in sub_parent->subs */
+    int32_t sx, sy, psx, psy;         /* position in the parent: committed, pending */
+    int sub_moved;                    /* a position waits for the parent's commit */
+    int sync;                         /* wl_subsurface's synchronized mode */
+    int sub_shown;                    /* its WINDOW sub line describes it now */
+    int32_t sent_x, sent_y, sent_w, sent_h;
+    int sent_above, sent_index;
+    /* synchronized mode's cached state, applied at the parent's commit */
+    struct wl_resource *cached_buffer;
+    int cached_attach, cached;
+    struct wl_listener cached_buffer_destroy;
+    struct wl_list cached_frames, cached_feedback;
+};
+
+/* The clipboard (ADR 0229): a program's selection source. */
+struct bc_source {
+    struct wl_resource *resource;
+    struct bc_server *server;
+    int primary;                      /* zwp_primary_selection_source_v1, else wl_data_source */
+    char *types[BC_CLIP_TYPES];
+    int ntypes;
+};
+
+/* One selection, the clipboard's or the primary: a program's source, or the
+   desktop's offer `desk_seq` in `desk_types`; never the bytes. */
+struct bc_selection {
+    struct bc_source *source;
+    uint32_t source_seq;              /* the source's offer to the desktop */
+    uint32_t desk_seq;                /* 0: the desktop offers nothing */
+    int desk_text, desk_secret;
+    uint32_t generation;              /* bumped at every change: offers made before are stale */
+};
+
+/* A wl_data_offer or zwp_primary_selection_offer_v1 made to a program. */
+struct bc_offer {
+    struct bc_server *server;
+    int primary;
+    uint32_t generation;
 };
 
 struct bc_server {
@@ -206,6 +269,11 @@ struct bc_server {
     struct wl_list keyboards, pointers;   /* wl_keyboard, wl_pointer resources */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
     struct wl_list constraints;       /* bc_constraint: pointer locks and confinements */
+    /* the clipboard (ADR 0229): [0] Ctrl-C/V, [1] the primary selection */
+    struct bc_selection sel[2];
+    struct wl_list devices[2];        /* wl_data_device, zwp_primary_selection_device_v1 */
+    uint32_t clip_seq;                /* the offers made to the desktop */
+    int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
     struct xkb_keymap *keymap;
     struct xkb_state *xkb_state;
@@ -218,6 +286,7 @@ struct bc_server {
     struct bc_surface *kbd_focus, *ptr_focus;
     double ptr_x, ptr_y;
     uint32_t buttons_down;            /* BTN_LEFT + n */
+    uint32_t button_serial;           /* the serial of the newest press, sent to every pointer */
     int pointer_batch;                /* a pointer event since the last frame */
     FILE *log;
     int status;
@@ -283,6 +352,13 @@ static void send_limits(struct bc_xdg *x)
     x->limits_sent = 1;
 }
 
+/* `WINDOW geometry`: the window's rectangle in its surface pixels. */
+static void send_geometry(struct bc_xdg *x)
+{
+    bc_wire_line(&x->server->wire, "WINDOW geometry %u %d %d %d %d", x->id, x->gx, x->gy, x->gw,
+                 x->gh);
+}
+
 static void send_decor(struct bc_xdg *x)
 {
     bc_wire_line(&x->server->wire, "WINDOW decor %u %s", x->id,
@@ -302,12 +378,13 @@ static void announce_hints(struct bc_xdg *x, int parent)
     if (x->appid[0]) bc_wire_line(w, "WINDOW appid %u %s", x->id, x->appid);
     if (x->min_w || x->min_h || x->max_w || x->max_h) send_limits(x);
     send_decor(x);
+    if (x->gw > 0 && x->gh > 0) send_geometry(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
     /* Its input, straight from Blit to its own input socket (one route per
        toplevel); the desktop relays the request under its own id. */
     if (window_input_listen(x) == 0)
-        bc_wire_line(w, "INPUT sock %s %u", x->input_path, x->id);
+        bc_wire_input_sock(w, x->id, x->input_path);
 }
 
 /* The toplevel's first appearance, at its initial commit: new, then every
@@ -354,8 +431,13 @@ static void kept_set(struct bc_xdg *x, const BcCopy *c)
     else x->kept.fd = -1;
 }
 
+static void subs_children_gone(struct bc_surface *surface);
+
 static void window_gone(struct bc_xdg *x)
 {
+    /* Its subsurfaces' pictures go first: they are drawn with it. */
+    if (x->surface) subs_children_gone(x->surface);
+    x->sub_shown = 0;
     kept_set(x, NULL);
     window_set_output(x, NULL);
     /* Its pointer lock let go first: the desktop's hold ends with it. */
@@ -383,6 +465,15 @@ static void send_toplevel_configure(struct bc_xdg *x)
         *s = XDG_TOPLEVEL_STATE_MAXIMIZED;
     if (x->size_activated && (s = wl_array_add(&states, sizeof(*s))) != NULL)
         *s = XDG_TOPLEVEL_STATE_ACTIVATED;
+    /* Tiled (xdg_toplevel v2): a client-side frame drops its shadow there. */
+    if (wl_resource_get_version(x->toplevel) >= 2) {
+        static const uint32_t tiled[] = { XDG_TOPLEVEL_STATE_TILED_LEFT, XDG_TOPLEVEL_STATE_TILED_RIGHT,
+                                          XDG_TOPLEVEL_STATE_TILED_TOP, XDG_TOPLEVEL_STATE_TILED_BOTTOM };
+        unsigned k;
+        for (k = 0; k < 4; ++k)
+            if ((x->size_tiled & (1u << k)) && (s = wl_array_add(&states, sizeof(*s))) != NULL)
+                *s = tiled[k];
+    }
     if (x->decoration)
         zxdg_toplevel_decoration_v1_send_configure(x->decoration, x->decor_mode);
     xdg_toplevel_send_configure(x->toplevel, x->size_w, x->size_h, &states);
@@ -473,7 +564,7 @@ static void hold_end(struct bc_hold *h)
 
 /* Every frame of picture `id` still held, given back to its client: the
    picture is going, and WINDOW gone follows only once nothing of it is
-   held (docs/api.md). Blit's later RELEASEs for them are stale. */
+   held (docs/api.md). Blit's later `FRAME release`s for them are stale. */
 static void holds_end_id(struct bc_server *s, uint32_t id)
 {
     struct bc_hold *h, *next;
@@ -849,7 +940,7 @@ static void callbacks_destroy(struct wl_list *list)
    - wl_shm, or a dmabuf copied: taken when its FRM1 is sent;
    - a dmabuf sent as FRM3: taken when it is the window's only frame Blit
      holds, which is at once for the first and, after that, at Blit's
-     RELEASE of the frame before it -- the RELEASE that says Blit drew the
+     `FRAME release` of the frame before it -- the one that says Blit drew the
      newer frame (or let it supersede the older one), so a client is never
      more than one frame ahead of Blit;
    - a commit with no new buffer on a shown window: taken at once (a client
@@ -869,9 +960,160 @@ static uint64_t now_us(void)
     return (uint64_t)ts.tv_sec * 1000000u + (uint64_t)ts.tv_nsec / 1000u;
 }
 
+static int region_add_op(struct bc_region *r, int32_t x, int32_t y, int32_t w, int32_t h, int add)
+{
+    struct bc_rect_op *grown;
+    if (r->count >= 4096) return -1;
+    if ((grown = realloc(r->ops, sizeof(*grown) * (size_t)(r->count + 1))) == NULL) return -1;
+    r->ops = grown;
+    r->ops[r->count++] = (struct bc_rect_op){ x, y, w, h, add };
+    return 0;
+}
+
+static void region_clear(struct bc_region *r)
+{
+    free(r->ops);
+    r->ops = NULL;
+    r->count = 0;
+}
+
+static int region_copy(struct bc_region *to, const struct bc_region *from)
+{
+    struct bc_rect_op *ops = NULL;
+    if (from->count && (ops = malloc(sizeof(*ops) * (size_t)from->count)) == NULL) return -1;
+    if (from->count) memcpy(ops, from->ops, sizeof(*ops) * (size_t)from->count);
+    region_clear(to);
+    to->ops = ops;
+    to->count = from->count;
+    return 0;
+}
+
+static int region_contains(const struct bc_region *r, double x, double y)
+{
+    int i, in = 0;
+    for (i = 0; i < r->count; ++i) {
+        const struct bc_rect_op *o = &r->ops[i];
+        if (x >= o->x && y >= o->y && x < (double)o->x + o->w && y < (double)o->y + o->h)
+            in = o->add;
+    }
+    return in;
+}
+
+/* Whether the surface takes the pointer at (x, y), its own pixels: inside
+   its buffer and its input region. */
+static int surface_takes_pointer(const struct bc_surface *surface, int32_t w, int32_t h, double x,
+                                 double y)
+{
+    if (x < 0 || y < 0 || x >= w || y >= h) return 0;
+    return surface->input_all || region_contains(&surface->input, x, y);
+}
+
+/* ---- the subsurface section: helpers ----
+
+   A subsurface is a picture of its own, as a popup is: `WINDOW sub <id>
+   <parent> <x> <y> <w> <h> above|below`, its frames under <id>, the
+   desktop placing it at its offset in the top-level's surface pixels
+   (docs/api.md, "Subsurfaces"). The tree under a top-level is flattened:
+   <parent> is always the top-level, the offset the sum of the positions
+   down to it, and the lines go bottom to top, `below` for those under the
+   top-level's own picture. */
+
+/* The picture a surface's buffers are frames of: its window, popup or
+   subsurface; NULL for none (a cursor). */
+static struct bc_xdg *surface_pic(struct bc_surface *surface)
+{
+    return surface->xdg ? surface->xdg : surface->sub;
+}
+
+/* The top-level a subsurface belongs to and its offset in that top-level's
+   surface pixels; NULL when its chain does not reach a top-level (a parent
+   gone, no role yet, or a popup's: not shown in this release). */
+static struct bc_xdg *sub_root(const struct bc_xdg *sub, int32_t *ox, int32_t *oy)
+{
+    int32_t x = 0, y = 0;
+    while (sub && sub->subsurface) {
+        struct bc_surface *p = sub->sub_parent;
+        x += sub->sx;
+        y += sub->sy;
+        if (p == NULL) return NULL;
+        if (p->xdg) {
+            if (ox) *ox = x;
+            if (oy) *oy = y;
+            return p->xdg->toplevel ? p->xdg : NULL;
+        }
+        sub = p->sub;
+    }
+    return NULL;
+}
+
+/* The top-level a surface's input belongs to: its own, a popup's or a
+   subsurface's top-level; NULL for none. */
+static struct bc_xdg *surface_window(struct bc_surface *surface)
+{
+    struct bc_xdg *x;
+    if (surface == NULL) return NULL;
+    if (surface->sub) return sub_root(surface->sub, NULL, NULL);
+    x = surface->xdg;
+    while (x && x->popup && x->parent) x = x->parent;
+    return x && x->toplevel ? x : NULL;
+}
+
+/* Synchronized, by its own mode or an ancestor's (wl_subsurface). */
+static int sub_effectively_sync(const struct bc_xdg *sub)
+{
+    while (sub) {
+        if (sub->sync) return 1;
+        sub = sub->sub_parent ? sub->sub_parent->sub : NULL;
+    }
+    return 0;
+}
+
+/* One subsurface of a top-level's flattened tree, bottom to top. */
+struct bc_sub_at {
+    struct bc_xdg *sub;
+    int32_t x, y;
+    int above;
+};
+#define BC_SUBS_MAX 64
+
+static int subs_walk(struct bc_surface *surface, int32_t ox, int32_t oy, int above, int top,
+                     struct bc_sub_at *out, int n)
+{
+    struct wl_list *node;
+    for (node = surface->subs.next; node != &surface->subs; node = node->next) {
+        struct bc_xdg *c;
+        if (node == &surface->self) {
+            if (top) above = 1;
+            continue;
+        }
+        c = wl_container_of(node, c, sub_link);
+        /* A subsurface shows only while it and every one above it in the
+           tree is mapped. */
+        if (!c->mapped || c->surface == NULL) continue;
+        if (n < BC_SUBS_MAX) {
+            out[n].sub = c;
+            out[n].x = ox + c->sx;
+            out[n].y = oy + c->sy;
+            out[n].above = above;
+        }
+        ++n;
+        n = subs_walk(c->surface, ox + c->sx, oy + c->sy, above, 0, out, n);
+    }
+    return n;
+}
+
+/* The top-level's shown subsurfaces, bottom to top. */
+static int subs_collect(struct bc_xdg *root, struct bc_sub_at *out)
+{
+    int n;
+    if (root == NULL || root->surface == NULL) return 0;
+    n = subs_walk(root->surface, 0, 0, 0, 1, out, 0);
+    return n < BC_SUBS_MAX ? n : BC_SUBS_MAX;
+}
+
 static uint32_t surface_refresh_mhz(struct bc_surface *surface)
 {
-    struct bc_xdg *x = surface->xdg;
+    struct bc_xdg *x = surface_pic(surface);
     return x && x->output ? x->output->refresh_mhz : 60000u;
 }
 
@@ -889,7 +1131,7 @@ static void feedback_presented(struct bc_surface *surface)
     struct wl_resource *r, *next, *out;
     struct timespec ts;
     uint32_t mhz = surface_refresh_mhz(surface);
-    struct bc_output *o = surface->xdg ? surface->xdg->output : NULL;
+    struct bc_output *o = surface_pic(surface) ? surface_pic(surface)->output : NULL;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     wl_resource_for_each_safe(r, next, &surface->feedback) {
         if (o && (out = output_resource(o, wl_resource_get_client(r))) != NULL)
@@ -940,7 +1182,7 @@ static void frames_taken(struct bc_surface *surface)
 
 enum { BC_SENT_NONE = 0, BC_SENT_COPY, BC_SENT_HELD };
 
-/* A dmabuf commit: FRM3, held until Blit's RELEASE, unless the peer
+/* A dmabuf commit: FRM3, held until Blit's `FRAME release`, unless the peer
    refused dmabuf on this connection, when it is copied as FRM1. */
 static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
 {
@@ -965,7 +1207,7 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
             /* The newest frame is this one, not a copy. */
             kept_set(x, NULL);
             /* Taken at once when Blit holds nothing else of the window,
-               else at the RELEASE of the frame before it. */
+               else at the `FRAME release` of the frame before it. */
             if (!older) frames_taken(x->surface);
             return BC_SENT_HELD;
         }
@@ -1020,9 +1262,8 @@ static int keep_buffer(struct bc_xdg *x, struct wl_shm_buffer *shm, struct bc_dm
 /* The committed buffer as one frame of the window's picture: BC_SENT_HELD
    for an FRM3 Blit now holds, BC_SENT_COPY for a copy (the buffer is the
    client's again), BC_SENT_NONE when nothing was sent. */
-static int send_buffer(struct bc_surface *surface, struct wl_resource *buffer)
+static int send_buffer(struct bc_xdg *x, struct bc_surface *surface, struct wl_resource *buffer)
 {
-    struct bc_xdg *x = surface->xdg;
     struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
     struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
     int rc;
@@ -1102,35 +1343,61 @@ static void surface_frame(struct wl_client *client, struct wl_resource *resource
     wl_list_insert(surface->pending_frames.prev, wl_resource_get_link(cb));
 }
 
-static void surface_region(struct wl_client *client, struct wl_resource *resource,
-                           struct wl_resource *region)
+static void surface_opaque_region(struct wl_client *client, struct wl_resource *resource,
+                                  struct wl_resource *region)
 {
     (void)client; (void)resource; (void)region;
 }
 
-static void surface_commit(struct wl_client *client, struct wl_resource *resource)
+/* Pending until the surface's state is applied (its commit, or its
+   parent's for a synchronized subsurface). NULL is all of the surface. */
+static void surface_input_region(struct wl_client *client, struct wl_resource *resource,
+                                 struct wl_resource *region)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
-    struct bc_xdg *x = surface->xdg;
-    struct wl_resource *buffer = surface->pending_buffer;
-    int attached = surface->pending_attach, sent = 0;
-    (void)client;
+    surface->pending_input_set = 1;
+    surface->pending_input_all = region == NULL;
+    if (region == NULL) region_clear(&surface->pending_input);
+    else if (region_copy(&surface->pending_input, wl_resource_get_user_data(region)) != 0)
+        wl_client_post_no_memory(client);
+}
 
-    /* Pending frame callbacks and feedback wait for Blit to take the next
+static int sub_apply_buffer(struct bc_xdg *sub, struct wl_resource *buffer, int attached);
+static void subs_parent_applied(struct bc_surface *parent);
+static void sub_cache(struct bc_xdg *sub, struct wl_resource *buffer, int attached);
+static void sub_apply_cached(struct bc_xdg *sub);
+
+/* A surface's new state applied: at its commit, or at its parent's for a
+   synchronized subsurface (the state cached until then). `frames` and
+   `feedback` are the callbacks and feedback committed with it. */
+static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer, int attached,
+                          struct wl_list *frames, struct wl_list *feedback)
+{
+    struct bc_xdg *x = surface->xdg, *sub = surface->sub, *pic = surface_pic(surface);
+    int sent = 0;
+
+    /* The frame callbacks and feedback wait for Blit to take the next
        frame of this surface; feedback for a frame it never took is
        discarded once a newer buffer comes. */
     if (attached && buffer) feedback_discard(&surface->feedback);
-    wl_list_insert_list(surface->frames.prev, &surface->pending_frames);
-    wl_list_init(&surface->pending_frames);
-    wl_list_insert_list(surface->feedback.prev, &surface->pending_feedback);
-    wl_list_init(&surface->pending_feedback);
-    set_pending_buffer(surface, NULL);
-    surface->pending_attach = 0;
+    wl_list_insert_list(surface->frames.prev, frames);
+    wl_list_init(frames);
+    wl_list_insert_list(surface->feedback.prev, feedback);
+    wl_list_init(feedback);
+    if (surface->pending_input_set) {
+        surface->pending_input_set = 0;
+        surface->input_all = surface->pending_input_all;
+        if (!surface->input_all && region_copy(&surface->input, &surface->pending_input) != 0)
+            surface->input_all = 1;
+    }
 
     if (x && (x->toplevel || x->popup)) {
         if (x->pending_geometry) {
+            int changed = x->gx != x->pgx || x->gy != x->pgy || x->gw != x->pgw || x->gh != x->pgh;
             x->gx = x->pgx; x->gy = x->pgy; x->gw = x->pgw; x->gh = x->pgh;
             x->pending_geometry = 0;
+            /* The window inside its buffer (ADR 0229): its shadows outside. */
+            if (changed && x->toplevel && x->id) send_geometry(x);
         }
         if (x->toplevel && x->decor_dropped && !x->decoration) {
             x->decor_dropped = 0;
@@ -1183,21 +1450,52 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
         if (attached && buffer) {
             struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
             struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
-            sent = send_buffer(surface, buffer);
+            sent = send_buffer(x, surface, buffer);
             x->mapped = 1;
             x->hidden = 0;
             x->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf ? dmabuf->width : 0;
             x->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf ? dmabuf->height : 0;
         }
+    } else if (sub) {
+        sent = sub_apply_buffer(sub, buffer, attached);
     }
-    /* Copied or not shown (a subsurface, a cursor): the client's again. An
-       FRM3 frame is the client's again at Blit's RELEASE. */
+    /* Copied or not shown (a cursor): the client's again. An FRM3 frame is
+       the client's again at Blit's `FRAME release`. A frame nothing took
+       still has its callbacks answered at the refresh, so a program
+       waiting on them (EGL's swap) does not stall. */
     if (attached && buffer && sent != BC_SENT_HELD)
         wl_buffer_send_release(buffer);
-    if (attached && buffer && sent == BC_SENT_NONE)
+    if (attached && buffer && sent == BC_SENT_NONE) {
         feedback_discard(&surface->feedback);
-    else if (!attached && x && x->mapped && x->id)
         frames_taken(surface);
+    } else if (!attached && pic && pic->mapped && pic->id) {
+        frames_taken(surface);
+    }
+    /* Its subsurfaces' positions and synchronized state are applied with it. */
+    subs_parent_applied(surface);
+}
+
+static void surface_commit(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(resource);
+    struct bc_xdg *sub = surface->sub;
+    struct wl_resource *buffer = surface->pending_buffer;
+    int attached = surface->pending_attach;
+    (void)client;
+    set_pending_buffer(surface, NULL);
+    surface->pending_attach = 0;
+    if (sub && sub_effectively_sync(sub)) {
+        /* Synchronized: kept until the parent's commit applies it. */
+        sub_cache(sub, buffer, attached);
+        return;
+    }
+    if (sub && sub->cached) {
+        /* Desynchronized with state still cached: applied as a whole. */
+        sub_cache(sub, buffer, attached);
+        sub_apply_cached(sub);
+        return;
+    }
+    surface_apply(surface, buffer, attached, &surface->pending_frames, &surface->pending_feedback);
 }
 
 static void surface_set_buffer_transform(struct wl_client *client, struct wl_resource *resource,
@@ -1234,8 +1532,8 @@ static const struct wl_surface_interface surface_impl = {
     .attach = surface_attach,
     .damage = surface_damage,
     .frame = surface_frame,
-    .set_opaque_region = surface_region,
-    .set_input_region = surface_region,
+    .set_opaque_region = surface_opaque_region,
+    .set_input_region = surface_input_region,
     .commit = surface_commit,
     .set_buffer_transform = surface_set_buffer_transform,
     .set_buffer_scale = surface_set_buffer_scale,
@@ -1265,22 +1563,61 @@ static void surface_destroyed(struct wl_resource *resource)
         window_gone(surface->xdg);
         surface->xdg->surface = NULL;
     }
+    if (surface->sub) {
+        /* The wl_subsurface outlived its surface: unmapped, surfaceless. */
+        window_gone(surface->sub);
+        surface->sub->surface = NULL;
+    }
+    {
+        /* Its subsurfaces lose their parent: unmapped (a parent's
+           destruction unmaps its children). */
+        struct wl_list *node, *next;
+        for (node = surface->subs.next; node != &surface->subs; node = next) {
+            struct bc_xdg *c;
+            next = node->next;
+            if (node == &surface->self) continue;
+            c = wl_container_of(node, c, sub_link);
+            if (c->mapped || c->id) window_gone(c);
+            c->sub_parent = NULL;
+            wl_list_remove(&c->sub_link);
+            wl_list_init(&c->sub_link);
+        }
+    }
+    region_clear(&surface->input);
+    region_clear(&surface->pending_input);
     free(surface);
 }
 
 /* ---- wl_compositor ---- */
 
-/* Regions are not used: input and opacity are milestone B's at most. */
-static void region_rect(struct wl_client *client, struct wl_resource *resource, int32_t x,
-                        int32_t y, int32_t w, int32_t h)
+/* Regions: the input region decides which surface the pointer is over (a
+   program routes a subsurface's input to its parent with an empty one,
+   as Firefox does). Opacity is not used. */
+static void region_add(struct wl_client *client, struct wl_resource *resource, int32_t x, int32_t y,
+                       int32_t w, int32_t h)
 {
-    (void)client; (void)resource; (void)x; (void)y; (void)w; (void)h;
+    if (region_add_op(wl_resource_get_user_data(resource), x, y, w, h, 1) != 0)
+        wl_client_post_no_memory(client);
+}
+
+static void region_subtract(struct wl_client *client, struct wl_resource *resource, int32_t x,
+                            int32_t y, int32_t w, int32_t h)
+{
+    if (region_add_op(wl_resource_get_user_data(resource), x, y, w, h, 0) != 0)
+        wl_client_post_no_memory(client);
+}
+
+static void region_destroyed(struct wl_resource *resource)
+{
+    struct bc_region *r = wl_resource_get_user_data(resource);
+    region_clear(r);
+    free(r);
 }
 
 static const struct wl_region_interface region_impl = {
     .destroy = bc_destroy_request,
-    .add = region_rect,
-    .subtract = region_rect,
+    .add = region_add,
+    .subtract = region_subtract,
 };
 
 static void compositor_create_surface(struct wl_client *client, struct wl_resource *resource,
@@ -1304,6 +1641,9 @@ static void compositor_create_surface(struct wl_client *client, struct wl_resour
     wl_list_init(&surface->due);
     wl_list_init(&surface->pending_feedback);
     wl_list_init(&surface->feedback);
+    wl_list_init(&surface->subs);
+    wl_list_insert(&surface->subs, &surface->self);
+    surface->input_all = 1;
     surface->pace = wl_event_loop_add_timer(surface->server->loop, frames_pace_timer, surface);
     surface->pending_buffer_destroy.notify = pending_buffer_gone;
     wl_list_init(&surface->pending_buffer_destroy.link);
@@ -1313,13 +1653,15 @@ static void compositor_create_surface(struct wl_client *client, struct wl_resour
 static void compositor_create_region(struct wl_client *client, struct wl_resource *resource,
                                      uint32_t id)
 {
-    struct wl_resource *region = wl_resource_create(client, &wl_region_interface, 1, id);
+    struct bc_region *r = calloc(1, sizeof(*r));
+    struct wl_resource *region = r ? wl_resource_create(client, &wl_region_interface, 1, id) : NULL;
     (void)resource;
     if (region == NULL) {
+        free(r);
         wl_client_post_no_memory(client);
         return;
     }
-    wl_resource_set_implementation(region, &region_impl, NULL, NULL);
+    wl_resource_set_implementation(region, &region_impl, r, region_destroyed);
 }
 
 static const struct wl_compositor_interface compositor_impl = {
@@ -1337,54 +1679,782 @@ static void bind_compositor(struct wl_client *client, void *data, uint32_t versi
     wl_resource_set_implementation(r, &compositor_impl, data, NULL);
 }
 
-/* ---- wl_subcompositor: accepted, not composited ---- */
+/* ---- the clipboard (ADR 0229) ----
+
+   Two selections, the clipboard (Ctrl-C/V, wl_data_device) and the primary
+   (middle click, zwp_primary_selection_v1), each either a program's source
+   or the desktop's offer. Hibr's clipboard is the truth: the compositor
+   keeps which side owns a selection and streams a read from the owner to
+   the reader through the reader's pipe, and never holds the bytes.
+
+   - A program sets a selection (it must have the keyboard): its source is
+     the selection, and the desktop is told `CLIP offer <seq> clipboard|
+     primary [text/plain;charset=utf-8] [x-kde-passwordManagerHint]` -- any
+     text type the source offers is the one text type, and the secret hint
+     if it carries one; no text, no types. The desktop's `CLIP read <seq>
+     <type>` with a pipe is answered by the source's best text type.
+   - The desktop sets one (`CLIP offer`): the program with the keyboard is
+     offered the text aliases (and the secret hint); a program's read
+     becomes `CLIP read <seq> text/plain;charset=utf-8` with its pipe.
+   - `CLIP clear <seq>` ends an offer either way: a program's source going,
+     the desktop's clipboard cleared (the Vault's timeout).
+   - Between programs, a paste goes straight from the source.
+   - The program with the keyboard is offered each selection when it gets
+     the keyboard and whenever a selection changes. A desktop's offer lapses
+     with its channel; a program's is offered again on a new one.
+   - Drag and drop is not here yet (ADR 0229, later): a drag is cancelled. */
+
+static const char *const bc_text_types[] = {
+    "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT",
+};
+#define BC_TEXT_TYPE "text/plain;charset=utf-8"
+#define BC_SECRET_TYPE "x-kde-passwordManagerHint"
+
+static int is_text_type(const char *type)
+{
+    size_t i;
+    for (i = 0; i < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++i)
+        if (strcmp(type, bc_text_types[i]) == 0) return 1;
+    return 0;
+}
+
+static int source_has(const struct bc_source *src, const char *type)
+{
+    int i;
+    for (i = 0; i < src->ntypes; ++i)
+        if (strcmp(src->types[i], type) == 0) return 1;
+    return 0;
+}
+
+/* The source's best text type, in bc_text_types' order; NULL for none. */
+static const char *source_text_type(const struct bc_source *src)
+{
+    size_t i;
+    for (i = 0; i < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++i)
+        if (source_has(src, bc_text_types[i])) return bc_text_types[i];
+    return NULL;
+}
+
+static void source_send(struct bc_source *src, const char *type, int fd)
+{
+    if (src->primary) zwp_primary_selection_source_v1_send_send(src->resource, type, fd);
+    else wl_data_source_send_send(src->resource, type, fd);
+}
+
+static void source_cancel(struct bc_source *src)
+{
+    if (src->primary) zwp_primary_selection_source_v1_send_cancelled(src->resource);
+    else wl_data_source_send_cancelled(src->resource);
+}
+
+/* A program's source, offered to the desktop under a new seq. */
+static void clip_offer_to_desktop(struct bc_server *s, int k)
+{
+    struct bc_selection *sel = &s->sel[k];
+    const char *text, *secret;
+    if (sel->source == NULL) return;
+    sel->source_seq = ++s->clip_seq;
+    text = source_text_type(sel->source) ? " " BC_TEXT_TYPE : "";
+    secret = source_has(sel->source, BC_SECRET_TYPE) ? " " BC_SECRET_TYPE : "";
+    bc_wire_line(&s->wire, "CLIP offer %u %s%s%s", sel->source_seq, k ? "primary" : "clipboard", text,
+                 secret);
+}
+
+static void offer_receive(struct bc_offer *o, const char *type, int fd)
+{
+    struct bc_server *s = o->server;
+    struct bc_selection *sel = &s->sel[o->primary];
+    if (o->generation == sel->generation) {
+        if (sel->source) {
+            if (source_has(sel->source, type)) source_send(sel->source, type, fd);
+        } else if (sel->desk_seq) {
+            const char *want = is_text_type(type) && sel->desk_text ? BC_TEXT_TYPE
+                             : strcmp(type, BC_SECRET_TYPE) == 0 && sel->desk_secret ? BC_SECRET_TYPE
+                             : NULL;
+            if (want && bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", sel->desk_seq, want) != 0)
+                logf_("clipboard: a paste from the desktop not asked: %s", s->wire.last_error);
+        }
+    }
+    close(fd);
+}
+
+static void offer_destroyed(struct wl_resource *resource)
+{
+    free(wl_resource_get_user_data(resource));
+}
+
+static void data_offer_accept(struct wl_client *client, struct wl_resource *resource, uint32_t serial,
+                              const char *type)
+{
+    (void)client; (void)resource; (void)serial; (void)type;
+}
+
+static void data_offer_receive(struct wl_client *client, struct wl_resource *resource, const char *type,
+                               int32_t fd)
+{
+    (void)client;
+    offer_receive(wl_resource_get_user_data(resource), type, fd);
+}
+
+static void data_offer_finish(struct wl_client *client, struct wl_resource *resource)
+{
+    (void)client; (void)resource;
+}
+
+static void data_offer_set_actions(struct wl_client *client, struct wl_resource *resource,
+                                   uint32_t actions, uint32_t preferred)
+{
+    (void)client; (void)resource; (void)actions; (void)preferred;
+}
+
+static const struct wl_data_offer_interface data_offer_impl = {
+    .accept = data_offer_accept,
+    .receive = data_offer_receive,
+    .destroy = bc_destroy_request,
+    .finish = data_offer_finish,
+    .set_actions = data_offer_set_actions,
+};
+
+static void primary_offer_receive(struct wl_client *client, struct wl_resource *resource,
+                                  const char *type, int32_t fd)
+{
+    (void)client;
+    offer_receive(wl_resource_get_user_data(resource), type, fd);
+}
+
+static const struct zwp_primary_selection_offer_v1_interface primary_offer_impl = {
+    .receive = primary_offer_receive,
+    .destroy = bc_destroy_request,
+};
+
+static void offer_type(struct wl_resource *offer, int k, const char *type)
+{
+    if (k) zwp_primary_selection_offer_v1_send_offer(offer, type);
+    else wl_data_offer_send_offer(offer, type);
+}
+
+/* Selection k to every device of `client`: a new offer with its types, or
+   none. */
+static void clip_send_to_client(struct bc_server *s, int k, struct wl_client *client)
+{
+    struct bc_selection *sel = &s->sel[k];
+    struct wl_resource *dev;
+    wl_resource_for_each(dev, &s->devices[k]) {
+        struct wl_resource *offer = NULL;
+        struct bc_offer *o;
+        size_t i;
+        if (wl_resource_get_client(dev) != client) continue;
+        if ((sel->source || sel->desk_seq) && (o = calloc(1, sizeof(*o))) != NULL) {
+            o->server = s;
+            o->primary = k;
+            o->generation = sel->generation;
+            offer = k ? wl_resource_create(client, &zwp_primary_selection_offer_v1_interface, 1, 0)
+                      : wl_resource_create(client, &wl_data_offer_interface, wl_resource_get_version(dev), 0);
+            if (offer == NULL) {
+                free(o);
+                wl_client_post_no_memory(client);
+                continue;
+            }
+            wl_resource_set_implementation(offer, k ? (const void *)&primary_offer_impl
+                                                    : (const void *)&data_offer_impl, o, offer_destroyed);
+            if (k) zwp_primary_selection_device_v1_send_data_offer(dev, offer);
+            else wl_data_device_send_data_offer(dev, offer);
+            if (sel->source) {
+                int t;
+                for (t = 0; t < sel->source->ntypes; ++t) offer_type(offer, k, sel->source->types[t]);
+            } else {
+                if (sel->desk_text)
+                    for (i = 0; i < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++i)
+                        offer_type(offer, k, bc_text_types[i]);
+                if (sel->desk_secret) offer_type(offer, k, BC_SECRET_TYPE);
+            }
+        }
+        if (k) zwp_primary_selection_device_v1_send_selection(dev, offer);
+        else wl_data_device_send_selection(dev, offer);
+    }
+}
+
+/* A selection changed: older offers go stale; the keyboard's program is
+   offered the new one. */
+static void clip_changed(struct bc_server *s, int k)
+{
+    ++s->sel[k].generation;
+    if (s->kbd_focus) clip_send_to_client(s, k, wl_resource_get_client(s->kbd_focus->resource));
+}
+
+/* The program with the keyboard set selection k to `src` (NULL: none). A
+   NULL ends only a program's selection: the desktop's is Hibr's. */
+static void clip_set_source(struct bc_server *s, int k, struct bc_source *src)
+{
+    struct bc_selection *sel = &s->sel[k];
+    struct bc_source *old = sel->source;
+    if (src == NULL && old == NULL) return;
+    if (old && old != src) source_cancel(old);
+    if (old && src == NULL && sel->source_seq)
+        bc_wire_line(&s->wire, "CLIP clear %u", sel->source_seq);
+    sel->source = src;
+    sel->source_seq = 0;
+    if (src) sel->desk_seq = 0;
+    clip_offer_to_desktop(s, k);
+    clip_changed(s, k);
+}
+
+static void source_offer(struct wl_client *client, struct wl_resource *resource, const char *type)
+{
+    struct bc_source *src = wl_resource_get_user_data(resource);
+    (void)client;
+    if (src->ntypes >= BC_CLIP_TYPES || strlen(type) > BC_CLIP_TYPE_BYTES || source_has(src, type)) return;
+    if ((src->types[src->ntypes] = strdup(type)) != NULL) ++src->ntypes;
+}
+
+static void source_destroyed(struct wl_resource *resource)
+{
+    struct bc_source *src = wl_resource_get_user_data(resource);
+    struct bc_server *s = src->server;
+    int k = src->primary, i;
+    if (s->sel[k].source == src) {
+        if (s->sel[k].source_seq) bc_wire_line(&s->wire, "CLIP clear %u", s->sel[k].source_seq);
+        s->sel[k].source = NULL;
+        s->sel[k].source_seq = 0;
+        clip_changed(s, k);
+    }
+    for (i = 0; i < src->ntypes; ++i) free(src->types[i]);
+    free(src);
+}
+
+static void data_source_set_actions(struct wl_client *client, struct wl_resource *resource,
+                                    uint32_t actions)
+{
+    (void)client; (void)resource; (void)actions;
+}
+
+static const struct wl_data_source_interface data_source_impl = {
+    .offer = source_offer,
+    .destroy = bc_destroy_request,
+    .set_actions = data_source_set_actions,
+};
+
+static const struct zwp_primary_selection_source_v1_interface primary_source_impl = {
+    .offer = source_offer,
+    .destroy = bc_destroy_request,
+};
+
+static void source_create(struct wl_client *client, struct wl_resource *manager, uint32_t id, int k)
+{
+    struct bc_source *src = calloc(1, sizeof(*src));
+    struct wl_resource *r = src ? wl_resource_create(client, k ? &zwp_primary_selection_source_v1_interface
+                                                               : &wl_data_source_interface,
+                                                     wl_resource_get_version(manager), id)
+                                : NULL;
+    if (r == NULL) {
+        free(src);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    src->resource = r;
+    src->server = wl_resource_get_user_data(manager);
+    src->primary = k;
+    wl_resource_set_implementation(r, k ? (const void *)&primary_source_impl : (const void *)&data_source_impl,
+                                   src, source_destroyed);
+}
+
+/* set_selection: honoured from the program with the keyboard only, as
+   Wayland requires a serial of its own input. */
+static void device_set_selection(struct wl_resource *device, struct wl_resource *source, int k)
+{
+    struct bc_server *s = wl_resource_get_user_data(device);
+    struct wl_client *client = wl_resource_get_client(device);
+    if (s->kbd_focus == NULL || wl_resource_get_client(s->kbd_focus->resource) != client) {
+        logf_("clipboard: a selection from a program without the keyboard is ignored");
+        return;
+    }
+    clip_set_source(s, k, source ? wl_resource_get_user_data(source) : NULL);
+}
+
+static void data_device_start_drag(struct wl_client *client, struct wl_resource *resource,
+                                   struct wl_resource *source, struct wl_resource *origin,
+                                   struct wl_resource *icon, uint32_t serial)
+{
+    /* Drag and drop is ADR 0229's later row: the drag ends at once. */
+    (void)client; (void)resource; (void)origin; (void)icon; (void)serial;
+    if (source) wl_data_source_send_cancelled(source);
+}
+
+static void data_device_set_selection(struct wl_client *client, struct wl_resource *resource,
+                                      struct wl_resource *source, uint32_t serial)
+{
+    (void)client; (void)serial;
+    device_set_selection(resource, source, 0);
+}
+
+static const struct wl_data_device_interface data_device_impl = {
+    .start_drag = data_device_start_drag,
+    .set_selection = data_device_set_selection,
+    .release = bc_destroy_request,
+};
+
+static void primary_device_set_selection(struct wl_client *client, struct wl_resource *resource,
+                                         struct wl_resource *source, uint32_t serial)
+{
+    (void)client; (void)serial;
+    device_set_selection(resource, source, 1);
+}
+
+static const struct zwp_primary_selection_device_v1_interface primary_device_impl = {
+    .set_selection = primary_device_set_selection,
+    .destroy = bc_destroy_request,
+};
+
+static void device_create(struct wl_client *client, struct wl_resource *manager, uint32_t id, int k)
+{
+    struct bc_server *s = wl_resource_get_user_data(manager);
+    struct wl_resource *r = wl_resource_create(client, k ? &zwp_primary_selection_device_v1_interface
+                                                         : &wl_data_device_interface,
+                                               wl_resource_get_version(manager), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, k ? (const void *)&primary_device_impl : (const void *)&data_device_impl,
+                                   s, unlink_resource);
+    wl_list_insert(&s->devices[k], wl_resource_get_link(r));
+    if (s->kbd_focus && wl_resource_get_client(s->kbd_focus->resource) == client)
+        clip_send_to_client(s, k, client);
+}
+
+static void ddm_create_data_source(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    source_create(client, resource, id, 0);
+}
+
+static void ddm_get_data_device(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                struct wl_resource *seat)
+{
+    (void)seat;
+    device_create(client, resource, id, 0);
+}
+
+static const struct wl_data_device_manager_interface data_device_manager_impl = {
+    .create_data_source = ddm_create_data_source,
+    .get_data_device = ddm_get_data_device,
+};
+
+static void psm_create_source(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    source_create(client, resource, id, 1);
+}
+
+static void psm_get_device(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                           struct wl_resource *seat)
+{
+    (void)seat;
+    device_create(client, resource, id, 1);
+}
+
+static const struct zwp_primary_selection_device_manager_v1_interface primary_manager_impl = {
+    .create_source = psm_create_source,
+    .get_device = psm_get_device,
+    .destroy = bc_destroy_request,
+};
+
+static void bind_data_device_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &wl_data_device_manager_interface, (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &data_device_manager_impl, data, NULL);
+}
+
+static void bind_primary_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zwp_primary_selection_device_manager_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &primary_manager_impl, data, NULL);
+}
+
+/* The desktop's lines. */
+static void clip_desktop_line(struct bc_server *s, const BcLine *l)
+{
+    int k;
+    if (l->kind == BC_LINE_CLIP_OFFER) {
+        struct bc_selection *sel = &s->sel[l->primary];
+        char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
+        if (sel->source) {
+            source_cancel(sel->source);
+            sel->source = NULL;
+            sel->source_seq = 0;
+        }
+        sel->desk_seq = l->id;
+        sel->desk_text = sel->desk_secret = 0;
+        snprintf(types, sizeof(types), "%s", l->types);
+        for (t = strtok_r(types, " ", &save); t; t = strtok_r(NULL, " ", &save)) {
+            if (is_text_type(t)) sel->desk_text = 1;
+            if (strcmp(t, BC_SECRET_TYPE) == 0) sel->desk_secret = 1;
+        }
+        clip_changed(s, l->primary);
+        return;
+    }
+    if (l->kind == BC_LINE_CLIP_CLEAR) {
+        for (k = 0; k < 2; ++k)
+            if (s->sel[k].desk_seq == l->id) {
+                s->sel[k].desk_seq = 0;
+                clip_changed(s, k);
+            }
+        return;
+    }
+    /* CLIP read: the desktop wants a program's selection, into its pipe. */
+    {
+        int fd = s->line_fd;
+        s->line_fd = -1;
+        if (fd < 0) {
+            logf_("clipboard: CLIP read %u came with no pipe", l->id);
+            return;
+        }
+        for (k = 0; k < 2; ++k) {
+            struct bc_source *src = s->sel[k].source;
+            const char *type;
+            if (src == NULL || s->sel[k].source_seq != l->id) continue;
+            type = strcmp(l->types, BC_TEXT_TYPE) == 0 ? source_text_type(src)
+                 : source_has(src, l->types) ? l->types : NULL;
+            if (type) source_send(src, type, fd);
+        }
+        close(fd);
+    }
+}
+
+/* The channel lost: the desktop's offers lapse with it. A new one: the
+   programs' selections are offered again. */
+static void clip_channel(struct bc_server *s, int up)
+{
+    int k;
+    for (k = 0; k < 2; ++k) {
+        if (up) clip_offer_to_desktop(s, k);
+        else if (s->sel[k].desk_seq) {
+            s->sel[k].desk_seq = 0;
+            clip_changed(s, k);
+        }
+    }
+}
+
+/* ---- wl_subcompositor: each subsurface a picture (WINDOW sub) ---- */
+
+static void window_resend(struct bc_xdg *x);
+
+/* The top-level's subsurfaces to the desktop: `WINDOW sub` for each shown
+   one, bottom to top, all of them again when any is new or its offset,
+   size or place in the order changed. A subsurface newly described whose
+   newest frame was kept (it drew before its top-level was announced, or
+   with the channel down) has that frame sent; `fresh` is about to send its
+   own; on a new channel (`resend` 0) the re-announcement sends every
+   frame after the lines. Nothing while the top-level has no id or the
+   desktop places no windows. Returns the lines written. */
+static int subs_show(struct bc_xdg *root, struct bc_xdg *fresh, int resend)
+{
+    struct bc_sub_at at[BC_SUBS_MAX];
+    struct bc_server *s;
+    int n, i, changed = 0;
+    if (root == NULL || root->id == 0) return 0;
+    s = root->server;
+    if (s->link != BC_LINK_UP || !s->wire.window) return 0;
+    n = subs_collect(root, at);
+    for (i = 0; i < n; ++i) {
+        struct bc_xdg *c = at[i].sub;
+        if (!c->sub_shown || c->sent_x != at[i].x || c->sent_y != at[i].y ||
+            c->sent_w != c->buffer_w || c->sent_h != c->buffer_h || c->sent_above != at[i].above ||
+            c->sent_index != i)
+            changed = 1;
+    }
+    if (!changed) return 0;
+    for (i = 0; i < n; ++i) {
+        struct bc_xdg *c = at[i].sub;
+        int was = c->sub_shown;
+        if (c->id == 0) c->id = bc_wire_new_id(&s->wire);
+        bc_wire_line(&s->wire, "WINDOW sub %u %u %d %d %d %d %s", c->id, root->id, at[i].x, at[i].y,
+                     c->buffer_w, c->buffer_h, at[i].above ? "above" : "below");
+        c->sub_shown = 1;
+        c->sent_x = at[i].x;
+        c->sent_y = at[i].y;
+        c->sent_w = c->buffer_w;
+        c->sent_h = c->buffer_h;
+        c->sent_above = at[i].above;
+        c->sent_index = i;
+        window_set_output(c, root->output);
+        if (!was) {
+            logf_("subsurface %u: window %u at %d,%d %dx%d %s", c->id, root->id, at[i].x, at[i].y,
+                  c->buffer_w, c->buffer_h, at[i].above ? "above" : "below");
+            if (c != fresh && resend) window_resend(c);
+        }
+    }
+    return n;
+}
+
+/* A committed buffer of a subsurface, or its unmapping (a NULL buffer). */
+static int sub_apply_buffer(struct bc_xdg *sub, struct wl_resource *buffer, int attached)
+{
+    struct bc_server *s = sub->server;
+    struct wl_shm_buffer *shm;
+    struct bc_dmabuf *dmabuf;
+    struct bc_xdg *root;
+    if (!attached) return BC_SENT_NONE;
+    if (buffer == NULL) {
+        if (sub->mapped) {
+            logf_("subsurface %u: unmapped by its client", sub->id);
+            window_gone(sub);
+        }
+        return BC_SENT_NONE;
+    }
+    shm = wl_shm_buffer_get(buffer);
+    dmabuf = dmabuf_from_buffer(buffer);
+    if (shm == NULL && dmabuf == NULL) {
+        logf_("subsurface: a buffer of an unknown kind, not shown");
+        return BC_SENT_NONE;
+    }
+    if (sub->id == 0) sub->id = bc_wire_new_id(&s->wire);
+    sub->mapped = 1;
+    sub->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf->width;
+    sub->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf->height;
+    root = sub_root(sub, NULL, NULL);
+    if (root == NULL && sub->sub_parent && sub->sub_parent->xdg && sub->sub_parent->xdg->popup &&
+        !sub->sub_shown)
+        logf_("subsurface %u: a popup's, not shown in this release", sub->id);
+    subs_show(root, sub, 1);
+    /* Shown now: a frame of its picture. Not (yet): kept, its callbacks
+       answered, and sent when it is described. */
+    if (sub->sub_shown && s->link == BC_LINK_UP) return send_buffer(sub, sub->surface, buffer);
+    return keep_buffer(sub, shm, dmabuf);
+}
+
+static void cached_buffer_gone(struct wl_listener *listener, void *data)
+{
+    struct bc_xdg *sub = wl_container_of(listener, sub, cached_buffer_destroy);
+    (void)data;
+    wl_list_remove(&sub->cached_buffer_destroy.link);
+    wl_list_init(&sub->cached_buffer_destroy.link);
+    sub->cached_buffer = NULL;
+}
+
+static void set_cached_buffer(struct bc_xdg *sub, struct wl_resource *buffer)
+{
+    if (sub->cached_buffer) {
+        wl_list_remove(&sub->cached_buffer_destroy.link);
+        wl_list_init(&sub->cached_buffer_destroy.link);
+    }
+    sub->cached_buffer = buffer;
+    if (buffer) wl_resource_add_destroy_listener(buffer, &sub->cached_buffer_destroy);
+}
+
+/* A synchronized subsurface's commit: its state cached for the parent's.
+   A cached buffer replaced before it was applied is the client's again
+   (unless Blit holds it as an earlier frame). */
+static void sub_cache(struct bc_xdg *sub, struct wl_resource *buffer, int attached)
+{
+    struct bc_surface *surface = sub->surface;
+    if (attached) {
+        struct wl_resource *old = sub->cached_buffer;
+        if (old && old != buffer) {
+            struct bc_dmabuf *b = dmabuf_from_buffer(old);
+            if (b == NULL || b->holds == 0) wl_buffer_send_release(old);
+        }
+        set_cached_buffer(sub, buffer);
+        sub->cached_attach = 1;
+    }
+    wl_list_insert_list(sub->cached_frames.prev, &surface->pending_frames);
+    wl_list_init(&surface->pending_frames);
+    wl_list_insert_list(sub->cached_feedback.prev, &surface->pending_feedback);
+    wl_list_init(&surface->pending_feedback);
+    sub->cached = 1;
+}
+
+static void sub_apply_cached(struct bc_xdg *sub)
+{
+    struct wl_resource *buffer = sub->cached_buffer;
+    int attached = sub->cached_attach;
+    set_cached_buffer(sub, NULL);
+    sub->cached_attach = 0;
+    sub->cached = 0;
+    if (sub->surface)
+        surface_apply(sub->surface, buffer, attached, &sub->cached_frames, &sub->cached_feedback);
+}
+
+/* The parent's state applied: its subsurfaces' new positions, and the
+   cached state of the synchronized ones, then the top-level's lines. */
+static void subs_parent_applied(struct bc_surface *parent)
+{
+    struct wl_list *node, *next;
+    struct bc_xdg *root;
+    for (node = parent->subs.next; node != &parent->subs; node = next) {
+        struct bc_xdg *c;
+        next = node->next;
+        if (node == &parent->self) continue;
+        c = wl_container_of(node, c, sub_link);
+        if (c->sub_moved) {
+            c->sx = c->psx;
+            c->sy = c->psy;
+            c->sub_moved = 0;
+        }
+        if (c->cached && sub_effectively_sync(c)) sub_apply_cached(c);
+    }
+    root = parent->sub ? sub_root(parent->sub, NULL, NULL)
+                       : parent->xdg && parent->xdg->toplevel ? parent->xdg : NULL;
+    subs_show(root, NULL, 1);
+}
+
+/* Every subsurface under `surface` gone with it (its picture and theirs). */
+static void subs_children_gone(struct bc_surface *surface)
+{
+    struct wl_list *node;
+    for (node = surface->subs.next; node != &surface->subs; node = node->next) {
+        struct bc_xdg *c;
+        if (node == &surface->self) continue;
+        c = wl_container_of(node, c, sub_link);
+        if (c->mapped || c->id) window_gone(c);
+    }
+}
 
 static void subsurface_set_position(struct wl_client *client, struct wl_resource *resource,
                                     int32_t x, int32_t y)
 {
-    (void)client; (void)resource; (void)x; (void)y;
+    struct bc_xdg *sub = wl_resource_get_user_data(resource);
+    (void)client;
+    if (sub == NULL) return;
+    sub->psx = x;
+    sub->psy = y;
+    sub->sub_moved = 1;
 }
 
-static void subsurface_place(struct wl_client *client, struct wl_resource *resource,
-                             struct wl_resource *sibling)
+/* place_above and place_below: the sibling is the parent or another
+   subsurface of it. The order is shown at the parent's next commit. */
+static void subsurface_restack(struct wl_resource *resource, struct wl_resource *sibling, int above)
 {
-    (void)client; (void)resource; (void)sibling;
+    struct bc_xdg *sub = wl_resource_get_user_data(resource);
+    struct bc_surface *other = wl_resource_get_user_data(sibling), *parent;
+    struct wl_list *ref;
+    if (sub == NULL || (parent = sub->sub_parent) == NULL) return;
+    if (other == parent) ref = &parent->self;
+    else if (other != sub->surface && other->sub && other->sub->sub_parent == parent)
+        ref = &other->sub->sub_link;
+    else {
+        wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+                               "the sibling is neither the parent nor a sibling");
+        return;
+    }
+    wl_list_remove(&sub->sub_link);
+    wl_list_insert(above ? ref : ref->prev, &sub->sub_link);
 }
 
-static void subsurface_sync(struct wl_client *client, struct wl_resource *resource)
+static void subsurface_place_above(struct wl_client *client, struct wl_resource *resource,
+                                   struct wl_resource *sibling)
 {
-    (void)client; (void)resource;
+    (void)client;
+    subsurface_restack(resource, sibling, 1);
+}
+
+static void subsurface_place_below(struct wl_client *client, struct wl_resource *resource,
+                                   struct wl_resource *sibling)
+{
+    (void)client;
+    subsurface_restack(resource, sibling, 0);
+}
+
+static void subsurface_set_sync(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_xdg *sub = wl_resource_get_user_data(resource);
+    (void)client;
+    if (sub) sub->sync = 1;
+}
+
+static void subsurface_set_desync(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_xdg *sub = wl_resource_get_user_data(resource);
+    (void)client;
+    if (sub) sub->sync = 0;
 }
 
 static const struct wl_subsurface_interface subsurface_impl = {
     .destroy = bc_destroy_request,
     .set_position = subsurface_set_position,
-    .place_above = subsurface_place,
-    .place_below = subsurface_place,
-    .set_sync = subsurface_sync,
-    .set_desync = subsurface_sync,
+    .place_above = subsurface_place_above,
+    .place_below = subsurface_place_below,
+    .set_sync = subsurface_set_sync,
+    .set_desync = subsurface_set_desync,
 };
+
+/* The wl_subsurface goes: its surface is unmapped at once (and every one
+   under it), its cached state dropped. */
+static void subsurface_destroyed(struct wl_resource *resource)
+{
+    struct bc_xdg *sub = wl_resource_get_user_data(resource);
+    if (sub == NULL) return;
+    window_gone(sub);
+    kept_set(sub, NULL);
+    if (sub->cached_buffer) {
+        struct bc_dmabuf *b = dmabuf_from_buffer(sub->cached_buffer);
+        if (b == NULL || b->holds == 0) wl_buffer_send_release(sub->cached_buffer);
+    }
+    set_cached_buffer(sub, NULL);
+    callbacks_destroy(&sub->cached_frames);
+    feedback_discard(&sub->cached_feedback);
+    if (sub->sub_parent) wl_list_remove(&sub->sub_link);
+    if (sub->surface) sub->surface->sub = NULL;
+    wl_list_remove(&sub->link);
+    free(sub);
+}
 
 static void subcompositor_get_subsurface(struct wl_client *client, struct wl_resource *resource,
                                          uint32_t id, struct wl_resource *surface_resource,
-                                         struct wl_resource *parent)
+                                         struct wl_resource *parent_resource)
 {
     struct bc_surface *surface = wl_resource_get_user_data(surface_resource);
+    struct bc_surface *parent = wl_resource_get_user_data(parent_resource), *p;
+    struct bc_xdg *sub;
     struct wl_resource *r;
-    (void)parent;
-    if (surface->role != BC_ROLE_NONE && surface->role != BC_ROLE_SUBSURFACE) {
+    if (surface == parent) {
         wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
-                               "the surface already has another role");
+                               "a surface cannot be its own parent");
         return;
     }
-    r = wl_resource_create(client, &wl_subsurface_interface, 1, id);
+    if (surface->sub || (surface->role != BC_ROLE_NONE && surface->role != BC_ROLE_SUBSURFACE)) {
+        wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+                               "the surface already has a role object");
+        return;
+    }
+    for (p = parent; p && p->sub; p = p->sub->sub_parent)
+        if (p == surface) {
+            /* bad_parent is wayland 1.22's; 1.21's bad_surface covers it. */
+            wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+                                   "the parent is the surface's own descendant");
+            return;
+        }
+    sub = calloc(1, sizeof(*sub));
+    r = sub ? wl_resource_create(client, &wl_subsurface_interface, 1, id) : NULL;
     if (r == NULL) {
+        free(sub);
         wl_client_post_no_memory(client);
         return;
     }
+    sub->server = surface->server;
+    sub->surface = surface;
+    sub->subsurface = r;
+    sub->sub_parent = parent;
+    sub->sync = 1;
+    sub->input_fd = -1;
+    sub->kept.fd = -1;
+    wl_list_init(&sub->cached_frames);
+    wl_list_init(&sub->cached_feedback);
+    sub->cached_buffer_destroy.notify = cached_buffer_gone;
+    wl_list_init(&sub->cached_buffer_destroy.link);
+    /* On top of the parent's stack. */
+    wl_list_insert(parent->subs.prev, &sub->sub_link);
+    wl_list_insert(&surface->server->windows, &sub->link);
     surface->role = BC_ROLE_SUBSURFACE;
-    wl_resource_set_implementation(r, &subsurface_impl, NULL, NULL);
-    logf_("a subsurface is accepted but not shown: subsurfaces are not composited yet");
+    surface->sub = sub;
+    wl_resource_set_implementation(r, &subsurface_impl, sub, subsurface_destroyed);
 }
 
 static const struct wl_subcompositor_interface subcompositor_impl = {
@@ -1815,24 +2885,60 @@ static void toplevel_set_app_id(struct wl_client *client, struct wl_resource *re
     if (x->id) bc_wire_line(&x->server->wire, "WINDOW appid %u %s", x->id, x->appid);
 }
 
-static void toplevel_show_window_menu(struct wl_client *client, struct wl_resource *resource,
-                                      struct wl_resource *seat, uint32_t serial, int32_t x,
-                                      int32_t y)
+/* A program's own frame asks the desktop to run a drag or show the window
+   menu (ADR 0229): only with the serial of a press still down on that
+   window, so no program starts one by itself. */
+static struct bc_xdg *toplevel_grab_window(struct wl_resource *resource, uint32_t serial)
 {
-    (void)client; (void)resource; (void)seat; (void)serial; (void)x; (void)y;
+    struct bc_xdg *x = wl_resource_get_user_data(resource);
+    struct bc_server *s;
+    if (x == NULL || x->id == 0) return NULL;
+    s = x->server;
+    if (s->link != BC_LINK_UP || !s->wire.window || s->buttons_down == 0 ||
+        serial != s->button_serial || surface_window(s->ptr_focus) != x) {
+        logf_("window %u: a move, resize or menu without a press on it is ignored", x->id);
+        return NULL;
+    }
+    return x;
+}
+
+static void toplevel_show_window_menu(struct wl_client *client, struct wl_resource *resource,
+                                      struct wl_resource *seat, uint32_t serial, int32_t mx,
+                                      int32_t my)
+{
+    struct bc_xdg *x = toplevel_grab_window(resource, serial);
+    (void)client; (void)seat;
+    /* x, y are in window geometry coordinates: the surface's are the
+       geometry's origin plus them. */
+    if (x) bc_wire_line(&x->server->wire, "WINDOW menu %u %d %d", x->id, x->gx + mx, x->gy + my);
 }
 
 static void toplevel_move(struct wl_client *client, struct wl_resource *resource,
                           struct wl_resource *seat, uint32_t serial)
 {
-    /* Moving and resizing are the desktop's, through its own frame. */
-    (void)client; (void)resource; (void)seat; (void)serial;
+    struct bc_xdg *x = toplevel_grab_window(resource, serial);
+    (void)client; (void)seat;
+    if (x) bc_wire_line(&x->server->wire, "WINDOW move %u", x->id);
 }
 
 static void toplevel_resize(struct wl_client *client, struct wl_resource *resource,
                             struct wl_resource *seat, uint32_t serial, uint32_t edges)
 {
-    (void)client; (void)resource; (void)seat; (void)serial; (void)edges;
+    static const char *const names[] = {
+        [XDG_TOPLEVEL_RESIZE_EDGE_TOP] = "top", [XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM] = "bottom",
+        [XDG_TOPLEVEL_RESIZE_EDGE_LEFT] = "left", [XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT] = "top-left",
+        [XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT] = "bottom-left", [XDG_TOPLEVEL_RESIZE_EDGE_RIGHT] = "right",
+        [XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT] = "top-right",
+        [XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT] = "bottom-right",
+    };
+    struct bc_xdg *x;
+    (void)client; (void)seat;
+    if (edges >= sizeof(names) / sizeof(names[0]) || names[edges] == NULL) {
+        wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_RESIZE_EDGE, "edge %u", edges);
+        return;
+    }
+    if ((x = toplevel_grab_window(resource, serial)) != NULL)
+        bc_wire_line(&x->server->wire, "WINDOW resize %u %s", x->id, names[edges]);
 }
 
 static void toplevel_set_max_size(struct wl_client *client, struct wl_resource *resource,
@@ -2286,7 +3392,7 @@ static struct bc_xdg *window_by_id(struct bc_server *s, uint32_t id)
 /* ---- input: Blit's lines on the input socket, as wl_seat events ----
 
    Blit connects to the compositor's input socket once per toplevel route
-   (`INPUT sock <path> <id>`, sent at WINDOW new) and writes that window's
+   (`INPUT sock <id> <path>`, sent at WINDOW new) and writes that window's
    input as lines (blit_compositor_wire.h, bc_parse_input). They become:
 
    - keys: wl_keyboard.key with the evdev code as it came, the xkb state
@@ -2490,6 +3596,9 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
     }
     s->kbd_focus = surface;
     if (surface == NULL) return;
+    /* The selections, before the keyboard enters (wl_data_device). */
+    clip_send_to_client(s, 0, wl_resource_get_client(surface->resource));
+    clip_send_to_client(s, 1, wl_resource_get_client(surface->resource));
     wl_array_init(&keys);
     seat_for_client(r, &s->keyboards, surface)
         wl_keyboard_send_enter(r, wl_display_next_serial(s->display), surface->resource, &keys);
@@ -2499,10 +3608,15 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
 }
 
 /* The surface under (x, y) of toplevel `x`, in that surface's pixels: a
-   mapped popup of it first, else the toplevel. */
+   mapped popup of it first, then its subsurfaces above it (topmost
+   first), the toplevel, those below it -- each only where its input
+   region takes the pointer (a program routes a subsurface's input to its
+   parent with an empty one) -- else the toplevel. */
 static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, double px,
                                          double py, double *lx, double *ly)
 {
+    struct bc_sub_at at[BC_SUBS_MAX];
+    int n, i, pass;
     struct bc_xdg *p;
     wl_list_for_each(p, &s->windows, link) {
         double ox, oy;
@@ -2515,6 +3629,22 @@ static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, 
             return p->surface;
         }
     }
+    n = subs_collect(x, at);
+    for (pass = 0; pass < 3; ++pass) {
+        if (pass == 1) {
+            if (x->surface && surface_takes_pointer(x->surface, x->buffer_w, x->buffer_h, px, py)) break;
+            continue;
+        }
+        for (i = n - 1; i >= 0; --i) {
+            struct bc_xdg *c = at[i].sub;
+            if (at[i].above != (pass == 0) || c->surface == NULL) continue;
+            if (surface_takes_pointer(c->surface, c->buffer_w, c->buffer_h, px - at[i].x, py - at[i].y)) {
+                *lx = px - at[i].x;
+                *ly = py - at[i].y;
+                return c->surface;
+            }
+        }
+    }
     *lx = px;
     *ly = py;
     return x->surface;
@@ -2525,6 +3655,14 @@ static void surface_origin(struct bc_surface *surface, double *ox, double *oy)
 {
     struct bc_xdg *p = surface->xdg;
     *ox = *oy = 0;
+    if (surface->sub) {
+        int32_t sx = 0, sy = 0;
+        if (sub_root(surface->sub, &sx, &sy)) {
+            *ox = sx;
+            *oy = sy;
+        }
+        return;
+    }
     if (p && p->popup && p->parent) {
         *ox = p->parent->gx + p->px - p->gx;
         *oy = p->parent->gy + p->py - p->gy;
@@ -2560,8 +3698,7 @@ static void relative_motion(struct bc_server *s, struct bc_xdg *x, double dx, do
 {
     struct wl_resource *r;
     uint64_t us = time_us ? time_us : (uint64_t)now_ms() * 1000u;
-    if (s->ptr_focus == NULL || s->ptr_focus->xdg == NULL ||
-        (s->ptr_focus->xdg != x && s->ptr_focus->xdg->parent != x))
+    if (surface_window(s->ptr_focus) != x)
         pointer_focus(s, x->surface, s->ptr_x, s->ptr_y);
     if (s->ptr_focus == NULL) return;
     seat_for_client(r, &s->relative_pointers, s->ptr_focus)
@@ -2635,9 +3772,8 @@ struct bc_constraint {
 /* The toplevel a surface belongs to, announced, or NULL. */
 static struct bc_xdg *surface_toplevel(struct bc_surface *surface)
 {
-    struct bc_xdg *x = surface ? surface->xdg : NULL;
-    while (x && x->popup && x->parent) x = x->parent;
-    return x && x->toplevel && x->id ? x : NULL;
+    struct bc_xdg *x = surface_window(surface);
+    return x && x->id ? x : NULL;
 }
 
 static void constraint_ask(struct bc_constraint *c)
@@ -2910,10 +4046,16 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         if (in.pressed) s->buttons_down |= 1u << (in.code - 0x110);
         else s->buttons_down &= ~(1u << (in.code - 0x110));
         if (s->ptr_focus == NULL) return;
-        seat_for_client(r, &s->pointers, s->ptr_focus)
-            wl_pointer_send_button(r, wl_display_next_serial(s->display), now_ms(), in.code,
-                                   in.pressed ? WL_POINTER_BUTTON_STATE_PRESSED
-                                              : WL_POINTER_BUTTON_STATE_RELEASED);
+        {
+            /* One serial for the event: a press's is what a move, resize or
+               menu request must name (WINDOW move). */
+            uint32_t serial = wl_display_next_serial(s->display);
+            if (in.pressed) s->button_serial = serial;
+            seat_for_client(r, &s->pointers, s->ptr_focus)
+                wl_pointer_send_button(r, serial, now_ms(), in.code,
+                                       in.pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+                                                  : WL_POINTER_BUTTON_STATE_RELEASED);
+        }
         s->pointer_batch = 1;
         return;
     case BC_INPUT_WHEEL: {
@@ -3119,7 +4261,7 @@ static void input_sockets_clear(struct bc_server *s)
     closedir(d);
 }
 
-/* `ERROR <id> <code>` for a frame. Replies come in the order frames are
+/* `FRAME error <id> <code>`. Replies come in the order frames are
    read and an accepted frame gets none, so a refusal is the newest frame
    of the picture -- an FRM3 still held, unless an FRM1 went after it
    (blit-gamescope's rule). ENOTSUP (Blit cannot import now) copies that
@@ -3168,6 +4310,7 @@ static void handle_line(struct bc_server *s, const char *line)
         x->size_fullscreen = l.fullscreen;
         x->size_maximized = l.maximized;
         x->size_activated = l.activated;
+        x->size_tiled = l.tiled;
         /* The desktop took the window's focus away: so does the keyboard. */
         if (!l.activated && x->surface && s->kbd_focus == x->surface) keyboard_focus(s, NULL);
         logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,
@@ -3241,10 +4384,15 @@ static void handle_line(struct bc_server *s, const char *line)
         return;
     }
     case BC_LINE_OTHER:
-        if (strncmp(line, "ERROR INPUT ", 12) == 0)
+        if (strncmp(line, "INPUT error ", 12) == 0)
             logf_("Blit refused or ended an input route: %.60s", line);
         return;
     case BC_LINE_OK_WINDOW:
+        return;
+    case BC_LINE_CLIP_OFFER:
+    case BC_LINE_CLIP_READ:
+    case BC_LINE_CLIP_CLEAR:
+        clip_desktop_line(s, &l);
         return;
     default:
         logf_("an unknown line from the channel: %.80s", line);
@@ -3259,21 +4407,48 @@ static int on_frame_socket(int fd, uint32_t mask, void *data)
     struct bc_server *s = data;
     char buf[1024];
     for (;;) {
-        ssize_t got = recv(fd, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+        /* A packet's descriptor (CLIP read's pipe) is its line's. */
+        char control[CMSG_SPACE(4 * sizeof(int))];
+        struct iovec iov = { buf, sizeof(buf) - 1 };
+        struct msghdr msg;
+        struct cmsghdr *cmsg;
+        ssize_t got;
         char *line, *next;
+        memset(&msg, 0, sizeof(msg));
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof(control);
+        got = recvmsg(fd, &msg, MSG_DONTWAIT | MSG_CMSG_CLOEXEC);
         if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
         if (got < 0 && errno == EINTR) continue;
         if (got <= 0) {
             channel_lost(s, got == 0 ? "closed" : strerror(errno));
             return 0;
         }
+        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+            int n, k, passed;
+            if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
+            n = (int)((cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int));
+            for (k = 0; k < n; ++k) {
+                memcpy(&passed, CMSG_DATA(cmsg) + (size_t)k * sizeof(int), sizeof(int));
+                if (s->line_fd < 0) s->line_fd = passed;
+                else close(passed);
+            }
+        }
         buf[got] = '\0';
         for (line = buf; line && *line; line = next) {
             next = strchr(line, '\n');
             if (next) *next++ = '\0';
             handle_line(s, line);
-            if (s->quit) return 0;
+            if (s->quit) break;
         }
+        /* A descriptor no line took is closed. */
+        if (s->line_fd >= 0) {
+            close(s->line_fd);
+            s->line_fd = -1;
+        }
+        if (s->quit) return 0;
     }
     if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) channel_lost(s, "hung up");
     return 0;
@@ -3425,9 +4600,13 @@ static void reannounce(struct bc_server *s)
         if (x->hidden) bc_wire_line(w, "WINDOW hide %u", x->id);
         ++windows;
     }
+    /* Each top-level's subsurfaces, after its popups. */
+    wl_list_for_each(x, &s->windows, link) x->sub_shown = x->subsurface ? 0 : x->sub_shown;
+    wl_list_for_each_reverse(x, &s->windows, link)
+        if (x->toplevel && x->id) windows += subs_show(x, NULL, 0);
     /* Each shown window's newest frame. */
     wl_list_for_each_reverse(x, &s->windows, link)
-        if (x->id && x->mapped) {
+        if (x->id && x->mapped && (!x->subsurface || x->sub_shown)) {
             uint64_t before = w->sequence;
             window_resend(x);
             if (w->sequence != before) ++frames;
@@ -3435,6 +4614,8 @@ static void reannounce(struct bc_server *s)
     /* The pointer constraints still wanted, asked again. */
     wl_list_for_each(c, &s->constraints, link) constraint_ask(c);
     logf_("reconnect: %d windows announced again, %d frames sent again", windows, frames);
+    /* The programs' selections, offered to the new desktop. */
+    clip_channel(s, 1);
 }
 
 /* The new channel is up: the desktop's (window=1). */
@@ -3523,6 +4704,7 @@ static void channel_lost(struct bc_server *s, const char *why)
     struct bc_hold *h, *next;
     struct bc_constraint *c;
     if (s->link != BC_LINK_UP || s->quit) return;
+    clip_channel(s, 0);
     logf_("the frame channel %s: the desktop is gone; keeping %d windows and reconnecting to %s "
           "for at most %u ms", why, wl_list_length(&s->windows), s->frame_socket, s->bound_ms);
     wl_event_source_remove(s->frame_source);
@@ -3631,6 +4813,9 @@ int main(int argc, char **argv)
     wl_list_init(&server.pointers);
     wl_list_init(&server.relative_pointers);
     wl_list_init(&server.constraints);
+    wl_list_init(&server.devices[0]);
+    wl_list_init(&server.devices[1]);
+    server.line_fd = -1;
     server.keymap_fd = -1;
     server.dial_fd = -1;
     for (i = 1; i < argc; ++i) {
@@ -3731,7 +4916,13 @@ int main(int argc, char **argv)
                           bind_relative_manager) ||
         !wl_global_create(server.display, &zwp_pointer_constraints_v1_interface,
                           BC_VERSION(1, zwp_pointer_constraints_v1_interface), &server,
-                          bind_constraints)) {
+                          bind_constraints) ||
+        !wl_global_create(server.display, &wl_data_device_manager_interface,
+                          BC_VERSION(3, wl_data_device_manager_interface), &server,
+                          bind_data_device_manager) ||
+        !wl_global_create(server.display, &zwp_primary_selection_device_manager_v1_interface,
+                          BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface), &server,
+                          bind_primary_manager)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
@@ -3753,13 +4944,16 @@ int main(int argc, char **argv)
     }
     logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
-          "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d",
+          "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d, "
+          "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
           BC_VERSION(1, wp_presentation_interface),
           BC_VERSION(1, zwp_relative_pointer_manager_v1_interface),
-          BC_VERSION(1, zwp_pointer_constraints_v1_interface));
+          BC_VERSION(1, zwp_pointer_constraints_v1_interface),
+          BC_VERSION(3, wl_data_device_manager_interface),
+          BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);

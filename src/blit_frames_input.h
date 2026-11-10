@@ -1,22 +1,23 @@
 /* ADR 0225: the physical keyboard and mouse to a compositor's EIS socket;
    ADR 0228: or, as lines, to blit-compositor's own input socket.
 
-   A version 3 frame client (blit-gamescope, or a desktop relaying its
-   windows' pictures) asks, on its authenticated channel, for the input of
-   its session to go to the EIS socket of the compositor whose output one of
-   its images shows. The wire text is docs/api.md, "Picture frames by
-   descriptor" and "Program windows", and only that:
+   A frame client (blit-gamescope, or a desktop relaying its windows'
+   pictures) asks, on its authenticated channel, for the input of its
+   session to go to the EIS socket of the compositor whose output one of its
+   images shows. The wire text is docs/api.md, "Picture frames by
+   descriptor" and "Program windows", and only that; each line is version
+   5's `INPUT <verb> <image id> [arguments]`:
 
-       INPUT eis <absolute path> <image id>\n
-       INPUT sock <absolute path> <image id>\n
-           OK input <image id> / ERROR INPUT <image id> <code>
+       INPUT eis <image id> <absolute path>\n
+       INPUT sock <image id> <absolute path>\n
+           INPUT ok <image id> / INPUT error <image id> <code>
        INPUT on <image id>\n   INPUT off <image id>\n
            whether that picture's window has the keys
        INPUT hold <image id> relative|confine\n
-           OK input <image id> / ERROR INPUT <image id> EINVAL
+           INPUT ok <image id> / INPUT error <image id> EINVAL
            what the route does while its session holds the pointer
        INPUT member <popup id> <top-level id> <x> <y>\n
-           OK input <popup id> / ERROR INPUT <popup id> <code>
+           INPUT ok <popup id> / INPUT error <popup id> <code>
            a popup's picture joins its top-level's route, at that offset
 
    Each route is one image's, so one channel carries the routes of several
@@ -27,7 +28,7 @@
    session is on, across all of its channels: `INPUT on` turns the others
    off, releasing what they held, before the new one gets anything. A route
    ends with its image or its channel; a compositor that refuses or drops it
-   later ends only that route, told `ERROR INPUT <image id> ENOENT`.
+   later ends only that route, told `INPUT error <image id> ENOENT`.
 
    The name comes from a peer whose uid Blit read at the hello, never from a
    terminal stream (ADR 0066). The socket must be that uid's: the file's
@@ -75,7 +76,7 @@
    A line the socket cannot take (full, or the compositor gone) is never
    dropped silently: the route is broken, counted in frames.input
    `dropped`, what it held is forgotten (the compositor releases all on the
-   socket's end), and at the next reconcile it ends with `ERROR INPUT <id>
+   socket's end), and at the next reconcile it ends with `INPUT error <id>
    ENOENT`, as an EIS route whose compositor went.
 
    libei is loaded at run time, so `blit` has no dependency on it; there are
@@ -592,14 +593,14 @@ static void frame_input_reconcile(BlitRuntime *runtime)
 }
 
 /* The compositor refused us in its handshake or closed the connection: the
-   client is told `ERROR INPUT <image id> ENOENT` now and that route ends
+   client is told `INPUT error <image id> ENOENT` now and that route ends
    (nothing held can be released to a compositor that has gone). The
    channel's other routes are untouched. */
 static void frame_input_disconnected(BlitRuntime *runtime, BlitFrameClient *client, int slot,
                                      const char *why)
 {
     char line[48];
-    snprintf(line, sizeof(line), "ERROR INPUT %u ENOENT\n", client->inputs[slot]->image_id);
+    snprintf(line, sizeof(line), "INPUT error %u ENOENT\n", client->inputs[slot]->image_id);
     frame_input_free(client, slot);
     frame_input_error(find_session_id(runtime, client->session_id), why);
     frame_reply(client->fd, line);
@@ -1090,14 +1091,14 @@ static void frame_input_keymap_changed(BlitRuntime *runtime)
 
 /* ---- The requests, on an authenticated channel. ---- */
 
-/* `ERROR INPUT <image id> <code>`; the id is 0 when the line named none or
+/* `INPUT error <image id> <code>`; the id is 0 when the line named none or
    could not be read. */
 static void frame_input_refuse(BlitRuntime *runtime, BlitFrameClient *client,
                                unsigned int image_id, const char *code)
 {
     char line[64];
     frame_input_error(find_session_id(runtime, client->session_id), code);
-    snprintf(line, sizeof(line), "ERROR INPUT %u %s\n", image_id, code);
+    snprintf(line, sizeof(line), "INPUT error %u %s\n", image_id, code);
     frame_reply(client->fd, line);
 }
 
@@ -1125,11 +1126,11 @@ static int frame_input_holds(const BlitSession *session, unsigned int image_id)
     return 0;
 }
 
-/* `OK input <image id>`. */
+/* `INPUT ok <image id>`. */
 static void frame_input_accept(BlitFrameClient *client, unsigned int image_id)
 {
     char line[48];
-    snprintf(line, sizeof(line), "OK input %u\n", image_id);
+    snprintf(line, sizeof(line), "INPUT ok %u\n", image_id);
     frame_reply(client->fd, line);
 }
 
@@ -1143,7 +1144,7 @@ static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id
     return -1;
 }
 
-/* `INPUT eis|sock <path> <image-id>`: the checks that need nothing come
+/* `INPUT eis|sock <image-id> <path>`: the checks that need nothing come
    first, then libei (for eis), then the socket's owner, the connection and
    its peer -- the same for both -- and last the backend: a libei sender on
    the connection, or the connection itself for lines. */
@@ -1431,15 +1432,22 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
             member_ok = toplevel != 0 && x_ok && y_ok;
         }
     } else if (strncmp(line, "INPUT eis ", 10) == 0 || strncmp(line, "INPUT sock ", 11) == 0) {
+        /* The id, then the path, one word: the id is cut out so it reads
+           alone; a path with a space in it is no path. */
+        char *rest;
         kind = line[6];
-        path_text = line + (kind == 'e' ? 10 : 11);
-        path_length = strcspn(path_text, " ");
-        if (path_text[path_length] == ' ')
-            id_text = path_text + path_length + 1;
+        id_text = line + (kind == 'e' ? 10 : 11);
+        rest = strchr(id_text, ' ');
+        if (rest != NULL) {
+            *rest++ = '\0';
+            path_text = rest;
+            path_length = strcspn(path_text, " ");
+            if (path_text[path_length] != '\0')
+                path_length = 0;
+        }
     }
     id = id_text != NULL ? frame_input_parse_id(id_text) : 0;
-    /* A version 2 channel's INPUT is not read at all. */
-    if (client->version < 3 || id == 0) {
+    if (id == 0) {
         frame_input_refuse(runtime, client, 0, "EINVAL");
         return;
     }

@@ -1867,6 +1867,15 @@ growing and writing. The image is placed, layered and deleted with ordinary
 Kitty escapes on the session's terminal, under the same id. The byte layout
 and rules are in the ADR's "Wire format".
 
+The channel has one version, 5, and one grammar for its lines ("One grammar,
+version 5" under "Program windows"): every line that concerns a picture is
+`<WORD> <verb> <id> [arguments]`, the picture id always the third word. The
+hello, written `v5 <token>` here, is the ADR's binary hello with version 5.
+It is answered `OK ...` (below); or refused, and the connection closed,
+with `ERROR 0 EACCES` (a wrong token, or a uid that may not send to that
+session) or `ERROR 0 EINVAL` (not a hello, or a hello of any version but
+5). A refused frame is answered `FRAME error <id> <code>`.
+
 The channel is local only. A program reached over ssh, or running on another
 machine, has no `BLIT_FRAME_SOCKET` and could not reach it if it had: it
 sends its pictures through the terminal as Kitty images, exactly as before.
@@ -1875,26 +1884,26 @@ the hello should fall back the same way. Each session reports
 `frames.accepted`, `refused`, `stale`, `superseded` and `last_error`; the
 server reports `graphics.frames` in `/v1/diagnostics`.
 
-A client that says version 2 in its hello may also be sent `HUD1 on` or
-`HUD1 off` lines, and may send STA1 status lines for the performance panel;
-see "Performance panel".
+A client may also be sent `HUD1 on` or `HUD1 off` lines, and may send STA1
+status lines for the performance panel (a malformed one is answered
+`FRAME error 0 EINVAL`); see "Performance panel".
 
-A client that says version 3 may send frames whose pixels are already in
+A client may send frames whose pixels are already in
 GPU memory: `FRM3`, a 72-byte header with the DRM fourcc, the format
 modifier and up to four planes, their dmabuf descriptors (and optionally an
 acquire fence) in `SCM_RIGHTS` ([ADR 0223](adr/0223-frames-by-dmabuf.md),
 "Wire format, version 3"). Its hello is answered
-`OK dmabuf=1 fence=<0|1> formats=<list>` while the GPU compositor composes
+`OK dmabuf=1 fence=<0|1> formats=<list> window=0` while the GPU compositor composes
 every output and can import them -- the list names each importable format and its modifiers,
 `XR24/0/100000000000001,AR24/0,...` (fourcc, then `/` and each modifier in
-hex) -- and `OK dmabuf=0` otherwise (the CPU compositor on any output, or
+hex) -- and `OK dmabuf=0 window=0` otherwise (the CPU compositor on any output, or
 EGL without `EGL_EXT_image_dma_buf_import`). `AR24` and `AB24` are
 premultiplied by alpha; a producer with straight alpha premultiplies or
 sends by memfd, and `XR24`/`XB24` (opaque) suit games and video. Blit imports the planes as a texture,
-never maps them, and answers `RELEASE <id> <sequence>` when it no longer
+never maps them, and answers `FRAME release <id> <sequence>` when it no longer
 needs a frame's buffer: once a newer frame of the image has been drawn, or
 at once for a frame superseded, stale or never shown, and when the image
-is deleted. A frame it cannot import is refused `ERROR <id> ENOTSUP` and
+is deleted. A frame it cannot import is refused `FRAME error <id> ENOTSUP` and
 should be sent again by memfd; a malformed one is `EINVAL`. Each session's
 `frames.dmabuf` counts frames accepted, released and refused by reason
 (`unavailable`, `format`, `import`, `invalid`), and an image says
@@ -1906,7 +1915,7 @@ it measures input-to-frame latency, ADR 0228 phase 0); `/v1/diagnostics` reports
 whether fences are waited on, the totals, `fences_waited` and the same
 counts per session.
 
-A version-3 client may also ask Blit to send the physical keyboard and mouse
+A client may also ask Blit to send the physical keyboard and mouse
 to a compositor's EIS socket, so that a game it shows gets input as a
 compositor expects it rather than as terminal escapes
 ([ADR 0225](adr/0225-games-in-a-window-through-gamescope.md)):
@@ -1916,12 +1925,13 @@ carry the routes of several pictures (a desktop multiplexes its windows'
 pictures over one connection per display). Each request is one message; a
 trailing newline is optional.
 
-- `INPUT eis <path> <image-id>` names the socket (an absolute path to a
+- `INPUT eis <image-id> <path>` names the socket (an absolute path to a
   Unix socket owned by the client's own uid, which Blit checks against the
   channel's peer credentials) and the image whose picture stands for the
   compositor's output. The image need not have a frame yet; the pointer
-  maps once it has a frame and a placement. Answered `OK input <image-id>`,
-  or `ERROR INPUT <image-id> <code>` (the id is 0 when the line names none
+  maps once it has a frame and a placement. The path is the rest of the
+  line, one word. Answered `INPUT ok <image-id>`,
+  or `INPUT error <image-id> <code>` (the id is 0 when the line names none
   or cannot be read): `EINVAL` (malformed; image id 0, a deleted image or a
   Kitty image; `INPUT on` or `INPUT off` for an image with no route),
   `EACCES` (the socket is not the client's), `ENOENT` (no such socket, or
@@ -1930,7 +1940,7 @@ trailing newline is optional.
   of a session, `graphics.max_images`), `ENOMEM` (Blit could not allocate the route), `ENOTSUP`
   (libei could not be loaded). If the
   compositor refuses the connection later, in its handshake, or drops it,
-  Blit sends `ERROR INPUT <image-id> ENOENT` then and that route ends; the
+  Blit sends `INPUT error <image-id> ENOENT` then and that route ends; the
   connection's other routes are untouched. A route ends with its image or
   its connection.
 - `INPUT on <image-id>` and `INPUT off <image-id>` say whether that
@@ -1945,10 +1955,9 @@ trailing newline is optional.
   its session holds pointer lock (`?7701`); it may be sent any time after
   `INPUT eis`, and neither takes nor gives back the lock, which stays the
   desktop's (ADR 0198). A new route is `relative`. Answered
-  `OK input <image-id>`, or `ERROR INPUT <image-id> EINVAL` for an unknown
+  `INPUT ok <image-id>`, or `INPUT error <image-id> EINVAL` for an unknown
   mode, an image with no route on this connection, or a malformed line (id
-  0 when it has no readable one). An older Blit answers every `INPUT hold`
-  `ERROR INPUT 0 EINVAL`.
+  0 when it has no readable one).
   - `relative`: Blit's pointer is hidden and still, and the route is sent
     relative motion, the raw counts.
   - `confine`: while the route is live and its picture is drawn on the
@@ -2024,42 +2033,60 @@ It speaks the frame channel above as a producer, with these additions.
   socket, below, with the longest id) fits in 107 bytes. A name that is not one, or that another compositor
   holds, is refused before the channel is dialed: a line on standard error
   and exit status 2. `WINDOW display` says the name either way.
-- **Hello.** Version 4: `v4 <token>` (everything in version 3, plus the
-  `WINDOW` lines). A peer that answers a version-4 hello without
+- **Hello.** `v5 <token>` (the frame channel's one version, below, with
+  the `WINDOW` lines). A peer that answers the hello without
   `window=1` in its `OK` line does not speak `WINDOW`; the compositor then
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
   The compositor's first line after `OK` is `WINDOW display <name>`, on
   every connection (a reconnect too: "Programs survive a desktop
   restart").
-- **One grammar, version 5 (agreed 2026-11-09; replaces the shapes above
-  when Blit and Hibr ship it together, with no compatibility forms).** Every
+- **One grammar, version 5** (Blit 0.3.74 and Hibr 0.99.482, which ship
+  together: the `blit` package Breaks `hibr (<< 0.99.482)` and Hibr's
+  Breaks `blit (<< 0.3.74)`, so there are no compatibility forms). Every
   line on the frame channel that concerns a picture is
   `<WORD> <verb> <id> [arguments]`, the picture id always the third word:
-  `FRAME release <id> <seq>` and `FRAME error <id> <code>` (were `RELEASE
-  <id> <seq>` and `ERROR <id> <code>`), `INPUT eis <id> <path>` and `INPUT
-  sock <id> <path>`, `INPUT ok <id>` and `INPUT error <id> <code>`, `WINDOW
-  ok <id>` and `WINDOW error <id> <code>`, and every `INPUT` and `WINDOW`
-  line. Further ids (a popup's parent, a member's top-level) are arguments.
-  The hello is `v5 <token>`. A relay rewrites ids with one rule.
+  - Blit to a producer: `FRAME release <id> <seq>`, `FRAME error <id>
+    <code>`, `INPUT ok <id>`, `INPUT error <id> <code>`;
+  - a producer to Blit: `INPUT eis <id> <path>`, `INPUT sock <id> <path>`,
+    `INPUT on|off <id>`, `INPUT hold <id> relative|confine`, `INPUT member
+    <id> <toplevel-id> <x> <y>`;
+  - on an input route's socket: `INPUT key|ptr|rel|btn|wheel|frame|keymap
+    <id> ...`;
+  - between the compositor and the desktop: every `WINDOW <verb> <id> ...`
+    line above and below, and `WINDOW ok <id>`, `WINDOW error <id> <code>`.
+  Further ids (a popup's parent, a member's top-level) are arguments after
+  it. A line that concerns no one picture says 0 there: `FRAME error 0
+  EINVAL` (a malformed STA1, or a message too short to name its picture),
+  `FRAME error 0 EACCES` (the session's user signed out; the connection then
+  closes), `INPUT error 0 <code>` and `WINDOW error 0 <code>` (a line with
+  no readable id, or `WINDOW display <name>`, which names a display, not a
+  picture), and `WINDOW quit 0` (the whole compositor). The hello and its
+  answer are not picture lines and keep their shapes: `OK dmabuf=0
+  window=0`, `OK dmabuf=1 fence=<0|1> formats=<list> window=0`, `ERROR 0
+  EACCES`, `ERROR 0 EINVAL`; Blit refuses a hello of version 1 to 4 (or
+  any but 5) `ERROR 0 EINVAL` and closes the connection, the refusal every
+  version reads. `HUD1 on|off` names no picture, and the binary `FRM1`,
+  `FRM3` and `STA1` messages are unchanged. A relay rewrites ids with one
+  rule: the third word of a picture's line.
 - **One id space.** A window's id is its picture id: its `FRM1` and `FRM3`
-  frames, `RELEASE`s and `INPUT` routes all use it.
+  frames, `FRAME release`s and `INPUT` routes all use it.
 - **Frames.** A `wl_shm` buffer is copied into one `FRM1` and given back to
   the program at once. A `zwp_linux_dmabuf_v1` buffer is one `FRM3` of the
-  program's own planes, no copy, given back at Blit's `RELEASE` for it (or
+  program's own planes, no copy, given back at Blit's `FRAME release` for it (or
   when its window goes: `WINDOW gone` follows only after every buffer of
-  the id is given back, and Blit's later `RELEASE`s for them are stale).
+  the id is given back, and Blit's later `FRAME release`s for them are stale).
   `zwp_linux_dmabuf_v1` (version 4, default feedback in one tranche) is
   offered only when the hello was answered `dmabuf=1` with a `formats=`
   list, and offers exactly those formats and modifiers. A frame refused
-  `ERROR <id> ENOTSUP` is sent again as an `FRM1` copy when its one linear
+  `FRAME error <id> ENOTSUP` is sent again as an `FRM1` copy when its one linear
   plane can be mapped, as is every later dmabuf frame of the connection;
   any other refusal, or one that cannot be mapped, gives the buffer back
   unshown and says so in the compositor's log. The feedback's main device
   is the first DRM render node: the hello does not name Blit's GPU.
 - **Pacing.** A program's frame callback is answered when Blit has taken
   the frame -- an `FRM1` when it is sent; an `FRM3` at once when it is the
-  only frame of the window Blit holds, else at Blit's `RELEASE` of the
+  only frame of the window Blit holds, else at Blit's `FRAME release` of the
   frame before it, so a program is never more than one frame ahead of
   Blit -- and at most once per refresh of the window's `WINDOW output`.
   `wp_presentation` feedback is `presented` at the same moment
@@ -2075,10 +2102,50 @@ It speaks the frame channel above as a producer, with these additions.
     at an offset in the parent's surface pixels (not on-screen pixels: the
     desktop may show the parent scaled); the desktop keeps it there when the
     parent moves, and may draw it past the parent's window.
+  - `WINDOW sub <id> <parent> <x> <y> <w> <h> above|below`: a subsurface
+    (`wl_subsurface`), its own picture, as a popup's is, with no `WINDOW
+    new`: owned, moved, hidden and closed with its top-level, never in the
+    window list or the focus. `<parent>` is always the top-level: a tree of
+    subsurfaces is flattened, `<x> <y>` the sum of the positions down to it
+    in the top-level's surface pixels (negative allowed), `<w> <h>` its
+    committed buffer's size, `above` or `below` the top-level's own
+    picture. Sent when it first has a buffer (and every subsurface above it
+    in the tree is mapped), and again, for all of that top-level's
+    subsurfaces, bottom to top, whenever any is new or its offset, size or
+    place in the order changes; positions and order are applied at the
+    parent's commit, a synchronized subsurface's frame only then too.
+    `WINDOW gone <id>` when it is unmapped (a NULL buffer, its
+    `wl_subsurface` destroyed, a parent unmapped or gone). Its frames are
+    `FRM1`/`FRM3` under `<id>`, released like any picture's. The desktop
+    places it 1:1 at its offset (Blit's and kitty's `X=`/`Y=` cell offset
+    gives the exact pixel), clipped to the window body, and sends Blit
+    `INPUT member <id> <parent> <x> <y>` as for a popup; the compositor
+    hit-tests subsurfaces by their input regions (an empty one, as Firefox
+    sets on its content, gives the pointer to the parent). A subsurface of
+    a popup is not shown in this release (logged).
   - `WINDOW decor <id> server|client`: who draws the frame
     (`zxdg_decoration`). `client` (a program that insists on its own, such
     as GTK's client-side decorations) gets a bare window from the desktop,
     never a frame around a frame.
+  - `WINDOW geometry <id> <x> <y> <w> <h>`: the window itself inside its
+    buffer, in its surface pixels (`xdg_surface.set_window_geometry`): a
+    program that draws its own frame draws its shadow outside it. Sent at
+    the commit that changes it and when the window is announced again; no
+    line means the whole buffer. The desktop crops the picture to it with
+    a source rectangle (Blit maps the pointer through it) and sizes the
+    window body by it: `WINDOW size` is this rectangle's size.
+  - `WINDOW move <id>`, `WINDOW resize <id>
+    top|bottom|left|right|top-left|top-right|bottom-left|bottom-right`: the
+    program's own frame asks the desktop to move or resize it
+    (`xdg_toplevel.move/resize`). Sent only while a pointer button the
+    compositor delivered to that window is down, the request naming that
+    press's serial; anything else is ignored and logged. The desktop has
+    seen the press itself (Blit reports every press, drag and release to
+    the terminal as well as to a live route), starts its own drag at the
+    pointer, and sends `INPUT off <id>` so that the program's button is
+    released and it gets no motion during the drag, `INPUT on <id>` after.
+  - `WINDOW menu <id> <x> <y>`: the window menu, asked for at x, y in its
+    surface pixels (`xdg_toplevel.show_window_menu`, the same press rule).
   - `WINDOW cursor <id> <name>`: the pointer shape the program asks for over
     that window, a CSS cursor name (`default`, `text`, `pointer`, ...) or
     `hidden`. The desktop turns it into its own per-window pointer shape
@@ -2096,15 +2163,19 @@ It speaks the frame channel above as a producer, with these additions.
   `title`, `appid`, `limits`, `cursor` and `decor` may come again at any
   time. The compositor strips control characters, newline included, from
   titles and app ids and bounds them to 256 bytes.
-  A line the desktop does not know is answered `ERROR WINDOW <id> EINVAL`.
+  A line the desktop does not know is answered `WINDOW error <id> EINVAL`.
 - **Desktop to compositor:**
-  - `WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]`:
+  - `WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
+    [tiled-left] [tiled-right] [tiled-top] [tiled-bottom]`:
     pixels, with the xdg states the desktop has given the window (so a
     window it zooms on its own still tells the program it is maximized). The
     compositor configures exactly this size; the frame that follows carries
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
     their own size and the desktop sizes its window to the first frame.
+    The tiled words, each at most once and in this order, say which edges
+    the desktop has put the window against (xdg_toplevel's tiled states):
+    a program that draws its own frame drops its shadow there.
     A program's initial commit is answered at once, as xdg-shell requires
     and as programs rely on (vkcube presents after one roundtrip): with the
     desktop's size if one has come, else 0,0. So the first frame of a new
@@ -2137,7 +2208,7 @@ It speaks the frame channel above as a producer, with these additions.
     own popups; keyboard focus stays the top-level's. The member ends with
     the popup's picture (deleted, or gone after it was shown), or with the
     top-level's route. Answers follow the other INPUT requests, with the
-    popup's id: `OK input <popup-id>`, or `ERROR INPUT <popup-id> <code>`
+    popup's id: `INPUT ok <popup-id>`, or `INPUT error <popup-id> <code>`
     (id 0 when the line has no readable one): `EINVAL` for a malformed line
     (an offset is a decimal, optionally negative, at most 32767 either
     way), a top-level with no route on this connection, the popup the
@@ -2190,7 +2261,7 @@ It speaks the frame channel above as a producer, with these additions.
     directly) is let go and the next attempt follows.
     `BLIT_COMPOSITOR_RECONNECT_MS` shortens the 60 seconds, in
     milliseconds, for gates only: it is not a setting.
-  - **On reconnect** it says hello again (version 4), then `WINDOW
+  - **On reconnect** it says hello again (version 5), then `WINDOW
     display`, and announces every window again with its id and its last
     state: each top-level, in the order they were created, `WINDOW new <id>
     <parent>` (`0`, and `WINDOW parent` after every top-level, for a parent
@@ -2198,7 +2269,8 @@ It speaks the frame channel above as a producer, with these additions.
     on`, `maximize on` and `INPUT sock`, and `WINDOW hide` for one its
     program had unmapped (`minimize` is a request, not a state, and is not
     repeated); then each popup, `WINDOW popup` with its offset; then each
-    shown window's newest frame (`FRM3` of the kept buffer, or `FRM1`);
+    top-level's subsurfaces, `WINDOW sub` bottom to top with their ids
+    kept; then each shown window's, popup's and subsurface's newest frame (`FRM3` of the kept buffer, or `FRM1`);
     then `WINDOW lock` for each pointer lock or confinement a program still
     holds. Popups' `INPUT member` lines are the desktop's to send again, as
     for new windows. The desktop answers as for new windows (`WINDOW
@@ -2221,10 +2293,9 @@ It speaks the frame channel above as a producer, with these additions.
   from Blit directly, not through EIS (libei exists only to feed a foreign
   compositor and leaves with gamescope in ADR 0228 phase 4) and not through
   the desktop's relay. It listens on an input socket of its own for each
-  top-level (`SOCK_STREAM`)
-  and asks once per top-level, through the channel, `INPUT sock <path>
-  <id>` -- the shape of `INPUT eis` until version 5 makes it `INPUT sock
-  <id> <path>` -- : Blit connects to `path`
+  top-level (`SOCK_STREAM`) and asks once per top-level, through the
+  channel, `INPUT sock <id> <path>`, the shape of `INPUT eis`: Blit
+  connects to `path`
   (an absolute path to a Unix socket owned by the client's uid, checked as
   for `INPUT eis`; `ENOTSUP` does not apply, no libei is involved), and the
   answers, `INPUT on|off|hold|member`, the live
@@ -2254,7 +2325,7 @@ It speaks the frame channel above as a producer, with these additions.
   is never dropped silently: if the socket cannot take a line (full, or its
   reader gone), Blit counts it in `frames.input` `dropped`, forgets what
   that route held -- the compositor releases every key and button of a
-  route whose socket ends -- and ends the route with `ERROR INPUT <id>
+  route whose socket ends -- and ends the route with `INPUT error <id>
   ENOENT`, as when the compositor closes the socket itself
   (`last_error` `sock-disconnected`, or `sock-full`). Each route in
   `frames.input` says its `backend`, `eis` or `sock`.
@@ -2339,8 +2410,33 @@ It speaks the frame channel above as a producer, with these additions.
   its own, ADR 0228), and with several displays each route's Blit is the
   one whose keys it carries. Without a keymap its clients are sent
   `no_keymap`. The desktop never touches it.
-- **Open in this draft:** the clipboard, which phase 2 decides with the X
-  window manager's selections.
+- **The clipboard** (ADR 0229): Hibr's clipboard is the one truth; the
+  compositor offers `wl_data_device_manager` v3 (Ctrl-C/V) and
+  `zwp_primary_selection_device_manager_v1` (middle click) and keeps only
+  which side owns each selection, never the bytes. Lines, both ways:
+  ```
+  CLIP offer <seq> clipboard|primary [<type> ...]   the selection is now this offer
+  CLIP read <seq> <type>                            with a pipe's write end: the owner writes, closes
+  CLIP clear <seq>                                  the offer is withdrawn
+  ```
+  `<seq>` is the sender's own count. A program's selection (set by the
+  program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`
+  when it has any text type (`text/plain;charset=utf-8`, `UTF8_STRING`,
+  `text/plain`, `STRING`, `TEXT`), with no types otherwise, plus
+  `x-kde-passwordManagerHint` when the program marked it secret; the
+  desktop's `CLIP read` in the text type is answered from the program's best
+  text type, through the pipe passed with the line. The desktop's offer is
+  shown to programs with all five text types (and the hint), and a
+  program's paste becomes `CLIP read <seq> text/plain;charset=utf-8` with
+  the program's pipe, which the desktop writes and closes. A secret (the
+  hint: the Vault's offers carry it) enters no history, and the desktop's
+  `CLIP clear` when its timeout clears it ends it on the program side too.
+  A program's source going sends `CLIP clear`. Between programs a paste goes
+  straight from the source. The program with the keyboard is offered each
+  selection when it gets the keyboard and when one changes. The desktop's
+  offers lapse with its channel; a program's selection is offered again,
+  under a new `<seq>`, after the re-announcement. Drag and drop is not here
+  yet: a drag is cancelled at once (ADR 0229's later row).
 
 ## Diagnostics and screenshots
 
@@ -2514,7 +2610,7 @@ video   9/s  by descriptor  (kitty 0  sixel 0)
   `update  0.3.27 installed, at login screen`, or `restart to apply` under
   `manual` (see "Restart after an update").
 - **hibr** (section `hibr`): the lines the session's frame client sends as
-  STA1 (version 2 of the frame socket, ADR 0202), with their age, while
+  STA1 (the frame socket, ADR 0202 and ADR 0203), with their age, while
   younger than 5 s. The session reports them as `status`.
 
 Every figure is in `/v1/diagnostics`: an output's under

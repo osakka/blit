@@ -1,7 +1,7 @@
 #!/bin/sh
 # ADR 0225: the frame channel's INPUT request, the cases that need no libeis:
 # ENOTSUP without libei, and against a stand-in libei the per-image EINVAL,
-# ENOENT, EACCES, OK input and EBUSY answers and the routes' states; then
+# ENOENT, EACCES, INPUT ok and EBUSY answers and the routes' states; then
 # every input case, several routes included, against the recording stand-in
 # (the stub mode). The same cases against libeis are frame_input_eis_gate.sh.
 set -eu

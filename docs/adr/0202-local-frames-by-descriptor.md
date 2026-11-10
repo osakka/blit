@@ -9,6 +9,7 @@
 - Depends on: [ADR 0066](0066-the-terminal-names-no-file-blit-opens.md),
   [ADR 0200](0200-kitty-images-change-in-place.md),
   [ADR 0065](0065-the-privilege-and-authentication-model.md)
+- Amended: lines in v5 grammar since 0.3.73 (ADR 0228)
 
 ## Context
 
