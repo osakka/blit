@@ -27,11 +27,10 @@ The diagnostic probe enumerates cards, connectors, and modes independently of
 the server and Hibr, without changing display state:
 
 ```sh
-tcc -std=c99 \
-  -Ibuild/deps/prefix/include \
-  -Ibuild/deps/prefix/include/libdrm \
+mkdir -p build/blit
+tcc -std=c99 $(tools/build-flags.sh --cflags drm) \
   tools/probes/drm_kms.c \
-  -Lbuild/deps/prefix/lib/x86_64-linux-gnu -ldrm \
+  $(tools/build-flags.sh --libs drm) \
   -o build/blit/drm-kms-probe
 sudo ./build/blit/drm-kms-probe
 ```

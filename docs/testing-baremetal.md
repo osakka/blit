@@ -54,11 +54,10 @@ may blank or change mode briefly while DRM master is acquired and released.
 ## Build the probe with TCC
 
 ```sh
-tcc -std=c99 \
-  -Ibuild/deps/prefix/include \
-  -Ibuild/deps/prefix/include/libdrm \
+mkdir -p build/blit
+tcc -std=c99 $(tools/build-flags.sh --cflags drm) \
   tools/probes/drm_kms.c \
-  -Lbuild/deps/prefix/lib/x86_64-linux-gnu -ldrm \
+  $(tools/build-flags.sh --libs drm) \
   -o build/blit/drm-kms-probe
 ```
 
