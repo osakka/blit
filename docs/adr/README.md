@@ -245,6 +245,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0225 — Steam and games in a window, through a headless gamescope](0225-games-in-a-window-through-gamescope.md) (proposed)
 - [0227 — Spleen is one text font of five masters, the master picked per size](0227-spleen-one-font-of-masters.md)
 - [0228 — Blit is the compositor for programs](0228-blit-is-the-compositor-for-programs.md) (proposed)
+- [0229 — Programs and the desktop: one owner per concern](0229-programs-and-the-desktop-one-owner-per-concern.md) (proposed)
 
 ## Status
 
