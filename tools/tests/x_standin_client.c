@@ -11,7 +11,7 @@
    Wayland stand-in (wl_standin_client.c), so the gate compares the frames
    of both the same way: at (x, y) red x & 255, green y & 255, blue 0x80 |
    (x >> 8 & 7) << 3 | (y >> 8 & 7), with PutImage in strips under the core
-   request size. A press of the space bar (keycode 65) draws it again 70
+   request size. A press of the space bar (keycode 65) draws it again 150
    times, 16 ms apart, for the compositor's measure of its first 60 frames.
 
    It prints one line per event, flushed:
@@ -39,7 +39,7 @@
 #include <time.h>
 #include <xcb/xcb.h>
 
-#define ANIMATE_FRAMES 70
+#define ANIMATE_FRAMES 150
 #define ANIMATE_MS 16
 #define KEYCODE_SPACE 65
 

@@ -24,7 +24,7 @@ order:
   - Blit's input on the window's socket (with blit-server's keymap, as
     Blit sends it, when a blit-server is given): a click at 10,12 reaching
     the X client as ButtonPress 1 at 10,12, a key (evdev 30) as KeyPress 38;
-  - the space bar: 70 frames drawn, and the compositor's measure of its
+  - the space bar: 150 frames drawn, and the compositor's measure of its
     first 60 frames, commit to frame sent (printed);
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
   - `WINDOW quit 0`: the compositor ends 0, Xwayland with it, the sockets
@@ -274,7 +274,8 @@ def x_part(compositor, standin, server, work):
         wait_for(lambda: 'XSTANDIN key %d' % (KEY_A + 8) in printed(),
                  lambda: 'the key did not reach the X client as keycode %d:\n%s' % (KEY_A + 8, printed()))
 
-        # 70 frames drawn: the compositor's measure of the first 60.
+        # 150 drawings (Xwayland commits at most one a refresh, so some
+        # coalesce): the compositor's measure of the window's first 60 frames.
         lines_to('key %%d %d press' % KEY_SPACE, 'key %%d %d release' % KEY_SPACE)
         frames = 0
         deadline = time.time() + 20
@@ -290,7 +291,7 @@ def x_part(compositor, standin, server, work):
                                 r'min (\d+) us, median (\d+) us', open(log).read())
         check(measure, lambda: 'no measure of 60 frames (%d frames seen):\n%s\n%s'
               % (frames, printed(), open(log).read()))
-        wait_for(lambda: 'XSTANDIN animated 70' in printed(), lambda: 'the X client did not draw 70:\n' + printed())
+        wait_for(lambda: 'XSTANDIN animated 150' in printed(), lambda: 'the X client did not draw 150:\n' + printed())
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
