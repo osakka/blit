@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.76 cursor shapes, one route per window, a portable build (ADR 0229, ADR 0230)
+
+- **Cursor shapes:** programs name their pointer (wp_cursor_shape_v1) and
+  Blit's own pointer art draws it (`WINDOW cursor <id> <name>`, OSC 22's
+  names; `none` hides; a program's own cursor images are never drawn).
+- **Input routes:** one route per compositor window socket (a new one ends
+  a route left behind, releasing what it held, `superseded`); each route
+  says whether its picture is `present` in its session.
+- **WINDOW size:** the state words in any order (the desktop's full screen
+  and maximize had been dropped as unknown lines).
+- **Build:** dependencies from the system through pkg-config, one place
+  (tools/build-flags.sh, ADR 0230), minimums stated; the hand-built
+  prefix retired. wayland-protocols >= 1.32 for the compositor: this build
+  host (1.31) skips the compositor gate with the reason, and this release's
+  packages were built on the owner's Debian 13 desktop.
+- **Gates:** every Blit process a gate starts gets a hermetic environment
+  (no inherited `BLIT_*`, fake input devices), proved by `gate_env_gate`.
+- **Docs:** programs in windows -- what to expect.
+- **Suites:** this host, main fae186d rebuilt: `all` 187 pass, 12 skip
+  (the compositor gate among them, below its minimum), 0 fail; GLES
+  `renderer` 82 pass, 1 skip, 0 fail. The owner's Debian 13 desktop:
+  `compositor_gate` with ASan/UBSan on 0cfa8e1 (the same compositor), and
+  the packages built there from 6668e28 with `package_artifact_gate`
+  passing; brought here by scp, checksums verified against the desktop's.
+- **Published** to hibr-apt (blit, blit-compositor).
+
 ## 2026-11-10: 0.3.75 gamescope removed; the compositor is the one path (ADR 0228)
 
 - **Removed, by the owner's decision ("no legacy stuff loose"):**
