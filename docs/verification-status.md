@@ -9,6 +9,34 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.72 blit-compositor milestone C, and its package (ADR 0228 phase 1)
+
+- **Pointer lock and confine:** `zwp_pointer_constraints_v1` v1, asked of
+  the desktop with `WINDOW lock <id> relative|confine|off` and granted with
+  `WINDOW lock <id> on|off` (the desktop's gesture rule; oneshot and
+  persistent lifetimes; no absolute motion while locked).
+- **Popups take input:** `INPUT member` in Blit -- a popup's picture joins
+  its top-level's route, its points mapped into the top-level's pixels (may
+  be negative), topmost draw wins; both backends; answered as INPUT.
+- **Keyboard, one source:** `GET /v1/input/keymap` carries Blit's repeat
+  (`X-Blit-Repeat-Rate`/`-Delay`, on 200 and 304); its default is the
+  keyboard whose key came last; Blit writes `INPUT keymap <id> <revision>`
+  to live sock routes when it changes, and the compositor re-reads only
+  then (250 ms bound on loopback).
+- **Package `blit-compositor`:** /usr/bin/blit-compositor; Depends blit (=
+  0.3.72-1), libwayland-server0, libxkbcommon0; Recommends xwayland; blit
+  Suggests it; built without debug info so two builds are byte-identical
+  (tcc ignores -ffile-prefix-map).
+- **Suites** (on the milestone's tree; the merge added documentation only,
+  re-checked by schema, documentation and compositor gates): `all` 188
+  pass, 12 skip, 0 fail; GLES `renderer` 82 pass, 1 skip, 0 fail;
+  `compositor_gate` with ASan/UBSan; `package_artifact_gate` passes with the
+  compositor leg.
+- **Published** to hibr-apt (blit, blit-gamescope, blit-compositor). Not
+  deployed: neither host reachable from the build machine. Hibr 0.99.481
+  (#494, native windows on v4) ships against it; v5 is Blit 0.3.73 with hibr
+  0.99.482.
+
 ## 2026-11-10: 0.3.71 blit-compositor milestones A and B (ADR 0228 phase 1)
 
 - **blit-compositor**, Blit's own Wayland compositor for programs (built in
