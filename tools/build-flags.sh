@@ -10,6 +10,10 @@
 #   build-flags.sh --check [GROUP...]  check the groups' modules (all of
 #                                      them without a group), print each
 #   build-flags.sh --protocols         wayland-protocols' XML directory
+#   build-flags.sh --plasma-protocols  plasma-wayland-protocols' XML directory
+#                                      (the global menu's appmenu.xml; it
+#                                      ships no pkg-config file, so it is
+#                                      found in the same share directory)
 #   build-flags.sh --scanner           the wayland-scanner program
 #
 # Groups:
@@ -157,6 +161,17 @@ case $1 in
     dir=$(variable wayland-protocols pkgdatadir)
     [ -f "$dir/stable/xdg-shell/xdg-shell.xml" ] ||
         die "wayland-protocols' XML not found under $dir"
+    echo "$dir"
+    ;;
+--plasma-protocols)
+    # plasma-wayland-protocols installs CMake files only, and its XML in
+    # <datarootdir>/plasma-wayland-protocols on every distribution: the
+    # directory beside wayland-protocols'.
+    dir=$(variable wayland-protocols pkgdatadir)
+    dir=${dir%/}
+    dir=${dir%/*}/plasma-wayland-protocols
+    [ -f "$dir/appmenu.xml" ] ||
+        die "plasma-wayland-protocols' appmenu.xml not found under $dir (docs/toolchain.md)"
     echo "$dir"
     ;;
 --scanner)

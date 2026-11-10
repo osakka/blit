@@ -73,6 +73,7 @@
 #include "pointer-constraints-unstable-v1-server-protocol.h"
 #include "primary-selection-unstable-v1-server-protocol.h"
 #include "cursor-shape-v1-server-protocol.h"
+#include "appmenu-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -143,6 +144,10 @@ struct bc_surface {
     uint64_t last_done_us;            /* when frame callbacks were last answered */
     int scale_warned;
     int cursor_logged;                /* a cursor image from it was noted once */
+    /* The global menu (org_kde_kwin_appmenu): where the program serves its
+       menus over D-Bus, "" none. */
+    struct wl_resource *appmenu;
+    char appmenu_service[256], appmenu_path[256];
     struct bc_constraint *constraint; /* its pointer lock or confinement, one at most */
 };
 
@@ -355,6 +360,19 @@ static void send_limits(struct bc_xdg *x)
     x->limits_sent = 1;
 }
 
+/* `WINDOW appmenu`: where the window's program serves its menus (the
+   global menu, ADR 0229), `- -` for none. */
+static void send_appmenu(struct bc_xdg *x)
+{
+    struct bc_surface *sf = x->surface;
+    if (sf == NULL || !x->id) return;
+    if (sf->appmenu_service[0])
+        bc_wire_line(&x->server->wire, "WINDOW appmenu %u %s %s", x->id, sf->appmenu_service,
+                     sf->appmenu_path);
+    else
+        bc_wire_line(&x->server->wire, "WINDOW appmenu %u - -", x->id);
+}
+
 /* `WINDOW geometry`: the window's rectangle in its surface pixels. */
 static void send_geometry(struct bc_xdg *x)
 {
@@ -385,6 +403,7 @@ static void announce_hints(struct bc_xdg *x, int parent)
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
     if (x->cursor[0]) bc_wire_line(w, "WINDOW cursor %u %s", x->id, x->cursor);
+    if (x->surface && x->surface->appmenu_service[0]) send_appmenu(x);
     /* Its input, straight from Blit to its own input socket (one route per
        toplevel); the desktop relays the request under its own id. */
     if (window_input_listen(x) == 0)
@@ -1587,6 +1606,7 @@ static void surface_destroyed(struct wl_resource *resource)
             wl_list_init(&c->sub_link);
         }
     }
+    if (surface->appmenu) wl_resource_set_user_data(surface->appmenu, NULL);
     region_clear(&surface->input);
     region_clear(&surface->pending_input);
     free(surface);
@@ -1681,6 +1701,100 @@ static void bind_compositor(struct wl_client *client, void *data, uint32_t versi
         return;
     }
     wl_resource_set_implementation(r, &compositor_impl, data, NULL);
+}
+
+/* ---- the global menu (ADR 0229) ----
+
+   A program that serves its menus over D-Bus (com.canonical.dbusmenu: Qt
+   and KDE programs, GTK 3 with the appmenu module) says where with
+   org_kde_kwin_appmenu: a service name and an object path for one of its
+   surfaces. The compositor tells the desktop `WINDOW appmenu <id>
+   <service> <path>` for that surface's top-level, when it is set, when the
+   window is announced (again), and `- -` when the program releases it; the
+   desktop reads the menus from the session bus and shows the focused
+   window's in its bar. Names that are not D-Bus syntax are refused (they go
+   on the wire as words). */
+
+static int dbus_word(const char *s, int path)
+{
+    size_t n = strlen(s), i;
+    if (n == 0 || n > 255 || (path && s[0] != '/') || strcmp(s, "-") == 0) return 0;
+    for (i = 0; i < n; ++i) {
+        unsigned char c = (unsigned char)s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' ||
+              (path ? c == '/' : (c == '.' || c == ':' || c == '-'))))
+            return 0;
+    }
+    return 1;
+}
+
+static void appmenu_changed(struct bc_surface *sf)
+{
+    struct bc_xdg *x = sf->xdg && sf->xdg->toplevel ? sf->xdg : NULL;
+    if (x) send_appmenu(x);
+}
+
+static void appmenu_set_address(struct wl_client *client, struct wl_resource *resource,
+                                const char *service, const char *path)
+{
+    struct bc_surface *sf = wl_resource_get_user_data(resource);
+    (void)client;
+    if (sf == NULL) return;
+    if (!dbus_word(service, 0) || !dbus_word(path, 1)) {
+        logf_("appmenu: an address that is not D-Bus syntax is ignored");
+        return;
+    }
+    if (strcmp(sf->appmenu_service, service) == 0 && strcmp(sf->appmenu_path, path) == 0) return;
+    snprintf(sf->appmenu_service, sizeof(sf->appmenu_service), "%s", service);
+    snprintf(sf->appmenu_path, sizeof(sf->appmenu_path), "%s", path);
+    appmenu_changed(sf);
+}
+
+static void appmenu_destroyed(struct wl_resource *resource)
+{
+    struct bc_surface *sf = wl_resource_get_user_data(resource);
+    if (sf == NULL) return;
+    sf->appmenu = NULL;
+    if (sf->appmenu_service[0]) {
+        sf->appmenu_service[0] = sf->appmenu_path[0] = '\0';
+        appmenu_changed(sf);
+    }
+}
+
+static const struct org_kde_kwin_appmenu_interface appmenu_impl = {
+    .set_address = appmenu_set_address,
+    .release = bc_destroy_request,
+};
+
+static void appmenu_create(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                           struct wl_resource *surface_resource)
+{
+    struct bc_surface *sf = wl_resource_get_user_data(surface_resource);
+    struct wl_resource *r = wl_resource_create(client, &org_kde_kwin_appmenu_interface,
+                                               wl_resource_get_version(resource), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    /* One per surface: a second replaces the first's address. */
+    if (sf->appmenu) wl_resource_set_user_data(sf->appmenu, NULL);
+    sf->appmenu = r;
+    wl_resource_set_implementation(r, &appmenu_impl, sf, appmenu_destroyed);
+}
+
+static const struct org_kde_kwin_appmenu_manager_interface appmenu_manager_impl = {
+    .create = appmenu_create,
+};
+
+static void bind_appmenu_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &org_kde_kwin_appmenu_manager_interface,
+                                               (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &appmenu_manager_impl, data, NULL);
 }
 
 /* ---- the clipboard (ADR 0229) ----
@@ -5035,7 +5149,10 @@ int main(int argc, char **argv)
                           bind_primary_manager) ||
         !wl_global_create(server.display, &wp_cursor_shape_manager_v1_interface,
                           BC_VERSION(2, wp_cursor_shape_manager_v1_interface), &server,
-                          bind_shape_manager)) {
+                          bind_shape_manager) ||
+        !wl_global_create(server.display, &org_kde_kwin_appmenu_manager_interface,
+                          BC_VERSION(1, org_kde_kwin_appmenu_manager_interface), &server,
+                          bind_appmenu_manager)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
@@ -5059,7 +5176,7 @@ int main(int argc, char **argv)
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
           "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d, "
           "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d, "
-          "wp_cursor_shape_manager_v1 %d",
+          "wp_cursor_shape_manager_v1 %d, org_kde_kwin_appmenu_manager %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
@@ -5068,7 +5185,8 @@ int main(int argc, char **argv)
           BC_VERSION(1, zwp_pointer_constraints_v1_interface),
           BC_VERSION(3, wl_data_device_manager_interface),
           BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface),
-          BC_VERSION(2, wp_cursor_shape_manager_v1_interface));
+          BC_VERSION(2, wp_cursor_shape_manager_v1_interface),
+          BC_VERSION(1, org_kde_kwin_appmenu_manager_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);

@@ -3,7 +3,7 @@
    for the real programs the gate cannot run).
 
      wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
-                       [--cursor] [title]
+                       [--cursor] [--appmenu] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -31,6 +31,10 @@
    clipboard <text>`; P (25) and O (24) copy and paste the primary
    selection; D (32) destroys its clipboard source. Every selection it is
    offered prints `STANDIN selection clipboard|primary <types>|none`.
+
+   With --appmenu it says where its menus are (org_kde_kwin_appmenu): at
+   its first sized configure an address that is not D-Bus syntax ("a b"),
+   then `:1.42` `/MenuBar/1`; at the next, it releases it.
 
    With --cursor it names its pointer shapes (wp_cursor_shape_v1): `text`
    when the pointer enters, `pointer` at a BTN_LEFT press, and at BTN_RIGHT
@@ -116,6 +120,7 @@
 #include "pointer-constraints-unstable-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
+#include "appmenu-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -167,6 +172,10 @@ struct standin {
     /* --sub */
     int sub_script, sub_step;
     int csd, csd_asked;
+    /* --appmenu */
+    int appmenu_mode, appmenu_step;
+    struct org_kde_kwin_appmenu_manager *appmenu_manager;
+    struct org_kde_kwin_appmenu *appmenu;
     /* --cursor */
     int cursor;
     struct wp_cursor_shape_manager_v1 *shape_manager;
@@ -629,6 +638,20 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
         fflush(stdout);
     }
     if (!s->sized) return;
+    if (s->appmenu_mode && s->appmenu_manager) {
+        if (s->appmenu_step == 0) {
+            s->appmenu = org_kde_kwin_appmenu_manager_create(s->appmenu_manager, s->surface);
+            org_kde_kwin_appmenu_set_address(s->appmenu, "a b", "/MenuBar/1");
+            org_kde_kwin_appmenu_set_address(s->appmenu, ":1.42", "/MenuBar/1");
+            printf("STANDIN appmenu set\n");
+        } else if (s->appmenu_step == 1 && s->appmenu) {
+            org_kde_kwin_appmenu_release(s->appmenu);
+            s->appmenu = NULL;
+            printf("STANDIN appmenu released\n");
+        }
+        ++s->appmenu_step;
+        fflush(stdout);
+    }
     if (s->sub_script) sub_next(s);
     if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
@@ -1171,6 +1194,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
     else if (strcmp(interface, wl_data_device_manager_interface.name) == 0)
         s->ddm = wl_registry_bind(registry, name, &wl_data_device_manager_interface, version < 3 ? version : 3);
+    else if (strcmp(interface, org_kde_kwin_appmenu_manager_interface.name) == 0)
+        s->appmenu_manager = wl_registry_bind(registry, name, &org_kde_kwin_appmenu_manager_interface, 1);
     else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0)
         s->shape_manager = wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1);
     else if (strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) == 0)
@@ -1292,6 +1317,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
         else if (strcmp(argv[i], "--cursor") == 0) s.cursor = 1;
+        else if (strcmp(argv[i], "--appmenu") == 0) s.appmenu_mode = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -1400,6 +1426,8 @@ int main(int argc, char **argv)
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);
     if (s.sub_surface) wl_surface_destroy(s.sub_surface);
+    if (s.appmenu) org_kde_kwin_appmenu_release(s.appmenu);
+    if (s.appmenu_manager) org_kde_kwin_appmenu_manager_destroy(s.appmenu_manager);
     if (s.shape_device) wp_cursor_shape_device_v1_destroy(s.shape_device);
     if (s.shape_manager) wp_cursor_shape_manager_v1_destroy(s.shape_manager);
     if (s.cursor_surface) wl_surface_destroy(s.cursor_surface);

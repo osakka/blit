@@ -47,6 +47,7 @@ pass the same gates. Stated once, in `tools/build-flags.sh`.
 | `wayland-scanner` | 1.21.0 | `libwayland-bin` | `wayland-devel` | `wayland` | blit-compositor (generates its protocol code) |
 | `xkbcommon` | 1.5.0 | `libxkbcommon-dev` | `libxkbcommon-devel` | `libxkbcommon` | blit-compositor |
 | `wayland-protocols` | 1.32 (cursor-shape-v1) | `wayland-protocols` | `wayland-protocols-devel` | `wayland-protocols` | blit-compositor (protocol XML) |
+| plasma-wayland-protocols (no pkg-config file: found beside wayland-protocols, `build-flags.sh --plasma-protocols`) | any with `appmenu.xml` | `plasma-wayland-protocols` | `plasma-wayland-protocols-devel` | `plasma-wayland-protocols` | blit-compositor (the global menu, ADR 0229) |
 
 Besides the modules: `pkg-config` itself (`pkgconf` or `pkg-config` on
 Debian and Ubuntu, `pkgconf-pkg-config` on Fedora, `pkgconf` on Arch) and

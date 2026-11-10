@@ -47,9 +47,9 @@ promise: if what you see differs from it, that is a bug.
 
 - **X11 programs** (Steam, older applications) do not open: they need
   Xwayland, ADR 0228's phase 2. They fail with "cannot open display".
-- **Programs' menus in Hibr's bar** (the global menu) are being built; Qt
-  and KDE programs, and GTK 3 ones with the appmenu module, will get it.
-  Firefox and GTK 4 programs keep their own menus.
+- **Programs' menus in Hibr's bar** (the global menu): Blit's side is in
+  0.3.77, Hibr's to follow. Qt and KDE programs, and GTK 3 ones with the
+  appmenu module, get it; Firefox and GTK 4 programs keep their own menus.
 - **Drag and drop, HiDPI scaling, input methods, touch and tablets** are
   ADR 0229's later rows.
 

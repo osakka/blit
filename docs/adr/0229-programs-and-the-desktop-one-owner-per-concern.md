@@ -60,6 +60,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Secrets on the clipboard (the Vault) | Hibr | the `x-kde-passwordManagerHint` type on `CLIP offer`; `CLIP clear` | 0.3.74 |
 | Cursor shape | the program names, Blit's pointer art draws (one source: OSC 22's names), Hibr relays | `WINDOW cursor <id> <name>` (wp_cursor_shape_v1); `none` hides | 0.3.76 |
 | Cursor images (wl_pointer.set_cursor surfaces) | none: never drawn, the display's own pointer (`default`) | -- | decided (owner: the same cursors we already have) |
+| The global menu (programs' menus in Hibr's bar) | the program serves them (D-Bus, `com.canonical.dbusmenu`), Hibr shows them | `WINDOW appmenu <id> <service> <path>` (org_kde_kwin_appmenu); `- -` none | 0.3.77 (owner confirmed, Hibr #500) |
 | Drag and drop | Hibr | `CLIP` extended with a drag | later |
 | Activation (xdg_activation: a launched program's window raised) | Hibr | `WINDOW activate <id>` | later |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |

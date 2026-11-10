@@ -81,6 +81,7 @@ case "$target" in
         # output directory, default build/protocol). The XML bounds the
         # versions offered (blit_compositor.c, BC_VERSION).
         protocols=$("$ROOT/tools/build-flags.sh" --protocols)
+        plasma=$("$ROOT/tools/build-flags.sh" --plasma-protocols)
         scanner=$("$ROOT/tools/build-flags.sh" --scanner)
         cflags=$("$ROOT/tools/build-flags.sh" --cflags compositor)
         libs=$("$ROOT/tools/build-flags.sh" --libs compositor)
@@ -100,7 +101,8 @@ case "$target" in
                    "$protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml" \
                    "$protocols/unstable/primary-selection/primary-selection-unstable-v1.xml" \
                    "$protocols/staging/cursor-shape/cursor-shape-v1.xml" \
-                   "$protocols/unstable/tablet/tablet-unstable-v2.xml"; do
+                   "$protocols/unstable/tablet/tablet-unstable-v2.xml" \
+                   "$plasma/appmenu.xml"; do
             base=$(basename "$xml" .xml)
             "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"
             "$scanner" client-header "$xml" "$proto/$base-client-protocol.h"
