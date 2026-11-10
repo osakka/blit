@@ -24,7 +24,7 @@ env = {
   **gate_display_env,
   
 }
-pid = Process.spawn(env, binary, port.to_s, out: log, err: [:child, :out])
+pid = gate_spawn(env, binary, port.to_s, out: log, err: [:child, :out])
 
 at_exit do
   Process.kill('TERM', pid) rescue nil

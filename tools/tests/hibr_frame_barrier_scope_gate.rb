@@ -44,7 +44,7 @@ File.write(env.fetch('BLIT_DRM_MOCK_STATE'), "2 0 0 0\n1 1024 768\n2 1024 768\n"
 env = env.merge('BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                 'BLIT_SETTINGS' => 'ignore', 'BLIT_LOGIN_AUTOSTART' => '0',
                 'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP)
-pid = Process.spawn(env, SERVER, PORT.to_s, out: "/tmp/blit-frame-barrier-scope-gate-#{Process.pid}.log",
+pid = gate_spawn(env, SERVER, PORT.to_s, out: "/tmp/blit-frame-barrier-scope-gate-#{Process.pid}.log",
                                             err: %i[child out])
 sessions = []
 BASE = URI("http://127.0.0.1:#{PORT}")

@@ -67,7 +67,7 @@ end
 # devices by it, so the server refuses a path that would be truncated.
 Dir.mktmpdir('blit-dev') do |root|
   NODES.each { |node| File.write(File.join(root, node), '') }
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root,
                    },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

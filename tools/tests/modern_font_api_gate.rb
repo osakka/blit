@@ -28,7 +28,7 @@ Dir.mktmpdir('blit-modern-api') do |work|
     'BLIT_SETTINGS_PATH'=>File.join(work, 'settings.json'), 'BLIT_FONT_ROOT'=>fonts)
   pid = nil
   launch = lambda do
-    pid = spawn(env, TestProfile.binary, port.to_s, out:File.join(work, 'server.log'), err:[:child,:out])
+    pid = gate_spawn(env, TestProfile.binary, port.to_s, out:File.join(work, 'server.log'), err:[:child,:out])
     Timeout.timeout(10) do
       loop do
         begin

@@ -20,7 +20,7 @@ identity = ->(font) { font.reject { |key,_| key=='raster_cache' } }
 Dir.mktmpdir('blit-font-probe-gate') do |work|
   env = TestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(root,'assets/fonts'),
     'BLIT_SETTINGS'=>'load', 'BLIT_SETTINGS_PATH'=>File.join(work,'settings.json'))
-  pid = spawn(env, TestProfile.binary, port.to_s, out:File.join(work,'server.log'), err:[:child,:out])
+  pid = gate_spawn(env, TestProfile.binary, port.to_s, out:File.join(work,'server.log'), err:[:child,:out])
   begin
     Timeout.timeout(10) do
       loop do

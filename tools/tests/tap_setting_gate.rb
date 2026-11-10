@@ -59,7 +59,7 @@ Dir.mktmpdir('blit-tap') do |root|
              "bustype=0003\nvendor=05ac\nproduct=0252\nversion=0110\nname=bcm5974\n" \
              "kinds=pointer\ncapabilities=buttons,touchpad\n")
   settings = File.join(root, 'settings.json')
-  server = spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
+  server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                    'BLIT_INPUT_ROOT' => root, 'BLIT_SETTINGS_PATH' => settings,
                    },
                  BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')

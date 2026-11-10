@@ -14,6 +14,6 @@ tcc -std=c99 -Wall $cflags tools/tests/xkb_keymap_check.c $libs -o "$out/xkb_key
 . tools/tests/gate_display.sh
 gate_display_setup
 trap gate_display_cleanup EXIT
-env $GATE_DISPLAY_ENV python3 tools/tests/keymap_gate.py "$out/xkb_keymap_check" \
+BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools/tests/keymap_gate.py "$out/xkb_keymap_check" \
     "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}"
 echo "KEYMAP_GATE_PASS"

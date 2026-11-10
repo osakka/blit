@@ -105,7 +105,10 @@ body << "}\n"
 File.write(suite, body)
 hang_suite = File.join(dir, 'hang_suite.sh')
 body = +"suite_fake() {\n"
-body << "    run_gate hangs sh -c '#{BINARY} #{server_port} >/dev/null 2>&1 & sleep 0.7; kill -0 $! && echo server-alive; sleep #{unique} & echo started; wait'\n"
+# The server is started the way every gate starts one (tools/tests/gate_env.sh);
+# its empty input directory goes under this gate's own, which is removed.
+body << "    run_gate hangs sh -c '. #{ROOT}/tools/tests/gate_env.sh; TMPDIR=#{dir}; gate_env_setup; " \
+        "env $GATE_SERVER_ENV #{BINARY} #{server_port} >/dev/null 2>&1 & sleep 0.7; kill -0 $! && echo server-alive; sleep #{unique} & echo started; wait'\n"
 body << "    run_gate fine sh -c 'echo fine'\n"
 body << "}\n"
 File.write(hang_suite, body)

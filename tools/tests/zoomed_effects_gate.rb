@@ -179,7 +179,7 @@ end
 
 Dir.mktmpdir('blit-zoomed-effects') do |root|
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   connectors = %w[display-1 display-2].map { |id| get("/v1/displays/#{id}").dig('state', 'connector') }
   effects_on = ->(set) { save_effects(connectors.to_h { |c| [c, { '1' => set }] }) }

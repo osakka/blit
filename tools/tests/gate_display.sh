@@ -3,8 +3,11 @@
 #
 #   . "$ROOT/tools/tests/gate_display.sh"
 #   gate_display_setup                 # once, before starting the server
-#   env $GATE_DISPLAY_ENV blit-server ...
+#   env $GATE_SERVER_ENV $GATE_DISPLAY_ENV blit-server ...
 #   gate_display_cleanup               # from the gate's own exit trap
+#
+# The setup runs tools/tests/gate_env.sh's as well: $GATE_SERVER_ENV is the
+# hermetic rest of the server's environment, and it comes first after env.
 #
 # BLIT_GATE_BACKEND=native (default) runs the direct-KMS compositor over the
 # DRM mock with one 1024x768 display-1; gles adds the GLES compositor on the
@@ -12,9 +15,11 @@
 
 gate_display_root=$(CDPATH= cd -- "$(dirname -- "${GATE_DISPLAY_SOURCE:-$0}")/../.." 2>/dev/null && pwd)
 [ -f "$gate_display_root/tools/tests/fixtures/drm_hotplug_mock.c" ] || gate_display_root=$(pwd)
+. "$gate_display_root/tools/tests/gate_env.sh"
 
 gate_display_setup() {
 	GATE_DISPLAY_DIR=
+	gate_env_setup || return 1
 	case "${BLIT_GATE_BACKEND:-native}" in
 	native|gles) ;;
 	*) echo "BLIT_GATE_BACKEND must be native or gles" >&2; return 1 ;;
@@ -42,6 +47,7 @@ gate_display_setup() {
 }
 
 gate_display_cleanup() {
+	gate_env_cleanup
 	[ -n "${GATE_DISPLAY_DIR:-}" ] && rm -rf "$GATE_DISPLAY_DIR"
 	GATE_DISPLAY_DIR=
 }

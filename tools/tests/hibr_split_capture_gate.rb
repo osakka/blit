@@ -63,7 +63,7 @@ Dir.mktmpdir('blit-split-capture-gate') do |work|
     'BLIT_SETTINGS' => 'ignore',
     'BLIT_COMMAND_ALLOWLIST' => launcher
   }
-  server = Process.spawn(env, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
+  server = gate_spawn(env, BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   sessions = []
   original = nil
   begin

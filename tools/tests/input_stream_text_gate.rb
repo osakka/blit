@@ -110,7 +110,7 @@ keymap = {
 
 Dir.mktmpdir('blit-stream-text') do |input_root|
   File.write(File.join(input_root, 'event0'), '')
-  pid = Process.spawn({**gate_display_env,
+  pid = gate_spawn({**gate_display_env,
                        'BLIT_PSF_FONT' => FONT,
                        'BLIT_INPUT_ROOT' => input_root,
                        },

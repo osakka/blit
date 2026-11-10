@@ -14,7 +14,7 @@ require_relative 'test_profile'
 port = gate_port(Integer(ENV.fetch('BLIT_WALLPAPER_DAMAGE_PORT', '19212')))
 base = URI("http://127.0.0.1:#{port}")
 log = "/tmp/blit-wallpaper-damage-#{Process.pid}.log"
-pid = Process.spawn(TestProfile.environment, TestProfile.binary, port.to_s,
+pid = gate_spawn(TestProfile.environment, TestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 
 at_exit do

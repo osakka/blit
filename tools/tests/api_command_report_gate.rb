@@ -8,7 +8,7 @@ require_relative 'gate_port'
 require_relative 'test_profile'
 base=URI("http://127.0.0.1:#{gate_port(19572)}")
 Dir.mktmpdir('blit-api-report-gate') do |work|
-  pid=spawn(TestProfile.environment,TestProfile.binary,base.port.to_s,
+  pid=gate_spawn(TestProfile.environment,TestProfile.binary,base.port.to_s,
     out:File.join(work,'server.log'),err:[:child,:out])
   begin
     Timeout.timeout(8){loop{begin;break if Net::HTTP.get_response(base+'/v1/version').code=='200';rescue Errno::ECONNREFUSED;end;sleep 0.02}}

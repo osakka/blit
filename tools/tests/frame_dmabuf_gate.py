@@ -35,6 +35,9 @@ import time
 import urllib.request
 import zlib
 
+sys.dont_write_bytecode = True  # the helper below is imported from this directory
+import gate_env  # noqa: E402
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 PORT = (int(os.environ.get('BLIT_GATE_PORT', '19822')) +
         int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0')))
@@ -145,9 +148,9 @@ def mixed():
     one would be accepted and never shown, so dmabufs are not offered at
     all and FRM3 is ENOTSUP -- the outputs are checked before EGL is."""
     work = tempfile.mkdtemp(prefix='blit-dmabuf-gate-mixed-')
-    with open(os.environ['BLIT_DRM_MOCK_STATE'], 'w') as out:
+    with open(gate_env.server_env()['BLIT_DRM_MOCK_STATE'], 'w') as out:
         out.write('2 0 0 0\n1 1024 768\n2 1024 768\n')
-    env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+    env = gate_env.server_env(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
                BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'), BLIT_TEST_MODE='1',
                BLIT_TEST_GLES_CPU_CONNECTOR='2')
@@ -180,7 +183,7 @@ def main():
     backend = os.environ.get('BLIT_GATE_BACKEND', 'native')
     mixed_result = 'mixed=gles_only'
     work = tempfile.mkdtemp(prefix='blit-dmabuf-gate-')
-    env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+    env = gate_env.server_env(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
                BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'))
     server = subprocess.Popen([os.environ.get('BLIT_GATE_BINARY', os.path.join(ROOT, 'build/blit/blit-server')),

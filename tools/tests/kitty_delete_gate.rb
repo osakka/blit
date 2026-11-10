@@ -82,7 +82,7 @@ end
 
 Dir.mktmpdir('blit-kitty-delete') do |root|
   env['BLIT_SETTINGS_PATH'] = File.join(root, 'settings.json')
-  server = spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
+  server = gate_spawn(env, BINARY, PORT.to_s, out: File::NULL, err: File::NULL)
   Timeout.timeout(15) { loop { break if (request('GET', '/v1/version').first rescue nil) == 200; sleep 0.1 } }
   # Each input line is one step, so the counters can be read between them.
   # A session argument is at most 255 bytes, so each step's bytes are a

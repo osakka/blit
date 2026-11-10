@@ -46,7 +46,9 @@ import urllib.request
 # The frame channel's session, channel and placement helpers, shared with
 # the INPUT gate (same directory).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.dont_write_bytecode = True
 import frame_input_gate as fig  # noqa: E402
+import gate_env  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 PORT = (int(os.environ.get('BLIT_GATE_PORT', '19823')) +
@@ -637,7 +639,7 @@ def input_part(server, compositor, standin, work):
         open(os.path.join(nodes, node), 'w').close()
         with open(os.path.join(nodes, node + '.identity'), 'w') as out:
             out.write('bustype=3\nvendor=05ac\nproduct=0256\nversion=0100\nphys=usb-gate/%s\n%s' % (node, identity))
-    env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+    env = gate_env.server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                           BLIT_SETTINGS_PATH=os.path.join(work, 'settings-input.json'),
                           BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'),
                           BLIT_EXPECT_DESKTOP='0', BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1',
@@ -661,7 +663,7 @@ def input_part(server, compositor, standin, work):
         keymap = answer.read()
         repeat = (int(answer.headers['X-Blit-Repeat-Rate']), int(answer.headers['X-Blit-Repeat-Delay']))
         check(answer.headers['X-Blit-Keymap-Device'] == keyboards[0], 'the default is not keyboard A')
-        cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+        cenv = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                     XDG_RUNTIME_DIR=runtime)
         for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_API_TOKEN'):
             cenv.pop(k, None)
@@ -817,7 +819,7 @@ def lock_part(compositor, standin, work):
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind('\0' + name)
     listener.listen(2)
-    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     env.pop('WAYLAND_DISPLAY', None)
     env.pop('BLIT_SERVER_PORT', None)
@@ -1011,7 +1013,7 @@ def dmabuf_part(compositor, standin, work):
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind('\0' + name)
     listener.listen(2)
-    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     env.pop('WAYLAND_DISPLAY', None)
     log = os.path.join(work, 'compositor-dmabuf.log')
@@ -1170,7 +1172,7 @@ def sub_restart_part(compositor, standin, work):
     os.mkdir(runtime, 0o700)
     name = 'blit-compositor-gate-sub-restart-%d' % os.getpid()
     listener = listen(name)
-    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     for k in ('WAYLAND_DISPLAY', 'BLIT_COMPOSITOR_RECONNECT_MS'):
         env.pop(k, None)
@@ -1262,7 +1264,7 @@ def restart_part(compositor, standin, work):
     display = 'gate-display'
     answer = b'OK dmabuf=1 fence=0 formats=XR24/0,AR24/0 window=1\n'
     listener = listen(name)
-    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_COMPOSITOR_RECONNECT_MS'):
         env.pop(k, None)
@@ -1474,7 +1476,7 @@ def desktop_part(compositor, standin, work):
     listener.listen(2)
     # The reconnect bound shortened (for gates only): the ending below is
     # the one after it.
-    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime, BLIT_COMPOSITOR_RECONNECT_MS='600')
     env.pop('WAYLAND_DISPLAY', None)
     log = os.path.join(work, 'compositor.log')
@@ -1609,17 +1611,6 @@ def desktop_part(compositor, standin, work):
         listener.close()
 
 
-def server_env(extra):
-    """blit-server's environment: ours, plus BLIT_GATE_SERVER_ENV's
-    `NAME=value` words (the mock display, for a sanitized run that must not
-    preload it into everything)."""
-    env = dict(os.environ, **extra)
-    for word in os.environ.get('BLIT_GATE_SERVER_ENV', '').split():
-        k, _, v = word.partition('=')
-        env[k] = v
-    return env
-
-
 def api(method, path, body=None):
     request = urllib.request.Request(BASE + path, method=method,
                                      data=json.dumps(body).encode() if body is not None else None,
@@ -1645,7 +1636,7 @@ class Peer:
 
 
 def blit_part(server, compositor, standin, work):
-    env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+    env = gate_env.server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                           BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'),
                           BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts')))
     blit = subprocess.Popen([server, str(PORT)], env=env, stdout=subprocess.DEVNULL,
@@ -1683,7 +1674,7 @@ def blit_part(server, compositor, standin, work):
         # picks) -- a client is never left waiting -- and nothing more.
         runtime = os.path.join(work, 'run-blit')
         os.mkdir(runtime, 0o700)
-        cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=token,
+        cenv = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=token,
                     XDG_RUNTIME_DIR=runtime)
         log = os.path.join(work, 'compositor-blit.log')
         comp = start([compositor, '--log', log], cenv, subprocess.DEVNULL)

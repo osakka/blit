@@ -90,7 +90,7 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     system(helper, '--stamp', index.to_s, '0', '24', path) || raise("stamp #{name} failed")
     stamps[name] = File.binread(path)
   end
-  pid = spawn({ **gate_display_env,
+  pid = gate_spawn({ **gate_display_env,
                 'BLIT_LOGIN_AUTOSTART' => '0',
                 'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'),
                 'BLIT_INPUT_ROOT' => root,

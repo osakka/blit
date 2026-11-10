@@ -24,6 +24,9 @@ import time
 import urllib.request
 import zlib
 
+sys.dont_write_bytecode = True  # the helper below is imported from this directory
+import gate_env  # noqa: E402
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 PORT = (int(os.environ.get('BLIT_GATE_PORT', '19821')) +
         int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0')))
@@ -145,7 +148,7 @@ def wait_for(predicate, why, seconds=5.0):
 
 def main():
     work = tempfile.mkdtemp(prefix='blit-frame-gate-')
-    env = dict(os.environ, BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+    env = gate_env.server_env(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'), BLIT_LOGIN_AUTOSTART='0',
                BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'))
     server = subprocess.Popen([os.environ.get('BLIT_GATE_BINARY', os.path.join(ROOT, 'build/blit/blit-server')),

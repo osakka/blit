@@ -18,7 +18,7 @@ request = lambda do |method, path, body = nil, expected = 200|
 end
 Dir.mktmpdir('blit-emoji-pty') do |work|
   env = TestProfile.environment.merge('BLIT_FONT_ROOT'=>File.join(TestProfile::ROOT,'assets/fonts'))
-  pid = spawn(env, TestProfile.binary, port.to_s,
+  pid = gate_spawn(env, TestProfile.binary, port.to_s,
     out:File.join(work,'server.log'),err:[:child,:out])
   begin
     Timeout.timeout(8) do

@@ -114,7 +114,7 @@ Dir.mktmpdir('blit-login-observe') do |root|
       env['BLIT_LOGIN_PANE_ID']='pane-display-1-2'
     end
     log=File.join(root,'server.log')
-    $pid=spawn('sudo','-n','env',*env.map{|k,v|"#{k}=#{v}"},BINARY,PORT.to_s,out:log,err:log)
+    $pid=spawn(*gate_sudo_argv(env,BINARY,PORT.to_s),out:log,err:log)
     login=await{q=request('GET','/v1/login');q['desktop'] && q}
     expected=%w[ready secondary expires].include?(mode) ? 'ready' : %w[missing owner_missing].include?(mode) ? 'waiting' : %w[shell waiting].include?(mode) ? 'inactive' : 'error'
     login=await do
