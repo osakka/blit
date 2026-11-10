@@ -98,8 +98,14 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW size 3 200 120 maximized activated tiled-left tiled-right tiled-top "
                          "tiled-bottom", &l) == BC_LINE_SIZE && l.maximized && l.activated && l.tiled == 15,
            "every state");
-    EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-top tiled-left", &l) == BC_LINE_UNKNOWN,
-           "tiled out of order");
+    EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-top tiled-left", &l) == BC_LINE_SIZE &&
+           l.tiled == (BC_TILED_LEFT | BC_TILED_TOP), "tiled in any order");
+    EXPECT(bc_parse_line("WINDOW size 1 2556 1440 activated fullscreen", &l) == BC_LINE_SIZE &&
+           l.activated && l.fullscreen && !l.maximized, "states in any order (Hibr's)");
+    EXPECT(bc_parse_line("WINDOW size 1 2556 1440 activated activated", &l) == BC_LINE_UNKNOWN,
+           "a state twice");
+    EXPECT(bc_parse_line("WINDOW size 1 2556 1440 activated  fullscreen", &l) == BC_LINE_UNKNOWN,
+           "two spaces");
     EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-middle", &l) == BC_LINE_UNKNOWN, "no such edge");
     EXPECT(bc_parse_line("WINDOW size 2 40000 10", &l) == BC_LINE_UNKNOWN, "too wide");
     EXPECT(bc_parse_line("WINDOW size 2 -1 10", &l) == BC_LINE_UNKNOWN, "negative");
@@ -108,8 +114,8 @@ static void lines(void)
            !l.fullscreen && !l.activated, "maximized");
     EXPECT(bc_parse_line("WINDOW size 2 10 10 fullscreen maximized activated", &l) == BC_LINE_SIZE &&
            l.fullscreen && l.maximized && l.activated, "all three flags");
-    EXPECT(bc_parse_line("WINDOW size 2 10 10 activated maximized", &l) == BC_LINE_UNKNOWN,
-           "maximized after activated");
+    EXPECT(bc_parse_line("WINDOW size 2 10 10 activated maximized", &l) == BC_LINE_SIZE &&
+           l.activated && l.maximized, "maximized after activated");
     EXPECT(bc_parse_line("WINDOW size 2 10 10 zoomed", &l) == BC_LINE_UNKNOWN, "unknown flag");
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440 59951\n", &l) == BC_LINE_OUTPUT && l.id == 3 &&
            l.width == 2560 && l.height == 1440 && l.refresh_mhz == 59951, "output");
@@ -117,8 +123,8 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW output 3 0 1440 60000", &l) == BC_LINE_UNKNOWN, "output, 0 wide");
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440", &l) == BC_LINE_UNKNOWN, "output, no refresh");
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000 x", &l) == BC_LINE_UNKNOWN, "output, tail");
-    EXPECT(bc_parse_line("WINDOW size 2 10 10 activated fullscreen", &l) == BC_LINE_UNKNOWN,
-           "flags out of the draft's order");
+    EXPECT(bc_parse_line("WINDOW size 2 10 10 activated fullscreen", &l) == BC_LINE_SIZE &&
+           l.activated && l.fullscreen, "flags in any order");
     EXPECT(bc_parse_line("WINDOW close 9\n", &l) == BC_LINE_CLOSE && l.id == 9, "close");
     EXPECT(bc_parse_line("WINDOW close 9 x", &l) == BC_LINE_UNKNOWN, "close with a tail");
     EXPECT(bc_parse_line("WINDOW lock 4 on\n", &l) == BC_LINE_LOCK && l.id == 4 && l.on, "lock on");

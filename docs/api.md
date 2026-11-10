@@ -2180,7 +2180,7 @@ It speaks the frame channel above as a producer, with these additions.
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
     their own size and the desktop sizes its window to the first frame.
-    The tiled words, each at most once and in this order, say which edges
+    The state words are a set (any order, each at most once); the tiled ones say which edges
     the desktop has put the window against (xdg_toplevel's tiled states):
     a program that draws its own frame drops its shadow there.
     A program's initial commit is answered at once, as xdg-shell requires
