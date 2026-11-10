@@ -1117,6 +1117,9 @@ def sock():
         server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
         receiver.nothing('the physical releases after INPUT off')
         ch.line('INPUT on 7\n')
+        # The channel and the API are two sockets: the key only once the
+        # route is live, as the eis part waits for `start`.
+        wait_for(lambda: state(server, a.id, 7) == 'live', 'the route did not go live again')
         key(33, 1)
         receiver.expect(['key 7 33 press'], 'held before the focus change')
         server.focus(b.id)
