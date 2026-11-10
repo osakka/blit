@@ -54,6 +54,9 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ -f "$ready" ]
 
+# The file is the one input under test: a token inherited from a Blit session
+# would make the client refuse two, so it goes.
+unset BLIT_AUTH_TOKEN
 BLIT_AUTH_TOKEN_FILE=$token_file
 diag_init_auth
 diag_curl --fail --silent --show-error \
