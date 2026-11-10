@@ -9,6 +9,35 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.71 blit-compositor milestones A and B (ADR 0228 phase 1)
+
+- **blit-compositor**, Blit's own Wayland compositor for programs (built in
+  the tree; packaged in milestone C): a frame-channel producer speaking
+  hello v4 and the `WINDOW` lines (docs/api.md "Program windows", agreed
+  with Hibr); xdg-shell toplevels and popups configured at exactly the
+  desktop's `WINDOW size`, so any size and shape is 1:1; wl_shm frames as
+  FRM1 and linux-dmabuf v4 frames as FRM3, zero copy, held until `RELEASE`,
+  falling back to FRM1 on `ENOTSUP`; frame callbacks and wp_presentation
+  paced per output refresh; one wl_output per mode from `WINDOW output`;
+  keyboard and pointer from Blit over its own input socket (`INPUT sock`),
+  with the xkb keymap from Blit's new `GET /v1/input/keymap`, generated from
+  Blit's own keyboard tables; relative pointer. No libei.
+- **blit-server:** hello v4 answered `window=0` and `WINDOW` lines
+  `ENOTSUP`; `INPUT sock` routes (a second emitter behind the route model);
+  `GET /v1/input/keymap`; a picture's `frame_us` and
+  `performance.last_inject_us` (phase 0's instrument).
+- **Agreed for later:** frame channel v5 (one grammar, the id always third),
+  shipped with Hibr 0.99.481 as Blit 0.3.73 with Breaks both ways;
+  `WINDOW lock` with the desktop's gesture rule.
+- **Gates:** `compositor_gate` (wire unit, desktop, states, pacing, dmabuf,
+  Blit, input, ASan and UBSan); `keymap_gate`; `frame_input_gate` sock mode;
+  `all` 188 pass, 12 skip, 0 fail; GLES `renderer` 82 pass, 1 skip, 0 fail;
+  `package_artifact_gate` passes.
+- **Not live yet:** neither host was reachable from the build machine (its
+  route to 192.168.10.0/24 was down); published to hibr-apt, not deployed.
+  A real GPU dmabuf from a program, vkcube and a GTK app wait for milestone
+  C on the mini PC.
+
 ## 2026-11-09: 0.3.70 hold modes: confine and relative (ADR 0225)
 
 - **`INPUT hold <id> relative|confine`** on the frame channel; a new route
