@@ -642,7 +642,7 @@ def confined(server, a, ch, receiver, placement, point, origin):
         at['width'] - 1, at['height'] - 1)
 
 
-def multi(server, a, work):
+def multi(server, a, work, b):
     """Several routes, a socket each, as a desktop has one per window's
     picture over one channel. Returns what the PASS line says of it."""
     ra, rb, rc, rd = (LineReceiver(work, name) for name in ('input-a', 'input-b', 'input-c', 'input-d'))
@@ -798,6 +798,22 @@ def multi(server, a, work):
         key(39, 1, 0)
         ra.expect(['key 27 39 press', 'key 27 39 release'], 'keys to route 27 on the same socket')
 
+        # Per session: another session's route to the same socket -- a
+        # desktop gives each display's session its own route to a window --
+        # does not end 27; only the session with the keyboard delivers.
+        chb = Channel(b)
+        chb.frame(29, 1)
+        wait_for(lambda: b.graphics(29), 'image 29 did not land')
+        check(chb.ask('INPUT sock 29 %s\n' % ra.path) == b'INPUT ok 29\n',
+              'route 29 from another session to 27\'s socket was refused')
+        check(chb.reply(0.3) == b'' and ch4.reply(0.3) == b'',
+              'a route in another session was superseded across sessions')
+        check(route(server.input(a.id), 27) is not None and route(server.input(b.id), 29) is not None,
+              'routes 27 and 29 do not both stand: %s %s' % (server.input(a.id), server.input(b.id)))
+        key(40, 1, 0)
+        ra.expect(['key 27 40 press', 'key 27 40 release'], 'keys to the focused session\'s route only')
+        chb.close()
+
         # A route before its picture has come says `picture: absent`, then
         # `present` once it lands.
         check(ch4.ask('INPUT sock 28 %s\n' % rc.path) == b'INPUT ok 28\n', 'route 28 was refused')
@@ -819,7 +835,7 @@ def multi(server, a, work):
             r.close()
     return ('routes=two_per_channel ebusy=same_image,no_connect on_releases_other=stamped_before '
             'late_enoent=one_route delete=one_route one_on=two_channels '
-            'one_route_per_socket=superseded,released,ENOENT picture=absent->present')
+            'one_route_per_socket=per_session(superseded,released,ENOENT;other_session_kept) picture=absent->present')
 
 
 def sock():
@@ -1140,7 +1156,7 @@ def sock():
         key(38, 0)
         ch.close()
 
-        several = multi(server, a, work)
+        several = multi(server, a, work, b)
     finally:
         server.stop()
         for r in receivers:

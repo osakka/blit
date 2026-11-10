@@ -2358,12 +2358,15 @@ It speaks the frame channel above as a producer, with these additions.
   change only the repeat (compared by bytes: a restarted Blit counts
   revisions afresh). Until a route's first keymap its clients are sent
   `no_keymap`, and keys still reach them.
-  A window's input socket has at most one route: Blit ends a route to the
-  same socket file (by device and inode, on any channel of the same user)
-  when a new `INPUT sock` opens one -- what it held released first, its
-  channel told `INPUT error <id> ENOENT`, `last_error` `superseded` -- so a
-  route left behind when a desktop asks again under a new picture id, or
-  on another display's channel, cannot linger. In `frames.input` each
+  A window's input socket has at most one route in a session: Blit ends a
+  route to the same socket file (by device and inode, on any channel of
+  the same session) when a new `INPUT sock` opens one -- what it held
+  released first, its channel told `INPUT error <id> ENOENT`, `last_error`
+  `superseded` -- so a route left behind when a desktop asks again under a
+  new picture id cannot linger. Routes in other sessions stay: a desktop
+  gives each display's session its own route to a window, and only the
+  session the pointer or keyboard is in delivers, so a window over the
+  seam between two displays takes input on both halves. In `frames.input` each
   route says `picture`: `present` when its picture is in the route's
   session, `absent` when it has not come yet or is drawn in another
   display's session (keys still reach a live route; the pointer cannot).

@@ -769,19 +769,25 @@ static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id
 /* `INPUT sock <image-id> <path>`: the checks that need nothing come first,
    then the socket's owner, the connection and its peer; the connection is
    the route's. */
-/* One route per compositor window socket (ADR 0229): a window has one
-   picture, so a route to the same socket file -- on any channel of the
-   same user, as one left behind when a desktop asks again under a new
-   picture id, or on another display's channel -- ends when a new one is
-   opened: what it held released to the compositor first, its channel told
-   `INPUT error <id> ENOENT`, `last_error` `superseded`. The file's device
-   and inode, not its name, say which socket it is. */
-static int frame_input_supersede(BlitRuntime *runtime, uid_t uid, dev_t dev, ino_t ino)
+/* One route per compositor window socket in a session (ADR 0229): a route
+   to the same socket file on any channel of the same session -- one left
+   behind when the desktop asks again under a new picture id, as after a
+   hide -- ends when a new one is opened: what it held released to the
+   compositor first, its channel told `INPUT error <id> ENOENT`,
+   `last_error` `superseded`. Other sessions' routes to that socket stay:
+   a desktop gives each display's session its own route to a window, and
+   only the session the pointer or the keyboard is in delivers, so a window
+   over the seam between two displays takes input on both halves. (0.3.76
+   ended them across sessions too; the last display asked then won.) The
+   file's device and inode, not its name, say which socket it is. */
+static int frame_input_supersede(BlitRuntime *runtime, uid_t uid, unsigned long long session_id,
+                                 dev_t dev, ino_t ino)
 {
     int i, k, ended = 0;
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         BlitFrameClient *other = &runtime->frame_clients[i];
-        if (!other->used || !other->authenticated || other->uid != uid)
+        if (!other->used || !other->authenticated || other->uid != uid ||
+            other->session_id != session_id)
             continue;
         for (k = 0; k < other->input_capacity; ++k) {
             BlitFrameInput *old = other->inputs[k];
@@ -873,7 +879,7 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
         frame_input_refuse(runtime, client, image_id, "ENOMEM");
         return;
     }
-    superseded = frame_input_supersede(runtime, client->uid, info.st_dev, info.st_ino);
+    superseded = frame_input_supersede(runtime, client->uid, client->session_id, info.st_dev, info.st_ino);
     in->sock_dev = info.st_dev;
     in->sock_ino = info.st_ino;
     in->sock = fd;
