@@ -17,6 +17,7 @@
    It prints one line per event, flushed:
 
      XSTANDIN mapped
+     XSTANDIN expose                     the last of an Expose series: it draws
      XSTANDIN configure <w>x<h>          every ConfigureNotify, synthetic too
      XSTANDIN drew <w>x<h>
      XSTANDIN focus-in
@@ -171,7 +172,10 @@ int main(int argc, char **argv)
         while ((ev = xcb_poll_for_event(conn)) != NULL) {
             switch (ev->response_type & 0x7f) {
             case XCB_EXPOSE:
-                if (((xcb_expose_event_t *)ev)->count == 0) draw();
+                if (((xcb_expose_event_t *)ev)->count == 0) {
+                    say("expose");
+                    draw();
+                }
                 break;
             case XCB_MAP_NOTIFY:
                 say("mapped");
