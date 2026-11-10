@@ -1916,33 +1916,35 @@ whether fences are waited on, the totals, `fences_waited` and the same
 counts per session.
 
 A client may also ask Blit to send the physical keyboard and mouse
-to a compositor's EIS socket, so that a game it shows gets input as a
-compositor expects it rather than as terminal escapes
-([ADR 0225](adr/0225-games-in-a-window-through-gamescope.md)):
+to blit-compositor's input socket for one of its windows, so that the
+program in it gets input as a compositor expects it rather than as
+terminal escapes ([ADR 0228](adr/0228-blit-is-the-compositor-for-programs.md);
+the lines Blit writes there are "Program windows", "Input straight from
+Blit", below). An INPUT line with any other verb is answered
+`INPUT error 0 EINVAL`.
 
 Every INPUT line names the image its route is for, so one connection can
 carry the routes of several pictures (a desktop multiplexes its windows'
 pictures over one connection per display). Each request is one message; a
 trailing newline is optional.
 
-- `INPUT eis <image-id> <path>` names the socket (an absolute path to a
-  Unix socket owned by the client's own uid, which Blit checks against the
-  channel's peer credentials) and the image whose picture stands for the
-  compositor's output. The image need not have a frame yet; the pointer
-  maps once it has a frame and a placement. The path is the rest of the
-  line, one word. Answered `INPUT ok <image-id>`,
-  or `INPUT error <image-id> <code>` (the id is 0 when the line names none
-  or cannot be read): `EINVAL` (malformed; image id 0, a deleted image or a
-  Kitty image; `INPUT on` or `INPUT off` for an image with no route),
-  `EACCES` (the socket is not the client's), `ENOENT` (no such socket, or
-  it refused the connection), `EBUSY` (this image already has a route on
-  this connection, or the connection already has 4096, the picture ceiling
-  of a session, `graphics.max_images`), `ENOMEM` (Blit could not allocate the route), `ENOTSUP`
-  (libei could not be loaded). If the
-  compositor refuses the connection later, in its handshake, or drops it,
-  Blit sends `INPUT error <image-id> ENOENT` then and that route ends; the
-  connection's other routes are untouched. A route ends with its image or
-  its connection.
+- `INPUT sock <image-id> <path>` names the socket (an absolute path to a
+  Unix stream socket owned by the client's own uid, which Blit checks
+  against the file's owner and, once connected, the listening peer's
+  credentials) and the image whose picture is the window. The image need
+  not have a frame yet; the pointer maps once it has a frame and a
+  placement. The path is the rest of the line, one word. Answered
+  `INPUT ok <image-id>`, or `INPUT error <image-id> <code>` (the id is 0
+  when the line names none or cannot be read): `EINVAL` (malformed; image
+  id 0, a deleted image or a Kitty image; `INPUT on` or `INPUT off` for an
+  image with no route), `EACCES` (the socket is not the client's),
+  `ENOENT` (no such socket, or it refused the connection), `EBUSY` (this
+  image already has a route on this connection, or the connection already
+  has 4096, the picture ceiling of a session, `graphics.max_images`),
+  `ENOMEM` (Blit could not allocate the route). If the compositor closes
+  the socket later, or it cannot take a line, Blit sends `INPUT error
+  <image-id> ENOENT` then and that route ends; the connection's other
+  routes are untouched. A route ends with its image or its connection.
 - `INPUT on <image-id>` and `INPUT off <image-id>` say whether that
   picture's window has the keyboard. A route starts off. At most one route
   is on per session: `INPUT on` turns off any other route of the same
@@ -1953,7 +1955,7 @@ trailing newline is optional.
   knows which of its windows has focus, sends these.
 - `INPUT hold <image-id> relative|confine` says what the route does while
   its session holds pointer lock (`?7701`); it may be sent any time after
-  `INPUT eis`, and neither takes nor gives back the lock, which stays the
+  `INPUT sock`, and neither takes nor gives back the lock, which stays the
   desktop's (ADR 0198). A new route is `relative`. Answered
   `INPUT ok <image-id>`, or `INPUT error <image-id> EINVAL` for an unknown
   mode, an image with no route on this connection, or a malformed line (id
@@ -1974,12 +1976,9 @@ trailing newline is optional.
     the pointer stays where it was, inside the picture.
 - While live, Blit sends evdev key codes as they happen, press and release
   (the compositor makes its own repeats); buttons and scroll; the pointer
-  as an absolute position while it is over the image's drawn rectangle,
-  scaled to the compositor's pointer region (the EIS device region's offset
-  and size, or the image's latest frame size when the device reports no
-  bounded region: gamescope offers one 2147483647 pixels square, meaning
-  its own output's pixels, which its stream matches), wherever and however
-  large the picture is placed; and, while the session holds pointer lock
+  as an absolute position, in the pixels of the image's latest frame,
+  while it is over the image's drawn rectangle, wherever and however large
+  the picture is placed; and, while the session holds pointer lock
   (`?7701`), relative motion instead, or under `INPUT hold ... confine` the
   confined pointer's position. Keys still reach the session as
   before, so the desktop's own keys (Release Pointer, Leave Full Screen)
@@ -1988,11 +1987,11 @@ trailing newline is optional.
   session losing focus, Blit giving up the console, the image deleted, the
   connection closed) Blit first releases every key and button it pressed
   there. Each session reports `frames.input`: `events` (keys, buttons,
-  scroll notches and motions sent, all routes of the session), `last_error`
-  (an INPUT code, or `eis-refused`/`eis-disconnected`), and `routes`, one
-  per route: its `image`, `state` (`off`, `on` while on but not live, or
-  `live`), `hold` (`relative` or `confine`), the compositor's absolute
-  `region` (`WxH+X+Y`, empty until it offers one), and `pointer`, the last absolute pointer for diagnosing its
+  scroll notches and motions sent, all routes of the session), `dropped`
+  (lines a route's socket could not take), `last_error` (an INPUT code, or
+  `sock-disconnected`/`sock-full`), and `routes`, one per route: its
+  `image`, `state` (`off`, `on` while on but not live, or `live`), `hold`
+  (`relative` or `confine`), and `pointer`, the last absolute pointer for diagnosing its
   mapping: `surface` (where it was on the session's surface, in pixels),
   `draw` (the picture's drawn rectangle it was mapped through, x, y, width,
   height), `over` (the picture it was over: the route's own or a member's,
@@ -2020,8 +2019,8 @@ It speaks the frame channel above as a producer, with these additions.
 - **Who starts it.** The desktop, once per desktop session, with the
   `BLIT_FRAME_SOCKET`/`BLIT_FRAME_TOKEN` of the socket the desktop serves
   (Hibr's `frames serve`), so a held desktop's windows reach every display
-  through `hold`. It connects to whatever those variables name, as
-  `blit-gamescope` does. It creates `$XDG_RUNTIME_DIR/<name>`, a Wayland
+  through `hold`. It connects to whatever those variables name, as any
+  producer does. It creates `$XDG_RUNTIME_DIR/<name>`, a Wayland
   socket owned by the desktop's user, and says its name (below); the
   desktop puts it in every program's environment as `WAYLAND_DISPLAY`.
   The desktop may pick the name, `blit-compositor --display <name>`, so it
@@ -2048,7 +2047,7 @@ It speaks the frame channel above as a producer, with these additions.
   `<WORD> <verb> <id> [arguments]`, the picture id always the third word:
   - Blit to a producer: `FRAME release <id> <seq>`, `FRAME error <id>
     <code>`, `INPUT ok <id>`, `INPUT error <id> <code>`;
-  - a producer to Blit: `INPUT eis <id> <path>`, `INPUT sock <id> <path>`,
+  - a producer to Blit: `INPUT sock <id> <path>`,
     `INPUT on|off <id>`, `INPUT hold <id> relative|confine`, `INPUT member
     <id> <toplevel-id> <x> <y>`;
   - on an input route's socket: `INPUT key|ptr|rel|btn|wheel|frame|keymap
@@ -2216,9 +2215,8 @@ It speaks the frame channel above as a producer, with these additions.
     for a popup with a route of its own on this connection, or a route with
     16 members already. Sent again, it moves the member (a popup
     repositioned); a member of another route on the connection moves to
-    this one. Both backends, `eis` and `sock`: the top-level's pixels are
-    then scaled to the EIS region as the top-level's own are. Where draws of
-    the top-level and its members overlap, the topmost wins.
+    this one. Where draws of the top-level and its members overlap, the
+    topmost wins.
 - **Sizes are the program's to honour.** A Wayland client is told a size
   and commits the buffer it draws; most draw exactly that size, but a
   client with a fixed size, or one mid-resize, commits another. The
@@ -2290,18 +2288,15 @@ It speaks the frame channel above as a producer, with these additions.
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
 - **Input straight from Blit.** blit-compositor takes its windows' input
-  from Blit directly, not through EIS (libei exists only to feed a foreign
-  compositor and leaves with gamescope in ADR 0228 phase 4) and not through
-  the desktop's relay. It listens on an input socket of its own for each
-  top-level (`SOCK_STREAM`) and asks once per top-level, through the
-  channel, `INPUT sock <id> <path>`, the shape of `INPUT eis`: Blit
-  connects to `path`
-  (an absolute path to a Unix socket owned by the client's uid, checked as
-  for `INPUT eis`; `ENOTSUP` does not apply, no libei is involved), and the
-  answers, `INPUT on|off|hold|member`, the live
-  rule and the release of everything held when a route stops being live are
-  exactly as for EIS routes. A desktop between relays the request and
-  replays it on reconnect, as it does `INPUT eis`, and carries no input.
+  from Blit directly, not through the desktop's relay. It listens on an
+  input socket of its own for each top-level (`SOCK_STREAM`) and asks once
+  per top-level, through the channel, `INPUT sock <id> <path>` ("Picture
+  frames by descriptor", above): Blit connects to `path` (an absolute path
+  to a Unix socket owned by the client's uid), and the answers,
+  `INPUT on|off|hold|member`, the live rule and the release of everything
+  held when a route stops being live are as described there. A desktop
+  between relays the request and replays it on reconnect, and carries no
+  input.
   While the route is live, Blit writes to that socket, in the picture's own
   surface pixels (a member's position mapped into its top-level's, as
   `INPUT member` defines):
@@ -2321,14 +2316,13 @@ It speaks the frame channel above as a producer, with these additions.
   member, the top-level's pixels, negative where a popup reaches past the
   top-level's left or top); `rel` the
   raw counts; `wheel` whole notches, positive right and down (as Wayland
-  and EIS count them); each event is one batch, its `frame` after it. Input
+  counts them); each event is one batch, its `frame` after it. Input
   is never dropped silently: if the socket cannot take a line (full, or its
   reader gone), Blit counts it in `frames.input` `dropped`, forgets what
   that route held -- the compositor releases every key and button of a
   route whose socket ends -- and ends the route with `INPUT error <id>
   ENOENT`, as when the compositor closes the socket itself
-  (`last_error` `sock-disconnected`, or `sock-full`). Each route in
-  `frames.input` says its `backend`, `eis` or `sock`.
+  (`last_error` `sock-disconnected`, or `sock-full`).
   `INPUT keymap` is no event: no `frame` follows it, it is not counted in
   `events`, and it may come between batches. It carries the keymap of the
   keyboard whose keys reach the window -- what `GET /v1/input/keymap`

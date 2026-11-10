@@ -70,8 +70,7 @@ The package installs and starts `blit.service`, generates an API token in
 `apt upgrade` keeps it current. For programs in windows,
 `sudo apt install blit-compositor`; Hibr starts it with the desktop (Control
 Panel > Windows > Programs in Windows), and a terminal opened after that
-has `WAYLAND_DISPLAY`. `blit-gamescope`, the earlier gamescope bridge
-(ADR 0225), is deprecated and leaves in the next release.
+has `WAYLAND_DISPLAY`.
 
 ## First steps
 
@@ -139,11 +138,9 @@ tools/run-gates.sh all                                  # the test suites
 packaging/build-deb.sh build/pkg                        # the .debs
 ```
 
-The package build makes four packages: `blit`, `blit-font-sources` (the
-source archive of the Arabic font, ADR 0217), `blit-compositor` (programs
-in windows, ADR 0228) and `blit-gamescope` (deprecated, leaving in the next
-release; built against PipeWire 1.4.2 headers, see
-[toolchain](docs/toolchain.md)). `blit` suggests the other three. Use `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` to build against system
+The package build makes three packages: `blit`, `blit-font-sources` (the
+source archive of the Arabic font, ADR 0217) and `blit-compositor` (programs
+in windows, ADR 0228). `blit` suggests the other two. Use `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` to build against system
 headers. Suites and their requirements are listed by `tools/run-gates.sh
 --help`; the [development workflow](docs/development-workflow.md) has the
 release procedure.
