@@ -1998,7 +1998,9 @@ trailing newline is optional.
 side from 0.3.71 (ADR 0228 phase 1: milestone A, `wl_shm` windows as FRM1;
 milestone B, the window states, `WINDOW output`, dmabuf as FRM3, pacing,
 the keymap and input; milestone C, 0.3.72, pointer lock and confinement,
-Blit's key repeat and the keymap re-read on Blit's notice), and Blit its
+Blit's key repeat and the keymap re-read on Blit's notice; and, unreleased
+until the next Blit, `--display`, programs that survive a desktop restart
+and `WINDOW quit 0`), and Blit its
 `window=0` answer, `GET /v1/input/keymap`, `INPUT sock`, `INPUT member`
 and `INPUT keymap`; no desktop implements its side yet. `blit-compositor`
 is Blit's Wayland compositor for programs (and, in phase 2, their X window
@@ -2012,12 +2014,23 @@ It speaks the frame channel above as a producer, with these additions.
   `blit-gamescope` does. It creates `$XDG_RUNTIME_DIR/<name>`, a Wayland
   socket owned by the desktop's user, and says its name (below); the
   desktop puts it in every program's environment as `WAYLAND_DISPLAY`.
+  The desktop may pick the name, `blit-compositor --display <name>`, so it
+  can export `WAYLAND_DISPLAY` before the compositor answers; without it
+  the compositor takes the first free `blit-<n>`. A name is printable
+  ASCII without a space or a slash (it is one file in `$XDG_RUNTIME_DIR`
+  and one word on the `WINDOW display` line), at most 31 bytes, and short
+  enough that `$XDG_RUNTIME_DIR/<name>-input` (the input socket, below)
+  fits in 107 bytes. A name that is not one, or that another compositor
+  holds, is refused before the channel is dialed: a line on standard error
+  and exit status 2. `WINDOW display` says the name either way.
 - **Hello.** Version 4: `v4 <token>` (everything in version 3, plus the
   `WINDOW` lines). A peer that answers a version-4 hello without
   `window=1` in its `OK` line does not speak `WINDOW`; the compositor then
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
-  The compositor's first line after `OK` is `WINDOW display <name>`.
+  The compositor's first line after `OK` is `WINDOW display <name>`, on
+  every connection (a reconnect too: "Programs survive a desktop
+  restart").
 - **One grammar, version 5 (agreed 2026-11-09; replaces the shapes above
   when Blit and Hibr ship it together, with no compatibility forms).** Every
   line on the frame channel that concerns a picture is
@@ -2101,6 +2114,10 @@ It speaks the frame channel above as a producer, with these additions.
     `WM_DELETE_WINDOW`); what to do if the program lingers is the desktop's.
     For a popup it is `xdg_popup.popup_done` -- the desktop sends it for a
     click outside a grabbing popup.
+  - `WINDOW quit 0`: the person quit the desktop; the compositor ends
+    every program at once and exits, status 0, without reconnecting. Only
+    id 0 (the whole compositor) is defined; any other is not a `quit`
+    line.
   - `INPUT on|off|hold` as above; focus is `INPUT on`, so there is no
     separate focus line. `INPUT on` for one window implies nothing for
     another: the desktop sends each `off` itself.
@@ -2135,22 +2152,61 @@ It speaks the frame channel above as a producer, with these additions.
   and the cell size of the display it is on; a window moved to a display
   with a different cell size gets a new `WINDOW size`.
 - **Programs survive a desktop restart** (agreed with Hibr 2026-11-10;
-  built after milestone C). The desktop starts blit-compositor detached (its
-  own session, owned by init), records its pid and display, and serves the
-  frame socket under a name and token fixed for the desktop session, so a
-  Restart Desktop (an exec) neither ends the compositor nor changes its
-  environment, and the restarted desktop starts no second one. When the
-  channel closes, the compositor keeps its programs running, their windows
-  unshown, and reconnects to the same socket and token with backoff, for at
-  most 60 seconds. On reconnect it says hello again, announces every window
-  again with its last state (`WINDOW new`, `title`, `appid`, `limits`,
-  `decor`, `parent`, `fullscreen`, the same ids), sends each window's last
-  frame again and asks for its input route again; the desktop answers as
-  for new windows (`WINDOW size`, `WINDOW output`, `INPUT on`). If no
-  desktop answers within the 60 seconds, it ends its programs as it does
-  today. When the person quits the desktop, the desktop sends `WINDOW quit
-  0` (id 0: the whole compositor) and the compositor ends its programs at
-  once.
+  built in blit-compositor, unreleased until the next Blit). The desktop
+  starts blit-compositor detached (its own session, owned by init), records
+  its pid and display (`--display`, above), and serves the frame socket
+  under a name and token fixed for the desktop session, so a Restart
+  Desktop (an exec) neither ends the compositor nor changes its
+  environment, and the restarted desktop starts no second one.
+  - **The channel lost.** When the channel closes or errors, the
+    compositor keeps every program running and its windows unshown, with
+    the Wayland socket and the input socket open. Blit's input routes to
+    the compositor end with the desktop's channel (their connections to
+    the input socket close, each releasing what it held). An active
+    pointer lock or confinement ends as at the desktop's `WINDOW lock <id>
+    off` (a oneshot one is then spent); every one still wanted is asked
+    for again on reconnect.
+  - **Meanwhile.** Programs may go on committing: the compositor keeps
+    only each window's newest frame -- for `wl_shm`, the copied pixels; for
+    a dmabuf, the newest `wl_buffer`, every older one given back at once,
+    so a program does not stall on a full pool. Frame callbacks are still
+    answered at the window's output refresh (the pacing above, as if each
+    frame were taken), so programs do not freeze and a game or video keeps
+    running unseen; `wp_presentation` feedback is `discarded`, since
+    nothing is shown. A program that connects meanwhile gets its windows,
+    announced when the desktop is back.
+  - **Reconnecting.** To the same `BLIT_FRAME_SOCKET` and
+    `BLIT_FRAME_TOKEN`, first after 50 ms, then at intervals doubling to
+    one second, for at most 60 seconds from the loss; the event loop never
+    waits on it (a hello not answered within 3 seconds is dropped and
+    dialed again). An answer without `window=1` (Blit itself, reached
+    directly) is let go and the next attempt follows.
+    `BLIT_COMPOSITOR_RECONNECT_MS` shortens the 60 seconds, in
+    milliseconds, for gates only: it is not a setting.
+  - **On reconnect** it says hello again (version 4), then `WINDOW
+    display`, and announces every window again with its id and its last
+    state: each top-level, in the order they were created, `WINDOW new <id>
+    <parent>` (`0`, and `WINDOW parent` after every top-level, for a parent
+    created after it), `title`, `appid`, `limits`, `decor`, `fullscreen
+    on`, `maximize on` and `INPUT sock`, and `WINDOW hide` for one its
+    program had unmapped (`minimize` is a request, not a state, and is not
+    repeated); then each popup, `WINDOW popup` with its offset; then each
+    shown window's newest frame (`FRM3` of the kept buffer, or `FRM1`);
+    then `WINDOW lock` for each pointer lock or confinement a program still
+    holds. Popups' `INPUT member` lines are the desktop's to send again, as
+    for new windows. The desktop answers as for new windows (`WINDOW
+    size`, `WINDOW output`, `INPUT on`); the compositor configures no window
+    until its new `WINDOW size` arrives, so until then a program keeps its
+    size, and each window stays on its output until the desktop's `WINDOW
+    output`. The dmabuf formats offered to programs stay the first
+    hello's: a desktop that answers others, or no `dmabuf=1`, is sent
+    copies (`FRM1`).
+  - **Ending.** If no desktop answers with `window=1` within the 60
+    seconds, the compositor says so in its log, ends its programs (their
+    connections closed) and exits, status 1. When the person quits
+    the desktop, the desktop sends `WINDOW quit 0` (id 0: the whole
+    compositor) and the compositor ends its programs at once, exit status
+    0, with no reconnect.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
