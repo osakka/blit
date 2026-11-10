@@ -3,14 +3,15 @@
    Runs inside a Blit session on a host with a GPU, so it has the session's
    BLIT_FRAME_SOCKET and BLIT_FRAME_TOKEN. It allocates a pool of three
    LINEAR XRGB8888 buffers with GBM on the render node, fills each frame
-   with a solid colour through gbm_bo_map, and sends it by version 3 of the
+   with a solid colour through gbm_bo_map, and sends it by version 5 of the
    frame channel (FRM3: one plane, its dmabuf in SCM_RIGHTS). The image is
    placed with a Kitty escape on its own terminal, as ADR 0202 does. A
-   buffer is reused only after Blit answered RELEASE for the frame in it.
+   buffer is reused only after Blit answered `FRAME release` for the frame
+   in it.
 
    It prints one machine-readable line, DMABUF_RESULT, with what it saw:
-   the hello's answer, frames sent and accepted, every RELEASE in order,
-   any ERROR, and whether the checks held:
+   the hello's answer, frames sent and accepted, every `FRAME release` in
+   order, any other line (`FRAME error`), and whether the checks held:
      - the hello offers dmabuf=1 and lists XR24 with the LINEAR modifier;
      - every frame but the newest is released, in sequence order, and only
        after a newer frame was sent (Blit holds the frame it shows);
@@ -211,8 +212,8 @@ static int send_frame(int sock, struct gbm_bo *bo, unsigned long long sequence, 
     return ok;
 }
 
-/* Reads what Blit sent within `wait` seconds. RELEASE lines free their
-   buffer; each is recorded in order. */
+/* Reads what Blit sent within `wait` seconds. `FRAME release <id> <seq>`
+   lines free their buffer; each is recorded in order. */
 static unsigned long long released_seq[4096];
 static int released_count;
 static unsigned long long buffer_seq[POOL];
@@ -232,12 +233,12 @@ static void read_replies(int sock, double wait)
         if (got <= 0)
             return;
         line[got] = '\0';
-        if (strncmp(line, "RELEASE ", 8) == 0) {
+        if (strncmp(line, "FRAME release ", 14) == 0) {
             unsigned int id = 0;
             unsigned long long seq = 0;
             char text[48];
             int i;
-            sscanf(line + 8, "%u %llu", &id, &seq);
+            sscanf(line + 14, "%u %llu", &id, &seq);
             snprintf(text, sizeof(text), "%llu", seq);
             note(releases, sizeof(releases), &releases_at, text);
             if (released_count < 4096) released_seq[released_count++] = seq;
@@ -495,7 +496,7 @@ int main(int argc, char **argv)
     }
     token_length = strlen(token);
     memcpy(hello, "BLITFRM1", 8);
-    put32(hello + 8, 3);
+    put32(hello + 8, 5);
     put32(hello + 12, (uint32_t)token_length);
     memcpy(hello + 16, token, token_length);
     send(sock, hello, 16 + token_length, MSG_NOSIGNAL);

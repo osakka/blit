@@ -16,10 +16,10 @@
    writes is its terminal set-up and its undoing at exit.
 
    Input does not pass through the bridge: it names gamescope's EIS socket
-   to Blit with `INPUT eis <path> <image id>` and Blit sends the pane's keys
+   to Blit with `INPUT eis <image id> <path>` and Blit sends the pane's keys
    and mouse there itself. Without --no-place (phase 1, a plain Blit pane:
    the pane is the window) the bridge turns the route on with
-   `INPUT on <image id>` once Blit answers `OK input <image id>`. With
+   `INPUT on <image id>` once Blit answers `INPUT ok <image id>`. With
    --no-place (phase 2, inside a Hibr desktop app) the desktop owns window
    focus: the app sends `INPUT on`/`INPUT off` itself from its focus
    callback, through Hibr's listener, and the bridge sends neither; it only
@@ -323,7 +323,7 @@ static void maybe_send_input(struct bridge *b)
     if (b->frames.input_state != GS_INPUT_NONE || !b->eis_path[0] || b->frames.fd < 0) return;
     if (stat(b->eis_path, &st) != 0 || !S_ISSOCK(st.st_mode)) return;
     if (gs_frames_send_input(&b->frames, b->eis_path) == 0)
-        logf_(b, "INPUT eis %s %u sent", b->eis_path, b->frames.image_id);
+        logf_(b, "INPUT eis %u %s sent", b->frames.image_id, b->eis_path);
 }
 
 static void child_line(struct bridge *b, const char *line)
@@ -465,7 +465,7 @@ static void on_process(void *data)
                                       d->chunk->stride ? (uint32_t)d->chunk->stride : b->stream_w * 4,
                                       newest) == 0) {
                 if (!b->placement.placed) place_picture(b); /* once, after the first frame */
-                return; /* held until RELEASE or ERROR */
+                return; /* held until FRAME release or error */
             }
         } else {
             send_mapped_dmabuf(b, d);
@@ -642,10 +642,10 @@ static void on_frame_socket(void *data, int fd, uint32_t mask)
     }
     if (input != b->frames.input_state) {
         if (b->frames.input_state == GS_INPUT_OK && b->frames.focus_by_desktop)
-            logf_(b, "OK input %u: Blit sends the window's input to %s (INPUT on/off by the desktop)",
+            logf_(b, "INPUT ok %u: Blit sends the window's input to %s (INPUT on/off by the desktop)",
                   b->frames.image_id, b->eis_path);
         else if (b->frames.input_state == GS_INPUT_OK)
-            logf_(b, "OK input %u: Blit sends the pane's input to %s (INPUT on %s)",
+            logf_(b, "INPUT ok %u: Blit sends the pane's input to %s (INPUT on %s)",
                   b->frames.image_id, b->eis_path, b->frames.input_on ? "sent" : "not sent");
         else if (b->frames.input_was_ok && strcmp(b->frames.input_error, "ENOENT") == 0)
             /* Blit ended a live route (docs/api.md, "Picture frames by

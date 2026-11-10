@@ -2,11 +2,12 @@
 """ADR 0225: blit-gamescope's frame core against a real Blit (CPU compositor).
 
 The gate binary runs as a session's command, as blit-gamescope does: it reads
-the pane's size with CSI 14 t, says hello on the frame channel (version 3,
-answered dmabuf=0 here), sends one FRM3 that is refused ENOTSUP (its buffer
+the pane's size with CSI 14 t, says hello on the frame channel (version 5,
+answered dmabuf=0 here), sends one FRM3 that is refused
+`FRAME error 1 ENOTSUP` (its buffer
 must come back and FRM3 stop), then fake BGRx gamescope buffers as sealed
 memfd FRM1 frames placed with a=p, and the INPUT request, which this Blit,
-with no libei on the gate host, answers `ERROR INPUT 1 ENOTSUP` (frames
+with no libei on the gate host, answers `INPUT error 1 ENOTSUP` (frames
 only). This script checks what it wrote and that the picture is on screen.
 """
 import json
@@ -98,7 +99,7 @@ def main():
         check(width > 0 and height > 0, 'CSI 14 t was not answered: %s' % got['SIZE'])
         check(got['CONNECT'] == 'ok', 'the frame channel refused the hello: %s' % got['CONNECT'])
         check(got['DMABUF'] == '0', 'the CPU compositor offered dmabufs')
-        check(got['FRM3_ERROR'] == 'ERROR 1 ENOTSUP', 'FRM3 answered %s' % got['FRM3_ERROR'])
+        check(got['FRM3_ERROR'] == 'FRAME error 1 ENOTSUP', 'FRM3 answered %s' % got['FRM3_ERROR'])
         check(got['FRM3_REQUEUED'] == '1', 'the refused FRM3 buffer was not requeued')
         check(got['FRM3_OFF'] == '1', 'FRM3 still in use after ENOTSUP')
         check(got['FRM1_SENT'] == '3' and got['ERRORS'] == '1', 'memfd frames refused: %s' % got['LAST_ERROR'])

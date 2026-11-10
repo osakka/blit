@@ -69,8 +69,8 @@ static inline void blit_graphics_account(BlitGraphicsBudget *budget,
 /* ADR 0223: one dmabuf frame of a descriptor image, imported by the GPU
    compositor. Its plane descriptors (and so the producer's buffer) are held
    until a newer frame of the image has been presented; then Blit answers
-   RELEASE and closes them. The compositor only reads `texture` and sets
-   `drawn` when a frame it composed sampled it. */
+   `FRAME release` and closes them. The compositor only reads `texture` and
+   sets `drawn` when a frame it composed sampled it. */
 #define BLIT_DMABUF_PLANES 4
 typedef struct {
     int used;
@@ -85,7 +85,7 @@ typedef struct {
 struct BlitKms;
 typedef struct {
     struct BlitKms *kms;    /* whose GLES context holds the textures */
-    int reply_fd;           /* a dup of the sender's socket, for RELEASE */
+    int reply_fd;           /* a dup of the sender's socket, for FRAME release */
     unsigned long long reply_serial;
     unsigned int image_id;
     /* What a release adds to: the session's count and Blit's. */

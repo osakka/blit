@@ -23,6 +23,13 @@ grep -q 'frames.focus_by_desktop = b->placement.no_place;' src/blit_gamescope.c 
     echo "GAMESCOPE_BRIDGE_FAIL --no-place does not leave INPUT on/off to the desktop" >&2
     exit 1
 }
+# Version 5 of the frame channel only (docs/api.md, "One grammar, version
+# 5"): none of the version 4 line forms is read or written by the bridge.
+if grep -nE '"(RELEASE|ERROR|OK input|OK window)|INPUT eis %s|version = [1-4],' \
+        src/blit_gamescope.c src/blit_gamescope_frames.h; then
+    echo "GAMESCOPE_BRIDGE_FAIL the bridge still speaks a version 4 line form" >&2
+    exit 1
+fi
 mkdir -p build/tests
 tcc -Wall tools/tests/gamescope_bridge_gate.c -o build/tests/gamescope_bridge_gate
 build/tests/gamescope_bridge_gate unit

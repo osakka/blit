@@ -1,7 +1,9 @@
 /* ADR 0228: blit-compositor's frame-channel core (src/blit_compositor_wire.h)
    without Wayland: the hello's answer, titles cleaned and bounded, the
-   desktop's lines, the pixel conversion, and one FRM1 frame and one WINDOW
-   line over a socketpair. Prints COMPOSITOR_WIRE_UNIT_OK. */
+   desktop's lines (version 5's, docs/api.md "One grammar, version 5"; the
+   version 4 forms understood as nothing), the pixel conversion, and one
+   FRM1 frame, one WINDOW line and one `INPUT sock <id> <path>` over a
+   socketpair. Prints COMPOSITOR_WIRE_UNIT_OK. */
 #include "blit_compositor_wire.h"
 
 static int failures;
@@ -103,15 +105,25 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW lock 4 relative", &l) == BC_LINE_UNKNOWN, "lock relative is the compositor's");
     EXPECT(bc_parse_line("WINDOW lock 4 onx", &l) == BC_LINE_UNKNOWN, "lock, a tail");
     EXPECT(bc_parse_line("WINDOW lock 0 on", &l) == BC_LINE_UNKNOWN, "lock, id 0");
-    EXPECT(bc_parse_line("ERROR WINDOW 3 EINVAL\n", &l) == BC_LINE_ERROR_WINDOW && l.id == 3 &&
-           strcmp(l.code, "EINVAL") == 0, "ERROR WINDOW");
-    EXPECT(bc_parse_line("OK window 3", &l) == BC_LINE_OK_WINDOW && l.id == 3, "OK window");
-    EXPECT(bc_parse_line("ERROR 5 ENOMEM", &l) == BC_LINE_ERROR && l.id == 5, "a refused frame");
-    EXPECT(bc_parse_line("RELEASE 5 18446744073709551615\n", &l) == BC_LINE_RELEASE && l.id == 5 &&
-           l.sequence == 18446744073709551615ull, "RELEASE");
-    EXPECT(bc_parse_line("RELEASE 5", &l) == BC_LINE_UNKNOWN, "RELEASE without a sequence");
-    EXPECT(bc_parse_line("RELEASE 5 7x", &l) == BC_LINE_UNKNOWN, "RELEASE with a tail");
-    EXPECT(bc_parse_line("ERROR INPUT 5 ENOTSUP", &l) == BC_LINE_OTHER, "an input route's answer");
+    EXPECT(bc_parse_line("WINDOW error 3 EINVAL\n", &l) == BC_LINE_ERROR_WINDOW && l.id == 3 &&
+           strcmp(l.code, "EINVAL") == 0, "WINDOW error");
+    EXPECT(bc_parse_line("WINDOW ok 3", &l) == BC_LINE_OK_WINDOW && l.id == 3, "WINDOW ok");
+    EXPECT(bc_parse_line("FRAME error 5 ENOMEM", &l) == BC_LINE_ERROR && l.id == 5 &&
+           strcmp(l.code, "ENOMEM") == 0, "a refused frame");
+    EXPECT(bc_parse_line("FRAME error 5", &l) == BC_LINE_UNKNOWN, "FRAME error without a code");
+    EXPECT(bc_parse_line("FRAME release 5 18446744073709551615\n", &l) == BC_LINE_RELEASE && l.id == 5 &&
+           l.sequence == 18446744073709551615ull, "FRAME release");
+    EXPECT(bc_parse_line("FRAME release 5", &l) == BC_LINE_UNKNOWN, "FRAME release without a sequence");
+    EXPECT(bc_parse_line("FRAME release 5 7x", &l) == BC_LINE_UNKNOWN, "FRAME release with a tail");
+    EXPECT(bc_parse_line("INPUT error 5 ENOTSUP", &l) == BC_LINE_OTHER, "an input route's refusal");
+    EXPECT(bc_parse_line("INPUT ok 5", &l) == BC_LINE_OTHER, "an input route's answer");
+    /* Version 5 only: the version 4 forms are no line the compositor knows. */
+    EXPECT(bc_parse_line("RELEASE 5 7", &l) == BC_LINE_UNKNOWN, "the version 4 RELEASE");
+    EXPECT(bc_parse_line("ERROR 5 ENOTSUP", &l) == BC_LINE_UNKNOWN, "the version 4 ERROR");
+    EXPECT(bc_parse_line("OK window 3", &l) == BC_LINE_UNKNOWN, "the version 4 OK window");
+    EXPECT(bc_parse_line("ERROR WINDOW 3 EINVAL", &l) == BC_LINE_UNKNOWN, "the version 4 ERROR WINDOW");
+    EXPECT(bc_parse_line("OK input 5", &l) == BC_LINE_UNKNOWN, "the version 4 OK input");
+    EXPECT(bc_parse_line("ERROR INPUT 5 ENOTSUP", &l) == BC_LINE_UNKNOWN, "the version 4 ERROR INPUT");
     EXPECT(bc_parse_line("HUD1 on", &l) == BC_LINE_OTHER, "HUD1");
     EXPECT(bc_parse_line("WINDOW frobnicate 1", &l) == BC_LINE_UNKNOWN, "unknown");
 }
@@ -193,6 +205,11 @@ static void channel(void)
     EXPECT(bc_wire_line(&w, "WINDOW title %u %s", 1u, "x") == 0, "a line");
     n = recv(sv[1], buf, sizeof(buf) - 1, MSG_DONTWAIT);
     EXPECT(n == 17 && memcmp(buf, "WINDOW title 1 x\n", 17) == 0, "the line: %zd", n);
+    /* The input route's request: the id third, the path after it. */
+    EXPECT(bc_wire_input_sock(&w, 4, "/run/user/1000/blit-0-input") == 0, "INPUT sock");
+    n = recv(sv[1], buf, sizeof(buf) - 1, MSG_DONTWAIT);
+    EXPECT(n == 41 && memcmp(buf, "INPUT sock 4 /run/user/1000/blit-0-input\n", 41) == 0,
+           "INPUT sock: %zd %.*s", n, (int)(n > 0 ? n : 0), buf);
     for (i = 0; i < (int)sizeof(pixels); ++i) pixels[i] = (unsigned char)i;
     EXPECT(bc_wire_send_shm(&w, 7, pixels, 3, 2, 12, BC_SHM_XRGB8888) == 0, "a frame: %s", w.last_error);
     EXPECT(bc_wire_send_shm(&w, 7, pixels, 3, 2, 8, BC_SHM_XRGB8888) != 0, "a stride too short");
@@ -223,7 +240,7 @@ static void channel(void)
                got[11] == 12, "pixels");
         close(fd);
     }
-    EXPECT(w.frames_sent == 1 && w.frames_failed == 1 && w.lines_sent == 1, "counters");
+    EXPECT(w.frames_sent == 1 && w.frames_failed == 1 && w.lines_sent == 2, "counters");
 
     /* FRM3: two planes' own descriptors, no copy. */
     {
@@ -280,6 +297,6 @@ int main(void)
     convert();
     channel();
     if (failures) return 1;
-    printf("COMPOSITOR_WIRE_UNIT_OK hello text lines input convert channel\n");
+    printf("COMPOSITOR_WIRE_UNIT_OK hello text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first)\n");
     return 0;
 }

@@ -4,7 +4,7 @@
     compositor_gate.py <blit-compositor> <wl_standin_client> [blit-server]
 
 Part one plays the desktop: a fake frame-channel peer that answers the
-version 4 hello with window=1, reads WINDOW lines and FRM1 frames, and sends
+version 5 hello with window=1, reads WINDOW lines and FRM1 frames, and sends
 `WINDOW size` and `WINDOW close`, while blit-compositor serves the in-repo
 stand-in client (tools/tests/wl_standin_client.c). It checks the draft in
 docs/api.md, "Program windows": `WINDOW display` first, the new window and
@@ -14,9 +14,14 @@ size to the program, `WINDOW gone` after close, and the compositor ending
 when the desktop's channel closes.
 
 Part two, with a blit-server (on the mock display, gate_display.sh), checks
-Blit's side: a version 4 hello is answered as version 3's plus ` window=0`,
-each WINDOW line `ERROR WINDOW <id> ENOTSUP`, and blit-compositor reaching
-Blit directly keeps running and shows nothing.
+Blit's side: a version 5 hello is answered with ` window=0`, each WINDOW
+line `WINDOW error <id> ENOTSUP`, a version 3 or 4 hello `ERROR 0 EINVAL`,
+and blit-compositor reaching Blit directly keeps running and shows nothing.
+
+Every line about a picture is version 5's `<WORD> <verb> <id> [arguments]`
+(docs/api.md, "One grammar, version 5"): the compositor asks
+`INPUT sock <id> <path>`, and takes `FRAME release` and `FRAME error`; the
+version 4 forms (`RELEASE`, `ERROR <id>`) release nothing.
 """
 import array
 import fcntl
@@ -96,10 +101,10 @@ class Desktop:
         hello = self.sock.recv(128)
         check(hello[:8] == b'BLITFRM1', 'not a hello: %r' % hello[:16])
         version, length = struct.unpack_from('<II', hello, 8)
-        check(version == 4, 'the hello says version %d, not 4' % version)
+        check(version == 5, 'the hello says version %d, not 5' % version)
         check(hello[16:16 + length].decode() == TOKEN, 'the hello has the wrong token')
         self.sock.send(answer)
-        # `INPUT sock <path> <id>`, one per toplevel: for Blit, which the
+        # `INPUT sock <id> <path>`, one per toplevel: for Blit, which the
         # desktop relays it to; recorded, not part of the WINDOW sequence.
         self.input_socks = {}
 
@@ -109,7 +114,7 @@ class Desktop:
             got = self.next_any(wait)
             if got is None or got[0] != 'line' or not got[1].startswith('INPUT sock '):
                 return got
-            path, image = got[1].split(' ')[2:4]
+            image, path = got[1].split(' ')[2:4]
             check(path.startswith('/') and path.endswith('-input') and int(image) not in self.input_socks,
                   'an INPUT sock line %r' % got[1])
             self.input_socks[int(image)] = path
@@ -612,8 +617,8 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
     session.write('\033[4;8H\033_Ga=p,i=2,p=1,q=2,C=1,c=8,r=3,z=1\033\\')
     at = wait_for(lambda: [p for p in (session.graphics(2) or {}).get('placements', []) if p['id'] == 1],
                   'picture 2 was not placed')[0]
-    check(ch.ask('INPUT sock %s 1\n' % desk.input_socks[1]) == b'OK input 1\n', 'Blit took no route')
-    check(ch.ask('INPUT member 2 1 12 63\n') == b'OK input 2\n', 'Blit took no member')
+    check(ch.ask('INPUT sock 1 %s\n' % desk.input_socks[1]) == b'INPUT ok 1\n', 'Blit took no route')
+    check(ch.ask('INPUT member 2 1 12 63\n') == b'INPUT ok 2\n', 'Blit took no member')
     ch.line('INPUT on 1\n')
     wait_for(lambda: [r for r in api('GET', '/v1/terminal-sessions/%s' % session.id)['frames']['input']['routes']
                       if r['image'] == 1 and r['state'] == 'live'], 'the route did not go live')
@@ -664,9 +669,10 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
-    copy), its buffer released only at Blit's RELEASE, given back when its
-    window goes; ERROR ENOTSUP copies that frame as FRM1 and every later
-    one. This host has no GPU: the stand-in's planes are memfds."""
+    copy), its buffer released only at Blit's `FRAME release`, given back
+    when its window goes; `FRAME error <id> ENOTSUP` copies that frame as
+    FRM1 and every later one. This host has no GPU: the stand-in's planes
+    are memfds."""
     runtime = os.path.join(work, 'run-dmabuf')
     os.mkdir(runtime, 0o700)
     name = 'blit-compositor-gate-dmabuf-%d' % os.getpid()
@@ -698,9 +704,14 @@ def dmabuf_part(compositor, standin, work):
         seq2, file2 = desk.frm3(80, 40, 1)
         check(seq2 > seq1 and file2 != file1, 'the second FRM3: sequence %d file %s' % (seq2, file2))
         desk.nothing(0.3)
-        check('STANDIN release' not in printed(), lambda: 'released before RELEASE:\n' + printed())
+        check('STANDIN release' not in printed(), lambda: 'released before FRAME release:\n' + printed())
+        # The version 4 forms are no line of version 5: they release nothing.
         desk.send('RELEASE 1 %d' % seq1)
-        wait_for(lambda: 'STANDIN release 64x32' in printed(), 'RELEASE did not release the buffer')
+        desk.send('ERROR 1 ENOTSUP')
+        desk.nothing(0.3)
+        check('STANDIN release' not in printed(), lambda: 'a version 4 line released a buffer:\n' + printed())
+        desk.send('FRAME release 1 %d' % seq1)
+        wait_for(lambda: 'STANDIN release 64x32' in printed(), 'FRAME release did not release the buffer')
         check('STANDIN release 80x40' not in printed(), 'the held 80x40 buffer was released too')
 
         # A window that goes while Blit holds its frame gives the buffer back.
@@ -720,7 +731,7 @@ def dmabuf_part(compositor, standin, work):
               'the held buffer was not given back at WINDOW gone:\n' + open(held_path).read())
 
         # A dmabuf client drawing on every callback is one frame ahead of
-        # Blit: its third frame waits for Blit's RELEASE of its first.
+        # Blit: its third frame waits for Blit's FRAME release of its first.
         paced_path = os.path.join(work, 'standin-paced.out')
         paced = start([standin, '--dmabuf', '--animate', '2', 'Paced'], cenv, open(paced_path, 'w'))
         clients.append(paced)
@@ -731,11 +742,11 @@ def dmabuf_part(compositor, standin, work):
         seq_a, _ = desk.frm3(40, 30, 3)
         seq_b, _ = desk.frm3(40, 30, 3)
         desk.nothing(0.4)
-        desk.send('RELEASE 3 %d' % seq_a)
+        desk.send('FRAME release 3 %d' % seq_a)
         seq_c, _ = desk.frm3(40, 30, 3)
-        # RELEASE of the second takes the third: its callback and feedback
+        # FRAME release of the second takes the third: its callback and feedback
         # come, and the client, done animating, draws no more.
-        desk.send('RELEASE 3 %d' % seq_b)
+        desk.send('FRAME release 3 %d' % seq_b)
         desk.nothing(0.3)
         desk.send('WINDOW close 3')
         desk.line('WINDOW gone 3')
@@ -747,13 +758,13 @@ def dmabuf_part(compositor, standin, work):
 
         # ENOTSUP: the refused (newest held) frame again as FRM1, and every
         # later one copied.
-        desk.send('ERROR 1 ENOTSUP')
+        desk.send('FRAME error 1 ENOTSUP')
         desk.frame(80, 40)
         wait_for(lambda: 'STANDIN release 80x40' in printed(), 'the refused buffer was not released')
         desk.send('WINDOW size 1 100 50')
         desk.frame(100, 50)
         wait_for(lambda: 'STANDIN release 100x50' in printed(), 'the copied buffer was not released')
-        desk.send('RELEASE 1 %d' % seq2)  # stale: nothing
+        desk.send('FRAME release 1 %d' % seq2)  # stale: nothing
         desk.nothing(0.3)
         desk.send('WINDOW close 1')
         desk.line('WINDOW gone 1')
@@ -768,7 +779,11 @@ def dmabuf_part(compositor, standin, work):
         text = open(log).read()
         check('dmabuf 6 sent, 3 released, 1 refused, 2 copied' in text,
               'the log does not count the dmabuf frames:\n' + text)
-        return ('FRM3=client-file,64x32+80x40 RELEASE->release gone->release paced=3rd-after-RELEASE-of-1st '
+        check(text.count('an unknown line from the channel: RELEASE 1 ') == 1 and
+              text.count('an unknown line from the channel: ERROR 1 ENOTSUP') == 1,
+              'the version 4 lines were not logged as unknown:\n' + text)
+        return ('FRM3=client-file,64x32+80x40 FRAME_release->release v4_RELEASE+ERROR=unknown,released_nothing '
+                'gone->release paced=3rd-after-FRAME_release-of-1st '
                 'ENOTSUP->FRM1 80x40,100x50 feedback=2')
     finally:
         for p in clients + [comp]:
@@ -965,17 +980,18 @@ def blit_part(server, compositor, standin, work):
         child = dict(l.rstrip('\n').split('=', 1) for l in open(os.path.join(work, 'env')) if '=' in l)
         name, token = child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN']
 
-        v3 = Peer(name, token, 3)
-        v4 = Peer(name, token, 4)
-        check(v3.hello == b'OK dmabuf=0\n', 'a version 3 hello was answered %r' % v3.hello)
-        check(v4.hello == b'OK dmabuf=0 window=0\n', 'a version 4 hello was answered %r' % v4.hello)
-        for line, want in ((b'WINDOW display blit-0\n', b'ERROR WINDOW 0 ENOTSUP\n'),
-                           (b'WINDOW new 7 0\n', b'ERROR WINDOW 7 ENOTSUP\n'),
-                           (b'WINDOW size 7 320 200', b'ERROR WINDOW 7 ENOTSUP\n'),
-                           (b'WINDOW gone x\n', b'ERROR WINDOW 0 ENOTSUP\n')):
-            got = v4.ask(line)
+        for version in (3, 4):
+            got = Peer(name, token, version).hello
+            check(got == b'ERROR 0 EINVAL\n', 'a version %d hello was answered %r' % (version, got))
+        v5 = Peer(name, token, 5)
+        check(v5.hello == b'OK dmabuf=0 window=0\n', 'a version 5 hello was answered %r' % v5.hello)
+        for line, want in ((b'WINDOW display blit-0\n', b'WINDOW error 0 ENOTSUP\n'),
+                           (b'WINDOW new 7 0\n', b'WINDOW error 7 ENOTSUP\n'),
+                           (b'WINDOW size 7 320 200', b'WINDOW error 7 ENOTSUP\n'),
+                           (b'WINDOW gone x\n', b'WINDOW error 0 ENOTSUP\n')):
+            got = v5.ask(line)
             check(got == want, '%r was answered %r, not %r' % (line, got, want))
-        check(Peer(name, token, 5).hello.startswith(b'ERROR 0 EINVAL'), 'a version 5 hello was accepted')
+        check(Peer(name, token, 6).hello == b'ERROR 0 EINVAL\n', 'a version 6 hello was accepted')
 
         # blit-compositor reaching Blit directly: it runs, says why it shows
         # nothing, sends Blit no WINDOW line, and configures no client.
@@ -1000,8 +1016,8 @@ def blit_part(server, compositor, standin, work):
         check(frames.get('refused', 0) == 0 and not frames.get('last_error'),
               'blit-compositor sent Blit something it refused: %s' % frames)
         api('DELETE', '/v1/terminal-sessions/%s' % session)
-        print('COMPOSITOR_BLIT_OK hello_v3="OK dmabuf=0" hello_v4="OK dmabuf=0 window=0" '
-              'WINDOW=ENOTSUPx4 v5=EINVAL compositor=runs,shows-nothing')
+        print('COMPOSITOR_BLIT_OK hello_v3_v4_v6="ERROR 0 EINVAL" hello_v5="OK dmabuf=0 window=0" '
+              'WINDOW="WINDOW error <id> ENOTSUP"x4 compositor=runs,shows-nothing')
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

@@ -965,9 +965,8 @@ typedef struct {
     int authenticated;
     unsigned long long session_id;
     uid_t uid;  /* the peer's, from SO_PEERCRED at the hello */
-    int version;  /* the hello's, 1, 2 or 3 */
-    unsigned long long serial;  /* which connection, for a dmabuf's RELEASE */
-    int hud_on;   /* the last HUD1 sent, to a version 2 client */
+    unsigned long long serial;  /* which connection, for a dmabuf's FRAME release */
+    int hud_on;   /* the last HUD1 sent */
     /* ADR 0225: this channel's input routes to compositors' EIS sockets,
        one per image it named in an accepted `INPUT eis`, the rest NULL
        (blit_frames_input.h). A desktop multiplexes its windows' pictures

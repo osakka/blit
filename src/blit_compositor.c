@@ -288,7 +288,7 @@ static void announce_toplevel(struct bc_xdg *x)
     /* Its input, straight from Blit to the input socket (one route per
        toplevel); the desktop relays the request. */
     if (x->server->input_path[0])
-        bc_wire_line(w, "INPUT sock %s %u", x->server->input_path, x->id);
+        bc_wire_input_sock(w, x->id, x->server->input_path);
     if (x->minimize) bc_wire_line(w, "WINDOW minimize %u", x->id);
     x->minimize = 0;
     logf_("window %u: new parent %d title \"%s\" appid \"%s\"", x->id, xdg_parent_id(x),
@@ -3042,7 +3042,7 @@ static int input_listen(struct bc_server *s)
     return 0;
 }
 
-/* `ERROR <id> <code>` for a frame. Replies come in the order frames are
+/* `FRAME error <id> <code>`. Replies come in the order frames are
    read and an accepted frame gets none, so a refusal is the newest frame
    of the picture -- an FRM3 still held, unless an FRM1 went after it
    (blit-gamescope's rule). ENOTSUP (Blit cannot import now) copies that
@@ -3157,7 +3157,7 @@ static void handle_line(struct bc_server *s, const char *line)
         return;
     }
     case BC_LINE_OTHER:
-        if (strncmp(line, "ERROR INPUT ", 12) == 0)
+        if (strncmp(line, "INPUT error ", 12) == 0)
             logf_("Blit refused or ended an input route: %.60s", line);
         return;
     case BC_LINE_OK_WINDOW:

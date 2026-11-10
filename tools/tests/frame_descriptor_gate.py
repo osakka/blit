@@ -3,8 +3,10 @@
 
 A session's program sends an image's pixels as a sealed memfd over Blit's
 frame socket; the image is placed and deleted with Kitty escapes on its PTY.
-Version 2 of the socket (ADR 0203) adds HUD1 and STA1 for the performance
-panel's Hibr section. Run by frame_descriptor_gate.sh, which sets up the
+HUD1 and STA1 (ADR 0203) serve the performance panel's Hibr section. The
+channel speaks version 5 only (docs/api.md, "One grammar, version 5"): a
+refused frame is `FRAME error <id> <code>`, and a hello of versions 1 to 4 is
+refused `ERROR 0 EINVAL`. Run by frame_descriptor_gate.sh, which sets up the
 mock display.
 
 Not covered here: a peer whose uid may not send a session frames. That needs
@@ -84,7 +86,7 @@ def set_hud(hud):
 
 
 class Client:
-    def __init__(self, name, token, version=1):
+    def __init__(self, name, token, version=5):
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         self.socket.connect('\0' + name)
         token = token.encode()
@@ -182,8 +184,13 @@ def main():
         bad = Client(child['BLIT_FRAME_SOCKET'][1:], 'not-the-token')
         check(bad.hello.startswith(b'ERROR 0 EACCES'), 'a wrong token was answered %r' % bad.hello)
 
+        # Version 5 only: an older hello gets the hello's own refusal.
+        for version in (1, 2, 3, 4):
+            old = Client(child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN'], version)
+            check(old.hello == b'ERROR 0 EINVAL\n', 'a version %d hello was answered %r' % (version, old.hello))
         client = Client(child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN'])
-        check(client.hello == b'OK\n', 'hello answered %r' % client.hello)
+        check(client.hello.startswith(b'OK dmabuf=') and client.hello.endswith(b' window=0\n'),
+              'hello answered %r' % client.hello)
         red, blue = solid((255, 0, 0), 16, 16), solid((0, 0, 255), 16, 16)
 
         # 1. A frame before its placement is kept, then drawn when placed.
@@ -219,13 +226,13 @@ def main():
         # 4. Refusals, each with its code, the image untouched.
         before = image(session, 7)[0]['pixel_crc32']
         client.send(frame(7, 10, 16, 16), memfd(red, seal=False))
-        check(client.reply().startswith(b'ERROR 7 EINVAL'), 'an unsealed memfd was not refused')
+        check(client.reply().startswith(b'FRAME error 7 EINVAL\n'), 'an unsealed memfd was not refused')
         client.send(frame(7, 11, 16, 16), memfd(red[:100]))
-        check(client.reply().startswith(b'ERROR 7 EINVAL'), 'a short memfd was not refused')
+        check(client.reply().startswith(b'FRAME error 7 EINVAL\n'), 'a short memfd was not refused')
         client.send(frame(7, 12, 5000, 16), memfd(red))
-        check(client.reply().startswith(b'ERROR 7 EFBIG'), 'an oversized frame was not refused')
+        check(client.reply().startswith(b'FRAME error 7 EFBIG\n'), 'an oversized frame was not refused')
         client.send(frame(9, 1, 16, 16, x=0, y=0, w=4, h=4), memfd(yellow))
-        check(client.reply().startswith(b'ERROR 9 ENOENT'), 'an edit of an unknown image was not refused')
+        check(client.reply().startswith(b'FRAME error 9 ENOENT\n'), 'an edit of an unknown image was not refused')
         check(image(session, 7)[0]['pixel_crc32'] == before, 'a refused frame changed the image')
 
         # 5. A descriptor image takes no pixels from the PTY, and a Kitty
@@ -238,13 +245,13 @@ def main():
               'Kitty pixels into a descriptor image were not refused')
         run('\\033_Ga=t,f=24,s=1,v=1,i=8,q=2;AAAA\\033\\\\')
         client.send(frame(8, 1, 1, 1), memfd(b'\xff\xff\xff'))
-        check(client.reply().startswith(b'ERROR 8 EINVAL'), 'a frame into a Kitty image was not refused')
+        check(client.reply().startswith(b'FRAME error 8 EINVAL\n'), 'a frame into a Kitty image was not refused')
 
         # 6. After a delete that frees it, a frame gets ENOENT.
         run('\\033_Ga=d,d=I,i=7,q=2\\033\\\\')
         wait_for(lambda: image(session, 7)[0] is None, 'a=d,d=I did not free the descriptor image')
         client.send(frame(7, 20, 16, 16), memfd(red))
-        check(client.reply().startswith(b'ERROR 7 ENOENT'), 'a frame after its delete was not refused')
+        check(client.reply().startswith(b'FRAME error 7 ENOENT\n'), 'a frame after its delete was not refused')
 
         # 7. The reverse order: an a=p read before its image's first frame
         #    is held while the session has a frame connection, and placed
@@ -274,22 +281,22 @@ def main():
                  'a=d,d=A left images: %s' % [g.get('id') for g in
                      api('GET', '/v1/terminal-sessions/%s' % session).get('graphics', [])])
         client.send(frame(13, 2, 16, 16), memfd(red))
-        check(client.reply().startswith(b'ERROR 13 ENOENT'), 'a frame after a=d,d=A was not refused')
+        check(client.reply().startswith(b'FRAME error 13 ENOENT\n'), 'a frame after a=d,d=A was not refused')
 
-        # 9. Version 2 (ADR 0203): HUD1 to a version 2 client only, when the
-        #    panel with its Hibr section is shown on the session's display;
-        #    STA1 lines in the session and the panel, refused when malformed,
-        #    gone five seconds after the last.
+        # 9. ADR 0203: HUD1 to every client, when the panel with its Hibr
+        #    section is shown on the session's display; STA1 lines in the
+        #    session and the panel, refused when malformed, gone five seconds
+        #    after the last.
         name, token = child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN']
-        v2 = Client(name, token, version=2)
-        check(v2.hello == b'OK\n', 'a version 2 hello was answered %r' % v2.hello)
-        check(v2.reply(0.4) == b'', 'HUD1 was sent with the panel off')
+        v2 = Client(name, token)
+        check(v2.hello.startswith(b'OK dmabuf='), 'a second hello was answered %r' % v2.hello)
+        check(v2.reply(0.4) == b'' and client.reply(0.2) == b'', 'HUD1 was sent with the panel off')
         set_hud({'enabled': True, 'display_id': 'display-1', 'sections': ['blit', 'hibr']})
         check(v2.reply() == b'HUD1 on\n', 'the panel was turned on without HUD1 on')
-        check(client.reply(0.4) == b'', 'a version 1 client was sent HUD1')
-        late = Client(name, token, version=2)
-        check(late.hello == b'OK\n' and late.reply() == b'HUD1 on\n',
-              'a version 2 client joining a shown panel was not told after its OK')
+        check(client.reply() == b'HUD1 on\n', 'the first client was not sent HUD1 on')
+        late = Client(name, token)
+        check(late.hello.startswith(b'OK dmabuf=') and late.reply() == b'HUD1 on\n',
+              'a client joining a shown panel was not told after its OK')
         # A settings write that leaves the panel as it was tells no one:
         # a write resets to the defaults before applying the document.
         wait_for(lambda: api('GET', '/v1/settings')['storage']['state'] == 'clean', 'settings not clean')
@@ -314,8 +321,6 @@ def main():
         check(any(l.startswith('why') and 'video ' in l for l in video) and
               any(l.startswith('video') and not l.startswith('video   0/s') for l in video),
               'the panel does not say the display is drawing a video: %s (%s)' % (video, recent))
-        client.say(status([b'fps=1']))
-        check(client.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 from a version 1 client was not refused')
         v2.say(status([b'fps=60 wakes=12', b'cpu=31%', b'slow=paint 4.2']))
         check(v2.reply(0.4) == b'', 'an accepted STA1 was answered')
         got = wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session).get('status'),
@@ -340,9 +345,9 @@ def main():
                     ('count 0', status([], count=0))]
         for why, message in refusals:
             v2.say(message)
-            check(v2.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 with %s was not refused' % why)
+            check(v2.reply() == b'FRAME error 0 EINVAL\n', 'STA1 with %s was not refused' % why)
         socket.send_fds(v2.socket, [status([b'a=1'])], [memfd(b'x')])
-        check(v2.reply().startswith(b'ERROR 0 EINVAL'), 'STA1 with a descriptor was not refused')
+        check(v2.reply() == b'FRAME error 0 EINVAL\n', 'STA1 with a descriptor was not refused')
         v2.say(status([b'x' * 64]))
         check(v2.reply(0.4) == b'', 'a 64-byte line was refused')
         time.sleep(5.4)
@@ -360,15 +365,17 @@ def main():
         set_hud({'enabled': False})
         check(v2.reply() == b'HUD1 off\n' and late.reply() == b'HUD1 off\n',
               'turning the panel off did not send HUD1 off')
-        check(client.reply(0.4) == b'', 'a version 1 client was sent HUD1')
+        check([client.reply() for _ in range(4)] == [b'HUD1 off\n', b'HUD1 on\n', b'HUD1 off\n', b''],
+              'the first client was not told as the others were')
 
         frames = image(session, 7)[1]['frames']
-        print('FRAME_DESCRIPTOR_PASS token=random hello=token_checked before_placement=kept screen=drawn '
-              'newest=wins stale=dropped edit=rectangle refused=unsealed+short+efbig+unknown '
+        print('FRAME_DESCRIPTOR_PASS token=random hello=token_checked+v5_only(v1-v4=ERROR_0_EINVAL) '
+              'before_placement=kept screen=drawn '
+              'newest=wins stale=dropped edit=rectangle refused=FRAME_error:unsealed+short+efbig+unknown '
               'kitty_into_descriptor=refused frame_into_kitty=refused after_delete=enoent '
               'placement_before_frame=held_then_placed expired_placement=refused delete_all=frees_descriptor_images '
-              'video_by_descriptor=panel+api v2_hud1=on+off+after_ok+steady_on_unrelated_write v1_hud1=never sta1=session+panel+screen '
-              'sta1_refused=v1+9_lines+65_bytes+count_mismatch+no_newline+control+count_0+descriptor '
+              'video_by_descriptor=panel+api hud1=every_client+on+off+after_ok+steady_on_unrelated_write sta1=session+panel+screen '
+              'sta1_refused=9_lines+65_bytes+count_mismatch+no_newline+control+count_0+descriptor '
               'sta1_expiry=5s accepted=%d refused=%d stale=%d wrong_uid=not_tested_without_root'
               % (frames['accepted'], frames['refused'], frames['stale']))
     finally:

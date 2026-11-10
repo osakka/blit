@@ -2,11 +2,12 @@
 
      gamescope_bridge_gate unit
          The frame channel client against a fake Blit on a socketpair (hello
-         parsing, FRM3 bytes and descriptor, buffers held until RELEASE or
-         ERROR and then requeued, stale releases, the memfd fallback after
-         ENOTSUP, the INPUT request and its per-image OK / ERROR / pre-INPUT
-         answers, another image's answers ignored, a late
-         ERROR INPUT <id> ENOENT ending a live route), the placement (a=p and
+         parsing, FRM3 bytes and descriptor, buffers held until
+         FRAME release or FRAME error and then requeued, stale releases, the
+         memfd fallback after ENOTSUP, the INPUT request and its per-image
+         INPUT ok / INPUT error answers, another image's answers ignored, a
+         late INPUT error <id> ENOENT ending a live route, and the version 4
+         forms understood as nothing), the placement (a=p and
          a=d, and neither with --no-place) and the terminal
          reader (size report, the ?7701;2$y notice, focus out and in; clicks,
          the wheel, deltas and keys skipped with no event, since the bridge
@@ -106,8 +107,9 @@ static void unit_hello(void)
     CHECK(f.dmabuf == 0, "XR24 without LINEAR was taken as importable");
     gs_frames_parse_hello(&f, "OK dmabuf=0\n");
     CHECK(f.dmabuf == 0, "dmabuf=0 taken as dmabuf");
-    gs_frames_parse_hello(&f, "OK\n");
-    CHECK(f.dmabuf == 0, "a version 1 answer taken as dmabuf");
+    gs_frames_parse_hello(&f, "OK dmabuf=0 window=0\n");
+    CHECK(f.dmabuf == 0, "dmabuf=0 window=0 taken as dmabuf");
+    CHECK(gs_frames_parse_hello(&f, "ERROR 0 EINVAL\n") != 0, "a refused version accepted");
     CHECK(gs_frames_parse_hello(&f, "ERROR 0 EACCES\n") != 0, "a refused hello accepted");
 }
 
@@ -150,30 +152,42 @@ static void unit_channel(void)
     }
     CHECK(requeued_count == 0, "a buffer came back before any reply");
 
-    /* RELEASE gives exactly that buffer back, in the order Blit says. */
-    fake_reply(sv[1], "RELEASE 1 2\n");
+    /* FRAME release gives exactly that buffer back, in the order Blit says. */
+    fake_reply(sv[1], "FRAME release 1 2\n");
     gs_frames_read(&f);
-    CHECK(requeued_count == 1 && requeued[0] == &cookies[1], "RELEASE 1 2 did not requeue frame 2");
-    fake_reply(sv[1], "RELEASE 1 1\n");
+    CHECK(requeued_count == 1 && requeued[0] == &cookies[1], "FRAME release 1 2 did not requeue frame 2");
+    fake_reply(sv[1], "FRAME release 1 1\n");
     gs_frames_read(&f);
-    CHECK(requeued_count == 2 && requeued[1] == &cookies[0], "RELEASE 1 1 did not requeue frame 1");
+    CHECK(requeued_count == 2 && requeued[1] == &cookies[0], "FRAME release 1 1 did not requeue frame 1");
     /* A release for something not held changes nothing. */
-    fake_reply(sv[1], "RELEASE 1 1\n");
+    fake_reply(sv[1], "FRAME release 1 1\n");
     gs_frames_read(&f);
-    CHECK(requeued_count == 2 && f.stale_releases == 1, "a repeated RELEASE requeued twice");
+    CHECK(requeued_count == 2 && f.stale_releases == 1, "a repeated FRAME release requeued twice");
+    /* Version 5 only: the version 4 forms of every answer are no line the
+       bridge knows, and change nothing. */
+    {
+        static const char *const old[] = {"RELEASE 1 3", "ERROR 1 ENOTSUP", "OK input 1",
+                                          "ERROR INPUT 1 ENOTSUP"};
+        unsigned long errors = f.errors, released = f.released;
+        for (i = 0; i < 4; ++i)
+            CHECK(gs_frames_handle_line(&f, old[i]) == 0, "the version 4 form %s was understood", old[i]);
+        CHECK(requeued_count == 2 && f.errors == errors && f.released == released &&
+              f.input_state == GS_INPUT_NONE && !f.dmabuf_refused,
+              "a version 4 form changed the bridge's state");
+    }
     /* HUD1 is understood and holds nothing back. */
     fake_reply(sv[1], "HUD1 on\n");
     gs_frames_read(&f);
     CHECK(f.hud == 1 && requeued_count == 2, "HUD1 on mishandled");
 
-    /* An ERROR for the image gives back the newest held buffer, and ENOTSUP
+    /* A FRAME error for the image gives back the newest held buffer, and ENOTSUP
        turns FRM3 off: the bridge sends memfds from then on. */
     CHECK(gs_frames_send_dmabuf(&f, memfd, 640, 480, 0, 2560, &cookies[3]) == 0, "FRM3 4 not sent");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
     if (nfds) close(fds[0]);
-    fake_reply(sv[1], "ERROR 1 ENOTSUP\n");
+    fake_reply(sv[1], "FRAME error 1 ENOTSUP\n");
     gs_frames_read(&f);
-    CHECK(requeued_count == 3 && requeued[2] == &cookies[3], "ERROR 1 ENOTSUP did not requeue the refused frame");
+    CHECK(requeued_count == 3 && requeued[2] == &cookies[3], "FRAME error 1 ENOTSUP did not requeue the refused frame");
     CHECK(!gs_frames_use_dmabuf(&f), "FRM3 still used after ENOTSUP");
     /* Frame 3 (seq 3) is still held: it was accepted. */
     CHECK(f.held[0].used + f.held[1].used + f.held[2].used + f.held[3].used == 1,
@@ -198,51 +212,51 @@ static void unit_channel(void)
                   "BGRx not converted to RGB");
             close(fds[0]);
         }
-        /* An ERROR after a memfd frame is that frame's: the held one stays. */
-        fake_reply(sv[1], "ERROR 1 EINVAL\n");
+        /* A FRAME error after a memfd frame is that frame's: the held one stays. */
+        fake_reply(sv[1], "FRAME error 1 EINVAL\n");
         gs_frames_read(&f);
-        CHECK(requeued_count == 3, "an ERROR for a memfd frame requeued a held dmabuf");
+        CHECK(requeued_count == 3, "a FRAME error for a memfd frame requeued a held dmabuf");
     }
 
     /* INPUT (docs/api.md): the exact line, then each answer, each naming the
-       image; OK input is followed by INPUT on. */
+       image; INPUT ok is followed by INPUT on. */
     CHECK(gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei") == 0, "INPUT not sent");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(strcmp((char *)msg, "INPUT eis /run/user/1000/gamescope-0-ei 1\n") == 0 && nfds == 0,
+    CHECK(strcmp((char *)msg, "INPUT eis 1 /run/user/1000/gamescope-0-ei\n") == 0 && nfds == 0,
           "INPUT message is %s", msg);
     CHECK(f.input_state == GS_INPUT_SENT, "INPUT not pending");
-    CHECK(gs_frames_send_input_focus(&f, 1) != 0, "INPUT on sent before OK input");
+    CHECK(gs_frames_send_input_focus(&f, 1) != 0, "INPUT on sent before INPUT ok");
     /* Another picture's answers on a shared channel are not this one's;
        the old unnumbered forms are not answers at all. */
-    fake_reply(sv[1], "OK input 2\n");
-    fake_reply(sv[1], "ERROR INPUT 2 EBUSY\n");
-    fake_reply(sv[1], "OK input\n");
+    fake_reply(sv[1], "INPUT ok 2\n");
+    fake_reply(sv[1], "INPUT error 2 EBUSY\n");
+    fake_reply(sv[1], "INPUT ok\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_SENT && !f.input_on, "another image's or an unnumbered answer was taken");
-    fake_reply(sv[1], "OK input 1\n");
+    fake_reply(sv[1], "INPUT ok 1\n");
     gs_frames_read(&f);
-    CHECK(f.input_state == GS_INPUT_OK && f.input_on, "OK input 1 not taken");
+    CHECK(f.input_state == GS_INPUT_OK && f.input_on, "INPUT ok 1 not taken");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(strcmp((char *)msg, "INPUT on 1\n") == 0 && nfds == 0, "after OK input came %s", msg);
+    CHECK(strcmp((char *)msg, "INPUT on 1\n") == 0 && nfds == 0, "after INPUT ok came %s", msg);
     CHECK(gs_frames_send_input_focus(&f, 0) == 0 && !f.input_on, "INPUT off not sent");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
     CHECK(strcmp((char *)msg, "INPUT off 1\n") == 0, "INPUT off message is %s", msg);
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "ERROR INPUT 1 ENOTSUP\n");
+    fake_reply(sv[1], "INPUT error 1 ENOTSUP\n");
     gs_frames_read(&f);
-    CHECK(f.input_state == GS_INPUT_UNSUPPORTED && !f.input_on, "ERROR INPUT ENOTSUP not taken as unsupported");
+    CHECK(f.input_state == GS_INPUT_UNSUPPORTED && !f.input_on, "INPUT error ENOTSUP not taken as unsupported");
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
     {
         int before = requeued_count;
-        fake_reply(sv[1], "ERROR INPUT 1 EACCES\n");
+        fake_reply(sv[1], "INPUT error 1 EACCES\n");
         gs_frames_read(&f);
         CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EACCES") == 0 &&
-              requeued_count == before, "ERROR INPUT EACCES");
+              requeued_count == before, "INPUT error EACCES");
     }
     CHECK(gs_frames_send_input(&f, "relative-ei") != 0, "a relative EIS path was sent");
 
@@ -251,51 +265,51 @@ static void unit_channel(void)
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
     CHECK(!f.input_was_ok, "a new INPUT request kept input_was_ok");
-    fake_reply(sv[1], "OK input 1\n");
+    fake_reply(sv[1], "INPUT ok 1\n");
     gs_frames_read(&f);
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds); /* INPUT on 1 */
-    CHECK(f.input_state == GS_INPUT_OK && f.input_was_ok && f.input_on, "OK input before the late ENOENT");
+    CHECK(f.input_state == GS_INPUT_OK && f.input_was_ok && f.input_on, "INPUT ok before the late ENOENT");
     /* Another picture's route ending leaves this one up. */
-    fake_reply(sv[1], "ERROR INPUT 3 ENOENT\n");
+    fake_reply(sv[1], "INPUT error 3 ENOENT\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_OK && f.input_on, "another image's late ENOENT ended this route");
-    fake_reply(sv[1], "ERROR INPUT 1 ENOENT\n");
+    fake_reply(sv[1], "INPUT error 1 ENOENT\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_REFUSED && f.input_was_ok && !f.input_on &&
           strcmp(f.input_error, "ENOENT") == 0,
-          "late ERROR INPUT ENOENT: state %d was_ok %d on %d error %s", f.input_state,
+          "late INPUT error ENOENT: state %d was_ok %d on %d error %s", f.input_state,
           f.input_was_ok, f.input_on, f.input_error);
-    /* ENOENT before any OK input is a refusal, as before. */
+    /* ENOENT before any INPUT ok is a refusal, as before. */
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "ERROR INPUT 1 ENOENT\n");
+    fake_reply(sv[1], "INPUT error 1 ENOENT\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_REFUSED && !f.input_was_ok && strcmp(f.input_error, "ENOENT") == 0,
-          "early ERROR INPUT ENOENT taken as a live route ending");
+          "early INPUT error ENOENT taken as a live route ending");
     /* A line Blit could not read is answered with image 0: still ours. */
     gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei");
     fake_recv(sv[1], msg, sizeof(msg), fds, &nfds);
-    fake_reply(sv[1], "ERROR INPUT 0 EINVAL\n");
+    fake_reply(sv[1], "INPUT error 0 EINVAL\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_REFUSED && strcmp(f.input_error, "EINVAL") == 0,
-          "ERROR INPUT 0 EINVAL not taken");
+          "INPUT error 0 EINVAL not taken");
 
     /* Under --no-place (phase 2) the desktop app owns focus and sends
-       INPUT on/off itself through Hibr's listener: OK input is followed by
+       INPUT on/off itself through Hibr's listener: INPUT ok is followed by
        nothing from the bridge. Phase 1 (above) still sends INPUT on. */
     f.focus_by_desktop = 1;
     CHECK(gs_frames_send_input(&f, "/run/user/1000/gamescope-0-ei") == 0, "no-place: INPUT not sent");
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(strcmp((char *)msg, "INPUT eis /run/user/1000/gamescope-0-ei 1\n") == 0 && nfds == 0,
+    CHECK(strcmp((char *)msg, "INPUT eis 1 /run/user/1000/gamescope-0-ei\n") == 0 && nfds == 0,
           "no-place: INPUT message is %s", msg);
-    fake_reply(sv[1], "OK input 1\n");
+    fake_reply(sv[1], "INPUT ok 1\n");
     gs_frames_read(&f);
     CHECK(f.input_state == GS_INPUT_OK && f.input_was_ok && !f.input_on,
-          "no-place: OK input 1: state %d was_ok %d on %d", f.input_state, f.input_was_ok, f.input_on);
+          "no-place: INPUT ok 1: state %d was_ok %d on %d", f.input_state, f.input_was_ok, f.input_on);
     got = fake_recv(sv[1], msg, sizeof(msg) - 1, fds, &nfds);
     msg[got > 0 ? got : 0] = '\0';
-    CHECK(got < 0 && errno == EAGAIN, "no-place: after OK input the bridge sent %s", msg);
+    CHECK(got < 0 && errno == EAGAIN, "no-place: after INPUT ok the bridge sent %s", msg);
     f.focus_by_desktop = 0;
 
     /* Blit closing the channel gives every held buffer back. */
@@ -410,7 +424,7 @@ static int run_session(const char *result_path)
 
     /* An FRM3 (a memfd stands in for the dmabuf): this compositor cannot
        import, so it is refused and the buffer comes back. Sent even though
-       the hello said dmabuf=0, to prove the requeue on ERROR. */
+       the hello said dmabuf=0, to prove the requeue on FRAME error. */
     f.dmabuf = 1;
     memfd = memfd_create("gate-fake-dmabuf", 0);
     ftruncate(memfd, 64 * 4 * 48);
@@ -495,7 +509,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "GAMESCOPE_BRIDGE_UNIT_FAIL %d\n", failures);
             return 1;
         }
-        printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+fallback+memfd+input-per-image+late-enoent+"
+        printf("GAMESCOPE_BRIDGE_UNIT_OK hello+frm3+release+error+v4-forms-ignored+fallback+memfd+input-per-image+late-enoent+"
                "no-place-no-input-on+placement+no-place+tty-no-capture\n");
         return 0;
     }
