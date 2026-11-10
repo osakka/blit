@@ -324,3 +324,90 @@ proposals named there.
   coordinated Blit+Hibr change), the package, and the live checks on the
   mini PC: vkcube's dmabuf frames imported by Blit's GPU, its pacing and
   keys and mouse.
+
+**Phase 1, milestone C (0.3.72, in development, 2026-11-10).** The
+Blit-side work that closes phase 1, apart from the owner's live check.
+
+- **Pointer lock and confinement.** `zwp_pointer_constraints_v1` (version
+  1) exactly as `docs/api.md` "Pointer lock", agreed with Hibr: the
+  program's `lock_pointer` or `confine_pointer` is asked of the desktop,
+  `WINDOW lock <id> relative|confine` (the top-level's id, also for a
+  popup's surface), and waits until the desktop's `WINDOW lock <id> on`
+  (an `off` before it, the desktop's "no gesture yet", leaves it waiting);
+  `off` deactivates it, after which a oneshot constraint is defunct and its
+  request spent, and a persistent one waits for the next `on`. The program
+  destroying a constraint still asked for, or its window going, is `WINDOW
+  lock <id> off`, before `WINDOW gone`. While a lock is active the
+  compositor sends no absolute motion; relative motion is milestone B's
+  `INPUT rel`. Regions and the cursor hint are not carried (Blit confines
+  to the picture's drawn rectangle).
+- **Popups take input: `INPUT member` in Blit.** A popup's picture joins
+  its top-level's route at its offset; the pointer over its drawn
+  rectangle is hit-tested with the top-level's (the topmost draw wins) and
+  sent as a point in the top-level's surface pixels -- the member's offset
+  plus the point within it, negative past the top-level's left or top --
+  for both backends (EIS scales it to the region as the top-level's own
+  points are). The member ends with its picture or its route. Its answers
+  follow the other INPUT requests (`OK input <popup-id>`, `ERROR INPUT
+  <popup-id> EINVAL|EBUSY`); api.md said `OK window`, which no INPUT
+  request answers, and now says this. The compositor hit-tests its popups
+  from top-level coordinates as milestone B did, now with negative points.
+- **Key repeat from Blit's settings.** `GET /v1/input/keymap` answers, 200
+  and 304 alike, with `X-Blit-Repeat-Rate` and `X-Blit-Repeat-Delay`: the
+  keyboard's repeat as the kernel holds it (the keyboard settings'
+  read-back), 0 and 0 without autorepeat. Headers rather than a second
+  endpoint: one request, and repeat is not part of the keymap's text, so
+  the ETag keeps its meaning and a 304 still brings a new repeat.
+  blit-compositor sends `wl_keyboard.repeat_info` from them; its 25 a
+  second after 600 ms is gone.
+- **The keymap read only when it changes.** Blit keeps a keymap revision,
+  bumped by any keyboard's device change (the event stream's
+  `device_changed` and this are one signal) and when the default keyboard
+  moves, and writes `INPUT keymap <id> <revision>` on each live `sock`
+  route that has not been told it -- at once, and when a route goes live
+  after a change. It is a notice, not an event: no `frame`, not counted.
+  The compositor reads the keymap for a revision it has not read for,
+  `If-None-Match`, **synchronously, bounded at 250 ms on loopback, only on
+  the notice**: chosen over a non-blocking read so that the key Blit writes
+  after the notice is interpreted with the new keymap; the event loop
+  waits at most that long, and only when the keyboard changed. It no longer
+  reads at a keyboard enter (only to retry a read that failed).
+- **Which keyboard.** The default keymap is the keyboard whose key came
+  last while it is there and enabled, else the first enabled keyboard; a
+  press on another keyboard moves it, and the notice is written before
+  that key.
+- **The `blit-compositor` package**, like `blit-gamescope`:
+  `/usr/bin/blit-compositor`, a README naming this ADR, a
+  GPL-3.0-or-later copyright file; `Depends: blit (= version), libc6,
+  libwayland-server0, libxkbcommon0`, `Recommends: xwayland` (as decided
+  above; phase 1 does not start it); `blit` Suggests it. tcc 0.9.27 has no
+  `-ffile-prefix-map` (it accepts the flag and ignores it: measured, the
+  working directory and source paths stay in its stabs), so the compositor
+  target is built without `-g`: no path is recorded, and builds from two
+  protocol directories are the same bytes. Two package builds of one tree
+  gave one sha256.
+- **Gates.** `compositor_gate`: the lock part (the stand-in's `--lock`:
+  oneshot pending through an `off`, locked with relative motion and no
+  absolute, unlocked and defunct; persistent locked again, its destroy
+  `off`; a confinement whose pointer moves; the window gone, `off` then
+  `gone`), and the input part end to end with a real Blit on the mock
+  display and two fabricated keyboards: Blit's route into the compositor's
+  input socket, the pointer over the popup's picture (`INPUT member`)
+  reaching the popup surface at its own pixels; repeat 30/250 from Blit; a
+  repeat PATCH while live reaching the client; a key from the second
+  keyboard bringing its keymap and repeat before the key, and the first's
+  back; the keymap read only at start and on notices; all again under
+  AddressSanitizer and UBSan. `frame_input_gate` sock and stub: `INPUT
+  member`'s answers, its mapping (a negative offset too) and its end with
+  its picture, through lines and through EIS; the notice when a route goes
+  live, once. `keymap_gate`: the repeat headers on 200 and 304, a repeat
+  PATCH changing them and not the ETag, the default following the last
+  key's keyboard, disabled and enabled. `package_artifact_gate`'s
+  compositor leg, run by hand on the built package (the full gate needs a
+  release manifest).
+- **Not in milestone C:** `WINDOW cursor` and `wl_pointer.set_cursor`,
+  `zxdg_output_manager_v1`, `wl_data_device_manager`, `wp_viewporter`,
+  subsurfaces composited, the version 5 grammar, Hibr's side of `WINDOW
+  lock` and `INPUT member`, and the owner's live check on the mini PC:
+  vkcube's dmabuf frames imported by Blit's GPU, an everyday Wayland
+  program (a GTK one), keys, mouse, popups and pointer lock.
