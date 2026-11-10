@@ -9,7 +9,7 @@
    descriptor:
 
        compositor to desktop
-           WINDOW display <name>          first, after the hello's OK
+           WINDOW display <name> <x-display>   first, after the hello's OK (`:n`, `-` X off)
            WINDOW new <id> <parent|0>
            WINDOW title <id> <text>       WINDOW appid <id> <text>
            WINDOW limits <id> <minW> <minH> <maxW> <maxH>

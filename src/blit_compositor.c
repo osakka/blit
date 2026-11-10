@@ -1,5 +1,6 @@
 /* blit-compositor: Blit's Wayland compositor for programs (ADR 0228,
-   phase 1, milestones A, B and C).
+   phase 1, milestones A, B and C), and the X window manager of the
+   Xwayland it runs for X programs (phase 2, milestone A: the X section).
 
      blit-compositor [--display name] [--log path]
 
@@ -7,8 +8,9 @@
    BLIT_FRAME_SOCKET/BLIT_FRAME_TOKEN of the frame channel it serves. It
    connects there as a version 5 producer (blit_compositor_wire.h), listens
    on $XDG_RUNTIME_DIR/<name> (--display's, else blit-<n>, the first free n)
-   and says that name with `WINDOW display <name>`; the desktop puts it in
-   its programs' environment as WAYLAND_DISPLAY.
+   and says that name with `WINDOW display <name> <x-display>`; the desktop
+   puts them in its programs' environment as WAYLAND_DISPLAY and DISPLAY
+   (the X display `:<n>` of its Xwayland, `-` when X is off).
 
    Its programs survive a desktop restart (the restart section): when the
    channel closes, the compositor keeps every client and window, reconnects
@@ -46,7 +48,8 @@
    frame, and so no configure, which waits for the desktop's size.
 
    Built with tools/build-tcc.sh compositor, linked against
-   libwayland-server.so.0 and libxkbcommon.so.0. */
+   libwayland-server.so.0, libxkbcommon.so.0 and libxcb.so.1 with its
+   composite, xfixes and res extensions. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <signal.h>
@@ -4645,10 +4648,10 @@ static void input_sockets_clear(struct bc_server *s)
    Xwayland is ready wait in the sockets' backlog. When Xwayland dies
    (SIGCHLD; its status logged) its windows go and it is started again a
    moment later, on the same display; dying within 5 s of its start three
-   times in a row stops that: X is off until the compositor restarts, and
-   the sockets close so X programs fail at once. At the compositor's end
-   it is ended (SIGTERM, then SIGKILL after a second) and the sockets and
-   lock removed.
+   times in a row stops that: X is off until the compositor restarts, the
+   sockets close so X programs fail at once, and a desktop that connects
+   again is told `-`. At the compositor's end it is ended (SIGTERM, then
+   SIGKILL after a second) and the sockets and lock removed.
 
    The window manager. When -displayfd's line comes, the compositor
    connects on its end of -wm: CompositeRedirectSubwindows(root, Manual)
@@ -5339,9 +5342,12 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
 {
     switch (ev->response_type & 0x7f) {
     case 0: {
+        /* BadWindow is a window gone before our request about it (its
+           WM_STATE at its unmap, a focus): X's ordinary race, not said. */
         xcb_generic_error_t *e = (xcb_generic_error_t *)ev;
-        logf_("X: error %u on request %u.%u (sequence %u, resource 0x%x)", e->error_code,
-              e->major_code, e->minor_code, e->sequence, e->resource_id);
+        if (e->error_code != XCB_WINDOW)
+            logf_("X: error %u on request %u.%u (sequence %u, resource 0x%x)", e->error_code,
+                  e->major_code, e->minor_code, e->sequence, e->resource_id);
         return;
     }
     case XCB_CREATE_NOTIFY:
@@ -5768,6 +5774,8 @@ static int on_x_child(int signal_number, void *data)
               "until the compositor restarts", BC_X_QUICK_US / 1000000ull, s->x.quick_deaths);
         x_sockets_close(s);
         s->x.on = 0;
+        /* A desktop that connects from here on is told X is off. */
+        snprintf(s->x.display, sizeof(s->x.display), "-");
         return 0;
     }
     logf_("X: starting Xwayland again on %s", s->x.display);
@@ -6528,7 +6536,9 @@ static void usage(FILE *out)
     fprintf(out, "usage: blit-compositor [--display name] [--log path]\n"
                  "  Blit's Wayland compositor for programs (ADR 0228). Needs BLIT_FRAME_SOCKET,\n"
                  "  BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR; listens on $XDG_RUNTIME_DIR/<name>,\n"
-                 "  --display's (refused, status 2, when in use or invalid), else blit-<n>.\n");
+                 "  --display's (refused, status 2, when in use or invalid), else blit-<n>.\n"
+                 "  With Xwayland 23.1 or later on PATH it runs it for X programs and is its\n"
+                 "  window manager; the X display goes to the desktop with the Wayland one.\n");
 }
 
 /* Why `name` cannot be the display --display asks for, or NULL: it is one

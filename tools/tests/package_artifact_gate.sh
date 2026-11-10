@@ -257,9 +257,12 @@ dpkg-deb -f "$package" Suggests | grep -Fq blit-compositor || {
     exit 1
 }
 # ADR 0228: the Wayland compositor's package, checked when it sits beside
-# the main one. Running it needs libwayland-server.so.0 and
-# libxkbcommon.so.0, which building it needed too. Its binary records no
-# build path (tools/build-tcc.sh compiles it without tcc's -g).
+# the main one. Running it needs libwayland-server.so.0, libxkbcommon.so.0
+# and libxcb with its composite, xfixes and res extensions (the X window
+# manager), which building it needed too. Its binary records no build path
+# (tools/build-tcc.sh compiles it without tcc's -g); the X display's own
+# paths, /tmp/.X11-unix/X<n> and /tmp/.X<n>-lock, are X's convention and
+# not one.
 compositor_package=$(dirname "$package")/blit-compositor_${version}_amd64.deb
 compositor=absent
 if [ -f "$compositor_package" ]; then
@@ -267,7 +270,7 @@ if [ -f "$compositor_package" ]; then
     test "$(dpkg-deb -f "$compositor_package" Architecture)" = amd64
     test "$(dpkg-deb -f "$compositor_package" Version)" = "$version"
     test "$(dpkg-deb -f "$compositor_package" Depends)" = \
-        "blit (= $version), libc6, libwayland-server0, libxkbcommon0" || {
+        "blit (= $version), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0" || {
         echo "PACKAGE_ARTIFACT_FAIL blit-compositor Depends is" \
              "$(dpkg-deb -f "$compositor_package" Depends)" >&2
         exit 1
@@ -296,7 +299,8 @@ if [ -f "$compositor_package" ]; then
         echo "PACKAGE_ARTIFACT_FAIL blit-compositor is not version $release" >&2
         exit 1
     }
-    if strings "$cstage/usr/bin/blit-compositor" | grep -F -e "$root" -e /tmp/ >/dev/null; then
+    if strings "$cstage/usr/bin/blit-compositor" |
+            sed -E 's#/tmp/\.X(11-unix(/X%d)?|%d-lock|<n>-lock)##g' | grep -F -e "$root" -e /tmp/ >/dev/null; then
         echo "PACKAGE_ARTIFACT_FAIL blit-compositor records a build path" >&2
         exit 1
     fi

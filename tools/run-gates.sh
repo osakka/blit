@@ -581,6 +581,11 @@ suite_hibr() {
     # wayland-server, wayland-client, wayland-scanner and wayland-protocols
     # (tools/build-flags.sh).
     run_gate compositor_gate.sh sh "$ROOT"/tools/tests/compositor_gate.sh
+    # ADR 0228 phase 2, milestone A: an X program in a window through the
+    # compositor's Xwayland, keys and mouse, with the in-repo X stand-in.
+    # Skips (77) without Xwayland 23.1 or later on PATH, or without libxcb
+    # (tools/build-flags.sh).
+    run_gate xwayland_gate.sh sh "$ROOT"/tools/tests/xwayland_gate.sh
     # ADR 0228 phase 1, milestone B: GET /v1/input/keymap compiles with
     # libxkbcommon and types what Blit types. Needs xkbcommon
     # (tools/build-flags.sh).
