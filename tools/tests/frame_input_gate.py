@@ -279,7 +279,10 @@ def local():
     work = tempfile.mkdtemp(prefix='blit-input-gate-')
     results = []
     own = os.path.join(work, 'own-input')
-    keep = [listening_socket(own)]
+    # A window's socket each: one route per socket (ADR 0229).
+    own12 = os.path.join(work, 'own-input-12')
+    own13 = os.path.join(work, 'own-input-13')
+    keep = [listening_socket(own), listening_socket(own12), listening_socket(own13)]
     server = Server(19834 + OFFSET, work)
     try:
         a = Session(server, work, 'a')
@@ -383,7 +386,7 @@ def local():
             check(route(server.input(a.id), 7)['hold'] == hold,
                   'after %r the hold is %s' % (text, route(server.input(a.id), 7)))
             holds.append(got.split()[1].decode())
-        got = ch.ask('INPUT sock 12 %s\n' % own)
+        got = ch.ask('INPUT sock 12 %s\n' % own12)
         check(got == b'INPUT ok 12\n', 'a second image on the channel was answered %r' % got)
         check(sorted(r['image'] for r in server.input(a.id)['routes']) == [7, 12],
               'two routes on one channel: %s' % server.input(a.id))
@@ -405,7 +408,7 @@ def local():
                  lambda: 'INPUT on 12 did not turn 7 off: %s' % server.input(a.id))
         # ... and across the session's channels.
         ch2 = Channel(a)
-        check(ch2.ask('INPUT sock 13 %s\n' % own) == b'INPUT ok 13\n', 'a second channel was refused')
+        check(ch2.ask('INPUT sock 13 %s\n' % own13) == b'INPUT ok 13\n', 'a second channel was refused')
         ch2.line('INPUT on 13\n')
         wait_for(lambda: state(server, a.id, 13) == 'live' and state(server, a.id, 12) == 'off',
                  lambda: 'the second channel did not turn the first off: %s' % server.input(a.id))
@@ -452,6 +455,17 @@ class LineReceiver:
 
     def accept(self):
         self.conn, _ = self.listener.accept()
+
+    def reaccept(self):
+        """A new connection on the same socket, after the last one ended."""
+        if self.conn is not None:
+            self.conn.close()
+        self.conn = None
+        self.buffer = b''
+        self.events, self.notices, self.keymaps, self.fds = [], [], [], []
+        self.frames = self.total = 0
+        self.eof = False
+        self.accept()
 
     def connected(self, wait=0.3):
         """Whether Blit connected (an accept pending), taking it if so."""
@@ -753,11 +767,59 @@ def multi(server, a, work):
         rb.ended('the first channel closed')
         key(37, 0)
         wait_for(lambda: server.input(a.id)['routes'] == [], 'routes outlived their channels')
+
+        # One route per window socket (ADR 0229): route 27, on another
+        # channel, to route 26's socket -- as a desktop asking again under a
+        # new picture id, or on another display's channel -- ends 26: what
+        # it held released first, its channel told ENOENT, last_error
+        # `superseded`; 27 takes the keys on the same socket.
+        ch3, ch4 = Channel(a), Channel(a)
+        ch3.frame(26, 1)
+        ch4.frame(27, 1)
+        wait_for(lambda: a.graphics(26) and a.graphics(27), 'images 26 and 27 did not land')
+        check(ch3.ask('INPUT sock 26 %s\n' % ra.path) == b'INPUT ok 26\n', 'route 26 was refused')
+        ra.reaccept()
+        ch3.line('INPUT on 26\n')
+        live(26)
+        key(38, 1)
+        ra.expect(['key 26 38 press'], 'held through route 26')
+        check(ch4.ask('INPUT sock 27 %s\n' % ra.path) == b'INPUT ok 27\n', 'route 27 to 26\'s socket was refused')
+        ra.expect(['key 26 38 release'], 'release-all when route 26 is superseded')
+        ra.ended('route 26 superseded')
+        got = ch3.reply(5.0)
+        check(got == b'INPUT error 26 ENOENT\n', 'the superseded route 26 was answered %r' % got)
+        info = server.input(a.id)
+        check(route(info, 26) is None and info.get('last_error') == 'superseded',
+              'frames.input after route 26 was superseded %s' % info)
+        ra.reaccept()
+        ch4.line('INPUT on 27\n')
+        live(27)
+        key(38, 0)
+        key(39, 1, 0)
+        ra.expect(['key 27 39 press', 'key 27 39 release'], 'keys to route 27 on the same socket')
+
+        # A route before its picture has come says `picture: absent`, then
+        # `present` once it lands.
+        check(ch4.ask('INPUT sock 28 %s\n' % rc.path) == b'INPUT ok 28\n', 'route 28 was refused')
+        rc.reaccept()
+        ch4.line('INPUT on 28\n')
+        live(28)
+        check(route(server.input(a.id), 28)['picture'] == 'absent',
+              'route 28 before its picture: %s' % server.input(a.id))
+        ch4.frame(28, 1)
+        wait_for(lambda: route(server.input(a.id), 28)['picture'] == 'present',
+                 lambda: 'route 28 after its picture landed: %s' % server.input(a.id))
+        ch3.close()
+        ch4.close()
+        ra.ended('the fourth channel closed')
+        rc.ended('the fourth channel closed')
+        wait_for(lambda: server.input(a.id)['routes'] == [], 'routes outlived their channels')
     finally:
         for r in receivers:
             r.close()
     return ('routes=two_per_channel ebusy=same_image,no_connect on_releases_other=stamped_before '
-            'late_enoent=one_route delete=one_route one_on=two_channels')
+            'late_enoent=one_route delete=one_route one_on=two_channels '
+            'one_route_per_socket=superseded,released,ENOENT picture=absent->present')
 
 
 def sock():

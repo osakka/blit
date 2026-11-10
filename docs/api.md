@@ -2353,9 +2353,10 @@ It speaks the frame channel above as a producer, with these additions.
   when a new `INPUT sock` opens one -- what it held released first, its
   channel told `INPUT error <id> ENOENT`, `last_error` `superseded` -- so a
   route left behind when a desktop asks again under a new picture id, or
-  on another display's channel, cannot linger. In `frames.input` a route
-  that is live by the rule but whose picture is not in its session (not
-  come yet, or drawn in another display's) says `waiting`, not `live`.
+  on another display's channel, cannot linger. In `frames.input` each
+  route says `picture`: `present` when its picture is in the route's
+  session, `absent` when it has not come yet or is drawn in another
+  display's session (keys still reach a live route; the pointer cannot).
   A top-level's input socket is `$XDG_RUNTIME_DIR/<display>-input-<id>`
   (mode 0600, made at its first `WINDOW new`, removed when it goes), and
   the compositor sends `INPUT sock` for it right after its `WINDOW new`

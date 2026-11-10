@@ -776,9 +776,9 @@ static int frame_input_slot(const BlitFrameClient *client, unsigned int image_id
    opened: what it held released to the compositor first, its channel told
    `INPUT error <id> ENOENT`, `last_error` `superseded`. The file's device
    and inode, not its name, say which socket it is. */
-static void frame_input_supersede(BlitRuntime *runtime, uid_t uid, dev_t dev, ino_t ino)
+static int frame_input_supersede(BlitRuntime *runtime, uid_t uid, dev_t dev, ino_t ino)
 {
-    int i, k;
+    int i, k, ended = 0;
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         BlitFrameClient *other = &runtime->frame_clients[i];
         if (!other->used || !other->authenticated || other->uid != uid)
@@ -789,8 +789,10 @@ static void frame_input_supersede(BlitRuntime *runtime, uid_t uid, dev_t dev, in
                 continue;
             frame_input_end(runtime, other, old);
             frame_input_disconnected(runtime, other, k, "superseded");
+            ++ended;
         }
     }
+    return ended;
 }
 
 static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
@@ -803,7 +805,7 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
     socklen_t peer_length = sizeof(peer);
     struct stat info;
     BlitFrameInput *in;
-    int fd, slot;
+    int fd, slot, superseded;
 
     /* An image whose frame has not come yet is accepted, as a placement
        that arrives first is (ADR 0202); a deleted one, or a Kitty image
@@ -871,7 +873,7 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
         frame_input_refuse(runtime, client, image_id, "ENOMEM");
         return;
     }
-    frame_input_supersede(runtime, client->uid, info.st_dev, info.st_ino);
+    superseded = frame_input_supersede(runtime, client->uid, info.st_dev, info.st_ino);
     in->sock_dev = info.st_dev;
     in->sock_ino = info.st_ino;
     in->sock = fd;
@@ -879,7 +881,8 @@ static void frame_input_open(BlitRuntime *runtime, BlitFrameClient *client,
     in->image_seen = image != NULL;
     client->inputs[slot] = in;
     ++frame_input_routes;
-    frame_input_error(session, "");
+    /* A route it superseded is the last thing that went wrong: kept. */
+    if (!superseded) frame_input_error(session, "");
     frame_input_accept(client, image_id);
 }
 
@@ -1131,17 +1134,17 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
                 mu += (size_t)snprintf(members + mu, sizeof(members) - mu,
                                        "%s{\"image\":%u,\"x\":%d,\"y\":%d}", m ? "," : "",
                                        in->members[m].image_id, in->members[m].x, in->members[m].y);
-            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"state\":\"%s\","
+            /* `picture`: whether the route's picture is in this session -- not
+               come yet, or drawn in another display's session, is `absent`:
+               keys still go to a live route, the pointer cannot. */
+            n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"picture\":\"%s\",\"state\":\"%s\","
                          "\"hold\":\"%s\",\"members\":[%s],"
                          "\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
                          "\"over\":%u,\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
                          first ? "" : ",", in->image_id,
-                         /* `waiting`: live by the rule, but its picture is not in this
-                            session (not come yet, or drawn in another display's). */
-                         !in->on ? "off"
-                         : !frame_input_live(runtime, client, in) ? "on"
-                         : session != NULL && graphics_image_find((BlitSession *)session, in->image_id) == NULL
-                               ? "waiting" : "live",
+                         session != NULL && graphics_image_find((BlitSession *)session, in->image_id) != NULL
+                             ? "present" : "absent",
+                         !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
                          in->confine ? "confine" : "relative", members,
                          in->last_surface[0], in->last_surface[1],
                          in->last_draw[0], in->last_draw[1], in->last_draw[2], in->last_draw[3],
