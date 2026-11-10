@@ -3,6 +3,11 @@
 - Status: superseded by [ADR 0228](0228-blit-is-the-compositor-for-programs.md);
   deprecated 2026-11-10 by the owner, removed in 0.3.75 (blit-gamescope,
   the libei input path and their gates)
+- Removed: in 0.3.75 -- the bridge (`src/blit_gamescope*.{c,h}`) and its
+  package, the libei backend of the input route (`INPUT eis`), the EIS and
+  stand-in libei gates; the route model and its hold modes stay, for
+  blit-compositor's `INPUT sock` routes (ADR 0228). `blit` Breaks
+  `blit-gamescope` and `steamer`, retired with it
 - Date: 2026-11-07
 - Scope: a new producer program for the frame channel (`blit-gamescope`),
   input forwarding from a Blit session to a nested compositor, gamepad

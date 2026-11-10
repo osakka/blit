@@ -574,3 +574,8 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   ("I want no legacy stuff loose"). Phase 4 is then only what is left of
   ADR 0206, which was never built. 0.3.74 ships with blit-gamescope marked
   deprecated in its documentation.
+- **gamescope removed in 0.3.75.** The bridge, its package, the libei
+  input path and their gates are gone; `INPUT sock` is the only input
+  route, and `frame_input_gate` covers on it every case the stand-in libei
+  covered. `blit` Breaks `blit-gamescope` and `steamer` (retired with it),
+  so an upgrade removes both.

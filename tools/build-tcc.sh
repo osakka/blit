@@ -68,36 +68,6 @@ case "$target" in
             -I"$hibr_root/include" -I"$hibr_root/mods" \
             -o "$output" "$ROOT/hibr/console-blit.c"
         ;;
-    gamescope)
-        # ADR 0225: blit-gamescope. The PipeWire/SPA headers need GNU C, so
-        # this target is built by cc, not tcc; linked by SONAME. The headers
-        # are Debian 13's libpipewire-0.3-dev and libspa-0.2-dev 1.4.2, kept
-        # in build/deps/prefix like the other build dependencies
-        # (docs/toolchain.md).
-        pw_include=${BLIT_PIPEWIRE_INCLUDE:-$ROOT/build/deps/prefix/include/pipewire-0.3}
-        spa_include=${BLIT_SPA_INCLUDE:-$ROOT/build/deps/prefix/include/spa-0.2}
-        if [ ! -f "$pw_include/pipewire/pipewire.h" ] || [ ! -f "$spa_include/spa/pod/builder.h" ]; then
-            echo "blit: PipeWire headers not found (set BLIT_PIPEWIRE_INCLUDE and BLIT_SPA_INCLUDE)" >&2
-            exit 1
-        fi
-        # The package build needs the same bytes from any directory and any
-        # checkout: -g records the compiler's working directory and the
-        # source paths, so compile from the root and record it as ".".
-        case "$output" in
-            /*) ;;
-            *) output=$(pwd)/$output ;;
-        esac
-        (cd "$ROOT" && ${CC:-cc} -O2 -g -std=gnu99 -Wall -Wno-unused-function \
-            -ffile-prefix-map="$ROOT"=. \
-            "-DBLIT_BUILD_VERSION=\"$version\"" \
-            -I"$ROOT/src" -I"$pw_include" -I"$spa_include" \
-            "$ROOT/src/blit_gamescope.c" \
-            "${BLIT_PIPEWIRE_LIBRARY:-/lib/x86_64-linux-gnu/libpipewire-0.3.so.0}" \
-            -o "$output")
-        chmod 0755 "$output"
-        echo "built $output target=$target version $version with ${CC:-cc}"
-        exit 0
-        ;;
     compositor)
         # ADR 0228: blit-compositor, Blit's Wayland compositor for programs,
         # its own program linked against libwayland-server by SONAME. Its
@@ -147,7 +117,7 @@ case "$target" in
             -o "$output"
         ;;
     *)
-        echo "blit: unknown TCC target '$target' (use server, helper, adapter, gamescope, or compositor)" >&2
+        echo "blit: unknown TCC target '$target' (use server, helper, adapter, or compositor)" >&2
         exit 1
         ;;
 esac

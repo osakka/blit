@@ -971,8 +971,8 @@ typedef struct {
     uid_t uid;  /* the peer's, from SO_PEERCRED at the hello */
     unsigned long long serial;  /* which connection, for a dmabuf's FRAME release */
     int hud_on;   /* the last HUD1 sent */
-    /* ADR 0225: this channel's input routes to compositors' EIS sockets,
-       one per image it named in an accepted `INPUT eis`, the rest NULL
+    /* ADR 0228: this channel's input routes to blit-compositor's input
+       sockets, one per image it named in an accepted `INPUT sock`, the rest NULL
        (blit_frames_input.h). A desktop multiplexes its windows' pictures
        over one channel, so each picture has its own. ADR 0226: a table of
        `input_capacity` slots that grows on demand, freed with the channel. */
@@ -1123,8 +1123,8 @@ typedef struct {
     unsigned long dmabuf_refused_unavailable, dmabuf_refused_format;
     unsigned long dmabuf_refused_import, dmabuf_refused_invalid;
     char frames_last_error[32];
-    /* ADR 0225: events this session's input routes sent to EIS, and the
-       last thing that went wrong with one (kept after the route ends). */
+    /* ADR 0228: events this session's input routes sent, and the last
+       thing that went wrong with one (kept after the route ends). */
     unsigned long frame_input_events;
     unsigned long frame_input_dropped;  /* lines an INPUT sock route could not write */
     char frame_input_error[32];
@@ -1865,8 +1865,8 @@ typedef struct {
     uint64_t auxiliary_worker_deadline_us;
     uint64_t console_input_since_us;
     /* Physical input handed to another VT (service_native_console), also
-       under BLIT_TEST_VT_SIGNALS, where no VT is owned: an input route to
-       EIS is live only while Blit holds the console (ADR 0225). */
+       under BLIT_TEST_VT_SIGNALS, where no VT is owned: an input route is
+       live only while Blit holds the console (ADR 0228). */
     int console_away;
     /* ADR 0202: the frame socket and its clients. */
     int frame_fd;
@@ -2040,7 +2040,7 @@ static void recent_note_present(BlitRuntime *runtime, int output,
 static void recent_tick(BlitRuntime *runtime, uint64_t now);
 static void recent_json(const BlitRuntime *runtime, int output, char *out, size_t capacity);
 static void frame_hud_notify(BlitRuntime *runtime);
-/* ADR 0225: physical input to a compositor's EIS socket (blit_frames_input.h). */
+/* ADR 0228: physical input to blit-compositor's input sockets (blit_frames_input.h). */
 static int frame_input_routes;
 static void frame_input_key(BlitRuntime *runtime, unsigned int code, int pressed);
 static void frame_input_button(BlitRuntime *runtime, int button, int pressed);
@@ -16770,7 +16770,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->dmabuf_accepted, session->dmabuf_released,
         session->dmabuf_refused_unavailable, session->dmabuf_refused_format,
         session->dmabuf_refused_import, session->dmabuf_refused_invalid);
-    /* ADR 0225: its input route to a compositor's EIS socket. */
+    /* ADR 0228: its input routes to blit-compositor. */
     if (used < capacity)
         used += frame_input_json(runtime, session, body + used, capacity - used);
     if (used < capacity)
@@ -29543,7 +29543,7 @@ static void evdev_emit_wheel(BlitRuntime *runtime,
         button = direction > 0 ? 66 : 67;
     else
         button = direction > 0 ? 64 : 65;
-    /* ADR 0225: one notch to a live EIS route, whatever the step. */
+    /* ADR 0228: one notch to a live input route, whatever the step. */
     if (frame_input_routes)
         frame_input_scroll(runtime, horizontal, direction);
     for (emitted = 0; emitted < scroll_step; ++emitted) {
@@ -30629,7 +30629,7 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
         blit_running = 0;
         return;
     }
-    /* ADR 0225: the physical key, press and release, to a live EIS route
+    /* ADR 0228: the physical key, press and release, to a live input route
        (the compositor makes its own repeats). The session still gets it. */
     if (frame_input_routes && event->value != 2)
         frame_input_key(runtime, event->code, event->value != 0);
@@ -30891,7 +30891,7 @@ static void service_native_console(BlitRuntime *runtime)
                 if (runtime->evdev_mouse_buttons[i] & (1U << button))
                     dispatch_evdev_mouse_button(runtime, i, button, 0);
         /* After the releases, so a program sees its keys come up before it
-           is told it lost focus. An EIS route ends here too (ADR 0225). */
+           is told it lost focus. A live input route ends here too (ADR 0228). */
         console_focus_report(runtime, 0);
         runtime->console_away = 1;
         frame_input_reconcile(runtime);

@@ -14,7 +14,7 @@ details.
 The full text of the GNU General Public License, version 3, is in COPYING.
 
 This covers Blit's own source, documentation and tools, and the programs
-built from them (blit-server, blit-update-helper, blit-gamescope). Bundled
+built from them (blit-server, blit-update-helper, blit-compositor). Bundled
 third-party material keeps its own licence, recorded beside it:
 - fonts under assets/fonts/ (assets/fonts/licenses/, the *-LICENSE.txt
   files, assets/fonts/README.md);

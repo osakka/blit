@@ -575,7 +575,6 @@ suite_hibr() {
     run_gate font_resize_views_gate.rb ruby tools/tests/font_resize_views_gate.rb
     run_gate frame_descriptor_gate.sh sh "$ROOT"/tools/tests/frame_descriptor_gate.sh
     run_gate frame_dmabuf_gate.sh sh "$ROOT"/tools/tests/frame_dmabuf_gate.sh
-    run_gate gamescope_bridge_gate.sh sh "$ROOT"/tools/tests/gamescope_bridge_gate.sh
     # ADR 0228 phase 1: blit-compositor and the WINDOW wire against a fake
     # desktop with the in-repo stand-in client, then Blit's window=0. Needs
     # libwayland-dev, libwayland-bin and wayland-protocols on the build host.
@@ -583,12 +582,10 @@ suite_hibr() {
     # ADR 0228 phase 1, milestone B: GET /v1/input/keymap compiles with
     # libxkbcommon and types what Blit types. Needs libxkbcommon-dev.
     run_gate keymap_gate.sh sh "$ROOT"/tools/tests/keymap_gate.sh
-    # ADR 0225: the INPUT route to EIS. The first runs anywhere (stand-in
-    # libei); the second needs libei.so.1 and libeis.so.1 and skips (77)
-    # without them.
+    # ADR 0228: the INPUT routes to blit-compositor's input sockets, and a
+    # routed picture never freed for room (ADR 0226).
     run_gate frame_input_gate.sh sh "$ROOT"/tools/tests/frame_input_gate.sh
     run_serial_gate graphics_memory_frames_gate.sh sh "$ROOT"/tools/tests/graphics_memory_frames_gate.sh
-    run_gate frame_input_eis_gate.sh sh "$ROOT"/tools/tests/frame_input_eis_gate.sh
     # ADR 0223: import, drawing and RELEASE need a GPU that imports dmabufs,
     # so they run against a named live host, never implied by a local run.
     if [ -n "$LIVE_DMABUF" ]; then

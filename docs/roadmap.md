@@ -99,11 +99,12 @@ and recovery.
 
 ### 7. Programs in windows (ADR 0228, ADR 0229)
 
-- **Now: gamescope out (0.3.75).** The owner chose to remove
+- **Done: gamescope removed in 0.3.75.** By the owner's choice
   `blit-gamescope` and everything that served it -- the bridge, the libei
   input path (`INPUT eis`), their gates and package, ADR 0206's hand-over --
-  in one change with Hibr's and steamer's sides. Until phase 2, Steam and
-  other X11 programs do not run in Blit windows.
+  went in one change with Hibr's side; steamer, the Steam launcher, is
+  retired with it, and `blit` Breaks `blit-gamescope` and `steamer`.
+  Until phase 2, Steam and other X11 programs do not run in Blit windows.
 - **Phase 0:** the latency baseline, deferred by the owner; measured before
   phase 2 is judged.
 - **Phase 2: Xwayland.** Rootless Xwayland per session with the compositor

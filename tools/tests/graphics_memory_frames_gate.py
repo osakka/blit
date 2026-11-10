@@ -2,7 +2,8 @@
 """ADR 0226: a frame-channel picture counts as shown, and is never freed
 for room, while a placement is held for its next frame (ADR 0202's `a=p`
 that arrived before the picture) or while it holds an input route (ADR
-0225). Run by graphics_memory_frames_gate.sh, against the stand-in libei.
+0228, `INPUT sock` to a socket the gate listens on). Run by
+graphics_memory_frames_gate.sh.
 
 One session, a 1 MiB picture budget, set live:
   - frame picture 30 (192 KiB) lands, unshown, and gets a route
@@ -27,7 +28,6 @@ import frame_input_gate as fig  # noqa: E402
 
 fig.TAG = 'GRAPHICS_MEMORY_FRAMES'
 check, wait_for = fig.check, fig.wait_for
-ROOT = fig.ROOT
 MIB = 1024 * 1024
 
 
@@ -61,10 +61,9 @@ def put_settings(server, server_settings):
 
 def main():
     work = tempfile.mkdtemp(prefix='blit-memory-frames-')
-    own = os.path.join(work, 'own-eis')
+    own = os.path.join(work, 'own-input')
     keep = [fig.listening_socket(own)]
-    stub = os.path.join(ROOT, 'build/tests/libei-stub')
-    server = fig.Server(19663 + fig.OFFSET, work, {'LD_LIBRARY_PATH': stub})
+    server = fig.Server(19663 + fig.OFFSET, work)
     try:
         put_settings(server, {'graphics_session_budget_mib': 1})
         a = fig.Session(server, work, 'a')
@@ -79,7 +78,7 @@ def main():
         # The routed picture: unshown, and the oldest.
         ch.frame(30, 1, 256, 256)
         wait_for(lambda: a.graphics(30), 'frame picture 30 did not land')
-        got = ch.ask('INPUT eis 30 %s\n' % own)
+        got = ch.ask('INPUT sock 30 %s\n' % own)
         check(got == b'INPUT ok 30\n', 'INPUT for 30 was answered %r' % got)
         # An unshown Kitty picture.
         a.write(kitty_picture('a=t,i=41,q=1', 256, 256, (200, 30, 30, 255)))

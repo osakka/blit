@@ -47,7 +47,7 @@
    frame Blit refuses `FRAME error <id> ENOTSUP` (it cannot import now) is
    sent again as a copy, FRM1, when its one linear plane can be mapped, and
    every later dmabuf frame on the connection is copied too (BcWire.refused,
-   blit-gamescope's rule).
+   a producer's rule, ADR 0223).
 
    Input comes straight from Blit (docs/api.md, "Input straight from
    Blit"): the compositor asks `INPUT sock <id> <path>` on the channel for
