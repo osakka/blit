@@ -6,6 +6,12 @@ require 'net/http'
 require 'tmpdir'
 require 'timeout'
 require 'fileutils'
+# Blit's own state -- the settings, its GLES start marker, the updates
+# directory -- in one directory of the gate's: these run Blit as root, and
+# with the defaults it wrote /var/lib/blit on the build host (the marker
+# left there turned a later GLES gate's server to the CPU).
+GATE_STATE = Dir.mktmpdir('blit-gate-state')
+at_exit { system('sudo', '-n', 'rm', '-rf', GATE_STATE, out: File::NULL, err: File::NULL) }
 require_relative 'gate_port'
 require_relative 'gate_server'
 ROOT = File.expand_path('../..', __dir__)
@@ -90,6 +96,7 @@ Dir.mktmpdir('blit-auxiliary') do |root|
   log = File.join(root,'server.log')
   settings = File.join(root,'settings.json')
   env = {**gate_display_env,
+    'BLIT_UPDATE_DIRECTORY'=>File.join(GATE_STATE,'updates'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_SETTINGS_PATH'=>settings,'BLIT_AUTH_TOKEN'=>'auxiliary-admin','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_LOGIN_PANE_ID'=>'pane-display-1-2','BLIT_LOGIN_AUTOSTART'=>'0',
