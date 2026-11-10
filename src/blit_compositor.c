@@ -2759,6 +2759,8 @@ static void constraint_ask(struct bc_constraint *c)
 {
     struct bc_xdg *x;
     if (c->window || c->defunct || (x = surface_toplevel(c->surface)) == NULL) return;
+    /* With the channel down it is asked when a desktop is back. */
+    if (c->server->link != BC_LINK_UP) return;
     c->window = x->id;
     bc_wire_line(&c->server->wire, "WINDOW lock %u %s", c->window,
                  c->kind == BC_CONSTRAINT_LOCK ? "relative" : "confine");

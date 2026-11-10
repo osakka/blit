@@ -803,14 +803,16 @@ def restart_part(compositor, standin, work):
     """docs/api.md, "Programs survive a desktop restart". The desktop picks
     the display (`--display`); a dmabuf program (window 1, drawing on every
     callback, so one frame ahead of Blit and stalled until a RELEASE) and a
-    wl_shm one (window 2, drawing 60 frames on its callbacks) are shown;
-    the channel closes. Both keep drawing at the output's refresh with
+    wl_shm one (window 2, drawing 60 frames on its callbacks, and asking for
+    a pointer lock the desktop has not granted) are shown; the channel
+    closes. Both keep drawing at the output's refresh with
     nothing shown, each dmabuf buffer given back at once but the newest; a
     third program starts meanwhile. The fake desktop serves the same socket
     again after its programs are done drawing (about a second): the
     compositor says hello, `WINDOW display`, announces windows 1, 2 and 3
     with their hints and input routes, then the newest frame of 1 (FRM3) and
-    of 2 (FRM1), each the program's pattern at its size; nothing is
+    of 2 (FRM1), each the program's pattern at its size, then the lock
+    asked for again; nothing is
     configured until the desktop's new `WINDOW size`, which brings a frame
     of that size. `WINDOW quit 0` ends it at once, status 0, its programs
     gone. A second compositor, whose desktop never comes back (only a
@@ -861,13 +863,15 @@ def restart_part(compositor, standin, work):
         desk.frm3(64, 32, 1)
         desk.nothing(0.3)  # one frame ahead of Blit: no RELEASE, no third
         kept_path = os.path.join(work, 'standin-restart-kept.out')
-        clients.append(start([standin, '--animate', '60', 'Kept'], cenv, open(kept_path, 'w')))
+        clients.append(start([standin, '--animate', '60', '--lock', 'Kept'], cenv,
+                             open(kept_path, 'w')))
         kept = lambda: open(kept_path).read()
         for want in ('WINDOW new 2 0', 'WINDOW title 2 Kept', 'WINDOW appid 2 blit.standin',
                      'WINDOW limits 2 64 48 0 0', 'WINDOW decor 2 server'):
             desk.line(want)
         desk.send('WINDOW size 2 160 100')
         desk.frame(160, 100, image_id=2)
+        desk.line('WINDOW lock 2 relative')
         check(sorted(desk.input_socks) == [1, 2], 'INPUT sock before: %s' % desk.input_socks)
 
         # The desktop goes (Restart Desktop): its channel and its socket.
@@ -911,6 +915,7 @@ def restart_part(compositor, standin, work):
                 desk.line(want)
         desk.frm3(64, 32, 1)
         desk.frame(160, 100, image_id=2)
+        desk.line('WINDOW lock 2 relative')
         desk.nothing(0.4)
         check(sorted(desk.input_socks) == [1, 2, 3], 'INPUT sock again: %s' % desk.input_socks)
         check(kept().count('STANDIN configure') == 1 and held().count('STANDIN configure') == 1 and
@@ -990,7 +995,7 @@ def restart_part(compositor, standin, work):
         listener.close()
         return ('display=%s refused=%s outage: shm 60 callbacks in %d ms, dmabuf 61 draws 60 given back, '
                 'a program started; back after %.1f s: display+new 1,2,3+hints+INPUT sock, newest '
-                'FRM3 64x32 and FRM1 160x100, no configure before WINDOW size, then 200x120,80x40,100x80; '
+                'FRM3 64x32 and FRM1 160x100, lock asked again, no configure before WINDOW size, then 200x120,80x40,100x80; '
                 'quit 0 in %.2f s; no desktop: status 1 after %.2f s (bound 1.5 s, %d window=0 answers)'
                 % (display, ','.join(refused), ms, back, took, took2, windowless))
     finally:
