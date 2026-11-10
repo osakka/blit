@@ -131,6 +131,11 @@ struct bc_positioner {
 };
 
 struct bc_xdg {
+    /* A toplevel's own input socket, <display>-input-<id> (the input
+       section): -1 until it is announced, closed when it goes. */
+    int input_fd;
+    struct wl_event_source *input_source;
+    char input_path[108];
     struct wl_resource *resource;     /* xdg_surface */
     struct bc_server *server;
     struct bc_surface *surface;       /* NULL once the wl_surface is gone */
@@ -197,9 +202,6 @@ struct bc_server {
     int format_table_fd;              /* linux-dmabuf v4's format table */
     dev_t main_device;
     /* input (the seat section) */
-    char input_path[108];             /* the input socket, "" without one */
-    int input_fd;
-    struct wl_event_source *input_source;
     struct wl_list input_conns;       /* bc_input_conn: Blit's routes */
     struct wl_list keyboards, pointers;   /* wl_keyboard, wl_pointer resources */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
@@ -287,6 +289,9 @@ static void send_decor(struct bc_xdg *x)
                  x->decor_mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE ? "server" : "client");
 }
 
+static int window_input_listen(struct bc_xdg *x);
+static void window_input_close(struct bc_xdg *x);
+
 /* `WINDOW new` and every hint the toplevel has, then its input route: at
    its first appearance, and again on a new channel (the restart section). */
 static void announce_hints(struct bc_xdg *x, int parent)
@@ -299,10 +304,10 @@ static void announce_hints(struct bc_xdg *x, int parent)
     send_decor(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
-    /* Its input, straight from Blit to the input socket (one route per
-       toplevel); the desktop relays the request. */
-    if (x->server->input_path[0])
-        bc_wire_input_sock(w, x->id, x->server->input_path);
+    /* Its input, straight from Blit to its own input socket (one route per
+       toplevel); the desktop relays the request under its own id. */
+    if (window_input_listen(x) == 0)
+        bc_wire_input_sock(w, x->id, x->input_path);
 }
 
 /* The toplevel's first appearance, at its initial commit: new, then every
@@ -360,6 +365,7 @@ static void window_gone(struct bc_xdg *x)
         bc_wire_line(&x->server->wire, "WINDOW gone %u", x->id);
         logf_("window %u: gone", x->id);
     }
+    window_input_close(x);
     x->id = 0;
     x->mapped = 0;
 }
@@ -2127,6 +2133,7 @@ static void wm_get_xdg_surface(struct wl_client *client, struct wl_resource *res
     if (x->resource == NULL) { free(x); wl_client_post_no_memory(client); return; }
     x->server = surface->server;
     x->surface = surface;
+    x->input_fd = -1;
     x->kept.fd = -1;
     surface->xdg = x;
     surface->role = BC_ROLE_XDG;
@@ -2841,7 +2848,8 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         logf_("input: a line that is not one: %.80s", line);
         return;
     }
-    conn->id = in.id;
+    /* conn->id is the window whose socket Blit connected to; in.id is the
+       desktop's picture id for it, Blit's name, not the compositor's. */
     if (in.kind == BC_INPUT_KEYMAP) {
         int fd;
         if (conn->nfds == 0) {
@@ -2853,7 +2861,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         keymap_from_route(s, &in, fd);
         return;
     }
-    x = window_by_id(s, in.id);
+    x = window_by_id(s, conn->id);
     if (x == NULL || x->toplevel == NULL || x->surface == NULL) return;  /* gone meanwhile */
     switch (in.kind) {
     case BC_INPUT_KEY: {
@@ -3028,7 +3036,8 @@ static int on_input_conn(int fd, uint32_t mask, void *data)
 
 static int on_input_listen(int fd, uint32_t mask, void *data)
 {
-    struct bc_server *s = data;
+    struct bc_xdg *x = data;
+    struct bc_server *s = x->server;
     struct bc_input_conn *conn;
     int c;
     (void)mask;
@@ -3040,40 +3049,74 @@ static int on_input_listen(int fd, uint32_t mask, void *data)
         }
         conn->server = s;
         conn->fd = c;
+        conn->id = x->id;
         conn->source = wl_event_loop_add_fd(s->loop, c, WL_EVENT_READABLE, on_input_conn, conn);
         wl_list_insert(&s->input_conns, &conn->link);
     }
     return 0;
 }
 
-/* $XDG_RUNTIME_DIR/<display>-input, a stream socket only this user (and
-   root) can reach: the directory is the user's alone. */
-static int input_listen(struct bc_server *s)
+/* The toplevel's input socket, $XDG_RUNTIME_DIR/<display>-input-<id>, a
+   stream socket only this user (and root) can reach: the directory is the
+   user's alone. One per toplevel, because the desktop relays `INPUT sock`
+   to Blit under its own picture id and Blit writes that id on the lines:
+   the connection, not the line, says which window the input is for. Made
+   once, at the toplevel's first announcement; a new channel's
+   re-announcement names the same socket. Returns 0 when it listens. */
+static int window_input_listen(struct bc_xdg *x)
 {
+    struct bc_server *s = x->server;
     struct sockaddr_un addr;
     int fd;
-    if (snprintf(s->input_path, sizeof(s->input_path), "%s/%s-input", getenv("XDG_RUNTIME_DIR"),
-                 s->socket_name) >= (int)sizeof(s->input_path)) {
-        s->input_path[0] = '\0';
+    if (x->input_fd >= 0) return 0;
+    if (snprintf(x->input_path, sizeof(x->input_path), "%s/%s-input-%u", getenv("XDG_RUNTIME_DIR"),
+                 s->socket_name, x->id) >= (int)sizeof(x->input_path)) {
+        x->input_path[0] = '\0';
         return -1;
     }
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    memcpy(addr.sun_path, s->input_path, strlen(s->input_path));
-    /* The display's lock is ours: a socket left at this name is a dead
-       compositor's. */
-    unlink(s->input_path);
+    memcpy(addr.sun_path, x->input_path, strlen(x->input_path));
+    unlink(x->input_path);
     fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-    if (fd < 0 || bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 16) != 0) {
-        logf_("input socket %s: %s", s->input_path, strerror(errno));
+    if (fd < 0 || bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 4) != 0) {
+        logf_("input socket %s: %s", x->input_path, strerror(errno));
         if (fd >= 0) close(fd);
-        s->input_path[0] = '\0';
+        x->input_path[0] = '\0';
         return -1;
     }
-    chmod(s->input_path, 0600);
-    s->input_fd = fd;
-    s->input_source = wl_event_loop_add_fd(s->loop, fd, WL_EVENT_READABLE, on_input_listen, s);
+    chmod(x->input_path, 0600);
+    x->input_fd = fd;
+    x->input_source = wl_event_loop_add_fd(s->loop, fd, WL_EVENT_READABLE, on_input_listen, x);
     return 0;
+}
+
+static void window_input_close(struct bc_xdg *x)
+{
+    if (x->input_fd < 0) return;
+    if (x->input_source) wl_event_source_remove(x->input_source);
+    x->input_source = NULL;
+    close(x->input_fd);
+    unlink(x->input_path);
+    x->input_fd = -1;
+    x->input_path[0] = '\0';
+}
+
+/* The display's lock is ours: any <display>-input-<n> left in the runtime
+   directory is a dead compositor's. */
+static void input_sockets_clear(struct bc_server *s)
+{
+    const char *runtime = getenv("XDG_RUNTIME_DIR");
+    char prefix[64], path[160];
+    struct dirent *e;
+    DIR *d;
+    if (runtime == NULL || (d = opendir(runtime)) == NULL) return;
+    snprintf(prefix, sizeof(prefix), "%s-input-", s->socket_name);
+    while ((e = readdir(d)) != NULL)
+        if (strncmp(e->d_name, prefix, strlen(prefix)) == 0 &&
+            snprintf(path, sizeof(path), "%s/%s", runtime, e->d_name) < (int)sizeof(path))
+            unlink(path);
+    closedir(d);
 }
 
 /* `FRAME error <id> <code>`. Replies come in the order frames are
@@ -3534,7 +3577,7 @@ static void usage(FILE *out)
 }
 
 /* Why `name` cannot be the display --display asks for, or NULL: it is one
-   file in $XDG_RUNTIME_DIR, beside `<name>-input`, and one word on the
+   file in $XDG_RUNTIME_DIR, beside `<name>-input-<id>`, and one word on the
    `WINDOW display <name>` line, so printable ASCII with no space or slash,
    at most 31 bytes, and short enough for the input socket's path. */
 static const char *display_name_problem(const char *name, const char *runtime)
@@ -3548,8 +3591,9 @@ static const char *display_name_problem(const char *name, const char *runtime)
             return "has a space, a control character or a byte past ASCII";
     }
     if (strlen(name) >= sizeof(((struct bc_server *)0)->socket_name)) return "is longer than 31 bytes";
-    if (strlen(runtime) + 1 + strlen(name) + strlen("-input") >= sizeof(((struct sockaddr_un *)0)->sun_path))
-        return "is too long: $XDG_RUNTIME_DIR/<name>-input passes 107 bytes";
+    if (strlen(runtime) + 1 + strlen(name) + strlen("-input-4294967295") >=
+        sizeof(((struct sockaddr_un *)0)->sun_path))
+        return "is too long: $XDG_RUNTIME_DIR/<name>-input-<id> passes 107 bytes";
     return NULL;
 }
 
@@ -3587,7 +3631,6 @@ int main(int argc, char **argv)
     wl_list_init(&server.pointers);
     wl_list_init(&server.relative_pointers);
     wl_list_init(&server.constraints);
-    server.input_fd = -1;
     server.keymap_fd = -1;
     server.dial_fd = -1;
     for (i = 1; i < argc; ++i) {
@@ -3667,7 +3710,7 @@ int main(int argc, char **argv)
 
     server.loop = wl_display_get_event_loop(server.display);
     server.xkb = xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES | XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
-    input_listen(&server);
+    input_sockets_clear(&server);
     if (wl_display_init_shm(server.display) != 0 ||
         !wl_global_create(server.display, &wl_compositor_interface,
                           BC_VERSION(6, wl_compositor_interface), &server, bind_compositor) ||
@@ -3734,12 +3777,10 @@ int main(int argc, char **argv)
         wl_list_remove(&conn->link);
         free(conn);
     }
-    if (server.input_source) wl_event_source_remove(server.input_source);
-    if (server.input_fd >= 0) {
-        close(server.input_fd);
-        unlink(server.input_path);
-    }
+    /* Each window's input socket goes with its window; any left (a
+       window never destroyed) go here. */
     wl_display_destroy_clients(server.display);
+    input_sockets_clear(&server);
     if (server.frame_source) wl_event_source_remove(server.frame_source);
     if (server.sigterm_source) wl_event_source_remove(server.sigterm_source);
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);

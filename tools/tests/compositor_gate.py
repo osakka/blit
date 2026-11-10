@@ -120,8 +120,9 @@ class Desktop:
             if got is None or got[0] != 'line' or not got[1].startswith('INPUT sock '):
                 return got
             image, path = got[1].split(' ')[2:4]
-            check(path.startswith('/') and path.endswith('-input') and int(image) not in self.input_socks,
-                  'an INPUT sock line %r' % got[1])
+            # Each toplevel its own socket, <display>-input-<id>.
+            check(path.startswith('/') and path.endswith('-input-%s' % image) and
+                  int(image) not in self.input_socks, 'an INPUT sock line %r' % got[1])
             self.input_socks[int(image)] = path
 
     def next_any(self, wait):
@@ -319,6 +320,12 @@ def pacing_part(desk, standin, env, display, work):
     return 'shm 10 frames at 20 Hz in %d ms, presented=12 refresh=50ms' % ms
 
 
+# The desktop's id for a window's picture in Blit, which Blit writes on the
+# route's lines: deliberately not the compositor's window id (Hibr's are
+# large numbers like 1259388934).
+BLIT_PICTURE = 1259388934
+
+
 def input_part(server, compositor, standin, work):
     """Blit's input lines on the compositor's input socket as wl_seat
     events: the gate plays the desktop on the channel and Blit on the input
@@ -377,7 +384,7 @@ def input_part(server, compositor, standin, work):
         desk.frame(200, 100)
         desk.line('WINDOW popup 2 1 12 63')
         desk.frame(80, 60, image_id=2)
-        check(desk.input_socks.get(1) == os.path.join(runtime, 'blit-0-input'),
+        check(desk.input_socks.get(1) == os.path.join(runtime, 'blit-0-input-1'),
               'INPUT sock for window 1: %s' % desk.input_socks)
         check(stat.S_IMODE(os.stat(desk.input_socks[1]).st_mode) == 0o600, 'the input socket is not 0600')
         # No keymap until a route brings one: no_keymap, keys still go.
@@ -391,7 +398,8 @@ def input_part(server, compositor, standin, work):
         memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
         os.write(memfd, keymap + b'\0')
         fcntl.fcntl(memfd, 1033, 0x0f)  # F_ADD_SEALS: seal, shrink, grow, write
-        socket.send_fds(route, [b'INPUT keymap 1 7 %d %d %d\n' % (len(keymap) + 1, repeat[0], repeat[1])],
+        socket.send_fds(route, [b'INPUT keymap %d 7 %d %d %d\n' % (BLIT_PICTURE, len(keymap) + 1, repeat[0],
+                                                                     repeat[1])],
                         [memfd])
         os.close(memfd)
         wait_for(lambda: 'STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
@@ -402,10 +410,14 @@ def input_part(server, compositor, standin, work):
         mark = [0]
 
         def lines_to(*lines):
+            # Under Blit's id for the picture, as the desktop relayed it --
+            # never the compositor's: the socket says which window.
             text = ''
             for line in lines:
                 frame[0] += 1
-                text += 'INPUT %s\nINPUT frame 1 %d\n' % (line, frame[0])
+                words = line.split(' ')
+                words[1] = str(BLIT_PICTURE)
+                text += 'INPUT %s\nINPUT frame %d %d\n' % (' '.join(words), BLIT_PICTURE, frame[0])
             route.sendall(text.encode())
 
         def seen(*wanted):
@@ -620,9 +632,10 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
     """A real Blit's route into the compositor's input socket, as a desktop
     sets it up (docs/api.md, "One input route per top-level"): the gate,
     as the desktop, shows windows 1 and 2 (the stand-in's toplevel and its
-    popup) as pictures 1 and 2 of a Blit session, asks `INPUT sock` for 1
-    and `INPUT member 2 1 12 63`, and turns the route on; the pointer over
-    picture 2 reaches the popup surface at its own pixels.
+    popup) as pictures 41 and 42 of a Blit session -- the desktop's ids, as
+    Hibr's are not the compositor's -- asks `INPUT sock` for 41 with window
+    1's socket and `INPUT member 42 41 12 63`, and turns the route on; the
+    pointer over picture 42 reaches the popup surface at its own pixels.
 
     Then the keyboard (milestone C): a repeat PATCH of keyboard A while the
     route is live reaches the client as repeat info (Blit's `INPUT keymap`
@@ -633,18 +646,18 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
     api('PATCH', '/v1/terminal-sessions/%s' % session.id, {'focused': True})
     wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session.id)['focused'], 'no focus')
     ch = fig.Channel(session)
-    ch.frame(1, 1, 200, 100)
-    ch.frame(2, 1, 80, 60)
-    wait_for(lambda: session.graphics(1) and session.graphics(2), 'pictures 1 and 2 did not land')
-    fig.place(session, 1, 3, 5, 20, 5)
-    session.write('\033[4;8H\033_Ga=p,i=2,p=1,q=2,C=1,c=8,r=3,z=1\033\\')
-    at = wait_for(lambda: [p for p in (session.graphics(2) or {}).get('placements', []) if p['id'] == 1],
-                  'picture 2 was not placed')[0]
-    check(ch.ask('INPUT sock 1 %s\n' % desk.input_socks[1]) == b'INPUT ok 1\n', 'Blit took no route')
-    check(ch.ask('INPUT member 2 1 12 63\n') == b'INPUT ok 2\n', 'Blit took no member')
-    ch.line('INPUT on 1\n')
+    ch.frame(41, 1, 200, 100)
+    ch.frame(42, 1, 80, 60)
+    wait_for(lambda: session.graphics(41) and session.graphics(42), 'pictures 41 and 42 did not land')
+    fig.place(session, 41, 3, 5, 20, 5)
+    session.write('\033[4;8H\033_Ga=p,i=42,p=1,q=2,C=1,c=8,r=3,z=1\033\\')
+    at = wait_for(lambda: [p for p in (session.graphics(42) or {}).get('placements', []) if p['id'] == 1],
+                  'picture 42 was not placed')[0]
+    check(ch.ask('INPUT sock 41 %s\n' % desk.input_socks[1]) == b'INPUT ok 41\n', 'Blit took no route')
+    check(ch.ask('INPUT member 42 41 12 63\n') == b'INPUT ok 42\n', 'Blit took no member')
+    ch.line('INPUT on 41\n')
     wait_for(lambda: [r for r in api('GET', '/v1/terminal-sessions/%s' % session.id)['frames']['input']['routes']
-                      if r['image'] == 1 and r['state'] == 'live'], 'the route did not go live')
+                      if r['image'] == 41 and r['state'] == 'live'], 'the route did not go live')
     # The session's surface origin on the display, from its pixel reports.
     api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': 301, 'y': 101})
     report = wait_for(lambda: __import__('re').findall(rb'\x1b\[<35;(\d+);(\d+)M', session.sent()),
@@ -682,7 +695,7 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
               % (device, got, want, '\n'.join(lines)))
         order.append('%dB' % len(text))
     mark[0] = len(printed().splitlines())
-    ch.line('INPUT off 1\n')
+    ch.line('INPUT off 41\n')
     ch.close()
     api('DELETE', '/v1/terminal-sessions/%s' % session.id)
     return ('blit-member-e2e=popup@%.2f,%.2f repeat=blit:30/250,patch->20/400 '
@@ -891,8 +904,9 @@ def restart_part(compositor, standin, work):
         desk = Desktop(listener, answer)
         desk.line('WINDOW display %s' % display)
         check(os.path.exists(os.path.join(runtime, display)) and
-              os.path.exists(os.path.join(runtime, display + '-input')),
-              'no %s or %s-input in XDG_RUNTIME_DIR: %s' % (display, display, os.listdir(runtime)))
+              not [f for f in os.listdir(runtime) if '-input' in f],
+              'no %s, or an input socket before any window, in XDG_RUNTIME_DIR: %s'
+              % (display, os.listdir(runtime)))
         # A display in use, or one that is not a name, is refused before the
         # channel hears of it.
         refused = []
@@ -952,8 +966,9 @@ def restart_part(compositor, standin, work):
               % (draws, releases, held()))
         check(comp.poll() is None, 'blit-compositor ended with the channel')
         check(os.path.exists(os.path.join(runtime, display)) and
-              os.path.exists(os.path.join(runtime, display + '-input')),
-              'the Wayland or the input socket went with the channel')
+              os.path.exists(os.path.join(runtime, display + '-input-1')) and
+              os.path.exists(os.path.join(runtime, display + '-input-2')),
+              'the Wayland or an input socket went with the channel: %s' % os.listdir(runtime))
         # A program started meanwhile: announced on the new channel.
         late_path = os.path.join(work, 'standin-restart-late.out')
         clients.append(start([standin, 'Late'], cenv, open(late_path, 'w')))
@@ -1000,6 +1015,8 @@ def restart_part(compositor, standin, work):
             except subprocess.TimeoutExpired:
                 fail('a program outlived WINDOW quit 0')
         check(not os.path.exists(os.path.join(runtime, display)), 'the Wayland socket outlived quit')
+        check(not [f for f in os.listdir(runtime) if '-input-' in f],
+              'an input socket outlived quit: %s' % os.listdir(runtime))
         text = open(log).read()
         check('reconnect: 3 windows announced again, 3 frames sent again' in text and
               'no desktop answered' not in text, 'the restart in the log:\n' + text)
