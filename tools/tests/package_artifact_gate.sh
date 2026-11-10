@@ -206,6 +206,16 @@ for needle in blit-font-sources https://ftp.gnu.org/gnu/freefont/freefont-src-20
         exit 1
     }
 done
+# The frame channel's version 5 is a flag day with Hibr (docs/api.md, "One
+# grammar, version 5"): blit Breaks every Hibr before Hibr's version 5, the
+# version packaging/build-deb.sh names.
+hibr_frame_v5=$(sed -n 's/^HIBR_FRAME_V5=//p' "$root/packaging/build-deb.sh")
+test -n "$hibr_frame_v5"
+test "$(dpkg-deb -f "$package" Breaks)" = "hibr (<< $hibr_frame_v5)" || {
+    echo "PACKAGE_ARTIFACT_FAIL blit Breaks is '$(dpkg-deb -f "$package" Breaks)'," \
+         "not 'hibr (<< $hibr_frame_v5)'" >&2
+    exit 1
+}
 dpkg-deb -f "$package" Suggests | grep -Fq blit-font-sources || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-font-sources" >&2
     exit 1
@@ -414,5 +424,5 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     rm -rf "$rebuild"
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s gamescope=%s compositor=%s\n' \
-    "$version" "$actual_hash" "$reproducible" "$gamescope" "$compositor"
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s gamescope=%s compositor=%s breaks=hibr<<%s\n' \
+    "$version" "$actual_hash" "$reproducible" "$gamescope" "$compositor" "$hibr_frame_v5"
