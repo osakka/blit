@@ -2155,11 +2155,15 @@ It speaks the frame channel above as a producer, with these additions.
   `?7701` with `INPUT hold <id> relative`) go to the relative pointers of
   the client that has the pointer, the raw counts as both the accelerated
   and the unaccelerated motion.
-- **Pointer lock, a proposal** (*not agreed with Hibr, not implemented;
-  until it is, blit-compositor does not offer `zwp_pointer_constraints_v1`,
-  so a program never waits on a lock it cannot get*). The lock is the
-  desktop's (ADR 0198), so the compositor asks for it rather than taking
-  it:
+- **Pointer lock** (*agreed with Hibr 2026-11-10; blit-compositor offers
+  `zwp_pointer_constraints_v1` from milestone C*). The lock is the desktop's
+  (ADR 0198), so the compositor asks for it rather than taking it. The
+  desktop takes a hold only within its gesture window after a click or key
+  in that window (Hibr's `DT_PTRGESTMS`, 2 s): a program asking on its own,
+  with no gesture, is answered `WINDOW lock <id> off` until the person
+  clicks. The desktop takes it through `dt_pointerlock` on the display
+  showing the window, with the route's `INPUT hold <id> relative|confine`;
+  Release Pointer and focus loss always end it with `off`.
   - compositor to desktop, `WINDOW lock <id> relative|confine|off`: the
     program locked the pointer (`zwp_pointer_constraints_v1.lock_pointer`:
     `relative`), confined it (`confine_pointer`: `confine`), or let it go
