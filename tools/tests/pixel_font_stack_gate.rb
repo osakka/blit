@@ -6,6 +6,7 @@
 require 'json'
 require 'digest'
 require 'tmpdir'
+require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root) do
   source = JSON.parse(File.read('assets/fonts/fonts.source.json'))
@@ -17,10 +18,9 @@ Dir.chdir(root) do
     input = File.join(work, 'ui.txt')
     File.write(input, JSON.parse(File.read(ui_path)).fetch('scalars').join("\n") + "\n")
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall',
-      "-I#{ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")}",
+      *BuildFlags.cflags('font'),
       'tools/tests/pixel_font_stack_gate.c', 'src/blit_font.c', 'src/blit_raster.c',
-      ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-      ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-lm', '-o', binary)
+      *BuildFlags.libs('font'), '-lm', '-o', binary)
     %w[Blit-Terminus16.psf].each do |face|
       raise "pixel font stack failed: #{face}" unless
         system(binary, "assets/fonts/#{face}", 'assets/fonts/NotoColorEmoji.ttf', input)

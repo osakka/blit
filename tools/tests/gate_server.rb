@@ -18,23 +18,24 @@
 require 'digest'
 require 'fileutils'
 require 'tmpdir'
+require_relative 'build_flags'
 
 GATE_ROOT = File.expand_path('../..', __dir__)
 GATE_BACKEND = ENV.fetch('BLIT_GATE_BACKEND', 'native')
 abort "BLIT_GATE_BACKEND must be native or gles, not #{GATE_BACKEND}" unless
   %w[native gles].include?(GATE_BACKEND)
 
-# The mock is compiled once per source revision and shared by every gate.
+# The mock is compiled once per source revision and set of libdrm headers
+# (tools/build-flags.sh) and shared by every gate; tools/tests/gate_display.sh
+# names the same file for the same source and flags.
 def gate_drm_mock
   source = File.join(GATE_ROOT, 'tools/tests/fixtures/drm_hotplug_mock.c')
-  digest = Digest::SHA256.file(source).hexdigest[0, 16]
+  cflags = BuildFlags.cflags('drm')
+  digest = Digest::SHA256.hexdigest(File.binread(source) + cflags.join(' '))[0, 16]
   path = File.join(Dir.tmpdir, "blit-gate-drm-mock-#{Process.uid}-#{digest}.so")
   return path if File.exist?(path)
   partial = "#{path}.#{Process.pid}"
-  ok = system('tcc', '-shared', '-fPIC',
-              '-I' + File.join(GATE_ROOT, 'build/deps/prefix/include'),
-              '-I' + File.join(GATE_ROOT, 'build/deps/prefix/include/libdrm'),
-              source, '-o', partial)
+  ok = system('tcc', '-shared', '-fPIC', *cflags, source, '-o', partial)
   abort 'gate_server: the DRM mock does not compile' unless ok
   File.rename(partial, path)
   path

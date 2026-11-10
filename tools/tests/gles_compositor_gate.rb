@@ -19,11 +19,12 @@ require 'timeout'
 require 'tmpdir'
 require_relative 'gate_port'
 require_relative 'gate_server'
+require_relative 'build_flags'
 
 frame = File.join(Dir.tmpdir, "blit-gles-frame-#{Process.pid}")
 at_exit { File.delete(frame) if File.exist?(frame) }
 abort 'GLES_COMPOSITOR_FAIL gles_frame_gate does not compile' unless
-  system('tcc', '-O2', '-std=c99', '-I' + File.join(GATE_ROOT, 'build/deps/prefix/include'),
+  system('tcc', '-O2', '-std=c99', *BuildFlags.cflags('gles'),
          File.join(GATE_ROOT, 'tools/tests/gles_frame_gate.c'),
          File.join(GATE_ROOT, 'src/blit_gles.c'), '-o', frame)
 frame_line = `#{frame} 2>&1`.strip

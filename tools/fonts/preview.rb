@@ -4,17 +4,17 @@ require 'tmpdir'
 require 'zlib'
 require 'fileutils'
 require 'json'
+require_relative '../tests/build_flags'
 root = File.expand_path('../..', __dir__)
 arabic = ARGV.delete('--arabic')
 output = File.expand_path(ARGV.fetch(0, arabic ? 'build/font-preview/blit-arabic.png' : 'build/font-preview/blit-fonts.png'))
 Dir.chdir(root) do
   Dir.mktmpdir('blit-font-preview') do |work|
     binary = File.join(work, 'preview')
-    headers = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")
-    library = ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6')
-    raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall', "-I#{headers}",
-      arabic ? 'tools/probes/arabic_preview.c' : 'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', library,
-      ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
+    headers = BuildFlags.cflags('font')
+    libraries = BuildFlags.libs('font')
+    raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall', *headers,
+      arabic ? 'tools/probes/arabic_preview.c' : 'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', *libraries, '-o', binary)
     ppm = File.join(work, 'specimen.ppm')
     if arabic
       arguments = ['assets/fonts/Blit-Terminus16.psf',

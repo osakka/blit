@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[2]
-hb = c.CDLL('/lib/x86_64-linux-gnu/libharfbuzz.so.0')
+hb = c.CDLL('libharfbuzz.so.0')
 def bind(name, result, *arguments):
     f = getattr(hb, name)
     f.restype, f.argtypes = result, list(arguments)

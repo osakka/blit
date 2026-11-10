@@ -29,6 +29,7 @@
 require 'json'
 require 'open3'
 require 'tmpdir'
+require_relative 'build_flags'
 
 ROOT = File.expand_path('../..', __dir__)
 ANCHOR = "\n    for (y = 0; y < (int)bitmap->rows; ++y) for (x = 0; x < (int)bitmap->width; ++x) {"
@@ -78,7 +79,7 @@ end
 (0x10030A..0x100313).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
 cells = ([[11, 22]] + (8..64).flat_map { |s| [[(s + 1) / 2, s], [s / 2, s]] }).uniq
 stride = ENV.fetch('BLIT_ICON_CLIP_STRIDE', '48').to_i
-freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")
+freetype = BuildFlags.cflags('font')
 fonts = ENV['BLIT_ICON_CLIP_FONTS'] == 'all' ? FONTS : FONTS.slice('hack', 'jetbrains', 'terminus')
 bad = []
 swept = 0
@@ -92,10 +93,9 @@ Dir.mktmpdir('blit-icon-clip') do |work|
              "#{text}\n#include \"#{ROOT}/tools/tests/icon_clip_gate.c\"\n")
   File.write(File.join(work, 'spec'), spec.map { |k, c, n, col, l| "#{k} #{c.to_s(16)} #{n} #{col} #{l}\n" }.join)
   binary = File.join(work, 'gate')
-  fail!('the harness does not compile') unless system('tcc', '-O2', '-std=c99', "-I#{freetype}", "-I#{ROOT}/src",
+  fail!('the harness does not compile') unless system('tcc', '-O2', '-std=c99', *freetype, "-I#{ROOT}/src",
     File.join(work, 'probe.c'), "#{ROOT}/src/blit_font.c",
-    ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-    ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-lm', '-o', binary)
+    *BuildFlags.libs('font'), '-lm', '-o', binary)
   fonts.each do |name, (psf, font)|
     font = "assets/fonts/#{font}" unless font == '-'
     out, err, status = Open3.capture3(binary, "assets/fonts/#{psf}", font,

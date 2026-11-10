@@ -20,6 +20,7 @@ require 'timeout'
 require 'uri'
 require_relative 'gate_port'
 require_relative 'gate_server'
+require_relative 'build_flags'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19265'), 10))
@@ -30,9 +31,9 @@ KITTY_PROBE = "/tmp/blit-kitty-image-echo-#{Process.pid}"
 BASE = URI("http://127.0.0.1:#{PORT}")
 
 abort("graphics-trace gate: missing #{BINARY}") unless File.executable?(BINARY)
-unless system('tcc', '-O2', '-std=c99',
+unless system('tcc', '-O2', '-std=c99', *BuildFlags.cflags('zlib'),
               File.join(ROOT, 'tools/probes/kitty_image_echo.c'),
-              '-o', KITTY_PROBE, '-lz')
+              '-o', KITTY_PROBE, *BuildFlags.libs('zlib'))
   abort('graphics-trace gate: could not build the Kitty probe')
 end
 

@@ -51,8 +51,8 @@ Environment:
   BLIT_GATE_FONT     PSF font           (default the bundled Hibr font)
   BLIT_GATE_OUTLINE  outline font; with BLIT_GATE_COLOUR enables raster module gate
   BLIT_GATE_COLOUR   colour bitmap font; requires FreeType headers/library
-  BLIT_GATE_HARFBUZZ shared library for offline emoji font audit
-  BLIT_HARFBUZZ_LIBRARY runtime link path (default OS libharfbuzz.so.0; >=6.0.0)
+  PKG_CONFIG_PATH    where pkg-config finds the build dependencies
+                     (tools/build-flags.sh, docs/toolchain.md)
   BLIT_GATE_BACKEND  native (default) or gles
   BLIT_GATE_PACKAGE  .deb path; enables the packaging artifact gate
   BLIT_GATE_LIVE     live base URL; enables the live-host-only gates
@@ -445,11 +445,7 @@ suite_font() {
     run_gate harfbuzz_identity_gate.rb ruby tools/tests/harfbuzz_identity_gate.rb
     run_gate emoji_cluster_raster_gate.rb ruby tools/tests/emoji_cluster_raster_gate.rb
     run_gate font_cache_workload.rb ruby tools/probes/font_cache_workload.rb --check
-    if [ -f "${BLIT_GATE_HARFBUZZ:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" ]; then
-        run_gate emoji_font_audit_gate.rb ruby tools/tests/emoji_font_audit_gate.rb
-    else
-        skip_gate emoji_font_audit_gate.rb "needs explicit HarfBuzz shared library for offline font audit"
-    fi
+    run_gate emoji_font_audit_gate.rb ruby tools/tests/emoji_font_audit_gate.rb
     run_gate modern_nerd_gate.sh sh tools/tests/modern_nerd_gate.sh
     run_gate font_fallback_gate.sh sh tools/tests/font_fallback_gate.sh
     run_gate font_raster_gate.sh sh tools/tests/font_raster_gate.sh \
@@ -577,10 +573,12 @@ suite_hibr() {
     run_gate frame_dmabuf_gate.sh sh "$ROOT"/tools/tests/frame_dmabuf_gate.sh
     # ADR 0228 phase 1: blit-compositor and the WINDOW wire against a fake
     # desktop with the in-repo stand-in client, then Blit's window=0. Needs
-    # libwayland-dev, libwayland-bin and wayland-protocols on the build host.
+    # wayland-server, wayland-client, wayland-scanner and wayland-protocols
+    # (tools/build-flags.sh).
     run_gate compositor_gate.sh sh "$ROOT"/tools/tests/compositor_gate.sh
     # ADR 0228 phase 1, milestone B: GET /v1/input/keymap compiles with
-    # libxkbcommon and types what Blit types. Needs libxkbcommon-dev.
+    # libxkbcommon and types what Blit types. Needs xkbcommon
+    # (tools/build-flags.sh).
     run_gate keymap_gate.sh sh "$ROOT"/tools/tests/keymap_gate.sh
     # ADR 0228: the INPUT routes to blit-compositor's input sockets, and a
     # routed picture never freed for room (ADR 0226).

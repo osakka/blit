@@ -127,9 +127,13 @@ All of it: [docs/README.md](docs/README.md).
 
 ## Build from source
 
-Blit is C, built with TCC. It needs FreeType (≥ 2.12.1) headers and
-library, HarfBuzz (≥ 6.0.0, headers pinned in `vendor/harfbuzz`), libdrm
-and zlib; Mesa's EGL/GLES/GBM are loaded at run time.
+Blit is C, built with TCC on any current Linux distribution from the
+system's own development packages, found through `pkg-config`: libdrm,
+FreeType, HarfBuzz (≥ 6.0.0; its headers pinned in `vendor/harfbuzz`),
+zlib, the EGL/GLES/GBM headers (the libraries are loaded at run time) and,
+for `blit-compositor`, wayland and xkbcommon. The minimum versions and each
+distribution's package names are in [the toolchain](docs/toolchain.md);
+`tools/build-flags.sh --check` checks them.
 
 ```sh
 tools/build-tcc.sh                                      # build/blit/blit-server
@@ -140,9 +144,8 @@ packaging/build-deb.sh build/pkg                        # the .debs
 
 The package build makes three packages: `blit`, `blit-font-sources` (the
 source archive of the Arabic font, ADR 0217) and `blit-compositor` (programs
-in windows, ADR 0228). `blit` suggests the other two. Use `BLIT_FREETYPE_INCLUDE=/usr/include/freetype2` to build against system
-headers. Suites and their requirements are listed by `tools/run-gates.sh
---help`; the [development workflow](docs/development-workflow.md) has the
+in windows, ADR 0228). `blit` suggests the other two. Suites and their
+requirements are listed by `tools/run-gates.sh --help`; the [development workflow](docs/development-workflow.md) has the
 release procedure.
 
 ## How it fits together

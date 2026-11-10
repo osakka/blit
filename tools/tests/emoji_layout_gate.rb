@@ -4,6 +4,7 @@ require 'digest'
 require 'tmpdir'
 require 'open3'
 require 'yaml'
+require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root) do
   schemas = YAML.load_file('openapi/blit-0.1.yaml').dig('components','schemas')
@@ -23,12 +24,9 @@ Dir.chdir(root) do
     raise 'derived trie stale' unless File.binread(generated) == File.binread('src/blit_emoji_sequences_data.h')
     binary = File.join(work, 'gate')
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99',
-       '-Ibuild/deps/prefix/include', '-Ibuild/deps/prefix/include/libdrm',
-      "-I#{ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")}",
+      *BuildFlags.cflags('server'),
       'tools/tests/emoji_layout_gate.c', 'src/blit_kms.c', 'src/blit_vt.c', 'src/blit_font.c', 'src/blit_raster.c',
-      ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-      ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'),
-      '-Lbuild/deps/prefix/lib/x86_64-linux-gnu', '-ldrm', '-lutil', '-lz', '-o', binary)
+      *BuildFlags.libs('server'), '-o', binary)
     command = [binary, rows.size.to_s]
     command = ['valgrind', '--error-exitcode=99', '--leak-check=full', '--errors-for-leak-kinds=definite,indirect', *command] if ENV['BLIT_EMOJI_VALGRIND'] == '1'
     out, err, status = Open3.capture3(*command, stdin_data:vectors)

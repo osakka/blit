@@ -246,6 +246,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0227 — Spleen is one text font of five masters, the master picked per size](0227-spleen-one-font-of-masters.md)
 - [0228 — Blit is the compositor for programs](0228-blit-is-the-compositor-for-programs.md) (proposed)
 - [0229 — Programs and the desktop: one owner per concern](0229-programs-and-the-desktop-one-owner-per-concern.md) (proposed)
+- [0230 — Dependencies from the system, through pkg-config](0230-dependencies-from-the-system-through-pkg-config.md)
 
 ## Status
 

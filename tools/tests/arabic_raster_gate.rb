@@ -3,6 +3,7 @@
 require 'tmpdir'
 require 'json'
 require 'digest'
+require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 abort 'usage: arabic_raster_gate.rb [ARABIC]' unless [0,1].include?(ARGV.size)
 Dir.chdir(root) do
@@ -34,9 +35,9 @@ Dir.chdir(root) do
     input = File.join(work, 'cells.txt')
     File.write(input, cells.map { |cp| [cp.size,*cp.map { |c| c.to_s(16) }].join(' ') }.join("\n"))
     raise 'compile failed' unless system('tcc', '-std=c99', '-Wall',
-      "-I#{root}/build/deps/prefix/include/freetype2",
+      *BuildFlags.cflags('font'),
       'tools/tests/arabic_raster_gate.c', 'src/blit_raster.c', 'src/blit_font.c',
-      '/lib/x86_64-linux-gnu/libfreetype.so.6', '/lib/x86_64-linux-gnu/libharfbuzz.so.0', '-o', binary)
+      *BuildFlags.libs('font'), '-o', binary)
     passed = %w[text/Hack-Regular.ttf text/3270-Regular.ttf].map do |text|
       command = [binary, 'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{text}", arabic, input]
       command = ['valgrind','--error-exitcode=99','--leak-check=full','--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'

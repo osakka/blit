@@ -16,7 +16,7 @@ import re
 root = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--font', type=Path, default=root / 'assets/fonts/NotoColorEmoji.ttf')
-parser.add_argument('--harfbuzz', type=Path, default=Path('/lib/x86_64-linux-gnu/libharfbuzz.so.0'))
+parser.add_argument('--harfbuzz', default='libharfbuzz.so.0', help='the HarfBuzz runtime, by soname or path (default: the system library)')
 parser.add_argument('--require-complete', action='store_true')
 args = parser.parse_args()
 data_root = root / 'assets/unicode/emoji-18.0'
@@ -29,7 +29,18 @@ class Glyph(c.Structure):
     _fields_ = [('codepoint', c.c_uint32), ('mask', c.c_uint32),
                 ('cluster', c.c_uint32), ('var1', c.c_uint32), ('var2', c.c_uint32)]
 
-hb = c.CDLL(str(args.harfbuzz))
+hb = c.CDLL(args.harfbuzz)
+
+def loaded_file(name):
+    """The file the dynamic loader chose for the library (Linux)."""
+    stem = Path(name).name.split('.so')[0] + '.so'
+    for line in open('/proc/self/maps'):
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6 and Path(fields[5].strip()).name.startswith(stem):
+            return Path(fields[5].strip())
+    raise SystemExit(f'cannot find the loaded {name}')
+
+harfbuzz_file = loaded_file(args.harfbuzz)
 def bind(name, result, *arguments):
     function = getattr(hb, name)
     function.restype = result
@@ -97,7 +108,7 @@ try:
         'unicode_emoji_version': manifest['unicode_emoji_version'],
         'font': str(args.font), 'font_sha256': hashlib.sha256(args.font.read_bytes()).hexdigest(),
         'harfbuzz_version': version().decode(),
-        'harfbuzz_sha256': hashlib.sha256(args.harfbuzz.read_bytes()).hexdigest(),
+        'harfbuzz_sha256': hashlib.sha256(harfbuzz_file.read_bytes()).hexdigest(),
         'counts': dict(counts), 'rgi_failures': rgi_failures, 'failures': failures}, indent=2))
 finally:
     if font:

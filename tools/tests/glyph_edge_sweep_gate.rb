@@ -28,6 +28,7 @@ require 'uri'
 require_relative 'gate_port'
 require_relative 'gate_server'
 require_relative 'gate_bmp'
+require_relative 'build_flags'
 
 ROOT = File.expand_path('../..', __dir__)
 PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19571'), 10))
@@ -63,15 +64,14 @@ def request(method, path, body = nil)
 end
 
 Dir.chdir(ROOT)
-freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")
+freetype = BuildFlags.cflags('font')
 failures = []
 checked = 0
 Dir.mktmpdir('blit-edge-sweep') do |work|
   harness = File.join(work, 'raster')
   fail!('the raster harness does not compile') unless system(
-    'tcc', '-O2', '-std=c99', "-I#{freetype}", 'tools/tests/glyph_edge_sweep_gate.c', 'src/blit_font.c',
-    'src/blit_raster.c', ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-    ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-lm', '-o', harness)
+    'tcc', '-O2', '-std=c99', *freetype, 'tools/tests/glyph_edge_sweep_gate.c', 'src/blit_font.c',
+    'src/blit_raster.c', *BuildFlags.libs('font'), '-lm', '-o', harness)
   backends = %w[cpu gles]
   backends.each do |backend|
     SIZES.each do |size|

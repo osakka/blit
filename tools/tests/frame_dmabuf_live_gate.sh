@@ -10,6 +10,8 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 [ "$#" -eq 1 ] || { echo "usage: $0 HOST" >&2; exit 2; }
 mkdir -p build/tests
-tcc -Wall -I build/deps/prefix/include tools/tests/frame_dmabuf_producer.c -ldl \
+cflags=$(tools/build-flags.sh --cflags gles)
+# shellcheck disable=SC2086
+tcc -Wall $cflags tools/tests/frame_dmabuf_producer.c -ldl \
     -o build/tests/frame_dmabuf_producer
 python3 tools/tests/frame_dmabuf_live_gate.py "$1" build/tests/frame_dmabuf_producer

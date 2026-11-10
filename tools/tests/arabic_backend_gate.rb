@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 require 'tmpdir'
+require_relative 'build_flags'
 root=File.expand_path('../..',__dir__)
 # Native KMS is the only presentation path (ADR 0184); the harness draws
 # Arabic through the KMS compositor's own cell path.
@@ -13,18 +14,14 @@ Dir.chdir(root) do
     end
     sources=['tools/tests/arabic_backend_gate.c','src/blit_font.c','src/blit_raster.c','src/blit_vt.c']
     raise 'compile failed' unless system('tcc','-O2','-std=c99',*extra,
-      '-Ibuild/deps/prefix/include','-Ibuild/deps/prefix/include/libdrm',
-      '-Ibuild/deps/prefix/include/freetype2',*sources,
-      '/lib/x86_64-linux-gnu/libfreetype.so.6','/lib/x86_64-linux-gnu/libharfbuzz.so.0',
-      '-Lbuild/deps/prefix/lib/x86_64-linux-gnu','-ldrm','-lutil','-lz','-o',binary)
-    env={'LD_LIBRARY_PATH'=>"#{root}/build/deps/prefix/lib/x86_64-linux-gnu"}
+      *BuildFlags.cflags('server'),*sources,*BuildFlags.libs('server'),'-o',binary)
     # ADR 0195: one Arabic companion beside every text font.
     %w[Hack-Regular.ttf 3270-Regular.ttf].each do |profile|
       command=[binary,"assets/fonts/text/#{profile}",
         'assets/fonts/NotoColorEmoji.ttf','assets/fonts/BlitArabicModern.ttf']
       command=['valgrind','--error-exitcode=99','--leak-check=full',
         '--errors-for-leak-kinds=definite,indirect',*command] if ENV['BLIT_FONT_VALGRIND']=='1'
-      raise "#{profile} failed" unless system(env,*command)
+      raise "#{profile} failed" unless system(*command)
     end
   end
 end
