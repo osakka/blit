@@ -1,7 +1,7 @@
 # ADR 0229: Programs and the desktop -- one owner per concern
 
 - Status: proposed (the owner asked for it, 2026-11-10; the 0.3.74 rows
-  are in that release, with Hibr 0.99.482)
+  are built and gated, with Hibr 0.99.482 to ship them)
 - Date: 2026-11-10
 - Scope: everything a program in a Hibr window (Wayland now, X through
   Xwayland in ADR 0228's phase 2) shares with the desktop: what each side
@@ -171,3 +171,12 @@ release half-implements one of them.
 - Hibr's Vault (programs/desktop/README.md): a copied password never
   enters the clipboard history and clears itself after a while; this ADR
   carries that rule to programs.
+- `compositor_gate`, 0.3.74's rows: `--csd` (decor client, geometry 10 px
+  inside, tiled left and top reaching the program, move, menu and
+  bottom-right resize from its own presses, one move with no press
+  ignored); `--clip` (a copy offered as the one text type and read through
+  a pipe, a stale or unknown read answered empty, the desktop's offer
+  pasted through `CLIP read` with the five aliases shown, a secret offered
+  and cleared both ways, a source's destruction clearing, the primary
+  both ways) and, across a restart, the program's selection offered again
+  and the old desktop's lapsed. ASan and UBSan clean.

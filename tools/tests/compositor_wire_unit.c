@@ -80,6 +80,19 @@ static void lines(void)
            l.activated, "size, activated");
     EXPECT(bc_parse_line("WINDOW size 2 0 0", &l) == BC_LINE_SIZE && l.width == 0 && l.height == 0,
            "0 0: the program chooses");
+    EXPECT(bc_parse_line("CLIP offer 7 clipboard text/plain;charset=utf-8 x-kde-passwordManagerHint\n", &l) ==
+               BC_LINE_CLIP_OFFER && l.id == 7 && !l.primary && l.ntypes == 2 &&
+               strcmp(l.types, "text/plain;charset=utf-8 x-kde-passwordManagerHint") == 0, "clip offer");
+    EXPECT(bc_parse_line("CLIP offer 8 primary", &l) == BC_LINE_CLIP_OFFER && l.primary && l.ntypes == 0,
+           "clip offer, no types");
+    EXPECT(bc_parse_line("CLIP offer 8 elsewhere text/plain", &l) == BC_LINE_UNKNOWN, "no such selection");
+    EXPECT(bc_parse_line("CLIP offer 0 clipboard text/plain", &l) == BC_LINE_UNKNOWN, "seq 0");
+    EXPECT(bc_parse_line("CLIP read 7 text/plain;charset=utf-8", &l) == BC_LINE_CLIP_READ && l.id == 7 &&
+           strcmp(l.types, "text/plain;charset=utf-8") == 0, "clip read");
+    EXPECT(bc_parse_line("CLIP read 7", &l) == BC_LINE_UNKNOWN, "clip read, no type");
+    EXPECT(bc_parse_line("CLIP read 7 a b", &l) == BC_LINE_UNKNOWN, "clip read, two types");
+    EXPECT(bc_parse_line("CLIP clear 7", &l) == BC_LINE_CLIP_CLEAR && l.id == 7, "clip clear");
+    EXPECT(bc_parse_line("CLIP clear", &l) == BC_LINE_UNKNOWN, "clip clear, no seq");
     EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-left tiled-top", &l) == BC_LINE_SIZE &&
            l.tiled == (BC_TILED_LEFT | BC_TILED_TOP) && !l.activated, "tiled");
     EXPECT(bc_parse_line("WINDOW size 3 200 120 maximized activated tiled-left tiled-right tiled-top "

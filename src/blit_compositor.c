@@ -71,6 +71,7 @@
 #include "presentation-time-server-protocol.h"
 #include "relative-pointer-unstable-v1-server-protocol.h"
 #include "pointer-constraints-unstable-v1-server-protocol.h"
+#include "primary-selection-unstable-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -215,6 +216,32 @@ struct bc_xdg {
     struct wl_list cached_frames, cached_feedback;
 };
 
+/* The clipboard (ADR 0229): a program's selection source. */
+struct bc_source {
+    struct wl_resource *resource;
+    struct bc_server *server;
+    int primary;                      /* zwp_primary_selection_source_v1, else wl_data_source */
+    char *types[BC_CLIP_TYPES];
+    int ntypes;
+};
+
+/* One selection, the clipboard's or the primary: a program's source, or the
+   desktop's offer `desk_seq` in `desk_types`; never the bytes. */
+struct bc_selection {
+    struct bc_source *source;
+    uint32_t source_seq;              /* the source's offer to the desktop */
+    uint32_t desk_seq;                /* 0: the desktop offers nothing */
+    int desk_text, desk_secret;
+    uint32_t generation;              /* bumped at every change: offers made before are stale */
+};
+
+/* A wl_data_offer or zwp_primary_selection_offer_v1 made to a program. */
+struct bc_offer {
+    struct bc_server *server;
+    int primary;
+    uint32_t generation;
+};
+
 struct bc_server {
     struct wl_display *display;
     struct wl_event_loop *loop;
@@ -242,6 +269,11 @@ struct bc_server {
     struct wl_list keyboards, pointers;   /* wl_keyboard, wl_pointer resources */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
     struct wl_list constraints;       /* bc_constraint: pointer locks and confinements */
+    /* the clipboard (ADR 0229): [0] Ctrl-C/V, [1] the primary selection */
+    struct bc_selection sel[2];
+    struct wl_list devices[2];        /* wl_data_device, zwp_primary_selection_device_v1 */
+    uint32_t clip_seq;                /* the offers made to the desktop */
+    int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
     struct xkb_keymap *keymap;
     struct xkb_state *xkb_state;
@@ -1645,6 +1677,469 @@ static void bind_compositor(struct wl_client *client, void *data, uint32_t versi
         return;
     }
     wl_resource_set_implementation(r, &compositor_impl, data, NULL);
+}
+
+/* ---- the clipboard (ADR 0229) ----
+
+   Two selections, the clipboard (Ctrl-C/V, wl_data_device) and the primary
+   (middle click, zwp_primary_selection_v1), each either a program's source
+   or the desktop's offer. Hibr's clipboard is the truth: the compositor
+   keeps which side owns a selection and streams a read from the owner to
+   the reader through the reader's pipe, and never holds the bytes.
+
+   - A program sets a selection (it must have the keyboard): its source is
+     the selection, and the desktop is told `CLIP offer <seq> clipboard|
+     primary [text/plain;charset=utf-8] [x-kde-passwordManagerHint]` -- any
+     text type the source offers is the one text type, and the secret hint
+     if it carries one; no text, no types. The desktop's `CLIP read <seq>
+     <type>` with a pipe is answered by the source's best text type.
+   - The desktop sets one (`CLIP offer`): the program with the keyboard is
+     offered the text aliases (and the secret hint); a program's read
+     becomes `CLIP read <seq> text/plain;charset=utf-8` with its pipe.
+   - `CLIP clear <seq>` ends an offer either way: a program's source going,
+     the desktop's clipboard cleared (the Vault's timeout).
+   - Between programs, a paste goes straight from the source.
+   - The program with the keyboard is offered each selection when it gets
+     the keyboard and whenever a selection changes. A desktop's offer lapses
+     with its channel; a program's is offered again on a new one.
+   - Drag and drop is not here yet (ADR 0229, later): a drag is cancelled. */
+
+static const char *const bc_text_types[] = {
+    "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT",
+};
+#define BC_TEXT_TYPE "text/plain;charset=utf-8"
+#define BC_SECRET_TYPE "x-kde-passwordManagerHint"
+
+static int is_text_type(const char *type)
+{
+    size_t i;
+    for (i = 0; i < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++i)
+        if (strcmp(type, bc_text_types[i]) == 0) return 1;
+    return 0;
+}
+
+static int source_has(const struct bc_source *src, const char *type)
+{
+    int i;
+    for (i = 0; i < src->ntypes; ++i)
+        if (strcmp(src->types[i], type) == 0) return 1;
+    return 0;
+}
+
+/* The source's best text type, in bc_text_types' order; NULL for none. */
+static const char *source_text_type(const struct bc_source *src)
+{
+    size_t i;
+    for (i = 0; i < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++i)
+        if (source_has(src, bc_text_types[i])) return bc_text_types[i];
+    return NULL;
+}
+
+static void source_send(struct bc_source *src, const char *type, int fd)
+{
+    if (src->primary) zwp_primary_selection_source_v1_send_send(src->resource, type, fd);
+    else wl_data_source_send_send(src->resource, type, fd);
+}
+
+static void source_cancel(struct bc_source *src)
+{
+    if (src->primary) zwp_primary_selection_source_v1_send_cancelled(src->resource);
+    else wl_data_source_send_cancelled(src->resource);
+}
+
+/* A program's source, offered to the desktop under a new seq. */
+static void clip_offer_to_desktop(struct bc_server *s, int k)
+{
+    struct bc_selection *sel = &s->sel[k];
+    const char *text, *secret;
+    if (sel->source == NULL) return;
+    sel->source_seq = ++s->clip_seq;
+    text = source_text_type(sel->source) ? " " BC_TEXT_TYPE : "";
+    secret = source_has(sel->source, BC_SECRET_TYPE) ? " " BC_SECRET_TYPE : "";
+    bc_wire_line(&s->wire, "CLIP offer %u %s%s%s", sel->source_seq, k ? "primary" : "clipboard", text,
+                 secret);
+}
+
+static void offer_receive(struct bc_offer *o, const char *type, int fd)
+{
+    struct bc_server *s = o->server;
+    struct bc_selection *sel = &s->sel[o->primary];
+    if (o->generation == sel->generation) {
+        if (sel->source) {
+            if (source_has(sel->source, type)) source_send(sel->source, type, fd);
+        } else if (sel->desk_seq) {
+            const char *want = is_text_type(type) && sel->desk_text ? BC_TEXT_TYPE
+                             : strcmp(type, BC_SECRET_TYPE) == 0 && sel->desk_secret ? BC_SECRET_TYPE
+                             : NULL;
+            if (want && bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", sel->desk_seq, want) != 0)
+                logf_("clipboard: a paste from the desktop not asked: %s", s->wire.last_error);
+        }
+    }
+    close(fd);
+}
+
+static void offer_destroyed(struct wl_resource *resource)
+{
+    free(wl_resource_get_user_data(resource));
+}
+
+static void data_offer_accept(struct wl_client *client, struct wl_resource *resource, uint32_t serial,
+                              const char *type)
+{
+    (void)client; (void)resource; (void)serial; (void)type;
+}
+
+static void data_offer_receive(struct wl_client *client, struct wl_resource *resource, const char *type,
+                               int32_t fd)
+{
+    (void)client;
+    offer_receive(wl_resource_get_user_data(resource), type, fd);
+}
+
+static void data_offer_finish(struct wl_client *client, struct wl_resource *resource)
+{
+    (void)client; (void)resource;
+}
+
+static void data_offer_set_actions(struct wl_client *client, struct wl_resource *resource,
+                                   uint32_t actions, uint32_t preferred)
+{
+    (void)client; (void)resource; (void)actions; (void)preferred;
+}
+
+static const struct wl_data_offer_interface data_offer_impl = {
+    .accept = data_offer_accept,
+    .receive = data_offer_receive,
+    .destroy = bc_destroy_request,
+    .finish = data_offer_finish,
+    .set_actions = data_offer_set_actions,
+};
+
+static void primary_offer_receive(struct wl_client *client, struct wl_resource *resource,
+                                  const char *type, int32_t fd)
+{
+    (void)client;
+    offer_receive(wl_resource_get_user_data(resource), type, fd);
+}
+
+static const struct zwp_primary_selection_offer_v1_interface primary_offer_impl = {
+    .receive = primary_offer_receive,
+    .destroy = bc_destroy_request,
+};
+
+static void offer_type(struct wl_resource *offer, int k, const char *type)
+{
+    if (k) zwp_primary_selection_offer_v1_send_offer(offer, type);
+    else wl_data_offer_send_offer(offer, type);
+}
+
+/* Selection k to every device of `client`: a new offer with its types, or
+   none. */
+static void clip_send_to_client(struct bc_server *s, int k, struct wl_client *client)
+{
+    struct bc_selection *sel = &s->sel[k];
+    struct wl_resource *dev;
+    wl_resource_for_each(dev, &s->devices[k]) {
+        struct wl_resource *offer = NULL;
+        struct bc_offer *o;
+        size_t i;
+        if (wl_resource_get_client(dev) != client) continue;
+        if ((sel->source || sel->desk_seq) && (o = calloc(1, sizeof(*o))) != NULL) {
+            o->server = s;
+            o->primary = k;
+            o->generation = sel->generation;
+            offer = k ? wl_resource_create(client, &zwp_primary_selection_offer_v1_interface, 1, 0)
+                      : wl_resource_create(client, &wl_data_offer_interface, wl_resource_get_version(dev), 0);
+            if (offer == NULL) {
+                free(o);
+                wl_client_post_no_memory(client);
+                continue;
+            }
+            wl_resource_set_implementation(offer, k ? (const void *)&primary_offer_impl
+                                                    : (const void *)&data_offer_impl, o, offer_destroyed);
+            if (k) zwp_primary_selection_device_v1_send_data_offer(dev, offer);
+            else wl_data_device_send_data_offer(dev, offer);
+            if (sel->source) {
+                int t;
+                for (t = 0; t < sel->source->ntypes; ++t) offer_type(offer, k, sel->source->types[t]);
+            } else {
+                if (sel->desk_text)
+                    for (i = 0; i < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++i)
+                        offer_type(offer, k, bc_text_types[i]);
+                if (sel->desk_secret) offer_type(offer, k, BC_SECRET_TYPE);
+            }
+        }
+        if (k) zwp_primary_selection_device_v1_send_selection(dev, offer);
+        else wl_data_device_send_selection(dev, offer);
+    }
+}
+
+/* A selection changed: older offers go stale; the keyboard's program is
+   offered the new one. */
+static void clip_changed(struct bc_server *s, int k)
+{
+    ++s->sel[k].generation;
+    if (s->kbd_focus) clip_send_to_client(s, k, wl_resource_get_client(s->kbd_focus->resource));
+}
+
+/* The program with the keyboard set selection k to `src` (NULL: none). A
+   NULL ends only a program's selection: the desktop's is Hibr's. */
+static void clip_set_source(struct bc_server *s, int k, struct bc_source *src)
+{
+    struct bc_selection *sel = &s->sel[k];
+    struct bc_source *old = sel->source;
+    if (src == NULL && old == NULL) return;
+    if (old && old != src) source_cancel(old);
+    if (old && src == NULL && sel->source_seq)
+        bc_wire_line(&s->wire, "CLIP clear %u", sel->source_seq);
+    sel->source = src;
+    sel->source_seq = 0;
+    if (src) sel->desk_seq = 0;
+    clip_offer_to_desktop(s, k);
+    clip_changed(s, k);
+}
+
+static void source_offer(struct wl_client *client, struct wl_resource *resource, const char *type)
+{
+    struct bc_source *src = wl_resource_get_user_data(resource);
+    (void)client;
+    if (src->ntypes >= BC_CLIP_TYPES || strlen(type) > BC_CLIP_TYPE_BYTES || source_has(src, type)) return;
+    if ((src->types[src->ntypes] = strdup(type)) != NULL) ++src->ntypes;
+}
+
+static void source_destroyed(struct wl_resource *resource)
+{
+    struct bc_source *src = wl_resource_get_user_data(resource);
+    struct bc_server *s = src->server;
+    int k = src->primary, i;
+    if (s->sel[k].source == src) {
+        if (s->sel[k].source_seq) bc_wire_line(&s->wire, "CLIP clear %u", s->sel[k].source_seq);
+        s->sel[k].source = NULL;
+        s->sel[k].source_seq = 0;
+        clip_changed(s, k);
+    }
+    for (i = 0; i < src->ntypes; ++i) free(src->types[i]);
+    free(src);
+}
+
+static void data_source_set_actions(struct wl_client *client, struct wl_resource *resource,
+                                    uint32_t actions)
+{
+    (void)client; (void)resource; (void)actions;
+}
+
+static const struct wl_data_source_interface data_source_impl = {
+    .offer = source_offer,
+    .destroy = bc_destroy_request,
+    .set_actions = data_source_set_actions,
+};
+
+static const struct zwp_primary_selection_source_v1_interface primary_source_impl = {
+    .offer = source_offer,
+    .destroy = bc_destroy_request,
+};
+
+static void source_create(struct wl_client *client, struct wl_resource *manager, uint32_t id, int k)
+{
+    struct bc_source *src = calloc(1, sizeof(*src));
+    struct wl_resource *r = src ? wl_resource_create(client, k ? &zwp_primary_selection_source_v1_interface
+                                                               : &wl_data_source_interface,
+                                                     wl_resource_get_version(manager), id)
+                                : NULL;
+    if (r == NULL) {
+        free(src);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    src->resource = r;
+    src->server = wl_resource_get_user_data(manager);
+    src->primary = k;
+    wl_resource_set_implementation(r, k ? (const void *)&primary_source_impl : (const void *)&data_source_impl,
+                                   src, source_destroyed);
+}
+
+/* set_selection: honoured from the program with the keyboard only, as
+   Wayland requires a serial of its own input. */
+static void device_set_selection(struct wl_resource *device, struct wl_resource *source, int k)
+{
+    struct bc_server *s = wl_resource_get_user_data(device);
+    struct wl_client *client = wl_resource_get_client(device);
+    if (s->kbd_focus == NULL || wl_resource_get_client(s->kbd_focus->resource) != client) {
+        logf_("clipboard: a selection from a program without the keyboard is ignored");
+        return;
+    }
+    clip_set_source(s, k, source ? wl_resource_get_user_data(source) : NULL);
+}
+
+static void data_device_start_drag(struct wl_client *client, struct wl_resource *resource,
+                                   struct wl_resource *source, struct wl_resource *origin,
+                                   struct wl_resource *icon, uint32_t serial)
+{
+    /* Drag and drop is ADR 0229's later row: the drag ends at once. */
+    (void)client; (void)resource; (void)origin; (void)icon; (void)serial;
+    if (source) wl_data_source_send_cancelled(source);
+}
+
+static void data_device_set_selection(struct wl_client *client, struct wl_resource *resource,
+                                      struct wl_resource *source, uint32_t serial)
+{
+    (void)client; (void)serial;
+    device_set_selection(resource, source, 0);
+}
+
+static const struct wl_data_device_interface data_device_impl = {
+    .start_drag = data_device_start_drag,
+    .set_selection = data_device_set_selection,
+    .release = bc_destroy_request,
+};
+
+static void primary_device_set_selection(struct wl_client *client, struct wl_resource *resource,
+                                         struct wl_resource *source, uint32_t serial)
+{
+    (void)client; (void)serial;
+    device_set_selection(resource, source, 1);
+}
+
+static const struct zwp_primary_selection_device_v1_interface primary_device_impl = {
+    .set_selection = primary_device_set_selection,
+    .destroy = bc_destroy_request,
+};
+
+static void device_create(struct wl_client *client, struct wl_resource *manager, uint32_t id, int k)
+{
+    struct bc_server *s = wl_resource_get_user_data(manager);
+    struct wl_resource *r = wl_resource_create(client, k ? &zwp_primary_selection_device_v1_interface
+                                                         : &wl_data_device_interface,
+                                               wl_resource_get_version(manager), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, k ? (const void *)&primary_device_impl : (const void *)&data_device_impl,
+                                   s, unlink_resource);
+    wl_list_insert(&s->devices[k], wl_resource_get_link(r));
+    if (s->kbd_focus && wl_resource_get_client(s->kbd_focus->resource) == client)
+        clip_send_to_client(s, k, client);
+}
+
+static void ddm_create_data_source(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    source_create(client, resource, id, 0);
+}
+
+static void ddm_get_data_device(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                struct wl_resource *seat)
+{
+    (void)seat;
+    device_create(client, resource, id, 0);
+}
+
+static const struct wl_data_device_manager_interface data_device_manager_impl = {
+    .create_data_source = ddm_create_data_source,
+    .get_data_device = ddm_get_data_device,
+};
+
+static void psm_create_source(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    source_create(client, resource, id, 1);
+}
+
+static void psm_get_device(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                           struct wl_resource *seat)
+{
+    (void)seat;
+    device_create(client, resource, id, 1);
+}
+
+static const struct zwp_primary_selection_device_manager_v1_interface primary_manager_impl = {
+    .create_source = psm_create_source,
+    .get_device = psm_get_device,
+    .destroy = bc_destroy_request,
+};
+
+static void bind_data_device_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &wl_data_device_manager_interface, (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &data_device_manager_impl, data, NULL);
+}
+
+static void bind_primary_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zwp_primary_selection_device_manager_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &primary_manager_impl, data, NULL);
+}
+
+/* The desktop's lines. */
+static void clip_desktop_line(struct bc_server *s, const BcLine *l)
+{
+    int k;
+    if (l->kind == BC_LINE_CLIP_OFFER) {
+        struct bc_selection *sel = &s->sel[l->primary];
+        char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
+        if (sel->source) {
+            source_cancel(sel->source);
+            sel->source = NULL;
+            sel->source_seq = 0;
+        }
+        sel->desk_seq = l->id;
+        sel->desk_text = sel->desk_secret = 0;
+        snprintf(types, sizeof(types), "%s", l->types);
+        for (t = strtok_r(types, " ", &save); t; t = strtok_r(NULL, " ", &save)) {
+            if (is_text_type(t)) sel->desk_text = 1;
+            if (strcmp(t, BC_SECRET_TYPE) == 0) sel->desk_secret = 1;
+        }
+        clip_changed(s, l->primary);
+        return;
+    }
+    if (l->kind == BC_LINE_CLIP_CLEAR) {
+        for (k = 0; k < 2; ++k)
+            if (s->sel[k].desk_seq == l->id) {
+                s->sel[k].desk_seq = 0;
+                clip_changed(s, k);
+            }
+        return;
+    }
+    /* CLIP read: the desktop wants a program's selection, into its pipe. */
+    {
+        int fd = s->line_fd;
+        s->line_fd = -1;
+        if (fd < 0) {
+            logf_("clipboard: CLIP read %u came with no pipe", l->id);
+            return;
+        }
+        for (k = 0; k < 2; ++k) {
+            struct bc_source *src = s->sel[k].source;
+            const char *type;
+            if (src == NULL || s->sel[k].source_seq != l->id) continue;
+            type = strcmp(l->types, BC_TEXT_TYPE) == 0 ? source_text_type(src)
+                 : source_has(src, l->types) ? l->types : NULL;
+            if (type) source_send(src, type, fd);
+        }
+        close(fd);
+    }
+}
+
+/* The channel lost: the desktop's offers lapse with it. A new one: the
+   programs' selections are offered again. */
+static void clip_channel(struct bc_server *s, int up)
+{
+    int k;
+    for (k = 0; k < 2; ++k) {
+        if (up) clip_offer_to_desktop(s, k);
+        else if (s->sel[k].desk_seq) {
+            s->sel[k].desk_seq = 0;
+            clip_changed(s, k);
+        }
+    }
 }
 
 /* ---- wl_subcompositor: each subsurface a picture (WINDOW sub) ---- */
@@ -3101,6 +3596,9 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
     }
     s->kbd_focus = surface;
     if (surface == NULL) return;
+    /* The selections, before the keyboard enters (wl_data_device). */
+    clip_send_to_client(s, 0, wl_resource_get_client(surface->resource));
+    clip_send_to_client(s, 1, wl_resource_get_client(surface->resource));
     wl_array_init(&keys);
     seat_for_client(r, &s->keyboards, surface)
         wl_keyboard_send_enter(r, wl_display_next_serial(s->display), surface->resource, &keys);
@@ -3891,6 +4389,11 @@ static void handle_line(struct bc_server *s, const char *line)
         return;
     case BC_LINE_OK_WINDOW:
         return;
+    case BC_LINE_CLIP_OFFER:
+    case BC_LINE_CLIP_READ:
+    case BC_LINE_CLIP_CLEAR:
+        clip_desktop_line(s, &l);
+        return;
     default:
         logf_("an unknown line from the channel: %.80s", line);
         return;
@@ -3904,21 +4407,48 @@ static int on_frame_socket(int fd, uint32_t mask, void *data)
     struct bc_server *s = data;
     char buf[1024];
     for (;;) {
-        ssize_t got = recv(fd, buf, sizeof(buf) - 1, MSG_DONTWAIT);
+        /* A packet's descriptor (CLIP read's pipe) is its line's. */
+        char control[CMSG_SPACE(4 * sizeof(int))];
+        struct iovec iov = { buf, sizeof(buf) - 1 };
+        struct msghdr msg;
+        struct cmsghdr *cmsg;
+        ssize_t got;
         char *line, *next;
+        memset(&msg, 0, sizeof(msg));
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control;
+        msg.msg_controllen = sizeof(control);
+        got = recvmsg(fd, &msg, MSG_DONTWAIT | MSG_CMSG_CLOEXEC);
         if (got < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
         if (got < 0 && errno == EINTR) continue;
         if (got <= 0) {
             channel_lost(s, got == 0 ? "closed" : strerror(errno));
             return 0;
         }
+        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+            int n, k, passed;
+            if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) continue;
+            n = (int)((cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int));
+            for (k = 0; k < n; ++k) {
+                memcpy(&passed, CMSG_DATA(cmsg) + (size_t)k * sizeof(int), sizeof(int));
+                if (s->line_fd < 0) s->line_fd = passed;
+                else close(passed);
+            }
+        }
         buf[got] = '\0';
         for (line = buf; line && *line; line = next) {
             next = strchr(line, '\n');
             if (next) *next++ = '\0';
             handle_line(s, line);
-            if (s->quit) return 0;
+            if (s->quit) break;
         }
+        /* A descriptor no line took is closed. */
+        if (s->line_fd >= 0) {
+            close(s->line_fd);
+            s->line_fd = -1;
+        }
+        if (s->quit) return 0;
     }
     if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) channel_lost(s, "hung up");
     return 0;
@@ -4084,6 +4614,8 @@ static void reannounce(struct bc_server *s)
     /* The pointer constraints still wanted, asked again. */
     wl_list_for_each(c, &s->constraints, link) constraint_ask(c);
     logf_("reconnect: %d windows announced again, %d frames sent again", windows, frames);
+    /* The programs' selections, offered to the new desktop. */
+    clip_channel(s, 1);
 }
 
 /* The new channel is up: the desktop's (window=1). */
@@ -4172,6 +4704,7 @@ static void channel_lost(struct bc_server *s, const char *why)
     struct bc_hold *h, *next;
     struct bc_constraint *c;
     if (s->link != BC_LINK_UP || s->quit) return;
+    clip_channel(s, 0);
     logf_("the frame channel %s: the desktop is gone; keeping %d windows and reconnecting to %s "
           "for at most %u ms", why, wl_list_length(&s->windows), s->frame_socket, s->bound_ms);
     wl_event_source_remove(s->frame_source);
@@ -4280,6 +4813,9 @@ int main(int argc, char **argv)
     wl_list_init(&server.pointers);
     wl_list_init(&server.relative_pointers);
     wl_list_init(&server.constraints);
+    wl_list_init(&server.devices[0]);
+    wl_list_init(&server.devices[1]);
+    server.line_fd = -1;
     server.keymap_fd = -1;
     server.dial_fd = -1;
     for (i = 1; i < argc; ++i) {
@@ -4380,7 +4916,13 @@ int main(int argc, char **argv)
                           bind_relative_manager) ||
         !wl_global_create(server.display, &zwp_pointer_constraints_v1_interface,
                           BC_VERSION(1, zwp_pointer_constraints_v1_interface), &server,
-                          bind_constraints)) {
+                          bind_constraints) ||
+        !wl_global_create(server.display, &wl_data_device_manager_interface,
+                          BC_VERSION(3, wl_data_device_manager_interface), &server,
+                          bind_data_device_manager) ||
+        !wl_global_create(server.display, &zwp_primary_selection_device_manager_v1_interface,
+                          BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface), &server,
+                          bind_primary_manager)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
@@ -4402,13 +4944,16 @@ int main(int argc, char **argv)
     }
     logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
-          "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d",
+          "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d, "
+          "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
           BC_VERSION(1, wp_presentation_interface),
           BC_VERSION(1, zwp_relative_pointer_manager_v1_interface),
-          BC_VERSION(1, zwp_pointer_constraints_v1_interface));
+          BC_VERSION(1, zwp_pointer_constraints_v1_interface),
+          BC_VERSION(3, wl_data_device_manager_interface),
+          BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);

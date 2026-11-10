@@ -100,6 +100,7 @@ class Desktop:
     """The desktop's end of a frame channel: one accepted connection."""
 
     def __init__(self, listener, answer=b'OK dmabuf=0 window=1\n'):
+        self.clip_fds = []
         listener.settimeout(10)
         self.sock, _ = listener.accept()
         self.sock.settimeout(5)
@@ -141,9 +142,14 @@ class Desktop:
             check(len(data) == 48 and len(fds) == 1, 'FRM1 of %d bytes with %d fds' % (len(data), len(fds)))
             fields = struct.unpack_from('<IQIIIIIIII', data, 4)
             return ('frame', fields, fds[0])
-        for fd in fds:
-            os.close(fd)
         check(data.endswith(b'\n') and data.count(b'\n') == 1, 'not one line: %r' % data)
+        if data.startswith(b'CLIP read '):
+            # The reader's pipe, passed with the line: the gate writes into it.
+            check(len(fds) == 1, 'CLIP read with %d fds' % len(fds))
+            self.clip_fds.append(fds[0])
+        else:
+            for fd in fds:
+                os.close(fd)
         return ('line', data[:-1].decode())
 
     def line(self, expected, wait=5.0):
@@ -278,6 +284,106 @@ def states_part(desk, standin, env, display, work):
             client.wait()
     return ('maximize+minimize+parent(5->4,->0)+hide->frame maximized output=BLIT-2:1280x720@30000,'
             'BLIT-1,BLIT-2:800x600@75000')
+
+
+def clip_part(desk, standin, env, display, work):
+    """The clipboard (ADR 0229), with `--clip`, window 10, the gate as Hibr's
+    clipboard: a program's copy offered to the desktop as one text type and
+    read through a pipe; the desktop's offer pasted by the program as
+    UTF8_STRING through a `CLIP read`; a secret offered and cleared both
+    ways; a source destroyed clears; the primary selection the same."""
+    out_path = os.path.join(work, 'standin-clip.out')
+    client = start([standin, '--clip', 'Clip'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    frame = [0]
+
+    def key(code):
+        frame[0] += 1
+        route.sendall(b'INPUT key %d %d press\nINPUT frame %d %d\nINPUT key %d %d release\nINPUT frame %d %d\n'
+                      % (BLIT_PICTURE, code, BLIT_PICTURE, frame[0], BLIT_PICTURE, code, BLIT_PICTURE,
+                         frame[0] + 1))
+        frame[0] += 1
+
+    def seen(text):
+        wait_for(lambda: text in printed(), lambda: 'the program did not print %r:\n%s' % (text, printed()))
+
+    def desktop_reads(seq, type_):
+        r, w = os.pipe()
+        socket.send_fds(desk.sock, [b'CLIP read %d %s\n' % (seq, type_.encode())], [w])
+        os.close(w)
+        out = b''
+        while True:
+            chunk = os.read(r, 4096)
+            if not chunk:
+                break
+            out += chunk
+        os.close(r)
+        return out
+
+    def desktop_answers(text):
+        fd = desk.clip_fds.pop(0)
+        os.write(fd, text)
+        os.close(fd)
+
+    aliases = 'text/plain;charset=utf-8,UTF8_STRING,text/plain,STRING,TEXT'
+    try:
+        for want in ('WINDOW new 10 0', 'WINDOW title 10 Clip', 'WINDOW appid 10 blit.standin',
+                     'WINDOW limits 10 64 48 0 0', 'WINDOW decor 10 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=10)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[10])
+        # A program copies: one text type to the desktop, read through a pipe.
+        key(46)
+        desk.line('CLIP offer 1 clipboard text/plain;charset=utf-8')
+        seen('STANDIN selection clipboard text/plain;charset=utf-8,text/plain,x-standin/other')
+        got = desktop_reads(1, 'text/plain;charset=utf-8')
+        check(got == b'copied: text/plain;charset=utf-8', 'the desktop read %r' % got)
+        check(desktop_reads(1, 'image/png') == b'', 'a type nobody offers was answered')
+        check(desktop_reads(99, 'text/plain;charset=utf-8') == b'', 'a stale offer was answered')
+        # The desktop copies: the program's source cancelled, the aliases offered,
+        # its paste a CLIP read the desktop answers.
+        desk.send('CLIP offer 7 clipboard text/plain;charset=utf-8')
+        seen('STANDIN source cancelled clipboard')
+        seen('STANDIN selection clipboard ' + aliases + '\n')
+        key(47)
+        desk.line('CLIP read 7 text/plain;charset=utf-8')
+        desktop_answers(b'hello from hibr')
+        seen('STANDIN pasted clipboard hello from hibr')
+        # A secret (the Vault), offered and cleared.
+        desk.send('CLIP offer 8 clipboard text/plain;charset=utf-8 x-kde-passwordManagerHint')
+        seen('STANDIN selection clipboard ' + aliases + ',x-kde-passwordManagerHint')
+        desk.send('CLIP clear 8')
+        wait_for(lambda: printed().rstrip().endswith('STANDIN selection clipboard none') or
+                 printed().splitlines()[-1] == 'STANDIN selection clipboard none',
+                 lambda: 'the secret was not cleared:\n' + printed())
+        # A program's secret, then its source destroyed: offered, then cleared.
+        key(45)
+        desk.line('CLIP offer 2 clipboard text/plain;charset=utf-8 x-kde-passwordManagerHint')
+        key(32)
+        desk.line('CLIP clear 2')
+        # The primary selection, both ways.
+        key(25)
+        desk.line('CLIP offer 3 primary text/plain;charset=utf-8')
+        desk.send('CLIP offer 9 primary text/plain;charset=utf-8')
+        seen('STANDIN source cancelled primary')
+        seen('STANDIN selection primary ' + aliases)
+        key(24)
+        desk.line('CLIP read 9 text/plain;charset=utf-8')
+        desktop_answers(b'middle')
+        seen('STANDIN pasted primary middle')
+        desk.nothing(0.3)
+        desk.send('WINDOW close 10')
+        desk.line('WINDOW gone 10')
+        check(client.wait(5) == 0, 'the clip stand-in failed:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('copy->CLIP offer text,read-by-pipe paste<-CLIP read aliases=5 secret=offer+clear-both-ways '
+            'source-gone->clear primary=both-ways stale/unknown=empty')
 
 
 def csd_part(desk, standin, env, display, work):
@@ -1024,7 +1130,8 @@ def sub_restart_part(compositor, standin, work):
         desk = Desktop(listener)
         desk.line('WINDOW display blit-0')
         out_path = os.path.join(work, 'standin-sub-restart.out')
-        client = start([standin, '--sub', 'Subbed'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        client = start([standin, '--sub', '--clip', 'Subbed'], dict(env, WAYLAND_DISPLAY='blit-0'),
+                       open(out_path, 'w'))
         printed = lambda: open(out_path).read()
         hints = ('WINDOW new 1 0', 'WINDOW title 1 Subbed', 'WINDOW appid 1 blit.standin',
                  'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server')
@@ -1036,7 +1143,15 @@ def sub_restart_part(compositor, standin, work):
         desk.line('WINDOW sub 2 1 20 30 64 40 above')
         desk.frame(64, 40, image_id=2)
         wait_for(lambda: 'STANDIN sub step 1' in printed(), lambda: 'no sub step 1:\n' + printed())
-        # Restart Desktop: the channel and its socket go, then come back.
+        # Its copy, and the desktop's offer of the primary (which lapses).
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        route.sendall(b'INPUT key %d 46 press\nINPUT frame %d 1\n' % (BLIT_PICTURE, BLIT_PICTURE))
+        desk.line('CLIP offer 1 clipboard text/plain;charset=utf-8')
+        desk.send('CLIP offer 5 primary text/plain;charset=utf-8')
+        wait_for(lambda: 'STANDIN selection primary text/plain;charset=utf-8' in printed(),
+                 lambda: 'no primary from the desktop:\n' + printed())
+        # Restart Desktop (the route kept: the program keeps the keyboard): the channel and its socket go, then come back.
         desk.sock.close()
         listener.close()
         time.sleep(0.5)
@@ -1048,7 +1163,13 @@ def sub_restart_part(compositor, standin, work):
         desk.line('WINDOW sub 2 1 20 30 64 40 above')
         desk.frame(200, 120)
         desk.frame(64, 40, image_id=2)
+        # The program's selection offered to the new desktop, the old
+        # desktop's primary gone from the program.
+        desk.line('CLIP offer 2 clipboard text/plain;charset=utf-8')
         desk.nothing(0.3)
+        check(printed().splitlines().count('STANDIN selection primary none') >= 2,
+              lambda: 'the lost desktop\'s primary was not withdrawn:\n' + printed())
+        route.close()
         quit_compositor(desk, comp)
         client.wait(5)
         text = open(log).read()
@@ -1060,7 +1181,8 @@ def sub_restart_part(compositor, standin, work):
                 p.kill()
                 p.wait()
         listener.close()
-    return 'reconnect=new+hints,WINDOW-sub-same-id,frames(top-level,sub)'
+    return ('reconnect=new+hints,WINDOW-sub-same-id,frames(top-level,sub),'
+            'program-selection-offered-again,desktop-offer-lapsed')
 
 
 def restart_part(compositor, standin, work):
@@ -1402,6 +1524,7 @@ def desktop_part(compositor, standin, work):
         pacing = pacing_part(desk, standin, env, display, work)
         subs = sub_part(desk, standin, env, display, work)
         csd = csd_part(desk, standin, env, display, work)
+        clip = clip_part(desk, standin, env, display, work)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1415,7 +1538,7 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('35 frames sent, 0 failed' in text, 'the log does not count 35 frames:\n%s' % text)
+        check('36 frames sent, 0 failed' in text, 'the log does not count 36 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
@@ -1424,6 +1547,7 @@ def desktop_part(compositor, standin, work):
         print('COMPOSITOR_PACING_OK %s' % pacing)
         print('COMPOSITOR_SUB_OK %s' % subs)
         print('COMPOSITOR_CSD_OK %s' % csd)
+        print('COMPOSITOR_CLIP_OK %s' % clip)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

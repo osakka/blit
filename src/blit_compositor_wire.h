@@ -386,24 +386,42 @@ static void bc_text_clean(char *out, const char *in)
 }
 
 /* One WINDOW line (the caller's format has no newline; one is added). */
-static int bc_wire_line(BcWire *w, const char *fmt, ...)
+static int bc_wire_vline(BcWire *w, int fd, const char *fmt, va_list ap)
 {
     char line[64 + BC_TEXT_BYTES];
-    va_list ap;
     int n;
     if (w->fd < 0 || !w->window) return -1;
-    va_start(ap, fmt);
     n = vsnprintf(line, sizeof(line) - 1, fmt, ap);
-    va_end(ap);
     if (n < 0 || (size_t)n >= sizeof(line) - 1) return -1;
     line[n++] = '\n';
-    if (bc_wire_sendmsg(w->fd, line, (size_t)n, -1) != 0) {
+    if (bc_wire_sendmsg(w->fd, line, (size_t)n, fd) != 0) {
         ++w->lines_failed;
         snprintf(w->last_error, sizeof(w->last_error), "send WINDOW: %s", strerror(errno));
         return -1;
     }
     ++w->lines_sent;
     return 0;
+}
+
+static int bc_wire_line(BcWire *w, const char *fmt, ...)
+{
+    va_list ap;
+    int rc;
+    va_start(ap, fmt);
+    rc = bc_wire_vline(w, -1, fmt, ap);
+    va_end(ap);
+    return rc;
+}
+
+/* A line with a descriptor passed with it (CLIP read's pipe), one packet. */
+static int bc_wire_line_fd(BcWire *w, int fd, const char *fmt, ...)
+{
+    va_list ap;
+    int rc;
+    va_start(ap, fmt);
+    rc = bc_wire_vline(w, fd, fmt, ap);
+    va_end(ap);
+    return rc;
 }
 
 /* `INPUT sock <id> <path>`: a toplevel's input route, straight from Blit to
@@ -610,8 +628,15 @@ enum {
     BC_LINE_ERROR_WINDOW,   /* WINDOW error <id> <code> */
     BC_LINE_RELEASE,        /* FRAME release <id> <sequence>: an FRM3 frame's buffer is free */
     BC_LINE_ERROR,          /* FRAME error <id> <code>: a refused frame */
-    BC_LINE_OTHER           /* understood, nothing to do (HUD1, INPUT ok|error) */
+    BC_LINE_OTHER,          /* understood, nothing to do (HUD1, INPUT ok|error) */
+    BC_LINE_CLIP_OFFER,     /* CLIP offer <seq> clipboard|primary [<type> ...] */
+    BC_LINE_CLIP_READ,      /* CLIP read <seq> <type>, a pipe's write end with it */
+    BC_LINE_CLIP_CLEAR      /* CLIP clear <seq> */
 };
+
+/* The clipboard's lines (ADR 0229): media types are printable ASCII words. */
+#define BC_CLIP_TYPE_BYTES 127
+#define BC_CLIP_TYPES 16
 
 typedef struct {
     int kind;
@@ -623,7 +648,22 @@ typedef struct {
     uint32_t refresh_mhz;   /* WINDOW output */
     uint64_t sequence;      /* FRAME release */
     char code[32];
+    int primary;            /* CLIP offer: the primary selection, not the clipboard */
+    char types[BC_TEXT_BYTES + 1];  /* CLIP offer: its types, one space apart; read: the type */
+    int ntypes;
 } BcLine;
+
+/* One media type word at *p into out (BC_CLIP_TYPE_BYTES + 1); advances. */
+static int bc_read_type(const char **p, char *out)
+{
+    size_t n = 0;
+    while ((unsigned char)**p > ' ' && (unsigned char)**p < 0x7f) {
+        if (n >= BC_CLIP_TYPE_BYTES) return -1;
+        out[n++] = *(*p)++;
+    }
+    out[n] = '\0';
+    return n ? 0 : -1;
+}
 
 /* Reads an unsigned decimal word at *p (no sign, no leading space), at most
    `max`; advances *p past it. */
@@ -747,6 +787,42 @@ static int bc_parse_line(const char *line, BcLine *out)
     const char *p;
     uint32_t a, b;
     memset(out, 0, sizeof(*out));
+    if (strncmp(line, "CLIP ", 5) == 0) {
+        char type[BC_CLIP_TYPE_BYTES + 1];
+        int kind;
+        p = line + 5;
+        if (strncmp(p, "offer ", 6) == 0) { kind = BC_LINE_CLIP_OFFER; p += 6; }
+        else if (strncmp(p, "read ", 5) == 0) { kind = BC_LINE_CLIP_READ; p += 5; }
+        else if (strncmp(p, "clear ", 6) == 0) { kind = BC_LINE_CLIP_CLEAR; p += 6; }
+        else return out->kind = BC_LINE_UNKNOWN;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0)
+            return out->kind = BC_LINE_UNKNOWN;
+        if (kind == BC_LINE_CLIP_OFFER) {
+            size_t used = 0;
+            if (strncmp(p, " clipboard", 10) == 0) p += 10;
+            else if (strncmp(p, " primary", 8) == 0) { out->primary = 1; p += 8; }
+            else return out->kind = BC_LINE_UNKNOWN;
+            while (*p == ' ') {
+                size_t n;
+                ++p;
+                if (bc_read_type(&p, type) != 0 || out->ntypes >= BC_CLIP_TYPES)
+                    return out->kind = BC_LINE_UNKNOWN;
+                n = strlen(type);
+                if (used + n + 1 > BC_TEXT_BYTES) return out->kind = BC_LINE_UNKNOWN;
+                if (used) out->types[used++] = ' ';
+                memcpy(out->types + used, type, n);
+                used += n;
+                out->types[used] = '\0';
+                ++out->ntypes;
+            }
+        } else if (kind == BC_LINE_CLIP_READ) {
+            if (*p++ != ' ' || bc_read_type(&p, type) != 0) return out->kind = BC_LINE_UNKNOWN;
+            snprintf(out->types, sizeof(out->types), "%s", type);
+            out->ntypes = 1;
+        }
+        if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = kind;
+    }
     if (strncmp(line, "WINDOW size ", 12) == 0) {
         p = line + 12;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' ||

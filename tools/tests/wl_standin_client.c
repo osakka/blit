@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -22,6 +22,14 @@
    to 40,10 and a 48x24 frame committed before the parent's commit; 3 an
    empty input region; 4 the whole surface again; 5 placed below the
    parent; 6 the wl_subsurface destroyed. Its pointer events name it `sub`.
+
+   With --clip it uses both selections, by key: C (46) copies "copied:
+   <type>" in text/plain;charset=utf-8, text/plain and x-standin/other; X
+   (45) copies the same marked secret (x-kde-passwordManagerHint); V (47)
+   pastes the clipboard as UTF8_STRING and prints `STANDIN pasted
+   clipboard <text>`; P (25) and O (24) copy and paste the primary
+   selection; D (32) destroys its clipboard source. Every selection it is
+   offered prints `STANDIN selection clipboard|primary <types>|none`.
 
    With --csd it draws its own frame, as GTK does: a window geometry 10
    pixels inside its buffer on each side (its shadow outside), and on a
@@ -100,6 +108,7 @@
 #include "presentation-time-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "pointer-constraints-unstable-v1-client-protocol.h"
+#include "primary-selection-unstable-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -151,6 +160,17 @@ struct standin {
     /* --sub */
     int sub_script, sub_step;
     int csd, csd_asked;
+    /* --clip */
+    int clip;
+    struct wl_data_device_manager *ddm;
+    struct zwp_primary_selection_device_manager_v1 *psm;
+    struct wl_data_device *data_device;
+    struct zwp_primary_selection_device_v1 *primary_device;
+    struct wl_data_offer *clip_offer, *clip_pending;
+    struct zwp_primary_selection_offer_v1 *primary_offer, *primary_pending;
+    char clip_types[512], primary_types[512];
+    struct wl_data_source *clip_source;
+    struct zwp_primary_selection_source_v1 *primary_source;
     struct wl_subcompositor *subcompositor;
     struct wl_surface *sub_surface;
     struct wl_subsurface *subsurface;
@@ -657,13 +677,245 @@ static void keyboard_leave(void *data, struct wl_keyboard *k, uint32_t serial,
     printf("STANDIN keyboard leave %s\n", surface_name(data, surface));
 }
 
+static void clip_key(struct standin *s, uint32_t key, uint32_t serial);
+
 static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
                          uint32_t key, uint32_t state)
 {
     struct standin *s = data;
-    (void)k; (void)serial; (void)time;
+    (void)k; (void)time;
     printf("STANDIN key %u %u\n", key, state);
     if (s->lock && key == 57 && state == WL_KEYBOARD_KEY_STATE_PRESSED) lock_next(s);
+    if (s->clip && state == WL_KEYBOARD_KEY_STATE_PRESSED) clip_key(s, key, serial);
+    fflush(stdout);
+}
+
+/* ---- --clip ---- */
+
+static void offer_types_add(char *types, const char *type)
+{
+    if (strlen(types) + strlen(type) + 2 >= 512) return;
+    if (types[0]) strcat(types, ",");
+    strcat(types, type);
+}
+
+static void data_offer_offer(void *data, struct wl_data_offer *o, const char *type)
+{
+    (void)o;
+    offer_types_add(data, type);
+}
+
+static void data_offer_source_actions(void *data, struct wl_data_offer *o, uint32_t a)
+{
+    (void)data; (void)o; (void)a;
+}
+
+static void data_offer_action(void *data, struct wl_data_offer *o, uint32_t a)
+{
+    (void)data; (void)o; (void)a;
+}
+
+static const struct wl_data_offer_listener data_offer_listener = {
+    data_offer_offer, data_offer_source_actions, data_offer_action,
+};
+
+static void data_device_data_offer(void *data, struct wl_data_device *d, struct wl_data_offer *o)
+{
+    struct standin *s = data;
+    (void)d;
+    if (s->clip_pending) wl_data_offer_destroy(s->clip_pending);
+    s->clip_pending = o;
+    s->clip_types[0] = '\0';
+    wl_data_offer_add_listener(o, &data_offer_listener, s->clip_types);
+}
+
+static void data_device_enter(void *data, struct wl_data_device *d, uint32_t serial, struct wl_surface *sf,
+                              wl_fixed_t x, wl_fixed_t y, struct wl_data_offer *o)
+{
+    (void)data; (void)d; (void)serial; (void)sf; (void)x; (void)y; (void)o;
+}
+
+static void data_device_leave(void *data, struct wl_data_device *d)
+{
+    (void)data; (void)d;
+}
+
+static void data_device_motion(void *data, struct wl_data_device *d, uint32_t t, wl_fixed_t x, wl_fixed_t y)
+{
+    (void)data; (void)d; (void)t; (void)x; (void)y;
+}
+
+static void data_device_drop(void *data, struct wl_data_device *d)
+{
+    (void)data; (void)d;
+}
+
+static void data_device_selection(void *data, struct wl_data_device *d, struct wl_data_offer *o)
+{
+    struct standin *s = data;
+    (void)d;
+    if (s->clip_offer && s->clip_offer != o) wl_data_offer_destroy(s->clip_offer);
+    s->clip_offer = o;
+    if (o == s->clip_pending) s->clip_pending = NULL;
+    printf("STANDIN selection clipboard %s\n", o ? s->clip_types : "none");
+    fflush(stdout);
+}
+
+static const struct wl_data_device_listener data_device_listener = {
+    data_device_data_offer, data_device_enter, data_device_leave, data_device_motion,
+    data_device_drop, data_device_selection,
+};
+
+static void primary_offer_offer(void *data, struct zwp_primary_selection_offer_v1 *o, const char *type)
+{
+    (void)o;
+    offer_types_add(data, type);
+}
+
+static const struct zwp_primary_selection_offer_v1_listener primary_offer_listener = { primary_offer_offer };
+
+static void primary_device_data_offer(void *data, struct zwp_primary_selection_device_v1 *d,
+                                      struct zwp_primary_selection_offer_v1 *o)
+{
+    struct standin *s = data;
+    (void)d;
+    if (s->primary_pending) zwp_primary_selection_offer_v1_destroy(s->primary_pending);
+    s->primary_pending = o;
+    s->primary_types[0] = '\0';
+    zwp_primary_selection_offer_v1_add_listener(o, &primary_offer_listener, s->primary_types);
+}
+
+static void primary_device_selection(void *data, struct zwp_primary_selection_device_v1 *d,
+                                     struct zwp_primary_selection_offer_v1 *o)
+{
+    struct standin *s = data;
+    (void)d;
+    if (s->primary_offer && s->primary_offer != o) zwp_primary_selection_offer_v1_destroy(s->primary_offer);
+    s->primary_offer = o;
+    if (o == s->primary_pending) s->primary_pending = NULL;
+    printf("STANDIN selection primary %s\n", o ? s->primary_types : "none");
+    fflush(stdout);
+}
+
+static const struct zwp_primary_selection_device_v1_listener primary_device_listener = {
+    primary_device_data_offer, primary_device_selection,
+};
+
+static void source_write(const char *type, int32_t fd)
+{
+    char text[160];
+    int n = snprintf(text, sizeof(text), "copied: %s", type);
+    if (write(fd, text, (size_t)n) != n) perror("STANDIN source write");
+    close(fd);
+    printf("STANDIN source sent %s\n", type);
+    fflush(stdout);
+}
+
+static void data_source_target(void *data, struct wl_data_source *src, const char *type)
+{
+    (void)data; (void)src; (void)type;
+}
+
+static void data_source_send(void *data, struct wl_data_source *src, const char *type, int32_t fd)
+{
+    (void)data; (void)src;
+    source_write(type, fd);
+}
+
+static void data_source_cancelled(void *data, struct wl_data_source *src)
+{
+    struct standin *s = data;
+    printf("STANDIN source cancelled clipboard\n");
+    fflush(stdout);
+    wl_data_source_destroy(src);
+    if (s->clip_source == src) s->clip_source = NULL;
+}
+
+static void data_source_dnd(void *data, struct wl_data_source *src)
+{
+    (void)data; (void)src;
+}
+
+static void data_source_action(void *data, struct wl_data_source *src, uint32_t a)
+{
+    (void)data; (void)src; (void)a;
+}
+
+static const struct wl_data_source_listener data_source_listener = {
+    data_source_target, data_source_send, data_source_cancelled, data_source_dnd, data_source_dnd,
+    data_source_action,
+};
+
+static void primary_source_send(void *data, struct zwp_primary_selection_source_v1 *src, const char *type,
+                                int32_t fd)
+{
+    (void)data; (void)src;
+    source_write(type, fd);
+}
+
+static void primary_source_cancelled(void *data, struct zwp_primary_selection_source_v1 *src)
+{
+    struct standin *s = data;
+    printf("STANDIN source cancelled primary\n");
+    fflush(stdout);
+    zwp_primary_selection_source_v1_destroy(src);
+    if (s->primary_source == src) s->primary_source = NULL;
+}
+
+static const struct zwp_primary_selection_source_v1_listener primary_source_listener = {
+    primary_source_send, primary_source_cancelled,
+};
+
+/* A paste: the type into a pipe, read to its end. */
+static void clip_paste(struct standin *s, int primary)
+{
+    char text[512];
+    size_t used = 0;
+    ssize_t got;
+    int p[2];
+    if ((primary ? (void *)s->primary_offer : (void *)s->clip_offer) == NULL || pipe(p) != 0) {
+        printf("STANDIN pasted %s nothing\n", primary ? "primary" : "clipboard");
+        return;
+    }
+    if (primary) zwp_primary_selection_offer_v1_receive(s->primary_offer, "UTF8_STRING", p[1]);
+    else wl_data_offer_receive(s->clip_offer, "UTF8_STRING", p[1]);
+    close(p[1]);
+    wl_display_flush(s->display);
+    while (used < sizeof(text) - 1 && (got = read(p[0], text + used, sizeof(text) - 1 - used)) > 0)
+        used += (size_t)got;
+    close(p[0]);
+    text[used] = '\0';
+    printf("STANDIN pasted %s %s\n", primary ? "primary" : "clipboard", text);
+}
+
+static void clip_key(struct standin *s, uint32_t key, uint32_t serial)
+{
+    if (key == 46 || key == 45) {
+        struct wl_data_source *src = wl_data_device_manager_create_data_source(s->ddm);
+        wl_data_source_add_listener(src, &data_source_listener, s);
+        wl_data_source_offer(src, "text/plain;charset=utf-8");
+        wl_data_source_offer(src, "text/plain");
+        wl_data_source_offer(src, "x-standin/other");
+        if (key == 45) wl_data_source_offer(src, "x-kde-passwordManagerHint");
+        wl_data_device_set_selection(s->data_device, src, serial);
+        s->clip_source = src;
+        printf("STANDIN copied clipboard%s\n", key == 45 ? " secret" : "");
+    } else if (key == 25) {
+        struct zwp_primary_selection_source_v1 *src = zwp_primary_selection_device_manager_v1_create_source(s->psm);
+        zwp_primary_selection_source_v1_add_listener(src, &primary_source_listener, s);
+        zwp_primary_selection_source_v1_offer(src, "UTF8_STRING");
+        zwp_primary_selection_device_v1_set_selection(s->primary_device, src, serial);
+        s->primary_source = src;
+        printf("STANDIN copied primary\n");
+    } else if (key == 47) {
+        clip_paste(s, 0);
+    } else if (key == 24) {
+        clip_paste(s, 1);
+    } else if (key == 32 && s->clip_source) {
+        wl_data_source_destroy(s->clip_source);
+        s->clip_source = NULL;
+        printf("STANDIN source destroyed clipboard\n");
+    }
 }
 
 static void keyboard_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t dep,
@@ -881,6 +1133,10 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
     else if (strcmp(interface, wl_subcompositor_interface.name) == 0)
         s->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
+    else if (strcmp(interface, wl_data_device_manager_interface.name) == 0)
+        s->ddm = wl_registry_bind(registry, name, &wl_data_device_manager_interface, version < 3 ? version : 3);
+    else if (strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) == 0)
+        s->psm = wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1);
     else if (strcmp(interface, wl_shm_interface.name) == 0)
         s->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
     else if (strcmp(interface, xdg_wm_base_interface.name) == 0)
@@ -996,6 +1252,7 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
+        else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -1012,6 +1269,16 @@ int main(int argc, char **argv)
     wl_registry_add_listener(registry, &registry_listener, &s);
     wl_display_roundtrip(s.display);
     wl_display_roundtrip(s.display); /* the seat's and the output's events */
+    if (s.clip) {
+        if (s.ddm == NULL || s.psm == NULL || s.seat == NULL) {
+            fprintf(stderr, "STANDIN --clip: no data device manager or primary selection\n");
+            return 1;
+        }
+        s.data_device = wl_data_device_manager_get_data_device(s.ddm, s.seat);
+        wl_data_device_add_listener(s.data_device, &data_device_listener, &s);
+        s.primary_device = zwp_primary_selection_device_manager_v1_get_device(s.psm, s.seat);
+        zwp_primary_selection_device_v1_add_listener(s.primary_device, &primary_device_listener, &s);
+    }
     if (!s.compositor || !s.shm || !s.wm_base) {
         fprintf(stderr, "STANDIN missing wl_compositor, wl_shm or xdg_wm_base\n");
         return 1;
@@ -1094,6 +1361,16 @@ int main(int argc, char **argv)
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);
     if (s.sub_surface) wl_surface_destroy(s.sub_surface);
+    if (s.clip_offer) wl_data_offer_destroy(s.clip_offer);
+    if (s.clip_pending) wl_data_offer_destroy(s.clip_pending);
+    if (s.primary_offer) zwp_primary_selection_offer_v1_destroy(s.primary_offer);
+    if (s.primary_pending) zwp_primary_selection_offer_v1_destroy(s.primary_pending);
+    if (s.clip_source) wl_data_source_destroy(s.clip_source);
+    if (s.primary_source) zwp_primary_selection_source_v1_destroy(s.primary_source);
+    if (s.data_device) wl_data_device_release(s.data_device);
+    if (s.primary_device) zwp_primary_selection_device_v1_destroy(s.primary_device);
+    if (s.ddm) wl_data_device_manager_destroy(s.ddm);
+    if (s.psm) zwp_primary_selection_device_manager_v1_destroy(s.psm);
     if (s.subcompositor) wl_subcompositor_destroy(s.subcompositor);
     wl_compositor_destroy(s.compositor);
     wl_registry_destroy(registry);

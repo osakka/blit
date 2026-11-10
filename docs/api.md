@@ -2410,8 +2410,33 @@ It speaks the frame channel above as a producer, with these additions.
   its own, ADR 0228), and with several displays each route's Blit is the
   one whose keys it carries. Without a keymap its clients are sent
   `no_keymap`. The desktop never touches it.
-- **Open in this draft:** the clipboard, which phase 2 decides with the X
-  window manager's selections.
+- **The clipboard** (ADR 0229): Hibr's clipboard is the one truth; the
+  compositor offers `wl_data_device_manager` v3 (Ctrl-C/V) and
+  `zwp_primary_selection_device_manager_v1` (middle click) and keeps only
+  which side owns each selection, never the bytes. Lines, both ways:
+  ```
+  CLIP offer <seq> clipboard|primary [<type> ...]   the selection is now this offer
+  CLIP read <seq> <type>                            with a pipe's write end: the owner writes, closes
+  CLIP clear <seq>                                  the offer is withdrawn
+  ```
+  `<seq>` is the sender's own count. A program's selection (set by the
+  program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`
+  when it has any text type (`text/plain;charset=utf-8`, `UTF8_STRING`,
+  `text/plain`, `STRING`, `TEXT`), with no types otherwise, plus
+  `x-kde-passwordManagerHint` when the program marked it secret; the
+  desktop's `CLIP read` in the text type is answered from the program's best
+  text type, through the pipe passed with the line. The desktop's offer is
+  shown to programs with all five text types (and the hint), and a
+  program's paste becomes `CLIP read <seq> text/plain;charset=utf-8` with
+  the program's pipe, which the desktop writes and closes. A secret (the
+  hint: the Vault's offers carry it) enters no history, and the desktop's
+  `CLIP clear` when its timeout clears it ends it on the program side too.
+  A program's source going sends `CLIP clear`. Between programs a paste goes
+  straight from the source. The program with the keyboard is offered each
+  selection when it gets the keyboard and when one changes. The desktop's
+  offers lapse with its channel; a program's selection is offered again,
+  under a new `<seq>`, after the re-announcement. Drag and drop is not here
+  yet: a drag is cancelled at once (ADR 0229's later row).
 
 ## Diagnostics and screenshots
 
