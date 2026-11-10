@@ -4659,7 +4659,8 @@ static void input_sockets_clear(struct bc_server *s)
    then SubstructureRedirect and SubstructureNotify on the root (refused
    when another window manager holds them), the atoms, a window of its
    own named by _NET_SUPPORTING_WM_CHECK, _NET_SUPPORTED, WM_S0 and
-   _NET_WM_CM_S0 owned. Each child of the root is a bc_xwin from its
+   _NET_WM_CM_S0 owned; a window an X program mapped before that is mapped
+   again under it (x_adopt). Each child of the root is a bc_xwin from its
    CreateNotify; a MapRequest reads its properties (WM_NAME and
    _NET_WM_NAME, WM_CLASS, WM_PROTOCOLS, WM_HINTS), sets WM_STATE Normal
    and maps it; PropertyNotify keeps them current.
@@ -4739,6 +4740,7 @@ struct bc_xwin {
     int input;                        /* WM_HINTS' input, 1 when it says nothing */
     uint32_t pid;                     /* its client's process, 0 unknown (X-Resource) */
     int or_logged;                    /* an override-redirect window, noted once */
+    int remapping;                    /* unmapped by the window manager to be mapped again */
     uint32_t measure[BC_X_MEASURE];   /* commit to frame sent, us, its first frames */
     int measured, measure_said;
 };
@@ -5228,23 +5230,67 @@ static void x_window_free(struct bc_server *s, struct bc_xwin *w)
 
 /* ---- the window manager's events ---- */
 
-static void x_create_notify(struct bc_server *s, xcb_create_notify_event_t *ev)
+/* A child of the root, known from here on; its focus and property changes
+   selected. */
+static struct bc_xwin *x_window_new(struct bc_server *s, xcb_window_t window, int16_t x, int16_t y,
+                                    uint16_t width, uint16_t height, int override_redirect)
 {
     struct bc_xwin *w;
     uint32_t mask = XCB_EVENT_MASK_FOCUS_CHANGE | XCB_EVENT_MASK_PROPERTY_CHANGE;
-    if (ev->window == s->x.wm_window || ev->parent != s->x.screen->root || x_window(s, ev->window))
-        return;
+    if (window == s->x.wm_window || x_window(s, window)) return NULL;
     w = calloc(1, sizeof(*w));
-    if (w == NULL) return;
-    w->window = ev->window;
-    w->override_redirect = ev->override_redirect;
-    w->x = ev->x;
-    w->y = ev->y;
-    w->width = ev->width;
-    w->height = ev->height;
+    if (w == NULL) return NULL;
+    w->window = window;
+    w->override_redirect = override_redirect;
+    w->x = x;
+    w->y = y;
+    w->width = width;
+    w->height = height;
     w->input = 1;
     wl_list_insert(s->x.windows.prev, &w->link);
     xcb_change_window_attributes(s->x.conn, w->window, XCB_CW_EVENT_MASK, &mask);
+    return w;
+}
+
+static void x_create_notify(struct bc_server *s, xcb_create_notify_event_t *ev)
+{
+    if (ev->parent == s->x.screen->root)
+        x_window_new(s, ev->window, ev->x, ev->y, ev->width, ev->height, ev->override_redirect);
+}
+
+/* The root's children from before the window manager: an X program that
+   mapped its window in the moment between Xwayland's start and the window
+   manager's had its WL_SURFACE_SERIAL go to no one, so each such window is
+   unmapped and mapped again under the window manager -- a new surface and
+   serial, matched and shown as any other. */
+static void x_adopt(struct bc_server *s)
+{
+    xcb_connection_t *c = s->x.conn;
+    xcb_query_tree_reply_t *tree = xcb_query_tree_reply(c, xcb_query_tree(c, s->x.screen->root), NULL);
+    xcb_window_t *children;
+    int i, n;
+    if (tree == NULL) return;
+    children = xcb_query_tree_children(tree);
+    n = xcb_query_tree_children_length(tree);
+    for (i = 0; i < n; ++i) {
+        xcb_get_window_attributes_reply_t *a =
+            xcb_get_window_attributes_reply(c, xcb_get_window_attributes(c, children[i]), NULL);
+        xcb_get_geometry_reply_t *g = xcb_get_geometry_reply(c, xcb_get_geometry(c, children[i]), NULL);
+        struct bc_xwin *w = a && g ? x_window_new(s, children[i], g->x, g->y, g->width, g->height,
+                                                  a->override_redirect)
+                                   : NULL;
+        if (w && a->map_state == XCB_MAP_STATE_VIEWABLE && !w->override_redirect) {
+            x_read_properties(s, w);
+            w->remapping = 1;
+            xcb_unmap_window(c, w->window);
+            x_set_wm_state(s, w, BC_WM_STATE_NORMAL);
+            xcb_map_window(c, w->window);
+            logf_("X: window 0x%x was mapped before the window manager: mapped again", (unsigned)w->window);
+        }
+        free(a);
+        free(g);
+    }
+    free(tree);
 }
 
 static void x_map_request(struct bc_server *s, xcb_map_request_event_t *ev)
@@ -5265,7 +5311,8 @@ static void x_unmap_notify(struct bc_server *s, xcb_unmap_notify_event_t *ev)
     struct bc_xwin *w = x_window(s, ev->window);
     if (w == NULL) return;
     x_unmatch(s, w);
-    if (!w->override_redirect) x_set_wm_state(s, w, BC_WM_STATE_WITHDRAWN);
+    if (w->remapping) w->remapping = 0;  /* x_adopt's: mapped again already */
+    else if (!w->override_redirect) x_set_wm_state(s, w, BC_WM_STATE_WITHDRAWN);
 }
 
 static void x_configure_request(struct bc_server *s, xcb_configure_request_event_t *ev)
@@ -5532,6 +5579,7 @@ static int x_wm_start(struct bc_server *s)
     s->x.focus = XCB_WINDOW_NONE;
     xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.screen->root,
                         s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &s->x.focus);
+    x_adopt(s);
     xcb_flush(c);
     s->x.wm_source = wl_event_loop_add_fd(s->loop, xcb_get_file_descriptor(c), WL_EVENT_READABLE,
                                           on_x_events, s);
