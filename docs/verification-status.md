@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.73 programs' windows, live: the first configure and the keymap (ADR 0228 phase 1)
+
+- **The first configure:** a toplevel's initial commit is answered at once
+  (the desktop's size, else 0x0) instead of after the desktop's `WINDOW
+  size`; live, `vkcube --wsi wayland` died with xdg_surface error 3. A
+  program started with no desktop is configured too, and re-announced with
+  its frame.
+- **The keymap on the route:** `INPUT keymap <id> <revision> <size> <rate>
+  <delay>` with a sealed memfd of Blit's keymap (the bytes GET
+  /v1/input/keymap serves); the compositor no longer reads Blit's API and
+  needs no port or token, which the desktop session does not have.
+- **Restart survival** (on main since 0.3.72): programs survive a desktop
+  restart, `--display NAME`, `WINDOW quit 0`.
+- **Session strings:** arguments and environment of POST
+  /v1/terminal-sessions bounded by the request (8192 bytes), not 255 bytes
+  each; over 32, an empty name, a name with `=` or a non-string is
+  `invalid_session_strings` (was the misleading `session_create_failed`).
+- **Suites:** `all` 187 pass, 12 skip, 1 fail (frame_input_gate: a test
+  race, the key before `INPUT on` took effect; fixed in the gate and passed
+  three runs alone); GLES `renderer` 82 pass, 1 skip, 0 fail;
+  `compositor_gate` with ASan/UBSan; `package_artifact_gate` passes (its
+  compositor usage line updated for `--display`).
+- **Published** to hibr-apt (blit, blit-gamescope, blit-compositor). No
+  Breaks on hibr: it installs beside hibr 0.99.481. v5 is now Blit 0.3.74
+  with hibr 0.99.482.
+
 ## 2026-11-10: 0.3.72 blit-compositor milestone C, and its package (ADR 0228 phase 1)
 
 - **Pointer lock and confine:** `zwp_pointer_constraints_v1` v1, asked of

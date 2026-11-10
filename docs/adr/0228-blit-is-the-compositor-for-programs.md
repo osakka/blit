@@ -233,8 +233,11 @@ stand-in-client build for Blit and Hibr to test against.
   size or the first size are the alternatives, to decide with Hibr),
   `wl_seat`, `xdg_wm_base`
   and `zxdg_decoration_manager_v1` (server-side). A toplevel is announced at
-  its initial commit and configured only when the desktop sends its size,
-  exactly that size; each committed `wl_shm` buffer is copied into one
+  its initial commit and configured at once -- the desktop's size if one
+  has come, else 0x0 (the program picks) -- then exactly each size the
+  desktop sends. (Milestone A configured only on the desktop's size; the
+  live vkcube check of 2026-11-10 showed why that breaks the protocol: see
+  Evidence); each committed `wl_shm` buffer is copied into one
   sealed FRM1 frame (XRGB8888 as RGB, ARGB8888 un-premultiplied to RGBA,
   which Blit reads as straight alpha), released at once, and its frame
   callbacks answered when the frame was sent.
@@ -252,8 +255,9 @@ stand-in-client build for Blit and Hibr to test against.
   `window=1`; with the in-repo stand-in client
   (`tools/tests/wl_standin_client.c`, libwayland-client) it sees
   `WINDOW display blit-0`, then `new 1 0`, `title`, `appid`, `limits 1 64
-  48 0 0` and `decor 1 server` and no frame before its size; after `WINDOW
-  size 1 320 200` a 320x200 frame; the client's popup as `WINDOW popup 2 1
+  48 0 0` and `decor 1 server`, then the client's own 256x160 frame (the
+  0x0 reply to its initial commit); after `WINDOW size 1 320 200` a
+  320x200 frame; the client's popup as `WINDOW popup 2 1
   12 63` (its positioner's offset in the toplevel's surface pixels) and an
   80x60 frame of picture 2, which `WINDOW close 2` ends through
   `popup_done` with `WINDOW gone 2`; a second client, given 100x80 and
@@ -367,7 +371,9 @@ Blit-side work that closes phase 1, apart from the owner's live check.
   the ETag keeps its meaning and a 304 still brings a new repeat.
   blit-compositor sends `wl_keyboard.repeat_info` from them; its 25 a
   second after 600 ms is gone.
-- **The keymap read only when it changes.** Blit keeps a keymap revision,
+- **The keymap read only when it changes** (superseded on 2026-11-10: the
+  keymap now comes on the route itself; see "The keymap on the route, not
+  the API" below). Blit keeps a keymap revision,
   bumped by any keyboard's device change (the event stream's
   `device_changed` and this are one signal) and when the default keyboard
   moves, and writes `INPUT keymap <id> <revision>` on each live `sock`
@@ -488,3 +494,38 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   outage, popups and hidden
   windows announced again (built, not in the gate), and a real GPU's
   dmabuf held across the outage.
+- **The first configure, live (2026-11-10).** `vkcube --wsi wayland` on the
+  mini PC under Hibr 0.99.481 and Blit 0.3.72 ended at once with
+  `xdg_surface#8: error 3: a buffer committed before the first configure
+  was acknowledged` (the compositor log: `window 1: new` then `gone` 5 ms
+  later, three times). vkcube commits, does one `wl_display_roundtrip` and
+  presents; xdg-shell says the compositor *replies* to the initial commit
+  with a configure, and the compositor was waiting for the desktop's
+  `WINDOW size`, which crosses the channel and comes back later than one
+  roundtrip. The configure now goes at once (0x0 before the desktop's
+  size); the stand-in client checks on every run that a configure answers
+  its initial commit within one roundtrip, and its scripted steps
+  (popup, states, lock, animation) wait for a configure that carries the
+  desktop's size.
+- **The keymap on the route, not the API (2026-11-10).** On the mini PC
+  the compositor logged `keymap: GET /v1/input/keymap answered 0
+  (BLIT_SERVER_PORT unset): clients get no_keymap`. The desktop session
+  has no BLIT_SERVER_PORT or BLIT_API_TOKEN by design: the login screen
+  passes only BLIT_VERSION and the frame socket and token into the PAM
+  session, its API token being the login screen's own (Hibr's
+  login.hibr, a decision of 0.99.357). Passing the greeter's token on, or
+  minting a session token, would have kept two hops (a notice on the
+  route, then an HTTP read) and a credential the compositor has no other
+  use for, and with several displays one held desktop's environment names
+  one Blit session's API. Blit already writes to the compositor directly,
+  so the keymap goes with the notice: `INPUT keymap <id> <revision> <size>
+  <rate> <delay>` and a sealed memfd of the text and a NUL (SCM_RIGHTS),
+  built by the one function GET /v1/input/keymap serves from
+  (input_keymap_of). The compositor's HTTP client, its 250 ms synchronous
+  read, the retry at keyboard enter and its environment lookup are gone;
+  it installs a keymap whose bytes differ from the one it has (revisions
+  restart with Blit) and otherwise applies only the repeat.
+  `frame_input_gate` checks the memfd is sealed and byte-for-byte the
+  API's keymap and repeat; `compositor_gate` runs the compositor with no
+  port or token, the gate sending a real Blit's keymap as Blit does, then
+  a real Blit's route switching keyboards B and A before their keys.

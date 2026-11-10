@@ -19,6 +19,7 @@
 #include "blit_ink.h"
 
 #include <arpa/inet.h>
+#include <sys/mman.h>
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -88,6 +89,9 @@ extern char **environ;
 #define BLIT_MAX_HTTP_CLIENTS 32
 #define BLIT_HTTP_ACCEPT_BUDGET 8
 #define BLIT_REQUEST_SIZE 8192
+/* Most arguments, and most environment entries, one session request carries.
+   Their lengths have no cap of their own: the request size bounds them. */
+#define BLIT_SESSION_STRINGS 32
 #define BLIT_MAX_CELL_COLS 512
 #define BLIT_MAX_CELL_ROWS 160
 /* Kitty permits a 4096-byte base64 chunk.  The APC header is carried in the
@@ -1624,8 +1628,8 @@ typedef struct {
     unsigned long long input_devices_revision;
     /* ADR 0228: the keyboard GET /v1/input/keymap serves by default -- the
        one whose key came last ("" before any) -- and the revision of what
-       it serves (its keymap and repeat), told to blit-compositor's input
-       routes as `INPUT keymap <id> <revision>` when it changes. */
+       it serves (its keymap and repeat), sent to blit-compositor's input
+       routes as `INPUT keymap` with the keymap itself when it changes. */
     char keymap_device_id[BLIT_INPUT_ID_CAPACITY];
     unsigned long long keymap_revision;
     BlitAudioDevice audio_devices[BLIT_MAX_AUDIO_DEVICES];
@@ -7324,8 +7328,35 @@ static int json_output_placements(const char *json, char ids[][128],
 /* Parse a bounded JSON array of strings.  The API deliberately keeps process
    launch inputs small and explicit: this is not a general JSON implementation
    and must never allocate based on client-controlled counts. */
+/* Session arguments and environment decode into one pool the caller sizes
+   to the request: a decoded JSON string is never longer than its encoded
+   form, so a pool of BLIT_REQUEST_SIZE holds every string a request can
+   carry, however the client splits them. There is no per-string cap; the
+   request size is the one bound. */
+typedef struct {
+    char *bytes;
+    size_t capacity;
+    size_t used;
+} JsonStringPool;
+
+static char *json_pool_decode(JsonStringPool *pool, const char **cursor)
+{
+    char *value;
+    size_t length = 0;
+
+    if (pool->used >= pool->capacity)
+        return NULL;
+    value = pool->bytes + pool->used;
+    *cursor = json_unescape(*cursor, value, pool->capacity - pool->used,
+                            &length);
+    if (*cursor == NULL)
+        return NULL;
+    pool->used += length + 1;
+    return value;
+}
+
 static int json_string_array(const char *json, const char *key,
-                             char storage[][256], char **values, int limit)
+                             JsonStringPool *pool, char **values, int limit)
 {
     char needle[128];
     const char *cursor;
@@ -7345,17 +7376,15 @@ static int json_string_array(const char *json, const char *key,
     if (*cursor++ != '[')
         return -1;
     for (;;) {
-        size_t out = 0;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
                *cursor == '\n' || *cursor == ',') ++cursor;
         if (*cursor == ']')
             return count;
         if (*cursor++ != '"' || count >= limit)
             return -1;
-        cursor = json_unescape(cursor, storage[count], 256, &out);
-        if (cursor == NULL)
+        values[count] = json_pool_decode(pool, &cursor);
+        if (values[count] == NULL)
             return -1;
-        values[count] = storage[count];
         ++count;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
                *cursor == '\n') ++cursor;
@@ -7368,8 +7397,8 @@ static int json_string_array(const char *json, const char *key,
    the inherited environment in the child, so PATH and the normal Hibr/Blit
    launch context remain available unless explicitly replaced. */
 static int json_string_object(const char *json, const char *key,
-                              char key_storage[][128],
-                              char value_storage[][256], int limit)
+                              JsonStringPool *pool, char **keys,
+                              char **values, int limit)
 {
     char needle[128];
     const char *cursor;
@@ -7389,23 +7418,15 @@ static int json_string_object(const char *json, const char *key,
     if (*cursor++ != '{')
         return -1;
     for (;;) {
-        size_t key_len = 0;
-        size_t value_len = 0;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
                *cursor == '\n' || *cursor == ',') ++cursor;
         if (*cursor == '}')
             return count;
         if (*cursor++ != '"' || count >= limit)
             return -1;
-        while (*cursor != '\0' && *cursor != '"') {
-            if (key_len + 1 >= 128 || *cursor == '\\')
-                return -1;
-            key_storage[count][key_len++] = *cursor++;
-        }
-        if (*cursor++ != '"' || key_len == 0)
-            return -1;
-        key_storage[count][key_len] = '\0';
-        if (strchr(key_storage[count], '=') != NULL)
+        keys[count] = json_pool_decode(pool, &cursor);
+        if (keys[count] == NULL || keys[count][0] == '\0' ||
+            strchr(keys[count], '=') != NULL)
             return -1;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
                *cursor == '\n') ++cursor;
@@ -7415,8 +7436,8 @@ static int json_string_object(const char *json, const char *key,
                *cursor == '\n') ++cursor;
         if (*cursor++ != '"')
             return -1;
-        cursor = json_unescape(cursor, value_storage[count], 256, &value_len);
-        if (cursor == NULL)
+        values[count] = json_pool_decode(pool, &cursor);
+        if (values[count] == NULL)
             return -1;
         ++count;
         while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
@@ -16990,7 +17011,7 @@ static int if_match_revision(int fd, const char *request,
    Keep this policy in Blit so callers cannot accidentally create two primary
    desktops by issuing two otherwise-valid generic session requests. */
 static int hibr_desktop_request(const char *command,
-                                char argument_storage[32][256],
+                                char *const *argument_storage,
                                 int argument_count,
                                 int *is_primary, int *is_join,
                                 char *session_name, size_t session_capacity)
@@ -17275,10 +17296,12 @@ static int create_session(BlitRuntime *runtime, const char *json,
 {
     struct winsize size;
     char command[256];
-    char argument_storage[32][256];
-    char *arguments[33];
-    char environment_keys[32][128];
-    char environment_values[32][256];
+    char string_bytes[BLIT_REQUEST_SIZE];
+    JsonStringPool strings = {string_bytes, sizeof(string_bytes), 0};
+    char *arguments[BLIT_SESSION_STRINGS + 2];
+    char **argument_storage = arguments + 1;
+    char *environment_keys[BLIT_SESSION_STRINGS];
+    char *environment_values[BLIT_SESSION_STRINGS];
     int argument_count;
     int environment_count;
     char display_id[128];
@@ -17312,7 +17335,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int i;
 
     if (!text_layout_from_json(json, &emoji_layout)) return -7;
-    memset(argument_storage, 0, sizeof(argument_storage));
+    memset(arguments, 0, sizeof(arguments));
     if (!json_string(json, "command", command, sizeof(command)))
         return 0;
     surface_present = strstr(json, "\"surface\"") != NULL;
@@ -17321,15 +17344,16 @@ static int create_session(BlitRuntime *runtime, const char *json,
          !json_int(json, "height", &height)))
         return 0;
     arguments[0] = command;
-    argument_count = json_string_array(json, "arguments", argument_storage,
-                                       arguments + 1, 32);
+    argument_count = json_string_array(json, "arguments", &strings,
+                                       arguments + 1, BLIT_SESSION_STRINGS);
     if (argument_count < 0)
-        return 0;
-    environment_count = json_string_object(json, "environment",
+        return -8;
+    environment_count = json_string_object(json, "environment", &strings,
                                            environment_keys,
-                                           environment_values, 32);
+                                           environment_values,
+                                           BLIT_SESSION_STRINGS);
     if (environment_count < 0)
-        return 0;
+        return -8;
     memset(run_user, 0, sizeof(run_user));
     if (json_string(json, "user", run_user, sizeof(run_user))) {
         if (geteuid() != 0 || run_user[0] == '\0')
@@ -17341,8 +17365,9 @@ static int create_session(BlitRuntime *runtime, const char *json,
         run_gid = run_pw->pw_gid;
         run_as_user = 1;
     }
-    ++argument_count;
-    arguments[argument_count] = NULL;
+    /* argument_count stays the client's arguments: argument_storage starts
+       after the command, and arguments[] ends with execve's NULL. */
+    arguments[argument_count + 1] = NULL;
     command_name = strrchr(command, '/');
     command_name = command_name == NULL ? command : command_name + 1;
     if (strcmp(command_name, "hibr") == 0 ||
@@ -24566,6 +24591,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         create_result = create_session(runtime, payload, &session, -1);
+        if (create_result == -8) {
+            send_problem(fd, 400, "Bad Request", "invalid_session_strings",
+                         "arguments must be an array of at most 32 JSON strings and environment an object of at most 32 string values with non-empty names that contain no '='.");
+            return;
+        }
         if (create_result == -7) {
             send_problem(fd, 400, "Bad Request", "invalid_text_layout",
                          "text_layout must be scalar or emoji at the request root.");
@@ -30020,6 +30050,26 @@ static const BlitInputDevice *input_keymap_device(const BlitRuntime *runtime)
     return NULL;
 }
 
+/* A keyboard's keymap as xkb text into `out`, and its repeat as the kernel
+   holds it (per second, ms; 0 0 for a keyboard the kernel does not
+   autorepeat). NULL is the built-in US table with no overrides and no
+   repeat. The one source for GET /v1/input/keymap and for blit-compositor's
+   `INPUT keymap` (ADR 0228). Returns the text's length, 0 when it did not
+   fit. */
+static size_t input_keymap_of(const BlitInputDevice *device, char *out, size_t capacity,
+                              int *rate, int *delay)
+{
+    static BlitInputDevice builtin;
+    if (device == NULL) device = &builtin;
+    *rate = *delay = 0;
+    if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) && device->repeat_period_ms > 0 &&
+        device->repeat_delay_ms > 0) {
+        *rate = input_repeat_rate_for_period(device->repeat_period_ms);
+        *delay = device->repeat_delay_ms;
+    }
+    return xkb_keymap_text(device, out, capacity);
+}
+
 /* GET /v1/input/keymap[?device=<id>] (blit_xkb_keymap.h): the keyboard's
    xkb keymap as text. The keyboard is the one named, else
    input_keymap_device's, else none: the built-in US table with no
@@ -30032,7 +30082,6 @@ static const BlitInputDevice *input_keymap_device(const BlitRuntime *runtime)
 static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
                                   const char *path, char *body, size_t capacity)
 {
-    static BlitInputDevice builtin;
     const BlitInputDevice *device = NULL;
     const char *query = strstr(path, "device=");
     char revision[65], etag[96], extra[192 + BLIT_INPUT_ID_CAPACITY], match[512];
@@ -30058,13 +30107,7 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
     } else {
         device = input_keymap_device(runtime);
     }
-    if (device == NULL) device = &builtin;
-    if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) && device->repeat_period_ms > 0 &&
-        device->repeat_delay_ms > 0) {
-        rate = input_repeat_rate_for_period(device->repeat_period_ms);
-        delay = device->repeat_delay_ms;
-    }
-    length = xkb_keymap_text(device, body, capacity);
+    length = input_keymap_of(device, body, capacity, &rate, &delay);
     if (length == 0) {
         send_problem(fd, 500, "Internal Server Error", "input_keymap_unserialisable",
                      "The keymap did not fit its response buffer.");
@@ -30074,7 +30117,7 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
     snprintf(etag, sizeof(etag), "\"%s\"", revision);
     snprintf(extra, sizeof(extra),
              "ETag: %s\r\nX-Blit-Keymap-Device: %s\r\nX-Blit-Repeat-Rate: %d\r\n"
-             "X-Blit-Repeat-Delay: %d\r\n", etag, device == &builtin ? "builtin" : device->id,
+             "X-Blit-Repeat-Delay: %d\r\n", etag, device == NULL ? "builtin" : device->id,
              rate, delay);
     if ((request_header(request, "If-None-Match:", match, sizeof(match)) ||
          request_header(request, "if-none-match:", match, sizeof(match))) &&

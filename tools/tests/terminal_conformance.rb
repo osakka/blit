@@ -265,6 +265,41 @@ rescue StandardError => error
   raise
 end
 
+# Session strings have no per-string cap: the request size bounds them. A
+# 1500-byte argument, a 2000-byte environment value and a newline inside an
+# argument all reach the child intact (the cap was 255 bytes per argument and
+# the refusal named the PTY).
+long_strings = run_case(base, 'session-strings-long',
+                        "x='#{'a' * 1500}'\nprintf '%s %s' ${#x} ${#BLIT_LONG_VALUE}",
+                        environment: { 'BLIT_LONG_VALUE' => 'b' * 2000 })
+assert_equal('1500 2000', row_text(long_strings).strip, 'long session strings')
+thirty_two = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh',
+  'arguments' => ['-c', 'printf %s $#; sleep 0.1', 'sh'] + (1..29).map(&:to_s),
+  'surface' => { 'width' => 8, 'height' => 2 }
+})
+Timeout.timeout(5) do
+  sleep 0.02 while %w[starting running].include?(
+    request(base, 'GET', "/v1/terminal-sessions/#{thirty_two.fetch('id')}").fetch('state'))
+end
+assert_equal('29', row_text(request(base, 'GET',
+                                    "/v1/surfaces/surface-#{thirty_two.fetch('id')}/cells")).strip,
+             'thirty-two arguments')
+request(base, 'DELETE', "/v1/terminal-sessions/#{thirty_two.fetch('id')}")
+[
+  ['33 arguments', { 'arguments' => ['-c', 'true', 'sh'] + (1..30).map(&:to_s) }],
+  ['name with =', { 'environment' => { 'A=B' => 'c' } }],
+  ['empty name', { 'environment' => { '' => 'c' } }],
+  ['non-string argument', { 'arguments' => ['-c', 1] }]
+].each do |label, fields|
+  status, problem = request_with_status(base, 'POST', '/v1/terminal-sessions', {
+    'command' => '/bin/true', 'surface' => { 'width' => 8, 'height' => 2 }
+  }.merge(fields))
+  assert_equal(400, status, "#{label} status")
+  assert_equal('invalid_session_strings', problem.fetch('code'), "#{label} code")
+end
+puts 'PASS session-strings-refused'
+
 api_cell_created = request(base, 'POST', '/v1/terminal-sessions', {
   'command' => '/bin/sh',
   'arguments' => ['-c', 'sleep 1'],

@@ -43,9 +43,9 @@
    its toplevel and surface before the constraint, so the window goes with
    the constraint still there.
 
-   With --animate n, it draws again on each of the next n frame callbacks,
-   as games do, and prints `STANDIN animated <n> in <ms> ms` from its first
-   draw. Every draw asks for wp_presentation feedback when it is offered;
+   With --animate n, it draws again on each of the next n frame callbacks
+   once a configure has carried the desktop's size, as games do, and
+   prints `STANDIN animated <n> in <ms> ms` from the draw before them. Every draw asks for wp_presentation feedback when it is offered;
    the exit line before `done` counts it: `STANDIN presentation
    presented=<n> discarded=<n> refresh=<ns>`.
 
@@ -89,6 +89,8 @@
 #define FOURCC_XR24 0x34325258u
 
 struct standin {
+    int surface_configures;           /* xdg_surface configures received */
+    int sized, child_sized;           /* the last configure carried a size */
     struct wl_display *display;
     struct wl_compositor *compositor;
     struct wl_shm *shm;
@@ -179,7 +181,8 @@ static void frame_done(void *data, struct wl_callback *cb, uint32_t time)
     for (i = 0; i < sizeof(s->callbacks) / sizeof(s->callbacks[0]); ++i)
         if (s->callbacks[i] == cb) s->callbacks[i] = NULL;
     wl_callback_destroy(cb);
-    if (s->animate > 0) {
+    /* --animate runs from the desktop's size on, like the other steps. */
+    if (s->animate > 0 && s->sized) {
         struct timespec now;
         --s->animate;
         ++s->animated;
@@ -277,7 +280,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     if (s->presentation)
         wp_presentation_feedback_add_listener(wp_presentation_feedback(s->presentation, surface),
                                               &presentation_feedback_listener, s);
-    if (s->draws == 0) clock_gettime(CLOCK_MONOTONIC, &s->first_draw);
+    if (s->animated == 0) clock_gettime(CLOCK_MONOTONIC, &s->first_draw);
     wl_surface_commit(surface);
     ++s->draws;
     printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" :
@@ -300,13 +303,17 @@ static void toplevel_configure(void *data, struct xdg_toplevel *t, int32_t w, in
     printf("STANDIN %sconfigure %dx%d%s%s%s\n", t == s->child ? "child " : "", w, h,
            fullscreen ? " fullscreen" : "", maximized ? " maximized" : "",
            activated ? " activated" : "");
+    /* 0x0 is the compositor's reply before the desktop has sized the
+       window: the client picks. The scripted steps wait for a sized one. */
     if (t == s->child) {
         s->child_w = w > 0 ? w : 50;
         s->child_h = h > 0 ? h : 40;
+        s->child_sized = w > 0 && h > 0;
         return;
     }
     s->want_w = w > 0 ? w : 256;
     s->want_h = h > 0 ? h : 160;
+    s->sized = w > 0 && h > 0;
 }
 
 static void toplevel_close(void *data, struct xdg_toplevel *t)
@@ -398,6 +405,7 @@ static void child_surface_configure(void *data, struct xdg_surface *xs, uint32_t
     struct standin *s = data;
     xdg_surface_ack_configure(xs, serial);
     draw(s, s->child_surface, s->child_w, s->child_h);
+    if (!s->child_sized) return;
     if (s->states_step == 1) {
         /* Unmapped (WINDOW hide), then an initial commit again: configured
            at the desktop's last size, it draws and shows again. */
@@ -492,8 +500,10 @@ static void lock_next(struct standin *s)
 static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
     struct standin *s = data;
+    ++s->surface_configures;
     xdg_surface_ack_configure(xs, serial);
     draw(s, s->surface, s->want_w, s->want_h);
+    if (!s->sized) return;
     if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
         s->want_popup = 0;
@@ -929,6 +939,15 @@ int main(int argc, char **argv)
     }
     wl_surface_commit(s.surface);
     printf("STANDIN toplevel \"%s\" committed, waiting for a configure\n", title);
+    fflush(stdout);
+    /* xdg-shell: the compositor replies to the initial commit with a
+       configure, and real clients (vkcube) present after one roundtrip. */
+    wl_display_roundtrip(s.display);
+    if (s.surface_configures == 0) {
+        fprintf(stderr, "STANDIN no configure answered the initial commit within one roundtrip\n");
+        return 1;
+    }
+    printf("STANDIN initial commit answered in one roundtrip\n");
     fflush(stdout);
     while (!s.closed && wl_display_dispatch(s.display) >= 0)
         fflush(stdout);

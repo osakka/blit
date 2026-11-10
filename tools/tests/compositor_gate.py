@@ -219,6 +219,8 @@ def states_part(desk, standin, env, display, work):
         for want in ('WINDOW new 4 0', 'WINDOW title 4 States', 'WINDOW appid 4 blit.standin',
                      'WINDOW limits 4 64 48 0 0', 'WINDOW decor 4 server'):
             desk.line(want)
+        # Configured at its initial commit: its own size first.
+        desk.frame(256, 160, image_id=4)
         wait_for(lambda: 'STANDIN enter BLIT-1 1920x1080@60000' in printed(),
                  lambda: 'the window did not enter the first output:\n' + printed())
         desk.send('WINDOW output 4 1280 720 30000')
@@ -228,6 +230,7 @@ def states_part(desk, standin, env, display, work):
                      'WINDOW new 5 0', 'WINDOW title 5 Child', 'WINDOW decor 5 client',
                      'WINDOW parent 5 4'):
             desk.line(want)
+        desk.frame(50, 40, image_id=5)
         desk.send('WINDOW size 5 50 40')
         desk.frame(50, 40, image_id=5)
         desk.line('WINDOW hide 5')
@@ -265,7 +268,7 @@ def states_part(desk, standin, env, display, work):
         check('STANDIN child enter BLIT-1 1920x1080@60000' in output, 'the child is on no output')
         for want in ('STANDIN configure 200x100 maximized\n', 'STANDIN capabilities 2 3 4\n',
                      'STANDIN child configure 50x40\n', 'STANDIN child hidden',
-                     'STANDIN child orphaned', 'STANDIN done draws=3 releases=3 frames=3'):
+                     'STANDIN child orphaned', 'STANDIN done draws=5 releases=5 frames=5'):
             check(want in output, 'the states stand-in did not print %r:\n%s' % (want, output))
         check(output.count('STANDIN child configure 50x40') == 2, 'the child was not configured again')
     finally:
@@ -288,6 +291,7 @@ def pacing_part(desk, standin, env, display, work):
         for want in ('WINDOW new 6 0', 'WINDOW title 6 Animate', 'WINDOW appid 6 blit.standin',
                      'WINDOW limits 6 64 48 0 0', 'WINDOW decor 6 server'):
             desk.line(want)
+        desk.frame(256, 160, image_id=6)
         desk.send('WINDOW output 6 640 480 20000')
         wait_for(lambda: 'STANDIN enter BLIT-2 640x480@20000' in printed(),
                  lambda: 'the window did not enter the 20 Hz output:\n' + printed())
@@ -305,21 +309,22 @@ def pacing_part(desk, standin, env, display, work):
         desk.line('WINDOW gone 6')
         check(client.wait(5) == 0, 'the animating stand-in failed: ' + printed())
         output = printed()
-        check('STANDIN presentation presented=11 discarded=0 refresh=50000000' in output,
+        check('STANDIN presentation presented=12 discarded=0 refresh=50000000' in output,
               'presentation feedback:\n' + output)
-        check('STANDIN done draws=11 releases=11 frames=10' in output, 'counts:\n' + output)
+        check('STANDIN done draws=12 releases=12 frames=11' in output, 'counts:\n' + output)
     finally:
         if client.poll() is None:
             client.kill()
             client.wait()
-    return 'shm 10 frames at 20 Hz in %d ms, presented=11 refresh=50ms' % ms
+    return 'shm 10 frames at 20 Hz in %d ms, presented=12 refresh=50ms' % ms
 
 
 def input_part(server, compositor, standin, work):
     """Blit's input lines on the compositor's input socket as wl_seat
     events: the gate plays the desktop on the channel and Blit on the input
-    socket (docs/api.md, "Input straight from Blit"), and a real blit-server
-    serves the keymap (GET /v1/input/keymap, BLIT_SERVER_PORT)."""
+    socket (docs/api.md, "Input straight from Blit"), sending a real
+    blit-server's keymap on it as Blit does (`INPUT keymap` and a sealed
+    memfd); the compositor has no BLIT_SERVER_PORT or token at all."""
     # Two fabricated keyboards (keymap_gate's sidecars): A, the first, and
     # B, given a Q that types a-umlaut, each with its own repeat.
     nodes = os.path.join(work, 'nodes')
@@ -351,11 +356,12 @@ def input_part(server, compositor, standin, work):
             {'configuration': {'keymap': {'base': 'us', 'keys': {'16': ['ä', 'Ä', '', '']}}}})
         answer = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10)
         keymap = answer.read()
+        repeat = (int(answer.headers['X-Blit-Repeat-Rate']), int(answer.headers['X-Blit-Repeat-Delay']))
         check(answer.headers['X-Blit-Keymap-Device'] == keyboards[0], 'the default is not keyboard A')
         cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
-                    XDG_RUNTIME_DIR=runtime, BLIT_SERVER_PORT=str(PORT))
-        cenv.pop('WAYLAND_DISPLAY', None)
-        cenv.pop('BLIT_API_TOKEN', None)
+                    XDG_RUNTIME_DIR=runtime)
+        for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_API_TOKEN'):
+            cenv.pop(k, None)
         log = os.path.join(work, 'compositor-input.log')
         comp = start([compositor, '--log', log], cenv, open(os.path.join(work, 'compositor-input.out'), 'w'))
         desk = Desktop(listener)
@@ -366,6 +372,7 @@ def input_part(server, compositor, standin, work):
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Input', 'WINDOW appid 1 blit.standin',
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
             desk.line(want)
+        desk.frame(256, 160)
         desk.send('WINDOW size 1 200 100 activated')
         desk.frame(200, 100)
         desk.line('WINDOW popup 2 1 12 63')
@@ -373,13 +380,24 @@ def input_part(server, compositor, standin, work):
         check(desk.input_socks.get(1) == os.path.join(runtime, 'blit-0-input'),
               'INPUT sock for window 1: %s' % desk.input_socks)
         check(stat.S_IMODE(os.stat(desk.input_socks[1]).st_mode) == 0o600, 'the input socket is not 0600')
-        check('STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
-              lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
-        # Repeat is Blit's, keyboard A's: 250 ms, a 33 ms period.
-        check('STANDIN repeat 30 250' in printed(), lambda: 'no repeat info from Blit:\n' + printed())
+        # No keymap until a route brings one: no_keymap, keys still go.
+        check('STANDIN keymap format=0 size=0 xkb=0' in printed(),
+              lambda: 'the client had a keymap before any route:\n' + printed())
 
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[1])
+        # Blit's keymap on the route, as Blit sends it: the line and a
+        # sealed memfd of the text and a NUL.
+        memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.write(memfd, keymap + b'\0')
+        fcntl.fcntl(memfd, 1033, 0x0f)  # F_ADD_SEALS: seal, shrink, grow, write
+        socket.send_fds(route, [b'INPUT keymap 1 7 %d %d %d\n' % (len(keymap) + 1, repeat[0], repeat[1])],
+                        [memfd])
+        os.close(memfd)
+        wait_for(lambda: 'STANDIN keymap format=1 size=%d xkb=1' % (len(keymap) + 1) in printed(),
+                 lambda: 'the client was not given Blit\'s keymap (%d bytes):\n%s' % (len(keymap), printed()))
+        # Repeat is Blit's, keyboard A's: 250 ms, a 33 ms period.
+        wait_for(lambda: 'STANDIN repeat 30 250' in printed(), lambda: 'no repeat info from Blit:\n' + printed())
         frame = [0]
         mark = [0]
 
@@ -453,12 +471,13 @@ def input_part(server, compositor, standin, work):
         check(client.wait(5) == 0, 'the input stand-in failed:\n' + printed())
         quit_compositor(desk, comp)
         text = open(log).read()
-        check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
-        # Read at start and on each notice only, never at a keyboard enter.
-        notices, reads = text.count("keymap: Blit's revision"), (text.count('keymap: unchanged (304)') +
-                                                                 text.count('bytes from Blit'))
-        check(notices >= 3 and reads == notices + 1,
-              '%d notices, %d reads of the keymap:\n%s' % (notices, reads, text))
+        check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not installed:\n' + text)
+        # Installed for the gate's route, B's and A's again; the real
+        # route's first (A's, the same bytes) and the repeat PATCH change
+        # only the repeat.
+        installs, same = text.count('bytes from Blit, revision'), text.count(', unchanged')
+        check(installs == 3 and same >= 2,
+              '%d keymaps installed, %d unchanged:\n%s' % (installs, same, text))
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
                 'relative=7,-3+-2,5 focus=line,!activated,route-end %s' % (len(keymap), e2e))
     finally:
@@ -507,6 +526,7 @@ def lock_part(compositor, standin, work):
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Lock', 'WINDOW appid 1 blit.standin',
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
             desk.line(want)
+        desk.frame(256, 160)
         desk.send('WINDOW size 1 120 80 activated')
         desk.frame(120, 80)
         desk.line('WINDOW lock 1 relative')
@@ -606,9 +626,9 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
 
     Then the keyboard (milestone C): a repeat PATCH of keyboard A while the
     route is live reaches the client as repeat info (Blit's `INPUT keymap`
-    notice, a 304); a key from keyboard B makes its keymap (Q types
+    with the same keymap); a key from keyboard B makes its keymap (Q types
     a-umlaut) and repeat the client's before that key; one from A, A's
-    again. The compositor reads the keymap only on Blit's notices."""
+    again. The keymap comes only on Blit's route."""
     session = fig.Session(_Blit, work, 'e2e')
     api('PATCH', '/v1/terminal-sessions/%s' % session.id, {'focused': True})
     wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session.id)['focused'], 'no focus')
@@ -639,7 +659,7 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
                                      'y': origin[1] + at['y'] + sy // 2})
     seen('pointer motion %.2f %.2f' % (2 * x, y / 2), 'pointer frame')
 
-    # Repeat changed while the route is live: the notice, a 304, repeat info.
+    # Repeat changed while the route is live: the same keymap, new repeat.
     api('PATCH', '/v1/input/devices/%s' % keyboards[0],
         {'configuration': {'repeat_delay_ms': 400, 'repeat_rate_hz': 20}})
     wait_for(lambda: 'STANDIN repeat 20 400' in printed(), lambda: 'no new repeat:\n' + printed())
@@ -699,6 +719,11 @@ def dmabuf_part(compositor, standin, work):
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Dmabuf', 'WINDOW appid 1 blit.standin',
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
             desk.line(want)
+        # Its own size first, at the initial commit's configure; Blit shows
+        # and releases it, and the cases below start from there.
+        seq0, _ = desk.frm3(256, 160, 1)
+        desk.send('FRAME release 1 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in printed(), 'FRAME release did not release the first buffer')
         desk.send('WINDOW size 1 64 32')
         seq1, file1 = desk.frm3(64, 32, 1)
         check('STANDIN dmabuf 64x32 file %d:%d' % file1 in printed(),
@@ -707,12 +732,14 @@ def dmabuf_part(compositor, standin, work):
         seq2, file2 = desk.frm3(80, 40, 1)
         check(seq2 > seq1 and file2 != file1, 'the second FRM3: sequence %d file %s' % (seq2, file2))
         desk.nothing(0.3)
-        check('STANDIN release' not in printed(), lambda: 'released before FRAME release:\n' + printed())
+        check('STANDIN release 64x32' not in printed() and 'STANDIN release 80x40' not in printed(),
+              lambda: 'released before FRAME release:\n' + printed())
         # The version 4 forms are no line of version 5: they release nothing.
         desk.send('RELEASE 1 %d' % seq1)
         desk.send('ERROR 1 ENOTSUP')
         desk.nothing(0.3)
-        check('STANDIN release' not in printed(), lambda: 'a version 4 line released a buffer:\n' + printed())
+        check('STANDIN release 64x32' not in printed() and 'STANDIN release 80x40' not in printed(),
+              lambda: 'a version 4 line released a buffer:\n' + printed())
         desk.send('FRAME release 1 %d' % seq1)
         wait_for(lambda: 'STANDIN release 64x32' in printed(), 'FRAME release did not release the buffer')
         check('STANDIN release 80x40' not in printed(), 'the held 80x40 buffer was released too')
@@ -724,13 +751,20 @@ def dmabuf_part(compositor, standin, work):
         for want in ('WINDOW new 2 0', 'WINDOW title 2 Held', 'WINDOW appid 2 blit.standin',
                      'WINDOW limits 2 64 48 0 0', 'WINDOW decor 2 server'):
             desk.line(want)
+        seq0, _ = desk.frm3(256, 160, 2)
+        desk.send('FRAME release 2 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in open(held_path).read(),
+                 'FRAME release did not release the held client\'s first buffer')
         desk.send('WINDOW size 2 30 20')
         desk.frm3(30, 20, 2)
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         check(held.wait(5) == 0, 'the held stand-in failed: ' + open(held_path).read())
+        # Every buffer back, the held 30x20 at WINDOW gone. (Whether its frame
+        # callback is read before the client acts on close is the client's
+        # race, not the compositor's: frames is not counted here.)
         check('STANDIN release 30x20' in open(held_path).read() and
-              'STANDIN done draws=1 releases=1 frames=1' in open(held_path).read(),
+              'STANDIN done draws=2 releases=2 frames=' in open(held_path).read(),
               'the held buffer was not given back at WINDOW gone:\n' + open(held_path).read())
 
         # A dmabuf client drawing on every callback is one frame ahead of
@@ -741,6 +775,10 @@ def dmabuf_part(compositor, standin, work):
         for want in ('WINDOW new 3 0', 'WINDOW title 3 Paced', 'WINDOW appid 3 blit.standin',
                      'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
             desk.line(want)
+        seq0, _ = desk.frm3(256, 160, 3)
+        desk.send('FRAME release 3 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in open(paced_path).read(),
+                 'FRAME release did not release the paced client\'s first buffer')
         desk.send('WINDOW size 3 40 30')
         seq_a, _ = desk.frm3(40, 30, 3)
         seq_b, _ = desk.frm3(40, 30, 3)
@@ -755,8 +793,8 @@ def dmabuf_part(compositor, standin, work):
         desk.line('WINDOW gone 3')
         check(paced.wait(5) == 0, 'the paced stand-in failed: ' + open(paced_path).read())
         text = open(paced_path).read()
-        check('STANDIN done draws=3 releases=3 frames=3' in text and
-              'STANDIN presentation presented=3 discarded=0 ' in text,
+        check('STANDIN done draws=4 releases=4 frames=4' in text and
+              'STANDIN presentation presented=4 discarded=0 ' in text,
               'the paced dmabuf client:\n' + text)
 
         # ENOTSUP: the refused (newest held) frame again as FRM1, and every
@@ -775,11 +813,11 @@ def dmabuf_part(compositor, standin, work):
         output = printed()
         for want in ('STANDIN global zwp_linux_dmabuf_v1 4',
                      'STANDIN dmabuf feedback pairs=2 tranche=2 xr24-linear=1',
-                     'STANDIN done draws=3 releases=3 frames=3'):
+                     'STANDIN done draws=4 releases=4 frames=4'):
             check(want in output, 'the dmabuf stand-in did not print %r:\n%s' % (want, output))
         quit_compositor(desk, comp)
         text = open(log).read()
-        check('dmabuf 6 sent, 3 released, 1 refused, 2 copied' in text,
+        check('dmabuf 9 sent, 6 released, 1 refused, 2 copied' in text,
               'the log does not count the dmabuf frames:\n' + text)
         check(text.count('an unknown line from the channel: RELEASE 1 ') == 1 and
               text.count('an unknown line from the channel: ERROR 1 ENOTSUP') == 1,
@@ -826,10 +864,11 @@ def restart_part(compositor, standin, work):
     again after its programs are done drawing (about a second): the
     compositor says hello, `WINDOW display`, announces windows 1, 2 and 3
     with their hints and input routes, then the newest frame of 1 (FRM3) and
-    of 2 (FRM1), each the program's pattern at its size, then the lock
-    asked for again; nothing is
-    configured until the desktop's new `WINDOW size`, which brings a frame
-    of that size. `WINDOW quit 0` ends it at once, status 0, its programs
+    of 2 (FRM1) and of 3, each the program's pattern at its size, then the lock
+    asked for again. The late program was configured at its initial commit
+    (0x0: no desktop has sized it), so its own 256x160 is shown again too.
+    No window is configured again until the desktop's new `WINDOW size`,
+    which brings a frame of that size. `WINDOW quit 0` ends it at once, status 0, its programs
     gone. A second compositor, whose desktop never comes back (only a
     peer answering without window=1), ends after the bound, status 1. Names
     in use or invalid are refused, status 2."""
@@ -873,6 +912,9 @@ def restart_part(compositor, standin, work):
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Held', 'WINDOW appid 1 blit.standin',
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
             desk.line(want)
+        seq0, _ = desk.frm3(256, 160, 1)
+        desk.send('FRAME release 1 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in held(), 'FRAME release did not release the first buffer')
         desk.send('WINDOW size 1 64 32')
         desk.frm3(64, 32, 1)
         desk.frm3(64, 32, 1)
@@ -884,6 +926,7 @@ def restart_part(compositor, standin, work):
         for want in ('WINDOW new 2 0', 'WINDOW title 2 Kept', 'WINDOW appid 2 blit.standin',
                      'WINDOW limits 2 64 48 0 0', 'WINDOW decor 2 server'):
             desk.line(want)
+        desk.frame(256, 160, image_id=2)
         desk.send('WINDOW size 2 160 100')
         desk.frame(160, 100, image_id=2)
         desk.line('WINDOW lock 2 relative')
@@ -930,11 +973,15 @@ def restart_part(compositor, standin, work):
                 desk.line(want)
         desk.frm3(64, 32, 1)
         desk.frame(160, 100, image_id=2)
+        desk.frame(256, 160, image_id=3)  # Late's own size, configured 0x0
         desk.line('WINDOW lock 2 relative')
         desk.nothing(0.4)
         check(sorted(desk.input_socks) == [1, 2, 3], 'INPUT sock again: %s' % desk.input_socks)
-        check(kept().count('STANDIN configure') == 1 and held().count('STANDIN configure') == 1 and
-              'STANDIN configure' not in late(), 'a window was configured before its new WINDOW size')
+        # Configured once at the initial commit (0x0; Late's while no desktop
+        # was there) and once at the old desktop's size: nothing again until
+        # the new desktop's WINDOW size.
+        check(kept().count('STANDIN configure') == 2 and held().count('STANDIN configure') == 2 and
+              late().count('STANDIN configure') == 1, 'a window was configured before its new WINDOW size')
         desk.send('WINDOW size 2 200 120 activated')
         desk.frame(200, 120, image_id=2)
         desk.send('WINDOW size 1 80 40')
@@ -954,7 +1001,7 @@ def restart_part(compositor, standin, work):
                 fail('a program outlived WINDOW quit 0')
         check(not os.path.exists(os.path.join(runtime, display)), 'the Wayland socket outlived quit')
         text = open(log).read()
-        check('reconnect: 3 windows announced again, 2 frames sent again' in text and
+        check('reconnect: 3 windows announced again, 3 frames sent again' in text and
               'no desktop answered' not in text, 'the restart in the log:\n' + text)
         check(text.split('WINDOW quit 0')[1].count('reconnect:') == 0, 'a reconnect after quit:\n' + text)
         listener.close()
@@ -976,6 +1023,7 @@ def restart_part(compositor, standin, work):
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Gone', 'WINDOW appid 1 blit.standin',
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
             desk.line(want)
+        desk.frame(256, 160)
         desk.send('WINDOW size 1 64 48')
         desk.frame(64, 48)
         desk.sock.close()
@@ -1060,9 +1108,11 @@ def desktop_part(compositor, standin, work):
         desk.line('WINDOW appid 1 blit.standin')
         desk.line('WINDOW limits 1 64 48 0 0')
         desk.line('WINDOW decor 1 server')
-        # The configure waits for the desktop's size: no frame before it.
-        desk.nothing(0.5)
-
+        # The initial commit is answered at once (xdg-shell; vkcube presents
+        # after one roundtrip): 0x0 before the desktop's size, so the
+        # client's own 256x160 is the first frame.
+        desk.frame(256, 160)
+        # The desktop's size, when it lands, is an ordinary reconfigure.
         desk.send('WINDOW size 1 320 200')
         first = desk.frame(320, 200)
         # The stand-in's popup: its own picture, at its offset in the
@@ -1080,6 +1130,7 @@ def desktop_part(compositor, standin, work):
         for want in ('WINDOW new 3 0', 'WINDOW title 3 Second', 'WINDOW appid 3 blit.standin',
                      'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
             desk.line(want)
+        desk.frame(256, 160, image_id=3)
         desk.send('WINDOW size 3 100 80')
         desk.frame(100, 80, image_id=3)
         wait_for(lambda: 'STANDIN drew 100x80' in open(second_out).read(), 'the second program did not draw')
@@ -1114,7 +1165,7 @@ def desktop_part(compositor, standin, work):
         # Pointer constraints, asked of the desktop with WINDOW lock.
         check(versions.get('zwp_pointer_constraints_v1') == '1', 'pointer constraints: %s' % versions)
         check(versions.get('wp_presentation') == '1', 'no wp_presentation 1: %s' % versions)
-        check('STANDIN presentation presented=4 discarded=0 refresh=16666666' in output,
+        check('STANDIN presentation presented=5 discarded=0 refresh=16666666' in output,
               'the stand-in\'s frames were not each presented at 60 Hz:\n%s' % output)
         for want in ('STANDIN decoration server',
                      'STANDIN configure 320x200\n', 'STANDIN configure 500x300 activated\n',
@@ -1124,7 +1175,7 @@ def desktop_part(compositor, standin, work):
                      'STANDIN output geometry Blit blit-compositor', 'STANDIN output scale 1',
                      'STANDIN output name BLIT-1', 'STANDIN output mode 1920x1080\n',
                      'STANDIN capabilities 2 3 4\n', 'STANDIN enter BLIT-1 1920x1080@60000\n',
-                     'STANDIN done draws=4 releases=4 frames=4'):
+                     'STANDIN done draws=5 releases=5 frames=5'):
             check(want in output, 'the stand-in did not print %r:\n%s' % (want, output))
         check(sorted(desk.input_socks) == [1, 3], 'INPUT sock for the toplevels only: %s' % desk.input_socks)
         # The output is the display's, never a window's size.
@@ -1147,8 +1198,8 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('19 frames sent, 0 failed' in text, 'the log does not count 19 frames:\n%s' % text)
-        print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=320x200,500x300,'
+        check('24 frames sent, 0 failed' in text, 'the log does not count 24 frames:\n%s' % text)
+        print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
                  ','.join('%s:%s' % kv for kv in sorted(versions.items()))))
@@ -1231,7 +1282,9 @@ def blit_part(server, compositor, standin, work):
         check(Peer(name, token, 6).hello == b'ERROR 0 EINVAL\n', 'a version 6 hello was accepted')
 
         # blit-compositor reaching Blit directly: it runs, says why it shows
-        # nothing, sends Blit no WINDOW line, and configures no client.
+        # nothing, and sends Blit no WINDOW line and no frame. The client
+        # still gets xdg-shell's reply to its initial commit (0x0, it
+        # picks) -- a client is never left waiting -- and nothing more.
         runtime = os.path.join(work, 'run-blit')
         os.mkdir(runtime, 0o700)
         cenv = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=token,
@@ -1244,8 +1297,9 @@ def blit_part(server, compositor, standin, work):
         wait_for(lambda: 'committed, waiting' in open(client_out).read(), 'the stand-in did not start')
         time.sleep(0.5)
         check(comp.poll() is None, 'blit-compositor exited against Blit: %s' % open(log).read())
-        check('STANDIN configure' not in open(client_out).read(),
-              'a client was configured with no desktop: %s' % open(client_out).read())
+        printed = open(client_out).read()
+        check(printed.count('STANDIN configure') == 1 and 'STANDIN configure 0x0\n' in printed,
+              'the client was not given exactly the initial 0x0 configure: %s' % printed)
         text = open(log).read()
         check('OK dmabuf=0 window=0' in text and 'without window=1' in text,
               'the log does not say why nothing is shown:\n%s' % text)

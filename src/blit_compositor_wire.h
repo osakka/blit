@@ -61,7 +61,9 @@
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
        INPUT frame <id> <monotonic us>
-       INPUT keymap <id> <revision>    what GET /v1/input/keymap serves changed
+       INPUT keymap <id> <revision> <size> <rate> <delay>
+                                       the keymap: a sealed memfd of <size>
+                                       bytes passed with the line
 
    read by bc_parse_input.
 
@@ -646,7 +648,7 @@ enum {
     BC_INPUT_BTN,           /* code, pressed */
     BC_INPUT_WHEEL,         /* dx, dy (notches) */
     BC_INPUT_FRAME,         /* time_us */
-    BC_INPUT_KEYMAP         /* revision: a notice, not an event (no frame follows) */
+    BC_INPUT_KEYMAP         /* revision size rate delay, and a memfd: no frame follows */
 };
 
 typedef struct {
@@ -657,6 +659,8 @@ typedef struct {
     double x, y;            /* ptr: pixels; rel: counts; wheel: notches */
     uint64_t time_us;
     uint64_t revision;      /* keymap */
+    uint32_t size;          /* keymap: the memfd's bytes, text and NUL */
+    int32_t rate, delay;    /* keymap: repeat per second, ms; 0 0 none */
 } BcInput;
 
 /* A decimal number as Blit writes it: an optional '-', digits, and an
@@ -713,11 +717,18 @@ static int bc_parse_input(const char *line, BcInput *out)
         errno = 0;
         out->time_us = strtoull(p, &end, 10);
         if (errno != 0) return out->kind = BC_INPUT_UNKNOWN;
+        p = end;
         if (kinds[i].kind == BC_INPUT_KEYMAP) {
+            uint32_t rate, delay;
             out->revision = out->time_us;
             out->time_us = 0;
+            if (*p++ != ' ' || bc_read_u32(&p, 0x7fffffffUL, &out->size) != 0 || *p++ != ' ' ||
+                bc_read_u32(&p, 1000, &rate) != 0 || *p++ != ' ' ||
+                bc_read_u32(&p, 60000, &delay) != 0)
+                return out->kind = BC_INPUT_UNKNOWN;
+            out->rate = (int32_t)rate;
+            out->delay = (int32_t)delay;
         }
-        p = end;
         break;
     }
     }

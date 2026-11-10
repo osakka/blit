@@ -342,7 +342,7 @@ if [ -f "$compositor_package" ]; then
         exit 1
     fi
     grep -Fq 'ADR 0228' "$cstage/usr/share/doc/blit-compositor/README"
-    grep -Fq 'blit-compositor [--log path]' "$cstage/usr/share/doc/blit-compositor/README"
+    grep -Fq 'blit-compositor [--display name] [--log path]' "$cstage/usr/share/doc/blit-compositor/README"
     grep -Fq 'GNU General Public License' "$cstage/usr/share/doc/blit-compositor/copyright"
     grep -Fq 'either version 3 of the License, or (at your' "$cstage/usr/share/doc/blit-compositor/copyright"
     if dpkg-deb --contents "$compositor_package" | grep -E -f "$root/tools/release/runtime-entrypoints.pattern" >/dev/null; then
