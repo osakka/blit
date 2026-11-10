@@ -2104,6 +2104,12 @@ It speaks the frame channel above as a producer, with these additions.
     the size the program committed in its header. `0 0` means the program
     chooses (an xdg configure of 0,0): dialogs and fixed-size programs pick
     their own size and the desktop sizes its window to the first frame.
+    A program's initial commit is answered at once, as xdg-shell requires
+    and as programs rely on (vkcube presents after one roundtrip): with the
+    desktop's size if one has come, else 0,0. So the first frame of a new
+    window is often the program's own size, and the desktop's first `WINDOW
+    size` is an ordinary reconfigure. The same holds for a program started
+    while no desktop is connected.
   - `WINDOW output <id> <w> <h> <mHz>`: the display the window is on (its
     mode, from `/v1/displays`), sent when the window opens and whenever it
     moves to another display; the compositor presents it to the program as

@@ -162,7 +162,6 @@ struct bc_xdg {
     uint32_t decor_mode;              /* 0 none (client draws), else zxdg mode */
     int decor_dropped;                /* the decoration object went: the
                                          client draws from its next commit */
-    int have_size;
     int32_t size_w, size_h;
     int size_fullscreen, size_maximized, size_activated;
     struct bc_output *output;         /* the display it is on */
@@ -393,10 +392,17 @@ static void send_toplevel_configure(struct bc_xdg *x)
     x->configured = 1;
 }
 
-/* The desktop's size, applied at once when the toplevel is ready for it. */
+/* A toplevel is configured from its initial commit on. xdg-shell's
+   compositor *replies* to the initial commit with a configure, and clients
+   lean on that: vkcube commits, does one roundtrip and presents. Waiting for
+   the desktop's size made that first buffer a protocol error, because the
+   size crosses the wire and comes back later than one roundtrip. So the
+   reply goes at once -- the desktop's size when it has sent one, else 0x0,
+   which xdg_toplevel defines as "the client picks" -- and the desktop's
+   size, when it lands, is an ordinary reconfigure. */
 static void configure_if_ready(struct bc_xdg *x)
 {
-    if (x->toplevel && x->initial && x->have_size)
+    if (x->toplevel && x->initial)
         send_toplevel_configure(x);
 }
 
@@ -3209,7 +3215,6 @@ static void handle_line(struct bc_server *s, const char *line)
             logf_("WINDOW size for %u, which is no toplevel here", l.id);
             return;
         }
-        x->have_size = 1;
         x->size_w = l.width;
         x->size_h = l.height;
         x->size_fullscreen = l.fullscreen;

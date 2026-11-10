@@ -233,8 +233,11 @@ stand-in-client build for Blit and Hibr to test against.
   size or the first size are the alternatives, to decide with Hibr),
   `wl_seat`, `xdg_wm_base`
   and `zxdg_decoration_manager_v1` (server-side). A toplevel is announced at
-  its initial commit and configured only when the desktop sends its size,
-  exactly that size; each committed `wl_shm` buffer is copied into one
+  its initial commit and configured at once -- the desktop's size if one
+  has come, else 0x0 (the program picks) -- then exactly each size the
+  desktop sends. (Milestone A configured only on the desktop's size; the
+  live vkcube check of 2026-11-10 showed why that breaks the protocol: see
+  Evidence); each committed `wl_shm` buffer is copied into one
   sealed FRM1 frame (XRGB8888 as RGB, ARGB8888 un-premultiplied to RGBA,
   which Blit reads as straight alpha), released at once, and its frame
   callbacks answered when the frame was sent.
@@ -252,8 +255,9 @@ stand-in-client build for Blit and Hibr to test against.
   `window=1`; with the in-repo stand-in client
   (`tools/tests/wl_standin_client.c`, libwayland-client) it sees
   `WINDOW display blit-0`, then `new 1 0`, `title`, `appid`, `limits 1 64
-  48 0 0` and `decor 1 server` and no frame before its size; after `WINDOW
-  size 1 320 200` a 320x200 frame; the client's popup as `WINDOW popup 2 1
+  48 0 0` and `decor 1 server`, then the client's own 256x160 frame (the
+  0x0 reply to its initial commit); after `WINDOW size 1 320 200` a
+  320x200 frame; the client's popup as `WINDOW popup 2 1
   12 63` (its positioner's offset in the toplevel's surface pixels) and an
   80x60 frame of picture 2, which `WINDOW close 2` ends through
   `popup_done` with `WINDOW gone 2`; a second client, given 100x80 and
@@ -487,3 +491,16 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   outage, popups and hidden
   windows announced again (built, not in the gate), and a real GPU's
   dmabuf held across the outage.
+- **The first configure, live (2026-11-10).** `vkcube --wsi wayland` on the
+  mini PC under Hibr 0.99.481 and Blit 0.3.72 ended at once with
+  `xdg_surface#8: error 3: a buffer committed before the first configure
+  was acknowledged` (the compositor log: `window 1: new` then `gone` 5 ms
+  later, three times). vkcube commits, does one `wl_display_roundtrip` and
+  presents; xdg-shell says the compositor *replies* to the initial commit
+  with a configure, and the compositor was waiting for the desktop's
+  `WINDOW size`, which crosses the channel and comes back later than one
+  roundtrip. The configure now goes at once (0x0 before the desktop's
+  size); the stand-in client checks on every run that a configure answers
+  its initial commit within one roundtrip, and its scripted steps
+  (popup, states, lock, animation) wait for a configure that carries the
+  desktop's size.
