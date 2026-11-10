@@ -180,6 +180,69 @@ owner can see.
 5. **Later, optional:** an upscaler (an FSR/NIS-like GLES pass), a frame
    limiter, HDR. Not part of this decision; listed so the loss is explicit.
 
+## Phase 2, planned (approved by the owner, 2026-11-10)
+
+Steam and other X11 programs in Hibr windows, through Xwayland, the real X
+server, with blit-compositor as its X window manager -- the same split as
+libwayland and our compositor: the server is upstream's, the behaviour is
+ours. Writing an X server (years; DRI3/Present/GLX are the hard part),
+Xorg on the display (two owners of KMS and input), Xvfb (no GPU) and a
+compositor library (a foreign compositor under Blit again) were each worse.
+
+**Decisions.**
+- **Xwayland per compositor**, started with it (lazy start a later
+  switch): the compositor creates the X socket (`/tmp/.X11-unix/X<n>`, the
+  first free) and passes it with `-listenfd`, the WM connection with
+  `-wm`, `-rootless`. Xwayland dying ends its clients; the compositor
+  starts it again for the next and logs why. Xwayland is `Recommends`:
+  without it the compositor runs Wayland only and says so once.
+- **Association by `xwayland_shell_v1`** (Xwayland >= 23.1; Debian 13 has
+  24.1.6): `_XWAYLAND_SURFACE_SERIAL` on the X window matched to the
+  surface's `set_serial`. No `WL_SURFACE_ID` path; an older Xwayland is
+  refused with the reason.
+- **The window manager** on libxcb (pkg-config `xcb`, `xcb-composite`,
+  `xcb-xfixes`, `xcb-res`, ADR 0230), built against wlroots' `xwm.c`
+  (MIT) as the reference: its order of `CompositeRedirectSubwindows(root,
+  Manual)` first, `_NET_SUPPORTING_WM_CHECK` and `_NET_SUPPORTED`, focus
+  by `SetInputFocus` honouring `WM_TAKE_FOCUS` when a window's route goes
+  active, override-redirect windows, `_NET_WM_MOVERESIZE`, INCR
+  selections. Where ours differs, a line here says why.
+- **X onto the existing wire** (ADR 0229): `WM_NAME`/`_NET_WM_NAME` title,
+  `WM_CLASS` app id, `WM_NORMAL_HINTS` limits, `_MOTIF_WM_HINTS` decor,
+  `_NET_WM_STATE` full screen and maximized, `WM_TRANSIENT_FOR` parent,
+  `_NET_WM_MOVERESIZE` move and resize, `WM_DELETE_WINDOW` close, XFixes
+  cursor names to `WINDOW cursor` (Blit's table knows the X names). Every
+  toplevel keeps a stable position in X space (a virtual layout; Hibr
+  still places the picture), so an override-redirect menu or tooltip is
+  `WINDOW popup` at its offset from its parent toplevel (`WM_TRANSIENT_FOR`,
+  else the toplevel under its origin).
+- **One wire addition:** `WINDOW display <wayland-name> <x-display>`, the
+  second word new (`-` when X is off), so the desktop exports `DISPLAY` to
+  its terminals as it does `WAYLAND_DISPLAY`.
+- **Selections:** CLIPBOARD and PRIMARY onto `CLIP` as a third kind of
+  owner beside a Wayland source and the desktop; INCR for large ones.
+- **Shaped for phase 3:** a full-screen toplevel's frame carries a flag so
+  phase 3 can scan it out whole without restructuring; not built now.
+
+**Milestones,** each gated (`xwayland_gate` with an xcb stand-in client:
+map, title and class, an shm draw, `WM_DELETE_WINDOW`, an override-
+redirect popup, a full-screen request; it skips with the reason where
+`Xwayland` is absent) and measured -- frame latency from an X client's
+Present to Blit's flip, and frames per second:
+- **A.** One X program (xterm, glxgears) in a Hibr window, keys and mouse.
+- **B.** The Steam client window, on the owner's machine, before any more
+  window-manager depth: Steam decides the scope.
+- **C.** What Steam showed: states, transients, popups, move and resize,
+  cursors.
+- **D.** The X selections onto `CLIP`.
+- **E.** Big Picture full screen and one Proton game, at the monitor's
+  refresh.
+
+**Outside Blit,** for "Steam works" (written in programs-in-windows.md
+before B): the Steam package (non-free), i386 multiarch, the Vulkan
+loader and 32-bit Mesa, PipeWire or Pulse, and udev access to controllers
+(Steam reads gamepads itself; Blit does not).
+
 ## Consequences
 
 - Any program in a Hibr window at any size and shape, rendered 1:1, with

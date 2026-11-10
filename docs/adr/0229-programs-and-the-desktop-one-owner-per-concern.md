@@ -70,7 +70,10 @@ origin once; Blit maps the pointer through source rectangles already.
 | Touch, tablets, shortcut inhibit | Blit | the input route | later |
 | Launching, app ids and icons (.desktop) | Hibr | none: the app id names it | Hibr's |
 | Terminals and `WAYLAND_DISPLAY` | Hibr | the environment at start | Hibr's |
-| X programs (phase 2) | as above | none new: `_MOTIF_WM_HINTS` is `decor`, `_NET_WM_MOVERESIZE` is `move`/`resize`, the X selections are `CLIP` | phase 2 |
+| X programs (phase 2) | as above | the X display name on `WINDOW display <wayland-name> <x-display>`; otherwise none new: `_MOTIF_WM_HINTS` is `decor`, `_NET_WM_MOVERESIZE` is `move`/`resize`, the X selections are `CLIP` | phase 2 |
+| Keyboard grab for games (every key to the program) | the program asks, Hibr grants | keyboard-shortcuts-inhibit; the `INPUT keep` question decided with it | with phase 2's games |
+| No screen saver mid-game or mid-video | Hibr | idle-inhibit: `WINDOW idle <id> on|off` | with phase 2's games |
+| Gamepads | the program (Steam reads `/dev/input` itself) | none: a device permission on the machine | -- |
 
 "Later" rows are named so they are built once, in this shape, when they
 come; none of them is half-built now.
@@ -155,8 +158,8 @@ release half-implements one of them.
   margins, moved and resized from its own frame, its menu the desktop's.
 - Copy and paste between programs, terminals and the Vault is one
   clipboard, Hibr's, with one history and one policy for secrets.
-- Phase 2's X window manager adds no wire: every X property above maps to
-  a line that exists.
+- Phase 2's X window manager adds one word of wire (the X display name);
+  every X property above maps to a line that exists.
 - Two more line families (`WINDOW geometry/move/resize/menu`, `CLIP`) on
   the channel, both version 5, both agreed with Hibr before they ship.
 
