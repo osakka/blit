@@ -71,8 +71,10 @@ case "$target" in
             -o "$output" "$ROOT/hibr/console-blit.c"
         ;;
     compositor)
-        # ADR 0228: blit-compositor, Blit's Wayland compositor for programs,
-        # its own program linked against libwayland-server and libxkbcommon.
+        # ADR 0228: blit-compositor, Blit's Wayland compositor for programs
+        # and the X window manager of its Xwayland, its own program linked
+        # against libwayland-server, libxkbcommon and libxcb (with its
+        # composite, xfixes and res extensions).
         # Its protocol code is generated here by the system's wayland-scanner
         # from the system's wayland-protocols XML, both found through
         # pkg-config (tools/build-flags.sh), never committed: server code
@@ -91,7 +93,8 @@ case "$target" in
         # Their code goes to $proto, and $proto/sources lists the .c files
         # for every other build of it (the gate's client and sanitizer
         # builds). cursor-shape-v1 refers to the tablet tool, so the tablet
-        # protocol's interfaces are generated with it.
+        # protocol's interfaces are generated with it. xwayland-shell-v1
+        # (staging since 1.31) is how Xwayland names each X window's surface.
         : > "$proto/sources"
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
@@ -102,6 +105,7 @@ case "$target" in
                    "$protocols/unstable/primary-selection/primary-selection-unstable-v1.xml" \
                    "$protocols/staging/cursor-shape/cursor-shape-v1.xml" \
                    "$protocols/unstable/tablet/tablet-unstable-v2.xml" \
+                   "$protocols/staging/xwayland-shell/xwayland-shell-v1.xml" \
                    "$plasma/appmenu.xml"; do
             base=$(basename "$xml" .xml)
             "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"

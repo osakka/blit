@@ -24,9 +24,12 @@
 #   font        FreeType and HarfBuzz (link only), for raster probes
 #   zlib        zlib
 #   gles        the EGL/GLES/GBM headers
-#   compositor  blit-compositor: wayland-server, xkbcommon
+#   compositor  blit-compositor: wayland-server, xkbcommon, and libxcb with
+#               its composite, xfixes and res extensions (the X window
+#               manager, ADR 0228 phase 2)
 #   xkbcommon   xkbcommon
 #   wayland-client  the in-repo stand-in Wayland client (gates)
+#   xcb         libxcb alone: the in-repo stand-in X client (gates)
 #
 # A module missing or older than its minimum stops the build here, naming
 # the module and the minimum: a blocked capability gate, never a fallback.
@@ -41,7 +44,8 @@ set -eu
 # Each module and the lowest version Blit is verified to build and pass
 # its suites with. "-" checks presence only.
 MODULES='libdrm freetype2 harfbuzz zlib egl glesv2 gbm wayland-server
-wayland-client xkbcommon wayland-protocols wayland-scanner'
+wayland-client xkbcommon wayland-protocols wayland-scanner xcb xcb-composite
+xcb-xfixes xcb-res'
 minimum() {
     case $1 in
     libdrm) echo 2.4.114 ;;
@@ -52,6 +56,7 @@ minimum() {
     wayland-server|wayland-client|wayland-scanner) echo 1.21.0 ;;
     xkbcommon) echo 1.5.0 ;;
     wayland-protocols) echo 1.32 ;;  # staging/cursor-shape (ADR 0229)
+    xcb|xcb-composite|xcb-xfixes|xcb-res) echo 1.15 ;;  # libxcb 1.15 (Debian 12)
     *) return 1 ;;
     esac
 }
@@ -71,10 +76,11 @@ group() {
     font) cmods=freetype2; lmods='freetype2 harfbuzz'; extra= ;;
     zlib) cmods=zlib; lmods=zlib; extra= ;;
     gles) cmods='egl glesv2 gbm'; lmods=; extra= ;;
-    compositor) cmods='wayland-server xkbcommon'
-                lmods='wayland-server xkbcommon'; extra= ;;
+    compositor) cmods='wayland-server xkbcommon xcb xcb-composite xcb-xfixes xcb-res'
+                lmods='wayland-server xkbcommon xcb xcb-composite xcb-xfixes xcb-res'; extra= ;;
     xkbcommon) cmods=xkbcommon; lmods=xkbcommon; extra= ;;
     wayland-client) cmods=wayland-client; lmods=wayland-client; extra= ;;
+    xcb) cmods=xcb; lmods=xcb; extra= ;;
     *) die "build-flags: unknown group '$1' (see tools/build-flags.sh)" ;;
     esac
 }
