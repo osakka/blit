@@ -9,6 +9,26 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-10: 0.3.77 input routes per session; the global menu's wire (ADR 0229)
+
+- **Fix (a 0.3.76 regression):** one route per compositor window socket
+  per session, not across sessions. Hibr gives each display's session its
+  own route to a window (the session with the pointer or keyboard
+  delivers; a window over a seam takes input on both halves); 0.3.76 let
+  the last display asked win, so Firefox drawn on HDMI had its only route
+  on DP's session. A route in another session to the same socket now
+  stands.
+- **The global menu, Blit's side:** `WINDOW appmenu <id> <service> <path>`
+  from org_kde_kwin_appmenu (`- -` released); Hibr's side is #500.
+- **Phase 2 planned** in ADR 0228 (Xwayland, approved by the owner).
+- **Suites:** this host, main 6519aae rebuilt: `all` 187 pass, 12 skip, 0
+  fail; GLES `renderer` 82 pass, 1 skip, 0 fail; `frame_input_gate` three
+  runs. The owner's Debian 13 desktop, 6f8ae85: `compositor_gate` with
+  ASan/UBSan (cursor and appmenu cases), the packages built there and
+  `package_artifact_gate` passing; brought here by scp, checksums
+  verified.
+- **Published** to hibr-apt (blit, blit-compositor).
+
 ## 2026-11-10: 0.3.76 cursor shapes, one route per window, a portable build (ADR 0229, ADR 0230)
 
 - **Cursor shapes:** programs name their pointer (wp_cursor_shape_v1) and
