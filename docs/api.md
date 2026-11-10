@@ -1967,9 +1967,12 @@ trailing newline is optional.
   `region` (`WxH+X+Y`, empty until it offers one), and `pointer`, the last absolute pointer for diagnosing its
   mapping: `surface` (where it was on the session's surface, in pixels),
   `draw` (the picture's drawn rectangle it was mapped through, x, y, width,
-  height), `sent` (the position sent to the compositor), and `miss` (empty
-  once a position was sent; `other-session`, `no-image` or
-  `outside-picture` when the last pointer sent nothing; `none-yet`).
+  height), `over` (the picture it was over: the route's own or a member's,
+  0 before any), `sent` (the position sent to the compositor), and `miss`
+  (empty once a position was sent; `other-session`, `no-image` or
+  `outside-picture` when the last pointer sent nothing; `none-yet`); and
+  `members`, the route's member pictures (`INPUT member`, "Program
+  windows"), each `{"image","x","y"}`.
 
 ## Program windows (draft, ADR 0228 phase 1)
 
@@ -2088,8 +2091,19 @@ It speaks the frame channel above as a producer, with these additions.
     over a member picture into the top-level's surface coordinates, so the
     compositor sees one coordinate space per top-level and hit-tests its
     own popups; keyboard focus stays the top-level's. The member ends with
-    the popup's picture. Answers are `OK window <id>` or
-    `ERROR WINDOW <id> <code>`.
+    the popup's picture (deleted, or gone after it was shown), or with the
+    top-level's route. Answers follow the other INPUT requests, with the
+    popup's id: `OK input <popup-id>`, or `ERROR INPUT <popup-id> <code>`
+    (id 0 when the line has no readable one): `EINVAL` for a malformed line
+    (an offset is a decimal, optionally negative, at most 32767 either
+    way), a top-level with no route on this connection, the popup the
+    top-level itself, or a popup that is a deleted or Kitty image; `EBUSY`
+    for a popup with a route of its own on this connection, or a route with
+    16 members already. Sent again, it moves the member (a popup
+    repositioned); a member of another route on the connection moves to
+    this one. Both backends, `eis` and `sock`: the top-level's pixels are
+    then scaled to the EIS region as the top-level's own are. Where draws of
+    the top-level and its members overlap, the topmost wins.
 - **Sizes are the program's to honour.** A Wayland client is told a size
   and commits the buffer it draws; most draw exactly that size, but a
   client with a fixed size, or one mid-resize, commits another. The
@@ -2129,7 +2143,9 @@ It speaks the frame channel above as a producer, with these additions.
   ```
   Keys are raw evdev codes; the compositor derives modifiers and characters
   with the keymap below, so there is one source. `ptr` is in pixels of the
-  picture's latest frame, a decimal with two fractional digits; `rel` the
+  picture's latest frame, a decimal with two fractional digits (over a
+  member, the top-level's pixels, negative where a popup reaches past the
+  top-level's left or top); `rel` the
   raw counts; `wheel` whole notches, positive right and down (as Wayland
   and EIS count them); each event is one batch, its `frame` after it. Input
   is never dropped silently: if the socket cannot take a line (full, or its
@@ -2138,8 +2154,7 @@ It speaks the frame channel above as a producer, with these additions.
   route whose socket ends -- and ends the route with `ERROR INPUT <id>
   ENOENT`, as when the compositor closes the socket itself
   (`last_error` `sock-disconnected`, or `sock-full`). Each route in
-  `frames.input` says its `backend`, `eis` or `sock`. `INPUT member` is not
-  implemented in Blit yet.
+  `frames.input` says its `backend`, `eis` or `sock`.
   blit-compositor's input socket is `$XDG_RUNTIME_DIR/<display>-input`
   (mode 0600), and it sends `INPUT sock` for each top-level right after its
   `WINDOW new` hints. It gives the keyboard to the window whose route sends

@@ -127,7 +127,8 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT btn 3 272 press", &in) == BC_INPUT_BTN && in.code == 272, "btn");
     EXPECT(bc_parse_input("INPUT ptr 3 10.50 20.25", &in) == BC_INPUT_PTR && in.x == 10.5 &&
            in.y == 20.25, "ptr");
-    EXPECT(bc_parse_input("INPUT ptr 3 -1.00 2", &in) == BC_INPUT_UNKNOWN, "ptr negative");
+    EXPECT(bc_parse_input("INPUT ptr 3 -1.00 2", &in) == BC_INPUT_PTR && in.x == -1,
+           "ptr negative: a popup past the toplevel's left");
     EXPECT(bc_parse_input("INPUT ptr 3 1e5 2", &in) == BC_INPUT_UNKNOWN, "ptr exponent");
     EXPECT(bc_parse_input("INPUT rel 3 -7 3", &in) == BC_INPUT_REL && in.x == -7 && in.y == 3, "rel");
     EXPECT(bc_parse_input("INPUT wheel 3 0 -1", &in) == BC_INPUT_WHEEL && in.y == -1, "wheel");

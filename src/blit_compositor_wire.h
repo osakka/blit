@@ -50,7 +50,8 @@
    each toplevel, Blit connects to that stream socket, and writes
 
        INPUT key <id> <evdev code> press|release
-       INPUT ptr <id> <x> <y>          the picture's own pixels, decimals
+       INPUT ptr <id> <x> <y>          the toplevel's own pixels, decimals
+                                       (negative over a popup past its left or top)
        INPUT rel <id> <dx> <dy>
        INPUT btn <id> <BTN code> press|release
        INPUT wheel <id> <dx> <dy>      notches, positive right and down
@@ -621,8 +622,6 @@ static int bc_parse_input(const char *line, BcInput *out)
     case BC_INPUT_REL:
     case BC_INPUT_WHEEL:
         if (bc_read_number(&p, &out->x) != 0 || *p++ != ' ' || bc_read_number(&p, &out->y) != 0)
-            return out->kind = BC_INPUT_UNKNOWN;
-        if (kinds[i].kind == BC_INPUT_PTR && (out->x < 0 || out->y < 0))
             return out->kind = BC_INPUT_UNKNOWN;
         break;
     default: {

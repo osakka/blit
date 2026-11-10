@@ -33,6 +33,11 @@ import tempfile
 import time
 import urllib.request
 
+# The frame channel's session, channel and placement helpers, shared with
+# the INPUT gate (same directory).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import frame_input_gate as fig  # noqa: E402
+
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 PORT = (int(os.environ.get('BLIT_GATE_PORT', '19823')) +
         int(os.environ.get('BLIT_GATE_PORT_OFFSET', '0')))
@@ -307,7 +312,8 @@ def input_part(server, compositor, standin, work):
     serves the keymap (GET /v1/input/keymap, BLIT_SERVER_PORT)."""
     env = server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
                           BLIT_SETTINGS_PATH=os.path.join(work, 'settings-input.json'),
-                          BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts')))
+                          BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'),
+                          BLIT_EXPECT_DESKTOP='0', BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1'))
     blit = subprocess.Popen([server, str(PORT)], env=env, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
     runtime = os.path.join(work, 'run-input')
@@ -396,6 +402,7 @@ def input_part(server, compositor, standin, work):
         # Relative motion (Blit's relative hold) to the client with the pointer.
         lines_to('rel 1 7 -3', 'rel 1 -2 5')
         seen('relative 7.00 -3.00', 'pointer frame', 'relative -2.00 5.00', 'pointer frame')
+        e2e = popup_end_to_end(desk, work, seen)
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
         # The desktop takes the window's focus: the keyboard leaves it.
@@ -416,7 +423,7 @@ def input_part(server, compositor, standin, work):
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not read:\n' + text)
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
-                'relative=7,-3+-2,5 focus=line,!activated,route-end' % len(keymap))
+                'relative=7,-3+-2,5 focus=line,!activated,route-end %s' % (len(keymap), e2e))
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -546,6 +553,53 @@ def lock_part(compositor, standin, work):
                 p.kill()
                 p.wait()
         listener.close()
+
+
+class _Blit:
+    """frame_input_gate's Session wants an object with api()."""
+    api = staticmethod(lambda method, path, body=None: api(method, path, body))
+
+
+def popup_end_to_end(desk, work, seen):
+    """A real Blit's route into the compositor's input socket, as a desktop
+    sets it up (docs/api.md, "One input route per top-level"): the gate,
+    as the desktop, shows windows 1 and 2 (the stand-in's toplevel and its
+    popup) as pictures 1 and 2 of a Blit session, asks `INPUT sock` for 1
+    and `INPUT member 2 1 12 63`, and turns the route on; the pointer over
+    picture 2 reaches the popup surface at its own pixels."""
+    session = fig.Session(_Blit, work, 'e2e')
+    api('PATCH', '/v1/terminal-sessions/%s' % session.id, {'focused': True})
+    wait_for(lambda: api('GET', '/v1/terminal-sessions/%s' % session.id)['focused'], 'no focus')
+    ch = fig.Channel(session)
+    ch.frame(1, 1, 200, 100)
+    ch.frame(2, 1, 80, 60)
+    wait_for(lambda: session.graphics(1) and session.graphics(2), 'pictures 1 and 2 did not land')
+    fig.place(session, 1, 3, 5, 20, 5)
+    session.write('\033[4;8H\033_Ga=p,i=2,p=1,q=2,C=1,c=8,r=3,z=1\033\\')
+    at = wait_for(lambda: [p for p in (session.graphics(2) or {}).get('placements', []) if p['id'] == 1],
+                  'picture 2 was not placed')[0]
+    check(ch.ask('INPUT sock %s 1\n' % desk.input_socks[1]) == b'OK input 1\n', 'Blit took no route')
+    check(ch.ask('INPUT member 2 1 12 63\n') == b'OK input 2\n', 'Blit took no member')
+    ch.line('INPUT on 1\n')
+    wait_for(lambda: [r for r in api('GET', '/v1/terminal-sessions/%s' % session.id)['frames']['input']['routes']
+                      if r['image'] == 1 and r['state'] == 'live'], 'the route did not go live')
+    # The session's surface origin on the display, from its pixel reports.
+    api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': 301, 'y': 101})
+    report = wait_for(lambda: __import__('re').findall(rb'\x1b\[<35;(\d+);(\d+)M', session.sent()),
+                      'no pixel report')[-1]
+    origin = (301 - (int(report[0]) - 1), 101 - (int(report[1]) - 1))
+    sx, sy = 8, 8
+    api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx,
+                                     'y': origin[1] + at['y'] + sy})
+    x, y = sx * 80 / at['width'], sy * 60 / at['height']
+    seen('pointer leave main', 'pointer frame', 'pointer enter popup %.2f %.2f' % (x, y), 'pointer frame')
+    api('POST', '/v1/input/inject', {'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 2 * sx,
+                                     'y': origin[1] + at['y'] + sy // 2})
+    seen('pointer motion %.2f %.2f' % (2 * x, y / 2), 'pointer frame')
+    ch.line('INPUT off 1\n')
+    ch.close()
+    api('DELETE', '/v1/terminal-sessions/%s' % session.id)
+    return 'blit-member-e2e=popup@%.2f,%.2f' % (x, y)
 
 
 def dmabuf_part(compositor, standin, work):

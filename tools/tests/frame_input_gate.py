@@ -850,6 +850,24 @@ def eis(stub=False):
         at = wait_for(lambda: (lambda p: p if p['width'] == 64 else None)(placement()), 'the resize was not drawn')
         point(at, 10, 5, 'absolute after the resize')
         cases.append('resized:%dx%d' % (at['width'], at['height']))
+        # INPUT member through EIS: popup 24 (a 160x80 frame), drawn past
+        # the top-level, is its offset (12, 63) plus the point within it in
+        # the top-level's pixels, scaled to the region as the top-level is.
+        ch.frame(24, 1, 160, 80)
+        wait_for(lambda: a.graphics(24), 'image 24 did not land')
+        a.write('\033[6;12H\033_Ga=p,i=24,p=1,q=2,C=1,c=8,r=2,z=1\033\\')
+        p24 = wait_for(lambda: [p for p in (a.graphics(24) or {}).get('placements', []) if p['id'] == 1],
+                       'image 24 was not placed')[0]
+        check(ch.ask('INPUT member 24 7 12 63\n') == b'OK input 24\n', 'INPUT member through EIS')
+        for sx, sy in ((0, 0), (p24['width'] - 1, p24['height'] - 1)):
+            server.inject({'kind': 'pointer_motion', 'x': origin[0] + p24['x'] + sx,
+                           'y': origin[1] + p24['y'] + sy})
+            receiver.expect(['abs %.2f %.2f' % ((12 + sx * 160 / p24['width']) * REGION_W / FRAME_W,
+                                                (63 + sy * 80 / p24['height']) * REGION_H / FRAME_H)],
+                            'the pointer at %d,%d of member 24' % (sx, sy))
+        a.write('\033_Ga=d,d=I,i=24,q=2\033\\')
+        wait_for(lambda: route(server.input(a.id), 7)['members'] == [], 'member 24 outlived its picture')
+        cases.append('member:24@12,63')
         server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 200, 'y': origin[1] + at['y'] + 100})
         receiver.nothing('the pointer outside the picture')
         miss = [r for r in server.input(a.id)['routes'] if r['image'] == 7][0]['pointer']['miss']
@@ -1085,6 +1103,46 @@ def sock():
             receiver.expect(['ptr 7 %.2f %.2f' % (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])],
                             'the pointer at %d,%d of %dx%d' % (sx, sy, at['width'], at['height']))
 
+        # INPUT member: popup 9 (a 160x80 frame) joins 7's route; the
+        # pointer over it is its offset plus the point within it, in 7's
+        # pixels; it ends with its picture.
+        ch.frame(9, 1, 160, 80)
+        wait_for(lambda: a.graphics(9), 'image 9 did not land')
+        a.write('\033[4;8H\033_Ga=p,i=9,p=1,q=2,C=1,c=8,r=2,z=1\033\\')
+        p9 = wait_for(lambda: [p for p in (a.graphics(9) or {}).get('placements', []) if p['id'] == 1],
+                      'image 9 was not placed')[0]
+        for line, want in (('INPUT member 9 8 12 63\n', b'ERROR INPUT 9 EINVAL\n'),   # 8 has no route
+                           ('INPUT member 7 7 12 63\n', b'ERROR INPUT 7 EINVAL\n'),   # itself
+                           ('INPUT member 9 7 12\n', b'ERROR INPUT 9 EINVAL\n'),      # no y
+                           ('INPUT member 9 7 1 x\n', b'ERROR INPUT 9 EINVAL\n'),
+                           ('INPUT member 9 7 40000 1\n', b'ERROR INPUT 9 EINVAL\n'),
+                           ('INPUT member x 7 1 1\n', b'ERROR INPUT 0 EINVAL\n'),
+                           ('INPUT member 9 7 12 63\n', b'OK input 9\n')):
+            got = ch.ask(line)
+            check(got == want, '%r was answered %r, not %r' % (line, got, want))
+        r = route(server.input(a.id), 7)
+        check(r['members'] == [{'image': 9, 'x': 12, 'y': 63}], 'frames.input members %s' % r)
+        receiver.read(0.2)
+        receiver.events = []
+        for sx, sy in ((0, 0), (p9['width'] - 1, p9['height'] - 1)):
+            server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'] + sx,
+                           'y': origin[1] + p9['y'] + sy})
+            receiver.expect(['ptr 7 %.2f %.2f' % (12 + sx * 160 / p9['width'], 63 + sy * 80 / p9['height'])],
+                            'the pointer at %d,%d of member 9' % (sx, sy))
+        check(route(server.input(a.id), 7)['pointer']['over'] == 9, 'the pointer was not over 9')
+        # Moved, past the top-level's left and top.
+        check(ch.ask('INPUT member 9 7 -4 -6\n') == b'OK input 9\n', 'a member moved')
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'], 'y': origin[1] + p9['y']})
+        receiver.expect(['ptr 7 -4.00 -6.00'], 'a member at a negative offset')
+        # Its picture deleted: the member ends, the point is 7's again.
+        a.write('\033_Ga=d,d=I,i=9,q=2\033\\')
+        wait_for(lambda: route(server.input(a.id), 7)['members'] == [], 'the member outlived its picture')
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'] + 1, 'y': origin[1] + p9['y']})
+        receiver.expect(['ptr 7 %.2f %.2f' % ((p9['x'] + 1 - at['x']) * FRAME_W / at['width'],
+                                              (p9['y'] - at['y']) * FRAME_H / at['height'])],
+                        'the pointer where the member was')
+        check(ch.ask('INPUT member 9 7 0 0\n') == b'ERROR INPUT 9 EINVAL\n', 'a deleted member was taken')
+
         # Relative motion under the lock, the raw sum.
         a.write('\033[?7701h')
         wait_for(lambda: server.locked(a.id), 'the lock was not engaged')
@@ -1134,7 +1192,8 @@ def sock():
     finally:
         server.stop()
     print('FRAME_INPUT_SOCK_PASS answers=OK,ENOENT,EINVAL,EBUSY backend=sock keys=ordered,repeats-dropped '
-          'off+unfocused=silent release_all=off,focus wheel=0,-1/0,1 ptr=frame-pixels rel=70,-30 '
+          'off+unfocused=silent release_all=off,focus wheel=0,-1/0,1 ptr=frame-pixels '
+          'member=EINVALx6,OK,offset+point,negative,ends-with-picture rel=70,-30 '
           'not-taken=dropped+ENOENT closed=ENOENT frames=%d' % receiver.frames)
 
 
