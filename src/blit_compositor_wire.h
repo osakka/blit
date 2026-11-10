@@ -83,6 +83,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <dirent.h>
 #include <unistd.h>
 
 #define BC_WIRE_VERSION 4

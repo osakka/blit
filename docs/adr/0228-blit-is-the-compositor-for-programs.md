@@ -528,3 +528,18 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   API's keymap and repeat; `compositor_gate` runs the compositor with no
   port or token, the gate sending a real Blit's keymap as Blit does, then
   a real Blit's route switching keyboards B and A before their keys.
+- **A socket per window (2026-11-10).** With 0.3.73 on the mini PC, keys
+  and the pointer reached no Wayland program: the log named "Blit's route
+  for window 1259388934". Hibr relays `INPUT sock` to Blit under its own
+  picture id, as a relay must (Blit's ids are the desktop's), so Blit's
+  lines carry that id, and the compositor looked it up among its own
+  window ids and dropped every line (the keymap, which names no window,
+  arrived). Every gate's fake desktop used the compositor's ids, so the
+  mismatch could not show. Now each top-level has its own input socket,
+  `<display>-input-<id>`, made at its first announcement and removed when
+  it goes (any left by a dead compositor are cleared at start, under the
+  display's lock); a connection's lines are that window's, and the line's
+  id is Blit's alone. No wire change, none for Hibr. `compositor_gate`'s
+  fake Blit writes id 1259388934, its real Blit pictures 41 and 42 for
+  windows 1 and 2, and the restart part checks the sockets survive the
+  channel and go at quit.

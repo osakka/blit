@@ -2020,8 +2020,8 @@ It speaks the frame channel above as a producer, with these additions.
   the compositor takes the first free `blit-<n>`. A name is printable
   ASCII without a space or a slash (it is one file in `$XDG_RUNTIME_DIR`
   and one word on the `WINDOW display` line), at most 31 bytes, and short
-  enough that `$XDG_RUNTIME_DIR/<name>-input` (the input socket, below)
-  fits in 107 bytes. A name that is not one, or that another compositor
+  enough that `$XDG_RUNTIME_DIR/<name>-input-<id>` (a window's input
+  socket, below, with the longest id) fits in 107 bytes. A name that is not one, or that another compositor
   holds, is refused before the channel is dialed: a line on standard error
   and exit status 2. `WINDOW display` says the name either way.
 - **Hello.** Version 4: `v4 <token>` (everything in version 3, plus the
@@ -2167,9 +2167,9 @@ It speaks the frame channel above as a producer, with these additions.
   environment, and the restarted desktop starts no second one.
   - **The channel lost.** When the channel closes or errors, the
     compositor keeps every program running and its windows unshown, with
-    the Wayland socket and the input socket open. Blit's input routes to
+    the Wayland socket and each window's input socket open. Blit's input routes to
     the compositor end with the desktop's channel (their connections to
-    the input socket close, each releasing what it held). An active
+    the input sockets close, each releasing what it held). An active
     pointer lock or confinement ends as at the desktop's `WINDOW lock <id>
     off` (a oneshot one is then spent); every one still wanted is asked
     for again on reconnect.
@@ -2220,7 +2220,8 @@ It speaks the frame channel above as a producer, with these additions.
 - **Input straight from Blit.** blit-compositor takes its windows' input
   from Blit directly, not through EIS (libei exists only to feed a foreign
   compositor and leaves with gamescope in ADR 0228 phase 4) and not through
-  the desktop's relay. It listens on its own input socket (`SOCK_STREAM`)
+  the desktop's relay. It listens on an input socket of its own for each
+  top-level (`SOCK_STREAM`)
   and asks once per top-level, through the channel, `INPUT sock <path>
   <id>` -- the shape of `INPUT eis` until version 5 makes it `INPUT sock
   <id> <path>` -- : Blit connects to `path`
@@ -2274,9 +2275,13 @@ It speaks the frame channel above as a producer, with these additions.
   change only the repeat (compared by bytes: a restarted Blit counts
   revisions afresh). Until a route's first keymap its clients are sent
   `no_keymap`, and keys still reach them.
-  blit-compositor's input socket is `$XDG_RUNTIME_DIR/<display>-input`
-  (mode 0600), and it sends `INPUT sock` for each top-level right after its
-  `WINDOW new` hints. It gives the keyboard to the window whose route sends
+  A top-level's input socket is `$XDG_RUNTIME_DIR/<display>-input-<id>`
+  (mode 0600, made at its first `WINDOW new`, removed when it goes), and
+  the compositor sends `INPUT sock` for it right after its `WINDOW new`
+  hints. The socket, not the line, names the window: a desktop relays
+  `INPUT sock` to Blit under its own id for the picture (Hibr's are not
+  the compositor's), and the `<id>` on Blit's lines is that one, which the
+  compositor does not read. It gives the keyboard to the window whose route sends
   a line, and takes it away when another window's route sends one, when
   the desktop's `WINDOW size` for it drops `activated`, or when its route's
   socket ends (releasing what was down); a popup of the top-level under
