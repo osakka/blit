@@ -1974,9 +1974,10 @@ trailing newline is optional.
 ## Program windows (draft, ADR 0228 phase 1)
 
 *Draft for review with Hibr.* `blit-compositor` implements the compositor's
-side from 0.3.71 (ADR 0228 phase 1, milestone A: `wl_shm` windows as FRM1,
-no input yet), and Blit's own `window=0` answer; no desktop implements its
-side yet. `blit-compositor`
+side from 0.3.71 (ADR 0228 phase 1: milestone A, `wl_shm` windows as FRM1;
+milestone B, the window states, `WINDOW output`, dmabuf as FRM3, pacing,
+the keymap and input), and Blit its `window=0` answer, `GET
+/v1/input/keymap` and `INPUT sock`; no desktop implements its side yet. `blit-compositor`
 is Blit's Wayland compositor for programs (and, in phase 2, their X window
 manager). It composites nothing: each window is one picture by descriptor.
 It speaks the frame channel above as a producer, with these additions.

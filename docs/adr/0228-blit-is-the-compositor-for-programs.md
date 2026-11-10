@@ -271,3 +271,56 @@ stand-in-client build for Blit and Hibr to test against.
   cursor`), `wp_presentation` and frame pacing, `zxdg_output_manager_v1`,
   `wl_data_device_manager`, `wp_viewporter`, subsurfaces composited, the
   package, and the live check with vkcube.
+
+**Phase 1, milestone B (0.3.71, in development, 2026-11-10).** Every line
+of `docs/api.md` "Program windows" as agreed with Hibr, except the
+proposals named there.
+
+- **Window states and outputs.** `WINDOW maximize`, `minimize`, `parent`,
+  `hide` and the `maximized` state of `WINDOW size` (and the xdg
+  capabilities to match). `WINDOW output` replaces milestone A's "newest
+  size" rule: one `wl_output` global per display mode the desktop names,
+  the window's surface entering it and leaving the one before, an output
+  no window is on given the next new mode so globals never come and go.
+  The line carries a mode, not a display, so two displays of one mode are
+  one output -- to revisit with Hibr if a program ever needs to tell them
+  apart.
+- **dmabuf.** `zwp_linux_dmabuf_v1` v4 (the Debian 12 XML's highest), only
+  for a hello answered `dmabuf=1` with `formats=`, exactly those pairs, in
+  the v4 format table and one tranche. A dmabuf commit is one `FRM3` of the
+  client's own planes, held until `RELEASE` and given back before `WINDOW
+  gone`; `ERROR <id> ENOTSUP` copies that frame, and every later one of
+  the connection, as `FRM1` when its one linear plane maps. The feedback's
+  main device is the first DRM render node (the hello does not name
+  Blit's GPU). The build host has no DRM device and no `/dev/udmabuf`, and
+  libgbm has no headers here: the stand-in's planes are memfds, so the gate
+  proves the wire and descriptor passing (the plane Blit receives is the
+  client's own file), not a GPU import.
+- **Pacing.** Frame callbacks when Blit has taken the frame -- an `FRM1`
+  when sent, an `FRM3` at once when it is the only one held, else at the
+  `RELEASE` of the frame before it -- and at most once per refresh of the
+  window's output; `wp_presentation` presented/discarded at the same
+  moment, `CLOCK_MONOTONIC`, no vsync flag.
+- **Keymap.** blit-server's `GET /v1/input/keymap`: every level asked of
+  `evdev_key_character` and every role of the device's `modifiers` remap,
+  so Blit's tables are the one source (`src/blit_xkb_keymap.h`).
+- **Input.** No libei: Blit's route machinery (ADR 0225) gained a second
+  backend, `INPUT sock`, which connects to blit-compositor's own input
+  socket and writes key/ptr/rel/btn/wheel/frame lines; blit-compositor
+  turns them into `wl_keyboard` (the keymap, compiled with libxkbcommon)
+  and `wl_pointer` events, and `INPUT rel` into
+  `zwp_relative_pointer_v1`. `zwp_pointer_constraints_v1` waits on the
+  proposed `WINDOW lock`.
+- **Gates.** `compositor_gate` (desktop, states, pacing, dmabuf, Blit,
+  input; every part again under ASan/UBSan), `keymap_gate` (the keymap
+  compiles with libxkbcommon and types what Blit types, before and after a
+  PATCH), `frame_input_gate` sock mode (the route's lines, live rule,
+  release-all, a line not taken), `compositor_wire_unit`.
+- **Not in milestone B:** `INPUT member` (in api.md, not in Blit),
+  `zwp_pointer_constraints_v1` and `WINDOW lock` (a proposal),
+  `WINDOW cursor` and `wl_pointer.set_cursor`, Blit's per-device key repeat
+  on the wire, `zxdg_output_manager_v1`, `wl_data_device_manager`,
+  `wp_viewporter`, subsurfaces composited, the version 5 grammar (a
+  coordinated Blit+Hibr change), the package, and the live checks on the
+  mini PC: vkcube's dmabuf frames imported by Blit's GPU, its pacing and
+  keys and mouse.

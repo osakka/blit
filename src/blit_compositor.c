@@ -1,5 +1,5 @@
 /* blit-compositor: Blit's Wayland compositor for programs (ADR 0228,
-   phase 1, milestone A).
+   phase 1, milestones A and B).
 
      blit-compositor [--log path]
 
@@ -14,10 +14,13 @@
    picture by descriptor whose id is a WINDOW id (docs/api.md, "Program
    windows"): the compositor tells the desktop about the window and its
    hints, the desktop answers `WINDOW size`, and the compositor configures
-   the client at exactly that size; every committed wl_shm buffer becomes
-   one FRM1 frame of that picture, and the buffer is released at once
-   because it was copied. Frame callbacks are answered when the frame was
-   sent.
+   the client at exactly that size. A committed wl_shm buffer becomes one
+   FRM1 frame of that picture, copied, and is released at once; a dmabuf
+   one becomes one FRM3 of its own planes, released at Blit's RELEASE (the
+   dmabuf section). Frame callbacks and presentation feedback follow when
+   Blit has taken the frame, at most once per output refresh (the frame
+   pacing section). Input comes straight from Blit to the compositor's
+   input socket as lines and becomes wl_seat events (the input section).
 
    Globals: wl_compositor, wl_subcompositor (subsurfaces accepted and
    logged, not composited), wl_shm (ARGB8888, XRGB8888, libwayland's own),
@@ -26,17 +29,18 @@
    its surface enters and leaves them as the desktop moves it),
    xdg_wm_base, zxdg_decoration_manager_v1 (server-side: the desktop draws
    frames; a client that insists on its own gets `WINDOW decor <id>
-   client`) and wl_seat (keyboard and pointer advertised; input is
-   milestone B, so no keymap, focus or events are sent yet). Each is
-   offered at the version the task names or the one the build host's
-   protocol XML carries, whichever is lower (BC_VERSION).
+   client`), wl_seat (keyboard with Blit's xkb keymap, pointer),
+   zwp_linux_dmabuf_v1 (only for a peer that imports: dmabuf=1),
+   wp_presentation and zwp_relative_pointer_manager_v1. Each is offered at
+   the version the task names or the one the build host's protocol XML
+   carries, whichever is lower (BC_VERSION).
 
    Against a peer that answers the hello without window=1 (Blit itself) it
    keeps running, shows nothing and says so in its log: no WINDOW line, no
    frame, and so no configure, which waits for the desktop's size.
 
    Built with tools/build-tcc.sh compositor, linked against
-   libwayland-server.so.0. */
+   libwayland-server.so.0 and libxkbcommon.so.0. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <signal.h>
@@ -2975,10 +2979,13 @@ int main(int argc, char **argv)
         logf_("no linux-dmabuf: the peer imports no dmabuf (no dmabuf=1 in its answer)");
     }
     logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
-          "xdg_wm_base %d, zxdg_decoration_manager_v1 %d",
+          "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
+          "zwp_relative_pointer_manager_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
-          BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface));
+          BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
+          BC_VERSION(1, wp_presentation_interface),
+          BC_VERSION(1, zwp_relative_pointer_manager_v1_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);
