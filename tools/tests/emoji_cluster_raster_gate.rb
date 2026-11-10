@@ -3,6 +3,7 @@ require 'json'
 require 'digest'
 require 'open3'
 require 'tmpdir'
+require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root) do
   manifest = JSON.parse(File.read('assets/unicode/emoji-18.0/source.json'))
@@ -14,10 +15,9 @@ Dir.chdir(root) do
   Dir.mktmpdir('blit-emoji-raster') do |work|
     binary = File.join(work, 'gate')
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall',
-      "-I#{ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")}",
+      *BuildFlags.cflags('font'),
       'tools/tests/emoji_cluster_raster_gate.c', 'src/blit_font.c', 'src/blit_raster.c',
-      ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-      ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
+      *BuildFlags.libs('font'), '-o', binary)
     %w[text/Hack-Regular.ttf text/3270-Regular.ttf].each do |profile|
       command = [binary, 'assets/fonts/Blit-Terminus16.psf', "assets/fonts/#{profile}",
                  'assets/fonts/NotoColorEmoji.ttf', rows.size.to_s]

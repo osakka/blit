@@ -23,18 +23,20 @@ esac
 mkdir -p "$(dirname -- "$output")"
 case "$target" in
     server)
+        # Dependencies from the system through pkg-config, minimums checked
+        # (tools/build-flags.sh, docs/toolchain.md). An assignment, so a
+        # missing or too-old module stops the build here.
+        cflags=$("$ROOT/tools/build-flags.sh" --cflags server)
+        libs=$("$ROOT/tools/build-flags.sh" --libs server)
+        # shellcheck disable=SC2086
         tcc -O2 -g -bt8 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             "-DBLIT_HIBR_VERSION=\"$hibr_version\"" \
             "-DBLIT_HIBR_ABI=$hibr_abi" \
-            -I"$ROOT/build/deps/prefix/include" \
-            -I"$ROOT/build/deps/prefix/include/libdrm" \
-            -I"${BLIT_FREETYPE_INCLUDE:-$ROOT/build/deps/prefix/include/freetype2}" \
+            $cflags \
             "$ROOT/src/blit_server.c" "$ROOT/src/blit_kms.c" "$ROOT/src/blit_vt.c" \
             "$ROOT/src/blit_font.c" "$ROOT/src/blit_raster.c" \
-            "${BLIT_FREETYPE_LIBRARY:-/lib/x86_64-linux-gnu/libfreetype.so.6}" \
-            "${BLIT_HARFBUZZ_LIBRARY:-/lib/x86_64-linux-gnu/libharfbuzz.so.0}" \
-            -L"$ROOT/build/deps/prefix/lib/x86_64-linux-gnu" -ldrm -lutil -lz \
+            $libs \
             -o "$output"
         ;;
     helper)
@@ -70,20 +72,19 @@ case "$target" in
         ;;
     compositor)
         # ADR 0228: blit-compositor, Blit's Wayland compositor for programs,
-        # its own program linked against libwayland-server by SONAME. Its
-        # protocol code is generated here by wayland-scanner from the
-        # system's protocol XML (libwayland-bin, wayland-protocols), never
-        # committed: server code for the compositor and client code for the
-        # in-repo stand-in client (tools/tests/wl_standin_client.c), both in
-        # BLIT_PROTOCOL_DIR (default build/protocol). The XML bounds the
+        # its own program linked against libwayland-server and libxkbcommon.
+        # Its protocol code is generated here by the system's wayland-scanner
+        # from the system's wayland-protocols XML, both found through
+        # pkg-config (tools/build-flags.sh), never committed: server code
+        # for the compositor and client code for the in-repo stand-in client
+        # (tools/tests/wl_standin_client.c), both in BLIT_PROTOCOL_DIR (the
+        # output directory, default build/protocol). The XML bounds the
         # versions offered (blit_compositor.c, BC_VERSION).
-        protocols=${BLIT_WAYLAND_PROTOCOLS:-$(pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null || echo /usr/share/wayland-protocols)}
+        protocols=$("$ROOT/tools/build-flags.sh" --protocols)
+        scanner=$("$ROOT/tools/build-flags.sh" --scanner)
+        cflags=$("$ROOT/tools/build-flags.sh" --cflags compositor)
+        libs=$("$ROOT/tools/build-flags.sh" --libs compositor)
         proto=${BLIT_PROTOCOL_DIR:-$ROOT/build/protocol}
-        if ! command -v wayland-scanner >/dev/null 2>&1 ||
-           [ ! -f "$protocols/stable/xdg-shell/xdg-shell.xml" ]; then
-            echo "blit: wayland-scanner or the wayland-protocols XML not found (libwayland-bin, wayland-protocols)" >&2
-            exit 1
-        fi
         mkdir -p "$proto"
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
@@ -93,9 +94,9 @@ case "$target" in
                    "$protocols/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml" \
                    "$protocols/unstable/primary-selection/primary-selection-unstable-v1.xml"; do
             base=$(basename "$xml" .xml)
-            wayland-scanner server-header "$xml" "$proto/$base-server-protocol.h"
-            wayland-scanner client-header "$xml" "$proto/$base-client-protocol.h"
-            wayland-scanner private-code "$xml" "$proto/$base-protocol.c"
+            "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"
+            "$scanner" client-header "$xml" "$proto/$base-client-protocol.h"
+            "$scanner" private-code "$xml" "$proto/$base-protocol.c"
         done
         # No -g: the package (packaging/build-deb.sh, blit-compositor) must
         # be the same bytes from any checkout, and tcc 0.9.27 records the
@@ -103,17 +104,17 @@ case "$target" in
         # and has no -ffile-prefix-map (it accepts the flag and ignores it,
         # measured: the path stays in the binary). Without debug
         # information nothing records a path.
+        # shellcheck disable=SC2086
         tcc -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
-            -I"$ROOT/src" -I"$proto" \
+            -I"$ROOT/src" -I"$proto" $cflags \
             "$ROOT/src/blit_compositor.c" \
             "$proto/xdg-shell-protocol.c" "$proto/xdg-decoration-unstable-v1-protocol.c" \
             "$proto/linux-dmabuf-unstable-v1-protocol.c" "$proto/presentation-time-protocol.c" \
             "$proto/relative-pointer-unstable-v1-protocol.c" \
             "$proto/pointer-constraints-unstable-v1-protocol.c" \
             "$proto/primary-selection-unstable-v1-protocol.c" \
-            "${BLIT_XKBCOMMON_LIBRARY:-/lib/x86_64-linux-gnu/libxkbcommon.so.0}" \
-            "${BLIT_WAYLAND_SERVER_LIBRARY:-/lib/x86_64-linux-gnu/libwayland-server.so.0}" \
+            $libs \
             -o "$output"
         ;;
     *)

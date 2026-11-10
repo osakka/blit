@@ -2,6 +2,7 @@
 require 'json'
 require 'digest'
 require 'tmpdir'
+require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root) do
   source = JSON.parse(File.read('assets/fonts/fonts.source.json'))
@@ -72,10 +73,9 @@ Dir.chdir(root) do
     File.write(distinct, icons.fetch('icons').select { |i| i['id'].start_with?('file-') && i['column'] == 0 }
                               .uniq { |i| i['source'] }.map { |i| i['codepoint'] }.join("\n") + "\n")
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall',
-      "-I#{ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{root}/build/deps/prefix/include/freetype2")}",
+      *BuildFlags.cflags('font'),
       'tools/tests/custom_icon_gate.c', 'src/blit_font.c', 'src/blit_raster.c',
-      ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-      ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'), '-o', binary)
+      *BuildFlags.libs('font'), '-o', binary)
     # ADR 0195: every shipped text font, through the glyph stack.
     # ADR 0227: a directory in text/ is one font, of masters; it is opened
     # as one, and its rule picks the master for each size.

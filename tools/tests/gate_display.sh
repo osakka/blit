@@ -20,11 +20,14 @@ gate_display_setup() {
 	*) echo "BLIT_GATE_BACKEND must be native or gles" >&2; return 1 ;;
 	esac
 	source=$gate_display_root/tools/tests/fixtures/drm_hotplug_mock.c
-	digest=$(sha256sum "$source" | cut -c1-16)
+	# One mock per source and set of libdrm headers (tools/build-flags.sh),
+	# the same file tools/tests/gate_server.rb names for them.
+	gate_display_cflags=$("$gate_display_root/tools/build-flags.sh" --cflags drm) || return 1
+	digest=$({ cat "$source"; printf '%s' "$gate_display_cflags"; } | sha256sum | cut -c1-16)
 	mock=${TMPDIR:-/tmp}/blit-gate-drm-mock-$(id -u)-$digest.so
 	if [ ! -f "$mock" ]; then
-		tcc -shared -fPIC -I"$gate_display_root/build/deps/prefix/include" \
-			-I"$gate_display_root/build/deps/prefix/include/libdrm" \
+		# shellcheck disable=SC2086
+		tcc -shared -fPIC $gate_display_cflags \
 			"$source" -o "$mock.$$" && mv "$mock.$$" "$mock" || return 1
 	fi
 	GATE_DISPLAY_DIR=$(mktemp -d "${TMPDIR:-/tmp}/blit-gate-display.XXXXXX") || return 1

@@ -28,8 +28,13 @@ protocol_sources="$proto/xdg-shell-protocol.c $proto/xdg-decoration-unstable-v1-
     $proto/relative-pointer-unstable-v1-protocol.c $proto/pointer-constraints-unstable-v1-protocol.c
     $proto/primary-selection-unstable-v1-protocol.c"
 client_sources="tools/tests/wl_standin_client.c $protocol_sources"
+# The system's libwayland and libxkbcommon (tools/build-flags.sh).
+client_cflags=$(tools/build-flags.sh --cflags wayland-client)
+client_libs=$(tools/build-flags.sh --libs wayland-client)
+compositor_cflags=$(tools/build-flags.sh --cflags compositor)
+compositor_libs=$(tools/build-flags.sh --libs compositor)
 # shellcheck disable=SC2086
-tcc -std=c99 -Wall -I"$proto" $client_sources -lwayland-client -o "$out/wl_standin_client"
+tcc -std=c99 -Wall -I"$proto" $client_cflags $client_sources $client_libs -o "$out/wl_standin_client"
 tcc -Wall -Isrc tools/tests/compositor_wire_unit.c -o "$out/compositor_wire_unit"
 "$out/compositor_wire_unit"
 
@@ -45,11 +50,11 @@ int main(void) { return 0; }
 PROBE
 then
     # shellcheck disable=SC2086
-    ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" \
+    ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" $compositor_cflags \
         "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c $protocol_sources \
-        -lwayland-server -lxkbcommon -o "$out/blit-compositor-asan"
+        $compositor_libs -o "$out/blit-compositor-asan"
     # shellcheck disable=SC2086
-    ${CC:-cc} $san -std=c99 -Wall -I"$proto" $client_sources -lwayland-client \
+    ${CC:-cc} $san -std=c99 -Wall -I"$proto" $client_cflags $client_sources $client_libs \
         -o "$out/wl_standin_client-asan"
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc tools/tests/compositor_wire_unit.c \

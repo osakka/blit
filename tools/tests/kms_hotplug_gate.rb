@@ -3,6 +3,7 @@
 require 'json'
 require 'net/http'
 require 'tmpdir'
+require_relative 'build_flags'
 require 'fileutils'
 require 'timeout'
 require_relative 'gate_port'
@@ -31,8 +32,8 @@ def await(why)
 end
 Dir.mktmpdir('blit-kms-hotplug') do |root|
   mock=File.join(root,'drm.so');state=File.join(root,'state');trace=File.join(root,'trace')
-  check(system('tcc','-shared','-fPIC','-I'+File.join(ROOT,'build/deps/prefix/include'),
-    '-I'+File.join(ROOT,'build/deps/prefix/include/libdrm'),File.join(ROOT,'tools/tests/fixtures/drm_hotplug_mock.c'),'-o',mock),'mock compile failed')
+  check(system('tcc','-shared','-fPIC',*BuildFlags.cflags('drm'),
+    File.join(ROOT,'tools/tests/fixtures/drm_hotplug_mock.c'),'-o',mock),'mock compile failed')
   write=->(ids,fail_add=0,fail_remove=0,delay=0,width=320) do
     File.write(state+'.new',"#{ids.length} #{fail_add} #{fail_remove} #{delay}\n"+ids.map{|id|"#{id} #{width} 192\n"}.join)
     File.rename(state+'.new',state)
@@ -40,7 +41,7 @@ Dir.mktmpdir('blit-kms-hotplug') do |root|
   ids=-> {req('GET','/v1/displays')['displays'].map{|d|d['id']}}
   write.call([93]);device=File.join(root,'drm');File.write(device,'');Dir.mkdir(File.join(root,'input'))
   env={'BLIT_DISPLAY_BACKEND'=>'kms','BLIT_KMS_COMPOSITOR'=>'cpu','BLIT_DRM_DEVICE'=>device,'BLIT_DRM_MOCK_STATE'=>state,'BLIT_DRM_MOCK_TRACE'=>trace,
-    'LD_PRELOAD'=>mock,'LD_LIBRARY_PATH'=>File.join(ROOT,'build/deps/prefix/lib/x86_64-linux-gnu'),
+    'LD_PRELOAD'=>mock,
     'BLIT_AUTH_TOKEN'=>'hotplug-test','BLIT_LOGIN_AUTOSTART'=>'0','BLIT_PANE_LAYOUT'=>'1x2',
     'BLIT_SETTINGS_PATH'=>File.join(root,'settings.json'),'BLIT_INPUT_ROOT'=>File.join(root,'input'),
     'BLIT_PSF_FONT'=>File.join(ROOT,'assets/fonts/Blit-Terminus16.psf')}

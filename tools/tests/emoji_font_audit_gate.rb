@@ -2,9 +2,9 @@
 require 'json'
 require 'open3'
 root = File.expand_path('../..', __dir__)
-library = ENV.fetch('BLIT_GATE_HARFBUZZ', '/lib/x86_64-linux-gnu/libharfbuzz.so.0')
+# The system's HarfBuzz runtime, by soname, as blit-server loads it.
 Dir.chdir(root) do
-  command = ['python3', 'tools/fonts/audit-emoji.py', '--harfbuzz', library, '--require-complete']
+  command = ['python3', 'tools/fonts/audit-emoji.py', '--require-complete']
   out, err, status = Open3.capture3(*command)
   raise "colour font audit failed: #{err}" unless status.success?
   report = JSON.parse(out)

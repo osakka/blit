@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 require 'fileutils'
 require 'tmpdir'
+require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root)
 FileUtils.mkdir_p('build/tests')
@@ -9,19 +10,14 @@ native = "build/tests/graphics-scene-native-#{Process.pid}"
 at_exit { [out, native].each { |path| File.delete(path) if File.file?(path) } }
 runner = ENV['BLIT_GRAPHICS_VALGRIND'] == '1' ? %w[valgrind --error-exitcode=99 --leak-check=full --errors-for-leak-kinds=definite,indirect] : []
 abort 'build failed' unless system('tcc', '-O2', '-std=c99',
-   '-Ibuild/deps/prefix/include', '-Ibuild/deps/prefix/include/libdrm',
-  '-Ibuild/deps/prefix/include/freetype2', 'tools/tests/graphics_placement_damage_gate.c',
+  *BuildFlags.cflags('server'), 'tools/tests/graphics_placement_damage_gate.c',
   'src/blit_kms.c', 'src/blit_vt.c', 'src/blit_font.c', 'src/blit_raster.c',
-  '/lib/x86_64-linux-gnu/libfreetype.so.6', '/lib/x86_64-linux-gnu/libharfbuzz.so.0',
-  '-Lbuild/deps/prefix/lib/x86_64-linux-gnu',
-  '-ldrm', '-lutil', '-lz', '-o', out)
-abort 'graphics placement damage failed' unless system({ 'LD_LIBRARY_PATH' =>
-  "#{root}/build/deps/prefix/lib/x86_64-linux-gnu" }, *runner, out)
+  *BuildFlags.libs('server'), '-o', out)
+abort 'graphics placement damage failed' unless system(*runner, out)
 abort 'native build failed' unless system('tcc', '-O2', '-std=c99',
-   '-Ibuild/deps/prefix/include', '-Ibuild/deps/prefix/include/libdrm',
+  *BuildFlags.cflags('drm', 'zlib'),
   'tools/tests/graphics_scene_native_gate.c', 'src/blit_font.c',
-  '-Lbuild/deps/prefix/lib/x86_64-linux-gnu', '-ldrm', '-lz', '-o', native)
+  *BuildFlags.libs('drm', 'zlib'), '-o', native)
 Dir.mktmpdir('blit-graphics-scene') do |work|
-  abort 'native graphics scene failed' unless system({ 'LD_LIBRARY_PATH' =>
-    "#{root}/build/deps/prefix/lib/x86_64-linux-gnu" }, *runner, native, work)
+  abort 'native graphics scene failed' unless system(*runner, native, work)
 end

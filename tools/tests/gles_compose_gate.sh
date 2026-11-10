@@ -5,9 +5,10 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 bin=${TMPDIR:-/tmp}/blit-gles-compose-$$
 trap 'rm -f "$bin"' EXIT
 cd "$ROOT"
-tcc -O2 -std=c99 -I"$ROOT/build/deps/prefix/include" \
-    -I"$ROOT/build/deps/prefix/include/libdrm" -I"$ROOT/build/deps/prefix/include/freetype2" \
+cflags=$(tools/build-flags.sh --cflags drm font zlib)
+libs=$(tools/build-flags.sh --libs drm font zlib)
+# shellcheck disable=SC2086
+tcc -O2 -std=c99 $cflags \
     tools/tests/gles_compose_gate.c src/blit_font.c src/blit_raster.c \
-    /lib/x86_64-linux-gnu/libfreetype.so.6 /lib/x86_64-linux-gnu/libharfbuzz.so.0 \
-    -L"$ROOT/build/deps/prefix/lib/x86_64-linux-gnu" -ldrm -lz -o "$bin"
-BLIT_FONT_ROOT="$ROOT/assets/fonts" LD_LIBRARY_PATH="$ROOT/build/deps/prefix/lib/x86_64-linux-gnu" "$bin"
+    $libs -o "$bin"
+BLIT_FONT_ROOT="$ROOT/assets/fonts" "$bin"

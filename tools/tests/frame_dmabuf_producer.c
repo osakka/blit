@@ -21,7 +21,7 @@
    captured, deletes the image and exits.
 
    GBM is loaded with dlopen, so the binary needs only libc and libdl:
-     tcc -I build/deps/prefix/include tools/tests/frame_dmabuf_producer.c -ldl
+     tcc $(tools/build-flags.sh --cflags gles) tools/tests/frame_dmabuf_producer.c -ldl
    Usage: frame_dmabuf_producer [probe | run FRAMES HOLD_SECONDS]  */
 
 #define _GNU_SOURCE

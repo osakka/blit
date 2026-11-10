@@ -31,7 +31,7 @@ class Glyph(c.Structure):
     _fields_ = [('codepoint', c.c_uint32), ('mask', c.c_uint32),
                 ('cluster', c.c_uint32), ('var1', c.c_uint32), ('var2', c.c_uint32)]
 
-hb = c.CDLL('/lib/x86_64-linux-gnu/libharfbuzz.so.0')
+hb = c.CDLL('libharfbuzz.so.0')
 def bind(name, result, *arguments):
     f = getattr(hb, name)
     f.restype, f.argtypes = result, list(arguments)

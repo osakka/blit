@@ -4,6 +4,7 @@ require 'json'
 require 'open3'
 require 'digest'
 require 'fileutils'
+require_relative '../tests/build_flags'
 abort 'usage: font_cache_workload.rb [--check]' unless ARGV.empty? || ARGV == ['--check']
 root = File.expand_path('../..', __dir__)
 Dir.chdir(root)
@@ -11,10 +12,9 @@ out = 'build/tests/font-cache-workload'
 FileUtils.mkdir_p(File.dirname(out))
 sources = %w[tools/probes/font_cache_workload.c src/blit_font.c src/blit_raster.c]
 command = ['tcc', '-O2', '-std=c99',
-           "-I#{ENV.fetch('BLIT_FREETYPE_INCLUDE', 'build/deps/prefix/include/freetype2')}",
+           *BuildFlags.cflags('font'),
            *sources,
-           ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-           ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'),
+           *BuildFlags.libs('font'),
            '-o', out]
 abort 'TCC probe build failed' unless system(*command, out: $stderr)
 ui = JSON.parse(File.read('assets/fonts/hibr-ui-glyphs.json')).fetch('scalars').map { |s| s.to_i(16) }

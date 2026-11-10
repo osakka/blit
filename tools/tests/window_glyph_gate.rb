@@ -48,6 +48,7 @@
 require 'json'
 require 'open3'
 require 'tmpdir'
+require_relative 'build_flags'
 
 ROOT = File.expand_path('../..', __dir__)
 SIZES = [[11, 22], [4, 8], [5, 10], [6, 12], [8, 16], [9, 18], [10, 20], [12, 24], [14, 28], [16, 32],
@@ -111,15 +112,14 @@ check(frames.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'an ou
 check((frames.map { |e| e['codepoint'].to_i(16) } & (icon_codes + retired)).empty?, 'a frame glyph reuses an icon or retired codepoint')
 
 # The raster, at every size.
-freetype = ENV.fetch('BLIT_FREETYPE_INCLUDE', "#{ROOT}/build/deps/prefix/include/freetype2")
+freetype = BuildFlags.cflags('font')
 raster = {}
 design = {}
 Dir.mktmpdir('blit-window-glyphs') do |work|
   binary = File.join(work, 'gate')
-  check(system('tcc', '-O2', '-std=c99', '-Wall', "-I#{freetype}",
+  check(system('tcc', '-O2', '-std=c99', '-Wall', *freetype,
                'tools/tests/window_glyph_gate.c', 'src/blit_font.c', 'src/blit_raster.c',
-               ENV.fetch('BLIT_FREETYPE_LIBRARY', '/lib/x86_64-linux-gnu/libfreetype.so.6'),
-               ENV.fetch('BLIT_HARFBUZZ_LIBRARY', '/lib/x86_64-linux-gnu/libharfbuzz.so.0'),
+               *BuildFlags.libs('font'),
                '-o', binary), 'the harness does not compile')
   out, err, status = Open3.capture3(binary, 'assets/fonts/Blit-Terminus16.psf',
                                     'assets/fonts/text/Hack-Regular.ttf', 'assets/fonts/NotoColorEmoji.ttf',
