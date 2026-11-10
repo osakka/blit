@@ -393,6 +393,13 @@ makes SIGUSR1 and SIGUSR2 run the input half of a console release and
 acquire (key and button releases, focus reports) without a console, to test
 input hand-over.
 .TP
+.B BLIT_COMPOSITOR_RECONNECT_MS
+Read by
+.BR blit-compositor ,
+not by the server: shortens, in milliseconds, the 60 seconds it waits for a
+desktop to answer again after its frame channel is lost, so a test does not
+wait a minute.
+.TP
 .B BLIT_KMS_MODESET
 When set, performs a full mode set on every frame.
 .TP

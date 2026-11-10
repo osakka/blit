@@ -103,6 +103,13 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW lock 4 relative", &l) == BC_LINE_UNKNOWN, "lock relative is the compositor's");
     EXPECT(bc_parse_line("WINDOW lock 4 onx", &l) == BC_LINE_UNKNOWN, "lock, a tail");
     EXPECT(bc_parse_line("WINDOW lock 0 on", &l) == BC_LINE_UNKNOWN, "lock, id 0");
+    EXPECT(bc_parse_line("WINDOW quit 0", &l) == BC_LINE_QUIT && l.id == 0, "quit");
+    EXPECT(bc_parse_line("WINDOW quit 0\n", &l) == BC_LINE_QUIT, "quit, a newline");
+    EXPECT(bc_parse_line("WINDOW quit 1", &l) == BC_LINE_UNKNOWN, "quit, an id not 0");
+    EXPECT(bc_parse_line("WINDOW quit", &l) == BC_LINE_UNKNOWN, "quit, no id");
+    EXPECT(bc_parse_line("WINDOW quit ", &l) == BC_LINE_UNKNOWN, "quit, an empty id");
+    EXPECT(bc_parse_line("WINDOW quit 0 x", &l) == BC_LINE_UNKNOWN, "quit, a tail");
+    EXPECT(bc_parse_line("WINDOW quit 00x", &l) == BC_LINE_UNKNOWN, "quit, a word");
     EXPECT(bc_parse_line("ERROR WINDOW 3 EINVAL\n", &l) == BC_LINE_ERROR_WINDOW && l.id == 3 &&
            strcmp(l.code, "EINVAL") == 0, "ERROR WINDOW");
     EXPECT(bc_parse_line("OK window 3", &l) == BC_LINE_OK_WINDOW && l.id == 3, "OK window");
