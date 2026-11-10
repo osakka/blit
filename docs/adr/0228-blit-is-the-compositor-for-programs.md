@@ -154,10 +154,12 @@ owner can see.
    pattern). The owner sees vkcube (Vulkan, Wayland WSI) in a Hibr window,
    resized live at any shape, 1:1, with keys and mouse.
    **The criterion for phase 2, decided now:** phase 2 starts when phase 1
-   has shipped with its gates green, vkcube and one everyday Wayland
-   application are usable in Hibr windows on the owner's machine, and phase
-   0's latency is matched or beaten. Otherwise the owner decides again with
-   phase 1's experience, and gamescope stays.
+   has shipped with its gates green and vkcube and one everyday Wayland
+   application are usable in Hibr windows on the owner's machine.
+   (Amended 2026-11-10 by the owner: the condition that phase 0's latency be
+   matched or beaten is dropped. Phase 0 measured the gamescope path, which
+   the owner removed in 0.3.75; phase 2 is judged on its own latency
+   numbers.)
 2. **Xwayland.** Rootless Xwayland per session, blit-compositor as its
    window manager.
    The owner sees Steam Big Picture in a window with no gamescope, then one
@@ -579,3 +581,6 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   route, and `frame_input_gate` covers on it every case the stand-in libei
   covered. `blit` Breaks `blit-gamescope` and `steamer` (retired with it),
   so an upgrade removes both.
+- **Phase 0 dropped (2026-11-10).** With gamescope removed there is no
+  path left to measure against; the owner dropped phase 0's latency
+  condition from the phase 2 criterion.
