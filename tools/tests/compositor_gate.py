@@ -288,6 +288,39 @@ def states_part(desk, standin, env, display, work):
             'BLIT-1,BLIT-2:800x600@75000')
 
 
+def appmenu_part(desk, standin, env, display, work, log):
+    """The global menu (ADR 0229), with `--appmenu`, window 12: the
+    program's D-Bus address for its menus reaches the desktop as `WINDOW
+    appmenu <id> <service> <path>` (an address that is not D-Bus syntax
+    ignored), and `- -` when it releases it."""
+    out_path = os.path.join(work, 'standin-appmenu.out')
+    client = start([standin, '--appmenu', 'Menus'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    try:
+        for want in ('WINDOW new 12 0', 'WINDOW title 12 Menus', 'WINDOW appid 12 blit.standin',
+                     'WINDOW limits 12 64 48 0 0', 'WINDOW decor 12 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=12)
+        desk.send('WINDOW size 12 200 120')
+        desk.frame(200, 120, image_id=12)
+        desk.line('WINDOW appmenu 12 :1.42 /MenuBar/1')
+        wait_for(lambda: 'STANDIN appmenu set' in printed(), lambda: 'no appmenu set:\n' + printed())
+        desk.nothing(0.3)
+        check('appmenu: an address that is not D-Bus syntax is ignored' in open(log).read(),
+              'the address that is not D-Bus syntax was not noted')
+        desk.send('WINDOW size 12 200 120')
+        desk.frame(200, 120, image_id=12)
+        desk.line('WINDOW appmenu 12 - -')
+        desk.send('WINDOW close 12')
+        desk.line('WINDOW gone 12')
+        check(client.wait(5) == 0, 'the appmenu stand-in failed:\n' + printed())
+    finally:
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return 'address=:1.42,/MenuBar/1 not-dbus=ignored release=- -'
+
+
 def cursor_part(desk, standin, env, display, work, log):
     """The pointer's shape (ADR 0229), with `--cursor`, window 11: shapes the
     program names reach the desktop as `WINDOW cursor <id> <name>` in Blit's
@@ -1579,6 +1612,7 @@ def desktop_part(compositor, standin, work):
         csd = csd_part(desk, standin, env, display, work)
         clip = clip_part(desk, standin, env, display, work)
         cursor = cursor_part(desk, standin, env, display, work, log)
+        appmenu = appmenu_part(desk, standin, env, display, work, log)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1592,7 +1626,7 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('37 frames sent, 0 failed' in text, 'the log does not count 37 frames:\n%s' % text)
+        check('40 frames sent, 0 failed' in text, 'the log does not count 40 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
@@ -1603,6 +1637,7 @@ def desktop_part(compositor, standin, work):
         print('COMPOSITOR_CSD_OK %s' % csd)
         print('COMPOSITOR_CLIP_OK %s' % clip)
         print('COMPOSITOR_CURSOR_OK %s' % cursor)
+        print('COMPOSITOR_APPMENU_OK %s' % appmenu)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

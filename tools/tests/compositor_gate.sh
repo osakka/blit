@@ -23,6 +23,7 @@ fi
 # minimums -- wayland-protocols before 1.32 has no cursor-shape-v1 -- is a
 # blocked capability, a skip that says why, never a fallback.
 if ! why=$(tools/build-flags.sh --protocols 2>&1 >/dev/null) ||
+        ! why=$(tools/build-flags.sh --plasma-protocols 2>&1 >/dev/null) ||
         ! why=$(tools/build-flags.sh --check compositor wayland-client 2>&1 >/dev/null); then
     echo "COMPOSITOR_GATE_SKIP $why"
     exit 77
