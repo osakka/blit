@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [title]
+     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -14,6 +14,14 @@
    size into a fresh XRGB8888 wl_shm buffer and commits it, asking for a
    frame callback; a 0x0 configure means it chooses, 256x160. It exits 0 on
    xdg_toplevel.close.
+
+   With --sub, each configure that carries the desktop's size runs one
+   step of a wl_subsurface script after its own frame (printed `STANDIN
+   sub step <n>`): 1 a synchronized subsurface at 20,30, its 64x40 frame
+   committed and only then the parent's commit; 2 desynchronized, moved
+   to 40,10 and a 48x24 frame committed before the parent's commit; 3 an
+   empty input region; 4 the whole surface again; 5 placed below the
+   parent; 6 the wl_subsurface destroyed. Its pointer events name it `sub`.
 
    With --popup, after its first frame it opens one xdg_popup of 80x60
    (anchor rectangle 10,20 30x40, anchor bottom-left, gravity bottom-right,
@@ -132,6 +140,11 @@ struct standin {
     int closed;
     int want_popup;
     struct wl_surface *popup_surface;
+    /* --sub */
+    int sub_script, sub_step;
+    struct wl_subcompositor *subcompositor;
+    struct wl_surface *sub_surface;
+    struct wl_subsurface *subsurface;
     struct xdg_surface *popup_xdg;
     struct xdg_popup *popup;
     /* --states: maximize/minimize requests, a child toplevel that is given
@@ -284,7 +297,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     wl_surface_commit(surface);
     ++s->draws;
     printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" :
-           surface == s->child_surface ? "child " : "popup ", w, h);
+           surface == s->child_surface ? "child " : surface == s->sub_surface ? "sub " : "popup ", w, h);
     fflush(stdout);
     return 0;
 }
@@ -497,6 +510,63 @@ static void lock_next(struct standin *s)
     }
 }
 
+/* --sub: one step per sized configure, after the parent's own frame. */
+static void sub_next(struct standin *s)
+{
+    struct wl_region *empty;
+    switch (++s->sub_step) {
+    case 1:
+        s->sub_surface = wl_compositor_create_surface(s->compositor);
+        wl_surface_add_listener(s->sub_surface, &surface_listener, s);
+        s->subsurface = wl_subcompositor_get_subsurface(s->subcompositor, s->sub_surface, s->surface);
+        wl_subsurface_set_position(s->subsurface, 20, 30);
+        draw(s, s->sub_surface, 64, 40);
+        /* Synchronized: nothing until the parent's commit, which comes
+           only after the compositor has seen this one. */
+        wl_display_roundtrip(s->display);
+        printf("STANDIN sub committed, parent next\n");
+        fflush(stdout);
+        usleep(400000);
+        wl_surface_commit(s->surface);
+        break;
+    case 2:
+        wl_subsurface_set_desync(s->subsurface);
+        wl_subsurface_set_position(s->subsurface, 40, 10);
+        draw(s, s->sub_surface, 48, 24);
+        wl_display_roundtrip(s->display);
+        printf("STANDIN sub desync drawn, parent next\n");
+        fflush(stdout);
+        usleep(400000);
+        wl_surface_commit(s->surface);
+        break;
+    case 3:
+        empty = wl_compositor_create_region(s->compositor);
+        wl_surface_set_input_region(s->sub_surface, empty);
+        wl_region_destroy(empty);
+        wl_surface_commit(s->sub_surface);
+        wl_surface_commit(s->surface);
+        break;
+    case 4:
+        wl_surface_set_input_region(s->sub_surface, NULL);
+        wl_surface_commit(s->sub_surface);
+        wl_surface_commit(s->surface);
+        break;
+    case 5:
+        wl_subsurface_place_below(s->subsurface, s->surface);
+        wl_surface_commit(s->surface);
+        break;
+    case 6:
+        wl_subsurface_destroy(s->subsurface);
+        s->subsurface = NULL;
+        wl_surface_commit(s->surface);
+        break;
+    default:
+        return;
+    }
+    printf("STANDIN sub step %d\n", s->sub_step);
+    fflush(stdout);
+}
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
     struct standin *s = data;
@@ -504,6 +574,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
     xdg_surface_ack_configure(xs, serial);
     draw(s, s->surface, s->want_w, s->want_h);
     if (!s->sized) return;
+    if (s->sub_script) sub_next(s);
     if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
         s->want_popup = 0;
@@ -534,7 +605,8 @@ static const struct xdg_wm_base_listener wm_listener = { wm_ping };
 static const char *surface_name(struct standin *s, struct wl_surface *surface)
 {
     return surface == NULL ? "none" : surface == s->surface ? "main" :
-           surface == s->popup_surface ? "popup" : surface == s->child_surface ? "child" : "other";
+           surface == s->popup_surface ? "popup" : surface == s->child_surface ? "child" :
+           surface == s->sub_surface ? "sub" : "other";
 }
 
 static void keyboard_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd,
@@ -775,6 +847,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
     printf("STANDIN global %s %u\n", interface, version);
     if (strcmp(interface, wl_compositor_interface.name) == 0)
         s->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
+    else if (strcmp(interface, wl_subcompositor_interface.name) == 0)
+        s->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
     else if (strcmp(interface, wl_shm_interface.name) == 0)
         s->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
     else if (strcmp(interface, xdg_wm_base_interface.name) == 0)
@@ -888,6 +962,7 @@ int main(int argc, char **argv)
     memset(&s, 0, sizeof(s));
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
+        else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -985,6 +1060,8 @@ int main(int argc, char **argv)
         if (s.callbacks[i]) wl_callback_destroy(s.callbacks[i]);
     xdg_wm_base_destroy(s.wm_base);
     wl_shm_destroy(s.shm);
+    if (s.sub_surface) wl_surface_destroy(s.sub_surface);
+    if (s.subcompositor) wl_subcompositor_destroy(s.subcompositor);
     wl_compositor_destroy(s.compositor);
     wl_registry_destroy(registry);
     wl_display_roundtrip(s.display);

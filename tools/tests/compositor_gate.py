@@ -280,6 +280,89 @@ def states_part(desk, standin, env, display, work):
             'BLIT-1,BLIT-2:800x600@75000')
 
 
+def sub_part(desk, standin, env, display, work):
+    """Subsurfaces (docs/api.md, "Subsurfaces"), with `--sub`: window 7 and
+    its subsurface, picture 8. Synchronized, the subsurface's frame waits
+    for the parent's commit, then `WINDOW sub` and the frame; desynchronized,
+    its frame and size come at once and its position at the parent's
+    commit; the input region decides who takes the pointer; place_below
+    makes it `below`; destroying the wl_subsurface ends picture 8."""
+    out_path = os.path.join(work, 'standin-sub.out')
+    client = start([standin, '--sub', 'Sub'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    try:
+        for want in ('WINDOW new 7 0', 'WINDOW title 7 Sub', 'WINDOW appid 7 blit.standin',
+                     'WINDOW limits 7 64 48 0 0', 'WINDOW decor 7 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=7)
+        # 1: synchronized. The parent's frame, then nothing while the
+        # subsurface's commit is only cached, then the line and its frame.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        # (the stand-in waits 400 ms between the two commits)
+        desk.nothing(0.25)
+        desk.line('WINDOW sub 8 7 20 30 64 40 above')
+        desk.frame(64, 40, image_id=8)
+        wait_for(lambda: 'STANDIN sub step 1' in printed(), lambda: 'no sub step 1:\n' + printed())
+        # 2: desynchronized. Its new size and frame at once, at the old
+        # position; the new position only at the parent's commit.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        desk.line('WINDOW sub 8 7 20 30 48 24 above')
+        desk.frame(48, 24, image_id=8)
+        desk.line('WINDOW sub 8 7 40 10 48 24 above')
+        wait_for(lambda: 'STANDIN sub step 2' in printed(), lambda: 'no sub step 2:\n' + printed())
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[7])
+        frame = [0]
+
+        def pointer(x, y, *wanted):
+            frame[0] += 1
+            before = len(printed().splitlines())
+            route.sendall(b'INPUT ptr %d %.2f %.2f\nINPUT frame %d %d\n'
+                          % (BLIT_PICTURE, x, y, BLIT_PICTURE, frame[0]))
+            want = ['STANDIN ' + w for w in wanted]
+            wait_for(lambda: [l for l in printed().splitlines()[before:] if l in want] == want,
+                     lambda: 'the pointer at %s,%s: expected %s:\n%s'
+                     % (x, y, want, '\n'.join(printed().splitlines()[before:])))
+
+        # 3: an empty input region: over the subsurface, the parent has it.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        wait_for(lambda: 'STANDIN sub step 3' in printed(), lambda: 'no sub step 3:\n' + printed())
+        desk.nothing(0.3)
+        pointer(45, 15, 'pointer enter main 45.00 15.00')
+        # 4: the whole surface again: the subsurface has it, in its pixels.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        wait_for(lambda: 'STANDIN sub step 4' in printed(), lambda: 'no sub step 4:\n' + printed())
+        pointer(46, 16, 'pointer leave main', 'pointer enter sub 6.00 6.00')
+        # 5: below the parent: `below`, and the parent over it has the pointer.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        desk.line('WINDOW sub 8 7 40 10 48 24 below')
+        wait_for(lambda: 'STANDIN sub step 5' in printed(), lambda: 'no sub step 5:\n' + printed())
+        pointer(47, 17, 'pointer leave sub', 'pointer enter main 47.00 17.00')
+        # 6: the wl_subsurface destroyed: its picture gone at once.
+        desk.send('WINDOW size 7 200 120')
+        desk.frame(200, 120, image_id=7)
+        desk.line('WINDOW gone 8')
+        wait_for(lambda: 'STANDIN sub step 6' in printed(), lambda: 'no sub step 6:\n' + printed())
+        desk.send('WINDOW close 7')
+        desk.line('WINDOW gone 7')
+        check(client.wait(5) == 0, 'the sub stand-in failed:\n' + printed())
+        check('STANDIN drew sub 64x40' in printed() and 'STANDIN drew sub 48x24' in printed(),
+              'the subsurface did not draw:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('sync=cached-until-parent desync=frame+size-at-once,position-at-parent '
+            'input-region=empty->main,all->sub below->main destroy->gone')
+
+
 def pacing_part(desk, standin, env, display, work):
     """A client that draws on every frame callback (milestone A's answered
     them at once) runs at its output's refresh: 10 more frames at 20 Hz
@@ -865,6 +948,65 @@ def listen(name):
     return listener
 
 
+def sub_restart_part(compositor, standin, work):
+    """Subsurfaces survive a desktop restart: a top-level with a subsurface
+    shown, the channel closed and served again; the re-announcement is the
+    top-level's lines, then `WINDOW sub` with the same id, offset, size and
+    side, then both newest frames (the subsurface's too)."""
+    runtime = os.path.join(work, 'run-sub-restart')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-sub-restart-%d' % os.getpid()
+    listener = listen(name)
+    env = dict(os.environ, BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    for k in ('WAYLAND_DISPLAY', 'BLIT_COMPOSITOR_RECONNECT_MS'):
+        env.pop(k, None)
+    log = os.path.join(work, 'compositor-sub-restart.log')
+    comp = start([compositor, '--log', log], env, open(os.path.join(work, 'compositor-sub-restart.out'), 'w'))
+    client = None
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        out_path = os.path.join(work, 'standin-sub-restart.out')
+        client = start([standin, '--sub', 'Subbed'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        hints = ('WINDOW new 1 0', 'WINDOW title 1 Subbed', 'WINDOW appid 1 blit.standin',
+                 'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server')
+        for want in hints:
+            desk.line(want)
+        desk.frame(256, 160)
+        desk.send('WINDOW size 1 200 120')
+        desk.frame(200, 120)
+        desk.line('WINDOW sub 2 1 20 30 64 40 above')
+        desk.frame(64, 40, image_id=2)
+        wait_for(lambda: 'STANDIN sub step 1' in printed(), lambda: 'no sub step 1:\n' + printed())
+        # Restart Desktop: the channel and its socket go, then come back.
+        desk.sock.close()
+        listener.close()
+        time.sleep(0.5)
+        listener = listen(name)
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0')
+        for want in hints:
+            desk.line(want)
+        desk.line('WINDOW sub 2 1 20 30 64 40 above')
+        desk.frame(200, 120)
+        desk.frame(64, 40, image_id=2)
+        desk.nothing(0.3)
+        quit_compositor(desk, comp)
+        client.wait(5)
+        text = open(log).read()
+        check('reconnect: 2 windows announced again, 2 frames sent again' in text,
+              'the re-announcement in the log:\n' + text)
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+    return 'reconnect=new+hints,WINDOW-sub-same-id,frames(top-level,sub)'
+
+
 def restart_part(compositor, standin, work):
     """docs/api.md, "Programs survive a desktop restart". The desktop picks
     the display (`--display`); a dmabuf program (window 1, drawing on every
@@ -1202,6 +1344,7 @@ def desktop_part(compositor, standin, work):
 
         states = states_part(desk, standin, env, display, work)
         pacing = pacing_part(desk, standin, env, display, work)
+        subs = sub_part(desk, standin, env, display, work)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1215,13 +1358,14 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('24 frames sent, 0 failed' in text, 'the log does not count 24 frames:\n%s' % text)
+        check('33 frames sent, 0 failed' in text, 'the log does not count 33 frames:\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
                  ','.join('%s:%s' % kv for kv in sorted(versions.items()))))
         print('COMPOSITOR_STATES_OK %s' % states)
         print('COMPOSITOR_PACING_OK %s' % pacing)
+        print('COMPOSITOR_SUB_OK %s' % subs)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -1351,6 +1495,7 @@ def main():
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
+        print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))
         if server:
             blit_part(server, compositor, standin, work)
             # A server of its own, for its keymap.

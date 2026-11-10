@@ -459,7 +459,8 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
 - **The re-announcement**, in creation order: `WINDOW display`, each
   top-level's `new` and hints and `INPUT sock` (a parent created later as
   `WINDOW parent` after them; `hide` for a window unmapped by its program,
-  not for one not yet drawn), popups, the newest frames, `WINDOW lock`. A
+  not for one not yet drawn), popups, subsurfaces (`WINDOW sub`), the
+  newest frames, `WINDOW lock`. A
   toplevel never announced (the peer before had no `window=1`) is
   announced then, with a new id. No configure until the desktop's `WINDOW
   size`.
@@ -544,3 +545,24 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   fake Blit writes id 1259388934, its real Blit pictures 41 and 42 for
   windows 1 and 2, and the restart part checks the sockets survive the
   channel and go at quit.
+- **Subsurfaces (2026-11-10, phase 1's "one everyday program").** Firefox
+  on the mini PC showed only its frame: it draws its page into a
+  `wl_subsurface`, which phase 1 accepted and did not show. The owner chose
+  to ship them with the input fix and version 5 in one release (Blit
+  0.3.74, Hibr 0.99.482). A subsurface is a picture of its own, as a popup
+  is, never composited by the compositor (which has no GPU path): `WINDOW
+  sub <id> <parent> <x> <y> <w> <h> above|below`, agreed with Hibr, who
+  asked for the size (to blank, clip and keep the cell box before and
+  between frames). The tree is flattened onto the top-level; lines go
+  bottom to top and all of a top-level's are resent on any change. Both
+  wl_subsurface modes: synchronized state cached until the parent's
+  commit, desynchronized applied at once (with cached state merged first);
+  positions and order applied at the parent's commit. Input regions are
+  kept (`wl_region` add and subtract, the last rectangle holding a point
+  deciding) and decide the pointer: popups, subsurfaces above (topmost
+  first), the top-level, those below. A subsurface that commits before its
+  top-level is announced, or with the channel down, keeps its newest frame
+  and has it sent when described; a frame nothing took has its callbacks
+  answered at the refresh, so EGL's swap never stalls. `compositor_gate`'s
+  `--sub` script covers each mode, the input region both ways, `below`,
+  destruction and the reconnect; ASan/UBSan clean.

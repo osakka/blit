@@ -2102,6 +2102,27 @@ It speaks the frame channel above as a producer, with these additions.
     at an offset in the parent's surface pixels (not on-screen pixels: the
     desktop may show the parent scaled); the desktop keeps it there when the
     parent moves, and may draw it past the parent's window.
+  - `WINDOW sub <id> <parent> <x> <y> <w> <h> above|below`: a subsurface
+    (`wl_subsurface`), its own picture, as a popup's is, with no `WINDOW
+    new`: owned, moved, hidden and closed with its top-level, never in the
+    window list or the focus. `<parent>` is always the top-level: a tree of
+    subsurfaces is flattened, `<x> <y>` the sum of the positions down to it
+    in the top-level's surface pixels (negative allowed), `<w> <h>` its
+    committed buffer's size, `above` or `below` the top-level's own
+    picture. Sent when it first has a buffer (and every subsurface above it
+    in the tree is mapped), and again, for all of that top-level's
+    subsurfaces, bottom to top, whenever any is new or its offset, size or
+    place in the order changes; positions and order are applied at the
+    parent's commit, a synchronized subsurface's frame only then too.
+    `WINDOW gone <id>` when it is unmapped (a NULL buffer, its
+    `wl_subsurface` destroyed, a parent unmapped or gone). Its frames are
+    `FRM1`/`FRM3` under `<id>`, released like any picture's. The desktop
+    places it 1:1 at its offset (Blit's and kitty's `X=`/`Y=` cell offset
+    gives the exact pixel), clipped to the window body, and sends Blit
+    `INPUT member <id> <parent> <x> <y>` as for a popup; the compositor
+    hit-tests subsurfaces by their input regions (an empty one, as Firefox
+    sets on its content, gives the pointer to the parent). A subsurface of
+    a popup is not shown in this release (logged).
   - `WINDOW decor <id> server|client`: who draws the frame
     (`zxdg_decoration`). `client` (a program that insists on its own, such
     as GTK's client-side decorations) gets a bare window from the desktop,
@@ -2225,7 +2246,8 @@ It speaks the frame channel above as a producer, with these additions.
     on`, `maximize on` and `INPUT sock`, and `WINDOW hide` for one its
     program had unmapped (`minimize` is a request, not a state, and is not
     repeated); then each popup, `WINDOW popup` with its offset; then each
-    shown window's newest frame (`FRM3` of the kept buffer, or `FRM1`);
+    top-level's subsurfaces, `WINDOW sub` bottom to top with their ids
+    kept; then each shown window's, popup's and subsurface's newest frame (`FRM3` of the kept buffer, or `FRM1`);
     then `WINDOW lock` for each pointer lock or confinement a program still
     holds. Popups' `INPUT member` lines are the desktop's to send again, as
     for new windows. The desktop answers as for new windows (`WINDOW
