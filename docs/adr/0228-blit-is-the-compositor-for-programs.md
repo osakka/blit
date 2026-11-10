@@ -168,6 +168,13 @@ owner can see.
 4. **Cut over.** `blit-gamescope` and the gamescope dependency removed;
    Screens' engine becomes Blit's own windows; X Screen's retirement decided
    on the GTK comparison (clipboard, dialogs, menus).
+   **Planned with phase 2: the colour scheme.** Programs follow the
+   desktop's light or dark look live: the desktop tells blit-compositor
+   `WINDOW scheme 0 light|dark` (agreed with Hibr 2026-11-10), and the
+   compositor serves the session's xdg-desktop-portal Settings backend
+   (`org.freedesktop.appearance color-scheme`, later accent and contrast)
+   through sd-bus, registered for `XDG_CURRENT_DESKTOP=Hibr`, so GTK4,
+   libadwaita, Qt 6.5+, Firefox, Chromium and Steam's CEF follow it.
 5. **Later, optional:** an upscaler (an FSR/NIS-like GLES pass), a frame
    limiter, HDR. Not part of this decision; listed so the loss is explicit.
 
