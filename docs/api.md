@@ -2396,23 +2396,26 @@ It speaks the frame channel above as a producer, with these additions.
   - From milestone D (in development), X's CLIPBOARD and PRIMARY are the
     clipboard's two selections, on the `CLIP` lines below with nothing
     new: an X program is one more owner and reader, as a Wayland program
-    is. Its copy (its X ownership, honoured only from the X program with
-    X's focus, which follows the keyboard) is `CLIP offer` of
+    is, and X as a whole is "the program with the keyboard" while an X
+    window has X's focus (which follows the keyboard) -- any X client
+    then, as xclip run from an xterm or Wine's clipboard connection. Its
+    copy (its X ownership) is `CLIP offer` of
     `text/plain;charset=utf-8` when it has a text target (`UTF8_STRING`,
     `text/plain;charset=utf-8`, `STRING` -- its Latin-1 made UTF-8 --,
     `TEXT`, `text/plain`), with `x-kde-passwordManagerHint` when it has
-    that target; an ownership by an X program without the focus is not
-    the clipboard's (logged; X keeps it until the selection next
-    changes). The desktop's offer or a Wayland program's selection is
-    owned in X by the window manager, which answers the X program with
-    X's focus only: `TARGETS`, `UTF8_STRING`, `text/plain;charset=utf-8`,
+    that target; an ownership while no X window has the focus is not the
+    clipboard's (logged; X keeps it until the selection next changes).
+    The desktop's offer or a Wayland program's selection is owned in X by
+    the window manager, which answers only while an X window has X's
+    focus: `TARGETS`, `UTF8_STRING`, `text/plain;charset=utf-8`,
     `TEXT`, `STRING` (Latin-1, `?` for what it has not), the hint, and a
     Wayland program's other types, read from the owner as a Wayland
     paste is (`CLIP read` with a pipe, for the desktop's). From 64 KiB a
     transfer goes INCR, both ways. A transfer that makes no progress for
     3 s ends: an X paste not yet answered gets nothing (property None),
-    one under way ends short; the reader's pipe closes. When the desktop
-    clears a selection (`CLIP clear`), X's owner goes at once.
+    one under way ends short with what came; the reader's pipe closes.
+    When the desktop clears a selection (`CLIP clear`), X's owner goes at
+    once (a paste already under way is the desktop's pipe to finish).
   Not yet: `_NET_ACTIVE_WINDOW` requests and `_NET_WM_WINDOW_TYPE` (noted
   once in the compositor's log), and X drag and drop. When Xwayland dies,
   its windows are `WINDOW gone`, an X program's selection is `CLIP clear`,

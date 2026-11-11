@@ -865,10 +865,12 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   one more owner and reader of the clipboard's two selections, through
   the clipboard module's own `bc_source` (an X source has no resource)
   and `clip_read` (an X paste reads the owner as a Wayland paste does):
-  - X to everyone: XFixes' SelectionNotify names a new owner of
-    CLIPBOARD or PRIMARY; honoured when its X client is the one with X's
-    focus, its TARGETS are converted at its selection time into a window
-    of the window manager's, and it becomes the selection's source --
+  - X to everyone: XFixes' SelectionNotify (selected on a window of the
+    window manager's, as wlroots does: the event is about the selection,
+    whichever window asks for it) names a new owner of CLIPBOARD or
+    PRIMARY; honoured while an X window has X's focus, its TARGETS are
+    converted at its selection time into a window of the window
+    manager's, and it becomes the selection's source --
     its best text target (UTF8_STRING, text/plain;charset=utf-8, STRING,
     TEXT, text/plain) as the five text aliases, x-kde-passwordManagerHint
     as itself, MIME targets as themselves; `CLIP offer` follows as for a
@@ -878,28 +880,35 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     last.
   - Everyone to X: for a Wayland source or the desktop's offer the window
     manager owns X's selection on a window of its own, again at every
-    change, and gives it up when the selection is nobody's. The X client
-    with X's focus gets TARGETS, TIMESTAMP, UTF8_STRING,
+    change, and gives it up when the selection is nobody's. While an X
+    window has X's focus a request gets TARGETS, TIMESTAMP, UTF8_STRING,
     text/plain;charset=utf-8, TEXT (as UTF8_STRING), STRING (Latin-1, `?`
     past it), the hint and a Wayland source's other types; the data
     comes from the owner through a pipe by `clip_read`, INCR in 64 KiB
     chunks from 64 KiB on.
   - Deadlines: every transfer ends after 3 s without progress -- property
-    None before the answer; mid-INCR, a zero-length chunk when the owner
-    stalled (the paste is short) or the requestor let go when it stopped
-    deleting; a reader that stops taking an X owner's INCR is let go and
+    None before the answer; mid-INCR, what came and then a zero-length
+    chunk when the owner stalled (the paste is short) or the requestor
+    let go when it stopped deleting; a reader that stops taking an X owner's INCR is let go and
     the owner's rest taken and dropped, so the owner finishes. A transfer
     outlives a change of the selection: it is the old owner's to finish,
     as a Wayland source's pipe is.
   - Secrets: the hint travels both ways and is in TARGETS. A Vault
     secret the desktop clears (`CLIP clear`) leaves X at once: the window
-    manager gives the selection up, so no X program can paste it after.
-    What X cannot keep: a program that pasted it keeps its text (as a
-    Wayland program does); an X clipboard manager reading while it was
-    the selection sees it unless it honours the hint (KDE's and CopyQ's
-    do), and only the X client with X's focus is answered at all, so a
-    background one cannot read it; X programs can always talk to each
-    other on selections of their own.
+    manager gives the selection up, so no X program can start a paste of
+    it after; one already under way is the desktop's pipe to finish, as
+    for a Wayland program. While the keyboard is in Hibr or a Wayland
+    program no X program can read it at all. What X cannot keep: a
+    program that pasted it keeps its text (as a Wayland program does); an
+    X clipboard manager reading while the keyboard is in any X window sees
+    it, and keeps it unless it honours the hint (KDE's and CopyQ's do) --
+    X does not keep its clients from one another, here or anywhere.
+  - The keyboard rule is X's focus on any X window, not on the one X
+    client: X programs copy and paste over other connections than their
+    window's (xclip run in an xterm; Wine opens a connection per thread,
+    its clipboard on its own -- from recall, not checked here), and a
+    per-client rule (tried first, gated with one connection) would refuse
+    them. X has no isolation between its clients to protect.
   - **Where ours differs from wlroots** (`xwayland/selection/`, MIT):
     targets are kept by name for STRING and the hint too (wlroots keeps
     UTF8_STRING, TEXT and names with a `/`, so an X password manager's
@@ -910,18 +919,18 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     (wlroots reuses one property per selection, so two owners in quick
     succession can mix); our windows are children of the window
     manager's own window, so the root never reports them; the requestor's
-    window is selected for PropertyChange before INCR (wlroots hears
-    deletes only on windows it already watches, so a requestor that is
-    not a top-level -- as toolkits use -- stalls); every transfer has a
+    window is selected for PropertyChange before INCR (wlroots' xwm.c
+    selects PropertyChange only on the root and the root's children, and
+    its selection code never on a requestor, so a requestor that is not a
+    top-level -- as toolkits use -- stalls; the root is never reselected
+    here, its mask being the window manager's); every transfer has a
     deadline (wlroots has none, and a silent source hangs the
     requestor); the window manager's ownership is followed from XFixes,
     given up at its own selection time (never `CurrentTime`, which could
-    clear a newer owner); a reader that is not the focused X client is
-    refused, as only the focused Wayland program is offered the
-    selection; an X ownership by a client without X's focus is logged
-    and left to X until the selection next changes, not fought (an X
-    clipboard keeper that takes the selection whenever it is lost would
-    loop); no CLIPBOARD_MANAGER (an X program's selection ends with it,
+    clear a newer owner); an X ownership while no X window has X's focus
+    is logged and left to X until the selection next changes, not fought
+    (an X clipboard keeper that takes the selection whenever it is lost
+    would loop), where wlroots ignores it at TARGETS time the same way; no CLIPBOARD_MANAGER (an X program's selection ends with it,
     as a Wayland program's does; Hibr has read it by then); no drag and
     drop (ADR 0229's later row).
   - Evidence: `xwayland_gate` (Xwayland 24.1, Debian 13 build
@@ -934,8 +943,12 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     bytes, whole); an X requestor that never takes its chunks, a desktop
     reader that never reads and an X owner that never answers, each
     ended at 3 s while the compositor answered `WINDOW size` within 0.1 s;
-    two ownerships at once making one offer; a copy and a paste made
-    after X's focus was taken away, ignored and refused; the Wayland
+    the desktop silent before an X paste's answer (property None at 3 s)
+    and stalling mid-INCR after 100000 bytes (those 100000 pasted, then
+    the end); two ownerships at once making one offer; a copy and a paste
+    made after X's focus was taken away, ignored and refused; another X
+    client than the focused one copying and pasting, its selection
+    `CLIP clear` when it exits; the Wayland
     stand-in's CLIPBOARD and PRIMARY pasted by X and X's CLIPBOARD pasted
     by it; a give-up as `CLIP clear`; Xwayland killed while an X program
     owned PRIMARY (`CLIP clear` with its window) and the desktop's
@@ -945,7 +958,6 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     there).
   - Open: a `CLIP read` pipe has no error: an X owner that stalls or
     changes mid-transfer reaches Hibr as a short text that looks whole
-    (Hibr keeps what it read); the X focus rule is checked by client, so
-    a program with two X connections pastes only on the one with focus;
-    real programs (xterm's PRIMARY on selecting, a password manager's
+    (Hibr keeps what it read); an X clipboard manager can read while an
+    X window has the keyboard (above); real programs (xterm's PRIMARY on selecting, a password manager's
     hint, Steam's fields) are to be checked on the owner's machine.

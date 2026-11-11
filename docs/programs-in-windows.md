@@ -76,13 +76,16 @@ says so, and Hibr's frame stays off, as for Firefox.
   Wayland program, and the other way, Ctrl-C/V and the middle-click
   selection both, large ones too. Text is UTF-8 everywhere; an older X
   program that only speaks Latin-1 gets `?` for what Latin-1 has not.
-  Only the X program with the keyboard can copy or paste, as for Wayland
-  programs, so a program in the background cannot read the clipboard.
-  Vault passwords paste into X programs and leave them when the Vault's
-  timer ends; a program keeps what it already pasted, and an X clipboard
-  manager, if you run one, keeps them unless it honours the password
-  mark. A program that stops answering mid-paste is given up after 3
-  seconds, so a paste never hangs: it gets what came in time, or nothing.
+  X programs copy and paste while one of them has the keyboard, as only
+  the Wayland program with the keyboard can, so while you are in Hibr or
+  a Wayland program no X program can read the clipboard (xclip run in an
+  X terminal works, as that terminal has the keyboard). Vault passwords
+  paste into X programs and leave them when the Vault's timer ends; a
+  program keeps what it already pasted, and an X clipboard manager, if
+  you run one, can read them while you are in an X program and keeps them
+  unless it honours the password mark. A program that stops answering
+  mid-paste is given up after 3 seconds, so a paste never hangs: it gets
+  what came in time, or nothing.
 
 ## Using the window
 
