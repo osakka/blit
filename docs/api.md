@@ -2196,7 +2196,7 @@ It speaks the frame channel above as a producer, with these additions.
     `WINDOW size` comes when the desktop restores it.
   - `WINDOW parent <id> <parent|0>`: a transient parent set or cleared after
     `WINDOW new`.
-  - `WINDOW activate <id> <reason>` (0.3.85): the program asks for its
+  - `WINDOW activate <id> <reason>` (0.3.86): the program asks for its
     top-level `<id>` to have the focus. `<reason>` is one word: `x-focus`
     (an X program took X's input focus itself onto one of its windows;
     the compositor has put it back, "X programs" below), `x-active` (an X
@@ -2362,7 +2362,7 @@ It speaks the frame channel above as a producer, with these additions.
   X window to exactly that size (`0 0` leaves it to the program) and,
   with `activated`, gives it X's input focus (and `_NET_ACTIVE_WINDOW`);
   the keyboard's first key from its route does so too. X's focus always
-  follows the desktop's activated window (0.3.85): an X program that takes
+  follows the desktop's activated window (0.3.86): an X program that takes
   X's input focus itself (its own `SetInputFocus`) onto another window
   gets it put back on the activated one, by the same `SetInputFocus` /
   `WM_TAKE_FOCUS` as the desktop's activation (PointerRoot when none is

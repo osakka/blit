@@ -62,7 +62,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Cursor images (wl_pointer.set_cursor surfaces) | none: never drawn, the display's own pointer (`default`) | -- | decided (owner: the same cursors we already have) |
 | The global menu (programs' menus in Hibr's bar) | the program serves them (D-Bus, `com.canonical.dbusmenu`), Hibr shows them | `WINDOW appmenu <id> <service> <path>` (org_kde_kwin_appmenu); `- -` none | 0.3.77 (owner confirmed, Hibr #500) |
 | Drag and drop | Hibr | `CLIP` extended with a drag | later |
-| Activation: a program asks for its window's focus (xdg_activation's token; an X program's `_NET_ACTIVE_WINDOW`, or X's focus taken itself and put back) | program asks, Hibr decides (its focus-stealing setting) | `WINDOW activate <id> x-focus\|x-active\|xdg-activation`; granted with `WINDOW size ... activated` | 0.3.85 |
+| Activation: a program asks for its window's focus (xdg_activation's token; an X program's `_NET_ACTIVE_WINDOW`, or X's focus taken itself and put back) | program asks, Hibr decides (its focus-stealing setting) | `WINDOW activate <id> x-focus\|x-active\|xdg-activation`; granted with `WINDOW size ... activated` | 0.3.86 |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |
 | Text input and input methods | Hibr | zwp_text_input_v3 | later |
 | Scale (HiDPI): viewporter, fractional scale | Blit's outputs | `WINDOW output` with a scale | later |
@@ -148,7 +148,7 @@ All lines follow version 5's grammar, `<WORD> <verb> <id> ...`.
 ### What is not done here
 
 Drag and drop, idle inhibit, text input, scale, the portals
-and touch are the "later" rows (activation came in 0.3.85): each has its owner and its wire's shape
+and touch are the "later" rows (activation came in 0.3.86): each has its owner and its wire's shape
 above, and each is its own change with its own gate. Nothing in this
 release half-implements one of them.
 

@@ -87,7 +87,7 @@ says so, and Hibr's frame stays off, as for Firefox.
   mid-paste is given up after 3 seconds, so a paste never hangs: it gets
   what came in time, or nothing.
 
-*Since Blit 0.3.85:*
+*Since Blit 0.3.86:*
 
 - **A program asking for the focus is the desktop's call.** Keys always
   go to the window the desktop has focused: an X program that grabs the

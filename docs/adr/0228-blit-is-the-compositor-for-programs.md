@@ -311,7 +311,7 @@ section; `docs/api.md`, "X programs"):
 - Focus by ICCCM 4.1.7: `SetInputFocus` only when `WM_HINTS` takes input,
   `WM_TAKE_FOCUS` only to a window that lists it in `WM_PROTOCOLS`
   (wlroots sends it to every window); a program that moved X's focus
-  itself was logged, not reverted, until 0.3.85: now it is put back and
+  itself was logged, not reverted, until 0.3.86: now it is put back and
   the program asks with `WINDOW activate` (Evidence, "X focus follows
   the desktop"). With no window focused, the focus is PointerRoot,
   as wlroots (from milestone C; None before): None discards the
@@ -368,7 +368,7 @@ section; `docs/api.md`, "X programs"):
   maximized, active window, move/resize, name, the check window) and,
   from milestone C, focused; not wlroots' modal, hidden and client lists,
   which nothing keeps here. `_NET_ACTIVE_WINDOW` requests are `WINDOW
-  activate <id> x-active` (0.3.85; logged only, before).
+  activate <id> x-active` (0.3.86; logged only, before).
 - Xwayland gets exactly its five descriptors (`close_range` past them) and
   an unblocked signal mask (libwayland's signalfd blocks SIGTERM, SIGINT and
   SIGCHLD, which a child inherits); the listening sockets have a backlog of
@@ -984,7 +984,7 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     (Hibr keeps what it read); an X clipboard manager can read while an
     X window has the keyboard (above); real programs (xterm's PRIMARY on selecting, a password manager's
     hint, Steam's fields) are to be checked on the owner's machine.
-- **X focus follows the desktop (0.3.85, 2026-11-11).** On the owner's
+- **X focus follows the desktop (0.3.86, 2026-11-11).** On the owner's
   machine Steam's main window took X's input focus itself (its own
   SetInputFocus) 2.8 s after the desktop had activated its game; the
   compositor only logged it, so from then on X gave the keys arriving on
