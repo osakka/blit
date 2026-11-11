@@ -407,11 +407,10 @@ not by the server, for gates only: the Xwayland it runs for X programs, a
 path or a name on
 .BR PATH ,
 in place of
-.BR Xwayland ;
-.B none
-runs no Xwayland, so the compositor serves Wayland programs only and says
-.B -
-for the X display.
+.BR Xwayland .
+X is turned off by
+.BR "blit-compositor --x11 off" ,
+the desktop's X11 Programs setting, not by this variable.
 .TP
 .B BLIT_KMS_MODESET
 When set, performs a full mode set on every frame.

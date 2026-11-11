@@ -39,14 +39,17 @@ older applications; Steam is milestone B) run under Xwayland, which
 `blit-compositor` starts with itself and manages: install `xwayland`
 (`blit-compositor` recommends it; 23.1 or later, as Debian 13 has).
 Without it, or with an older one, X11 programs fail with "cannot open
-display" and the compositor's log says why.
+display" and the compositor's log says why. **Control Panel > Windows >
+X11 Programs (Xwayland)** turns them off and on (on by default; applied at
+Restart Desktop): off, X-only programs fail the same way, while GTK, Qt
+and Firefox keep running as Wayland programs.
 
 An X program's window is a Hibr window like any other: its title and
 application name, placed and sized by the desktop, keys and mouse, and
 Hibr's close asks it to close. A program that draws its own frame (Steam)
 says so, and Hibr's frame stays off, as for Firefox.
 
-*From the next Blit (milestone C):*
+*Since Blit 0.3.81 (milestone C):*
 
 - **Menus, dropdowns and tooltips** show over their window, where the
   program puts them, and take the keys and the mouse as the program

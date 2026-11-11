@@ -4713,8 +4713,9 @@ static void input_sockets_clear(struct bc_server *s)
    is its X window manager, on libxcb. The server is upstream's, the
    behaviour is ours, as libwayland's is.
 
-   Xwayland. `Xwayland` on PATH (BLIT_COMPOSITOR_XWAYLAND names another
-   program, `none` turns X off; gates only), 23.1 or later (its `-version`;
+   Xwayland. On unless `--x11 off` (the desktop's X11 Programs setting),
+   `Xwayland` on PATH (BLIT_COMPOSITOR_XWAYLAND names another program, for
+   gates only), 23.1 or later (its `-version`;
    older has no xwayland_shell_v1 and is refused with the reason). Absent,
    refused, or with no free display, X is off, said once, and `WINDOW
    display` says `-` for it. Else the compositor takes the first free
@@ -6577,7 +6578,7 @@ static void x_off(struct bc_server *s, const char *why)
     snprintf(s->x.display, sizeof(s->x.display), "-");
 }
 
-static void x_init(struct bc_server *s)
+static void x_init(struct bc_server *s, int x11)
 {
     const char *want = getenv("BLIT_COMPOSITOR_XWAYLAND");
     char text[4096], why[512];
@@ -6590,8 +6591,8 @@ static void x_init(struct bc_server *s)
     wl_list_init(&s->x.windows);
     wl_list_init(&s->x.client_gone.link);
     snprintf(s->x.display, sizeof(s->x.display), "-");
-    if (want && strcmp(want, "none") == 0) {
-        x_off(s, "BLIT_COMPOSITOR_XWAYLAND=none");
+    if (!x11) {
+        x_off(s, "turned off (--x11 off: the desktop's X11 Programs setting)");
         return;
     }
     if (x_find(want && *want ? want : "Xwayland", s->x.path, sizeof(s->x.path)) != 0) {
@@ -7153,12 +7154,13 @@ static int on_signal(int signal_number, void *data)
 
 static void usage(FILE *out)
 {
-    fprintf(out, "usage: blit-compositor [--display name] [--log path]\n"
+    fprintf(out, "usage: blit-compositor [--display name] [--log path] [--x11 on|off]\n"
                  "  Blit's Wayland compositor for programs (ADR 0228). Needs BLIT_FRAME_SOCKET,\n"
                  "  BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR; listens on $XDG_RUNTIME_DIR/<name>,\n"
                  "  --display's (refused, status 2, when in use or invalid), else blit-<n>.\n"
                  "  With Xwayland 23.1 or later on PATH it runs it for X programs and is its\n"
-                 "  window manager; the X display goes to the desktop with the Wayland one.\n");
+                 "  window manager; the X display goes to the desktop with the Wayland one.\n"
+                 "  --x11 off runs no Xwayland: Wayland programs only (default on).\n");
 }
 
 /* Why `name` cannot be the display --display asks for, or NULL: it is one
@@ -7202,7 +7204,7 @@ int main(int argc, char **argv)
     const char *token = getenv("BLIT_FRAME_TOKEN");
     const char *runtime = getenv("XDG_RUNTIME_DIR");
     const char *log_path = NULL, *display_name = NULL, *problem;
-    int i;
+    int i, x11 = 1;
 
     memset(&server, 0, sizeof(server));
     g_server = &server;
@@ -7226,6 +7228,9 @@ int main(int argc, char **argv)
             log_path = argv[++i];
         } else if (strcmp(argv[i], "--display") == 0 && i + 1 < argc) {
             display_name = argv[++i];
+        } else if (strcmp(argv[i], "--x11") == 0 && i + 1 < argc &&
+                   (strcmp(argv[i + 1], "on") == 0 || strcmp(argv[i + 1], "off") == 0)) {
+            x11 = strcmp(argv[++i], "on") == 0;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(stdout);
             return 0;
@@ -7374,7 +7379,7 @@ int main(int argc, char **argv)
     logf_("listening on %s/%s", runtime, server.socket_name);
     /* X programs, when Xwayland is here (the X section): the display is
        said with the Wayland one. */
-    x_init(&server);
+    x_init(&server, x11);
     bc_wire_line(&server.wire, "WINDOW display %s %s", server.socket_name, server.x.display);
 
     wl_display_run(server.display);

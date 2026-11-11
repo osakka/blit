@@ -241,13 +241,13 @@ Present to Blit's flip, and frames per second:
 - **E.** Big Picture full screen and one Proton game, at the monitor's
   refresh.
 
-**Milestone A, built (2026-11-10; unreleased until the next Blit).** One
+**Milestone A (2026-11-10; released in 0.3.78).** One
 X program in a Hibr window, keys and mouse (`src/blit_compositor.c`, the X
 section; `docs/api.md`, "X programs"):
 
 - **Xwayland** is started with the compositor: `Xwayland` on `PATH`
-  (`BLIT_COMPOSITOR_XWAYLAND` names another, `none` turns X off: gates
-  only), refused below 23.1 by its `-version` with the reason; the first
+  (`BLIT_COMPOSITOR_XWAYLAND` names another, gates only; `--x11 off`,
+  the desktop's X11 Programs setting since 0.3.81, runs none), refused below 23.1 by its `-version` with the reason; the first
   free display from :0 to :32 taken as X does (`/tmp/.X<n>-lock` with the
   compositor's pid, a dead pid's lock taken over; `@/tmp/.X11-unix/X<n>`
   and `/tmp/.X11-unix/X<n>`, passed by `-listenfd`), `-rootless`, `-wm` on
@@ -625,8 +625,8 @@ Blit-side work that closes phase 1, apart from the owner's live check.
   vkcube's dmabuf frames imported by Blit's GPU, an everyday Wayland
   program (a GTK one), keys, mouse, popups and pointer lock.
 
-**Programs survive a desktop restart (unreleased, the next Blit after
-0.3.72, 2026-11-10).** `docs/api.md` "Programs survive a desktop restart",
+**Programs survive a desktop restart (2026-11-10; released in
+0.3.73).** `docs/api.md` "Programs survive a desktop restart",
 as agreed with Hibr, built in blit-compositor; it replaces milestone A's
 "the compositor ends, status 1, when the desktop's channel closes".
 
@@ -795,7 +795,7 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   stayed on top of it. A window moved to another display stopped
   updating: Hibr's hold waited for a `FRAME release` from the display the
   window had left, fixed in Hibr 0.99.488.
-- **Milestone C, built (2026-11-11; unreleased until the next Blit).**
+- **Milestone C (2026-11-11; released in 0.3.81).**
   What Steam showed, each X request onto the line its Wayland equivalent
   already produces, through one setter for both kinds, with no wire
   change (`src/blit_compositor.c`, the X section; `docs/api.md`, "X
@@ -849,3 +849,11 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     click stays open after a click outside every X window; a toplevel
     larger than the root takes its pointer clamped past the root's edge;
     the raise-and-press race above, for synthetic input.
+- **X11 programs on or off (0.3.81, 2026-11-11).** The owner asked for a
+  lever per protocol. Wayland's is the desktop's existing Programs in
+  Windows (the compositor itself); X's is `blit-compositor --x11 on|off`,
+  which Hibr passes from its Control Panel's X11 Programs row (Hibr #504),
+  applied at Restart Desktop by restarting the compositor. The gates' old
+  `BLIT_COMPOSITOR_XWAYLAND=none` is gone: that variable only names a
+  stand-in Xwayland now. `compositor_gate` runs with `--x11 off` and
+  checks a value other than on or off is refused.

@@ -2005,17 +2005,17 @@ trailing newline is optional.
 
 ## Program windows (draft, ADR 0228 phase 1)
 
-*Draft for review with Hibr.* `blit-compositor` implements the compositor's
+`blit-compositor` implements the compositor's
 side from 0.3.71 (ADR 0228 phase 1: milestone A, `wl_shm` windows as FRM1;
 milestone B, the window states, `WINDOW output`, dmabuf as FRM3, pacing,
 the keymap and input; milestone C, 0.3.72, pointer lock and confinement,
-Blit's key repeat and the keymap re-read on Blit's notice; and, unreleased
-until the next Blit, `--display`, programs that survive a desktop restart
-and `WINDOW quit 0`), and Blit its
+Blit's key repeat and the keymap re-read on Blit's notice; and, from
+0.3.73, `--display`, programs that survive a desktop restart and `WINDOW
+quit 0`), and Blit its
 `window=0` answer, `GET /v1/input/keymap`, `INPUT sock`, `INPUT member`
-and `INPUT keymap`; no desktop implements its side yet. `blit-compositor`
+and `INPUT keymap`; Hibr implements the desktop's side. `blit-compositor`
 is Blit's Wayland compositor for programs and, from phase 2 (milestone A
-in 0.3.78, milestone C unreleased until the next Blit: "X programs"
+in 0.3.78, milestone C in 0.3.81: "X programs"
 below), the X window manager
 of the Xwayland it runs for X programs. It composites nothing: each window
 is one picture by descriptor.
@@ -2259,7 +2259,7 @@ It speaks the frame channel above as a producer, with these additions.
   and the cell size of the display it is on; a window moved to a display
   with a different cell size gets a new `WINDOW size`.
 - **Programs survive a desktop restart** (agreed with Hibr 2026-11-10;
-  built in blit-compositor, unreleased until the next Blit). The desktop
+  in blit-compositor from 0.3.73). The desktop
   starts blit-compositor detached (its own session, owned by init), records
   its pid and display (`--display`, above), and serves the frame socket
   under a name and token fixed for the desktop session, so a Restart
@@ -2320,7 +2320,7 @@ It speaks the frame channel above as a producer, with these additions.
   and the desktop opens a window for them.
 - **X programs** (ADR 0228 phase 2: milestone A, X programs in windows
   with keys and mouse, from 0.3.78; milestone C, their menus, dialogs,
-  states, move and resize and cursors, unreleased until the next Blit).
+  states, move and resize and cursors, from 0.3.81).
   The compositor runs Xwayland (23.1 or later, upstream's X server,
   `Recommends` of its package) on the first free X display `:<n>`, said on
   `WINDOW display`, and is its window manager. An X top-level window is a
@@ -2340,7 +2340,7 @@ It speaks the frame channel above as a producer, with these additions.
   when it takes no such request. The window's unmapping or destruction
   is `WINDOW gone`; mapped again it is a new window with a new id. Keys
   and the pointer come on its input socket as for any window.
-  From milestone C (unreleased until the next Blit) each of an X
+  From milestone C (0.3.81) each of an X
   program's requests is the line its Wayland equivalent produces:
   - `WM_TRANSIENT_FOR` is the window's parent, `WINDOW new <id> <parent>`
     (and `WINDOW parent` when it changes), as `xdg_toplevel.set_parent`.
@@ -2394,8 +2394,12 @@ It speaks the frame channel above as a producer, with these additions.
   once in the compositor's log), and the X selections (milestone D). When
   Xwayland dies, its windows are `WINDOW gone` and it is started again on
   the same display; its X programs end with it.
-  `BLIT_COMPOSITOR_XWAYLAND`, for gates only, names another Xwayland, or
-  `none` for X off.
+  `blit-compositor --x11 off` runs no Xwayland (Wayland programs only,
+  `WINDOW display <name> -`, the log saying why); the desktop starts it so
+  from its X11 Programs setting (`blit-compositor --version` 0.3.81 or
+  later takes the option; an older one refuses any unknown option with
+  status 2). `BLIT_COMPOSITOR_XWAYLAND`, for gates only, names another
+  Xwayland.
 - **Input straight from Blit.** blit-compositor takes its windows' input
   from Blit directly, not through the desktop's relay. It listens on an
   input socket of its own for each top-level (`SOCK_STREAM`) and asks once

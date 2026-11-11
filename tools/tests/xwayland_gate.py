@@ -499,7 +499,7 @@ def x_part(compositor, standin, server, work):
     for k in ('WAYLAND_DISPLAY', 'DISPLAY', 'XAUTHORITY'):
         env.pop(k, None)
     log = os.path.join(work, 'compositor.log')
-    comp = cg.start([compositor, '--log', log], env, open(os.path.join(work, 'compositor.out'), 'w'))
+    comp = cg.start([compositor, '--x11', 'on', '--log', log], env, open(os.path.join(work, 'compositor.out'), 'w'))
     client = None
     xpid = None
     try:
