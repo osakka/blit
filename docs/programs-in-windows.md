@@ -33,8 +33,8 @@ promise: if what you see differs from it, that is a bug.
 
 ## X11 programs
 
-*Coming with the next Blit (ADR 0228 phase 2, milestone A); Hibr's side --
-exporting `DISPLAY` -- follows.* Programs that speak only X11 (xterm,
+*Since Blit 0.3.78 with Hibr 0.99.486 (ADR 0228 phase 2, milestone A).*
+Programs that speak only X11 (xterm,
 older applications; Steam is milestone B) run under Xwayland, which
 `blit-compositor` starts with itself and manages: install `xwayland`
 (`blit-compositor` recommends it; 23.1 or later, as Debian 13 has).
