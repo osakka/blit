@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.81 X programs, milestone C; the X11 switch
+
+- **Milestone C** (ADR 0228 phase 2): X override-redirect windows (menus,
+  dropdowns, tooltips) are `WINDOW popup`s of their toplevel;
+  `WM_TRANSIENT_FOR` parents; `WM_NORMAL_HINTS` limits; `_NET_WM_STATE`
+  full screen and maximize both ways; `_NET_WM_MOVERESIZE` move and
+  resize; `WM_CHANGE_STATE` minimize; X stacking under the pointer; X
+  cursors by name through Blit's one table (`src/blit_pointer_names.h`).
+  Each onto the line its Wayland equivalent produces; no wire additions.
+- **`blit-compositor --x11 on|off`**, the desktop's X11 Programs setting
+  (Hibr #504); the gates' `BLIT_COMPOSITOR_XWAYLAND=none` is gone.
+- **Gate fixes:** `graphics_memory_gate`'s 1-in-50 hang (a FIFO race; 50
+  runs in two lanes clean); the shared gate `Server` is ready only when
+  its own process answers and stops it on a failed start (the 0.3.81 full
+  run met another program on 19663).
+- **Suites:** the build environment, e743bbe: `compositor_gate` (with the
+  `--x11` checks), `xwayland_gate` (menus, dialogs, hints, states,
+  move/resize, minimize, cursors, Motif, `+accessx 1`; median 1.6 ms),
+  both with ASan/UBSan, gcc `-Wall -Wextra` clean, `package_artifact_gate`.
+  This host (being upgraded to Debian 13 during the run): `all` 187 pass,
+  12 skip, 1 fail (`graphics_memory_frames_gate`, the port held by
+  another program; fixed in the helper, passing alone, and failing by
+  name with the port held); `renderer` 82 pass, 1 skip; `renderer-gles`
+  62 pass; `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.80 X windows that draw their own frame; releases built on this host
 
 - **Motif decorations:** the X window manager reads `_MOTIF_WM_HINTS`; no
