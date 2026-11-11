@@ -9,6 +9,22 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.82 a popup its program moves follows
+
+- **Popups that move:** `xdg_popup.reposition` and an X menu its program
+  moves are `WINDOW popup` again at the new offset; Hibr's frames module
+  already took a repeated popup line as a move. Before, both kept their
+  first place.
+- **Gates:** `compositor_gate` (`wl_standin_client --popup-move`: the line
+  again at 22,73, the frame there, the client told repositioned; its
+  counts follow the extra frame) and `xwayland_gate` (the stand-in's menu
+  moved 20,10: `WINDOW popup 2 1 50 50`, a press there a choice).
+- **Suites:** the build environment, 11993a3: `compositor_gate`,
+  `xwayland_gate`, ASan/UBSan, `package_artifact_gate`. This host,
+  rebuilt: `all` 188 pass, 12 skip, 0 fail; `renderer` 82 pass, 1 skip;
+  `renderer-gles` 62 pass; `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.81 X programs, milestone C; the X11 switch
 
 - **Milestone C** (ADR 0228 phase 2): X override-redirect windows (menus,
