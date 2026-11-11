@@ -299,6 +299,7 @@ struct bc_x {
     struct wl_list windows;           /* bc_xwin: the root's children */
     xcb_window_t focus;               /* the window given X focus, XCB_WINDOW_NONE none */
     uint32_t stack_seq;               /* the newest stacking count (bc_xwin.stack) */
+    int32_t root_w, root_h;           /* the root's size: X's pointer is confined to it */
     /* X's cursor (XFixes): the name of the cursor X shows, as `WINDOW
        cursor` says it ("" none known), whether Xwayland's last
        wl_pointer.set_cursor showed one, and the names of cursor atoms. */
@@ -4791,8 +4792,8 @@ static void input_sockets_clear(struct bc_server *s)
    An override-redirect window (a menu, a dropdown, a tooltip) is a
    `WINDOW popup` of the toplevel it belongs to (x_popup_parent), at its
    offset from that toplevel in X space. Toplevels keep their X position
-   (the program's, never moved by the window manager after the desktop's
-   first size): X space is a stable, virtual layout and Hibr places the
+   (the program's, only kept inside the root, x_fit, and never moved after
+   that): X space is a stable, virtual layout and Hibr places the
    pictures. Xwayland turns a pointer on any of its surfaces into a root
    position by that surface's window's X position, so a popup's pointer
    (Blit maps it into its toplevel's pixels, INPUT member; pointer_target
@@ -4801,7 +4802,8 @@ static void input_sockets_clear(struct bc_server *s)
    the grabbing menu, which closes on a press outside itself; when the
    desktop deactivates the window, X's focus leaves it and its menus close
    themselves. X's stacking follows Blit's pointer (x_raise) so X's hit
-   test agrees with the picture the pointer is over.
+   test agrees with the picture the pointer is over, also when a new
+   toplevel is shown under a pointer at rest.
 
    Not acted on, noted once in the log: _NET_ACTIVE_WINDOW requests and
    _NET_WM_WINDOW_TYPE; the selections are milestone D.
@@ -5255,8 +5257,10 @@ static void x_focus_follows(struct bc_server *s, struct bc_surface *surface)
    the topmost. So the toplevel under the pointer is raised above the
    topmost other shown toplevel -- never above override-redirect windows,
    which X programs expect to stay on top (wlroots' restack does the same)
-   -- before the pointer's event goes to Xwayland. Stacking is otherwise
-   the desktop's: it draws; X's order only decides X's hit test. */
+   -- before the pointer's event goes to Xwayland, and when a new toplevel
+   is shown (X puts it on top, under a pointer that may not move before a
+   press). Stacking is otherwise the desktop's: it draws; X's order only
+   decides X's hit test. */
 static void x_raise(struct bc_server *s, struct bc_xwin *w)
 {
     struct bc_xwin *o, *top = NULL;
@@ -5339,13 +5343,35 @@ static void x_pointer_entered(struct bc_server *s, struct bc_surface *surface)
         cursor_set(s, s->x.client, s->x.cursor);
 }
 
-/* The window resized to w x h at its own X position, border 0; a
-   synthetic ConfigureNotify when the size does not change (ICCCM 4.1.5:
-   the client is told either way). */
+/* A toplevel's place in X space kept inside the root. X confines its
+   pointer to the root (the largest output: the compositor's outputs all
+   sit at 0,0), so a press on the part of a window past the root's edge
+   would reach X at the edge (found by the X gate: a press at 390,170 of a
+   window at 1700,900 came as 219,170). So the window manager places a
+   toplevel that would reach past the root back inside it, as far as its
+   size allows -- at its map, at a ConfigureRequest and at the desktop's
+   size; otherwise its position is the program's, never moved. A window
+   larger than the root still reaches past it. */
+static void x_fit(const struct bc_server *s, int32_t width, int32_t height, int32_t *x, int32_t *y)
+{
+    if (*x + width > s->x.root_w) *x = s->x.root_w - width;
+    if (*y + height > s->x.root_h) *y = s->x.root_h - height;
+    if (*x < 0) *x = 0;
+    if (*y < 0) *y = 0;
+}
+
+/* The window resized to w x h at its own X position (kept inside the
+   root), border 0; a synthetic ConfigureNotify when the geometry does not
+   change (ICCCM 4.1.5: the client is told either way). */
 static void x_resize(struct bc_server *s, struct bc_xwin *w, uint16_t width, uint16_t height)
 {
     uint32_t values[5];
-    int same = width == w->width && height == w->height;
+    int32_t nx = w->x, ny = w->y;
+    int same;
+    x_fit(s, width, height, &nx, &ny);
+    same = width == w->width && height == w->height && nx == w->x && ny == w->y;
+    w->x = (int16_t)nx;
+    w->y = (int16_t)ny;
     values[0] = (uint32_t)(int32_t)w->x;
     values[1] = (uint32_t)(int32_t)w->y;
     values[2] = width;
@@ -5522,6 +5548,9 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
             wl_list_for_each(o, &s->x.windows, link)
                 if (o->transient_for == w->window && o->pic && !o->pic->xpopup && o->pic->parent == NULL)
                     window_set_parent(o->pic, x);
+            /* X stacked it on top; the window Blit's pointer rests on goes
+               back above it (x_raise), so a press without a move lands. */
+            x_pointer_over(s, s->ptr_focus);
         } else {
             logf_("X window 0x%x \"%s\" is not shown: the peer has no window=1", (unsigned)w->window,
                   w->title);
@@ -5714,6 +5743,20 @@ static void x_map_request(struct bc_server *s, xcb_map_request_event_t *ev)
     }
     x_read_properties(s, w);
     x_set_wm_state(s, w, BC_WM_STATE_NORMAL);
+    {
+        int32_t nx = w->x, ny = w->y;
+        x_fit(s, w->width, w->height, &nx, &ny);
+        if (nx != w->x || ny != w->y) {
+            uint32_t values[2];
+            values[0] = (uint32_t)nx;
+            values[1] = (uint32_t)ny;
+            xcb_configure_window(s->x.conn, w->window, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
+            logf_("X: window 0x%x placed at %d,%d, inside the root (it asked for %d,%d)", (unsigned)w->window,
+                  nx, ny, w->x, w->y);
+            w->x = (int16_t)nx;
+            w->y = (int16_t)ny;
+        }
+    }
     xcb_map_window(s->x.conn, w->window);
 }
 
@@ -5747,18 +5790,38 @@ static void x_configure_request(struct bc_server *s, xcb_configure_request_event
         x_resize(s, w, (uint16_t)w->pic->size_w, (uint16_t)w->pic->size_h);
         return;
     }
-    /* Before the desktop's size: the geometry asked for. Stacking is the
-       desktop's: not passed on. */
-    if (ev->value_mask & XCB_CONFIG_WINDOW_X) { mask |= XCB_CONFIG_WINDOW_X; values[n++] = (uint32_t)(int32_t)ev->x; }
-    if (ev->value_mask & XCB_CONFIG_WINDOW_Y) { mask |= XCB_CONFIG_WINDOW_Y; values[n++] = (uint32_t)(int32_t)ev->y; }
-    if (ev->value_mask & XCB_CONFIG_WINDOW_WIDTH) { mask |= XCB_CONFIG_WINDOW_WIDTH; values[n++] = ev->width; }
-    if (ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT) { mask |= XCB_CONFIG_WINDOW_HEIGHT; values[n++] = ev->height; }
+    /* Before the desktop's size: the geometry asked for, kept inside the
+       root (x_fit). Stacking is the desktop's: not passed on. */
+    {
+        int32_t gx = ev->value_mask & XCB_CONFIG_WINDOW_X ? ev->x : w->x;
+        int32_t gy = ev->value_mask & XCB_CONFIG_WINDOW_Y ? ev->y : w->y;
+        int32_t gw = ev->value_mask & XCB_CONFIG_WINDOW_WIDTH ? ev->width : w->width;
+        int32_t gh = ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT ? ev->height : w->height;
+        x_fit(s, gw, gh, &gx, &gy);
+        if (ev->value_mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_WIDTH) || gx != w->x) {
+            mask |= XCB_CONFIG_WINDOW_X;
+            values[n++] = (uint32_t)gx;
+        }
+        if (ev->value_mask & (XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_HEIGHT) || gy != w->y) {
+            mask |= XCB_CONFIG_WINDOW_Y;
+            values[n++] = (uint32_t)gy;
+        }
+        if (ev->value_mask & XCB_CONFIG_WINDOW_WIDTH) { mask |= XCB_CONFIG_WINDOW_WIDTH; values[n++] = ev->width; }
+        if (ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT) { mask |= XCB_CONFIG_WINDOW_HEIGHT; values[n++] = ev->height; }
+    }
     if (mask) xcb_configure_window(s->x.conn, w->window, mask, values);
 }
 
 static void x_configure_notify(struct bc_server *s, xcb_configure_notify_event_t *ev)
 {
-    struct bc_xwin *w = x_window(s, ev->window);
+    struct bc_xwin *w;
+    if (ev->window == s->x.screen->root) {
+        /* The outputs changed (Xwayland's RandR): the root with them. */
+        s->x.root_w = ev->width;
+        s->x.root_h = ev->height;
+        return;
+    }
+    w = x_window(s, ev->window);
     if (w == NULL || ev->event != s->x.screen->root) return;
     if (w->pic && w->pic->xpopup && w->pic->parent && w->pic->parent->xwin &&
         (ev->x != w->x || ev->y != w->y))
@@ -6020,8 +6083,10 @@ static int x_wm_start(struct bc_server *s)
     }
     /* Composite first: every top-level's pixels are its surface's. */
     xcb_composite_redirect_subwindows(c, s->x.screen->root, XCB_COMPOSITE_REDIRECT_MANUAL);
-    mask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
-           XCB_EVENT_MASK_PROPERTY_CHANGE;
+    mask = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
+           XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_PROPERTY_CHANGE;
+    s->x.root_w = s->x.screen->width_in_pixels;
+    s->x.root_h = s->x.screen->height_in_pixels;
     error = xcb_request_check(c, xcb_change_window_attributes_checked(c, s->x.screen->root,
                                                                       XCB_CW_EVENT_MASK, &mask));
     if (error) {
