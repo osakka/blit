@@ -2401,10 +2401,34 @@ It speaks the frame channel above as a producer, with these additions.
     without `activated`), X's focus and `_NET_ACTIVE_WINDOW` leave it,
     and X toolkits close their menus on that. A press outside every X
     window does not reach X at all.
+  - From milestone D (in development), X's CLIPBOARD and PRIMARY are the
+    clipboard's two selections, on the `CLIP` lines below with nothing
+    new: an X program is one more owner and reader, as a Wayland program
+    is, and X as a whole is "the program with the keyboard" while an X
+    window has X's focus (which follows the keyboard) -- any X client
+    then, as xclip run from an xterm or Wine's clipboard connection. Its
+    copy (its X ownership) is `CLIP offer` of
+    `text/plain;charset=utf-8` when it has a text target (`UTF8_STRING`,
+    `text/plain;charset=utf-8`, `STRING` -- its Latin-1 made UTF-8 --,
+    `TEXT`, `text/plain`), with `x-kde-passwordManagerHint` when it has
+    that target; an ownership while no X window has the focus is not the
+    clipboard's (logged; X keeps it until the selection next changes).
+    The desktop's offer or a Wayland program's selection is owned in X by
+    the window manager, which answers only while an X window has X's
+    focus: `TARGETS`, `UTF8_STRING`, `text/plain;charset=utf-8`,
+    `TEXT`, `STRING` (Latin-1, `?` for what it has not), the hint, and a
+    Wayland program's other types, read from the owner as a Wayland
+    paste is (`CLIP read` with a pipe, for the desktop's). From 64 KiB a
+    transfer goes INCR, both ways. A transfer that makes no progress for
+    3 s ends: an X paste not yet answered gets nothing (property None),
+    one under way ends short with what came; the reader's pipe closes.
+    When the desktop clears a selection (`CLIP clear`), X's owner goes at
+    once (a paste already under way is the desktop's pipe to finish).
   Not yet: `_NET_ACTIVE_WINDOW` requests and `_NET_WM_WINDOW_TYPE` (noted
-  once in the compositor's log), and the X selections (milestone D). When
-  Xwayland dies, its windows are `WINDOW gone` and it is started again on
-  the same display; its X programs end with it.
+  once in the compositor's log), and X drag and drop. When Xwayland dies,
+  its windows are `WINDOW gone`, an X program's selection is `CLIP clear`,
+  and it is started again on the same display; its X programs end with
+  it.
   `blit-compositor --x11 off` runs no Xwayland (Wayland programs only,
   `WINDOW display <name> -`, the log saying why); the desktop starts it so
   from its X11 Programs setting (`blit-compositor --version` 0.3.81 or
@@ -2549,7 +2573,8 @@ It speaks the frame channel above as a producer, with these additions.
   CLIP read <seq> <type>                            with a pipe's write end: the owner writes, closes
   CLIP clear <seq>                                  the offer is withdrawn
   ```
-  `<seq>` is the sender's own count. A program's selection (set by the
+  `<seq>` is the sender's own count. "A program" is a Wayland program or,
+  from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`
   when it has any text type (`text/plain;charset=utf-8`, `UTF8_STRING`,
   `text/plain`, `STRING`, `TEXT`), with no types otherwise, plus
@@ -2565,8 +2590,12 @@ It speaks the frame channel above as a producer, with these additions.
   straight from the source. The program with the keyboard is offered each
   selection when it gets the keyboard and when one changes. The desktop's
   offers lapse with its channel; a program's selection is offered again,
-  under a new `<seq>`, after the re-announcement. Drag and drop is not here
-  yet: a drag is cancelled at once (ADR 0229's later row).
+  under a new `<seq>`, after the re-announcement. A pipe either way may
+  close short: an X program that stops sending, or stops taking, for 3 s
+  is let go, and the pipe carries no error, so the desktop reads a short
+  text as it would a whole one (or its write to an X paste fails). Drag
+  and drop is not here yet: a drag is cancelled at once (ADR 0229's later
+  row).
 
 ## Diagnostics and screenshots
 

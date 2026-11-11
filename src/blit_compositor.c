@@ -269,6 +269,9 @@ enum {
     BC_ATOM_NET_WM_STATE_MAXIMIZED_HORZ, BC_ATOM_NET_WM_MOVERESIZE, BC_ATOM_NET_WM_WINDOW_TYPE,
     BC_ATOM_WM_NORMAL_HINTS, BC_ATOM_MOTIF_WM_HINTS, BC_ATOM_WM_S0, BC_ATOM_NET_WM_CM_S0,
     BC_ATOM_NET_WM_STATE_FOCUSED,
+    /* the selections (milestone D) */
+    BC_ATOM_CLIPBOARD, BC_ATOM_TARGETS, BC_ATOM_TIMESTAMP, BC_ATOM_INCR, BC_ATOM_TEXT, BC_ATOM_TEXT_UTF8,
+    BC_ATOM_SECRET, BC_ATOM_BLIT_SELECTION,
     BC_ATOMS
 };
 
@@ -309,15 +312,38 @@ struct bc_x {
     struct { xcb_atom_t atom; char name[24]; } cursor_names[16];
     unsigned cursor_next;
     unsigned logged;                  /* BC_X_LOGGED_*: a later milestone's request, noted once */
+    /* The selections (milestone D, the X selections section): XFixes'
+       first event (0: none, no selections), the window that owns
+       CLIPBOARD and PRIMARY for the clipboard's other owners, each
+       selection's X state, and the transfers going. */
+    uint8_t xfixes_first;
+    xcb_window_t sel_window;
+    struct bc_xsel {
+        xcb_window_t owner;           /* X's owner as XFixes last said, None none */
+        xcb_timestamp_t owner_time;   /* its selection time */
+        unsigned claims;              /* the window manager's SetSelectionOwner not yet seen */
+        uint32_t asked;               /* the TARGETS transfer whose answer counts (its serial), 0 none */
+        uint32_t ignored, refused;    /* the X client last not honoured, as owner and reader (logged once) */
+    } xsel[2];
+    struct wl_list xfers;             /* bc_xfer */
+    uint32_t xfer_serial;
 };
 
-/* The clipboard (ADR 0229): a program's selection source. */
+/* The clipboard (ADR 0229): a program's selection source -- a Wayland
+   program's wl_data_source or zwp_primary_selection_source_v1, or an X
+   program's selection (`x`, the X section: no resource; each type the X
+   target it is converted from, the owner's window and the time it took
+   the selection). */
 struct bc_source {
     struct wl_resource *resource;
     struct bc_server *server;
-    int primary;                      /* zwp_primary_selection_source_v1, else wl_data_source */
+    int primary;                      /* the primary selection, else the clipboard */
     char *types[BC_CLIP_TYPES];
     int ntypes;
+    int x;
+    xcb_atom_t xtargets[BC_CLIP_TYPES];
+    xcb_window_t xowner;
+    xcb_timestamp_t xtime;
 };
 
 /* One selection, the clipboard's or the primary: a program's source, or the
@@ -2063,16 +2089,36 @@ static const char *source_text_type(const struct bc_source *src)
     return NULL;
 }
 
+static void x_source_send(struct bc_source *src, const char *type, int fd);
+static void x_selection_follow(struct bc_server *s, int k);
+
+/* The source writes `type` into fd (the caller's to close). */
 static void source_send(struct bc_source *src, const char *type, int fd)
 {
-    if (src->primary) zwp_primary_selection_source_v1_send_send(src->resource, type, fd);
+    if (src->x) x_source_send(src, type, fd);
+    else if (src->primary) zwp_primary_selection_source_v1_send_send(src->resource, type, fd);
     else wl_data_source_send_send(src->resource, type, fd);
 }
 
+static void source_free_types(struct bc_source *src)
+{
+    int i;
+    for (i = 0; i < src->ntypes; ++i) free(src->types[i]);
+    src->ntypes = 0;
+}
+
+/* The source is no longer the selection: a Wayland program is told (its
+   resource goes when it destroys it); an X program's is ours, freed. */
 static void source_cancel(struct bc_source *src)
 {
-    if (src->primary) zwp_primary_selection_source_v1_send_cancelled(src->resource);
-    else wl_data_source_send_cancelled(src->resource);
+    if (src->x) {
+        source_free_types(src);
+        free(src);
+    } else if (src->primary) {
+        zwp_primary_selection_source_v1_send_cancelled(src->resource);
+    } else {
+        wl_data_source_send_cancelled(src->resource);
+    }
 }
 
 /* A program's source, offered to the desktop under a new seq. */
@@ -2088,21 +2134,36 @@ static void clip_offer_to_desktop(struct bc_server *s, int k)
                  secret);
 }
 
+/* Selection k's owner asked to write `type` into fd, which stays the
+   caller's to close: a source by that type, the desktop by its text type
+   for any text alias (and the secret hint). Returns -1 when nobody was
+   asked. */
+static int clip_read(struct bc_server *s, int k, const char *type, int fd)
+{
+    struct bc_selection *sel = &s->sel[k];
+    if (sel->source) {
+        if (!source_has(sel->source, type)) return -1;
+        source_send(sel->source, type, fd);
+        return 0;
+    }
+    if (sel->desk_seq) {
+        const char *want = is_text_type(type) && sel->desk_text ? BC_TEXT_TYPE
+                         : strcmp(type, BC_SECRET_TYPE) == 0 && sel->desk_secret ? BC_SECRET_TYPE
+                         : NULL;
+        if (want == NULL) return -1;
+        if (bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", sel->desk_seq, want) != 0) {
+            logf_("clipboard: a paste from the desktop not asked: %s", s->wire.last_error);
+            return -1;
+        }
+        return 0;
+    }
+    return -1;
+}
+
 static void offer_receive(struct bc_offer *o, const char *type, int fd)
 {
     struct bc_server *s = o->server;
-    struct bc_selection *sel = &s->sel[o->primary];
-    if (o->generation == sel->generation) {
-        if (sel->source) {
-            if (source_has(sel->source, type)) source_send(sel->source, type, fd);
-        } else if (sel->desk_seq) {
-            const char *want = is_text_type(type) && sel->desk_text ? BC_TEXT_TYPE
-                             : strcmp(type, BC_SECRET_TYPE) == 0 && sel->desk_secret ? BC_SECRET_TYPE
-                             : NULL;
-            if (want && bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", sel->desk_seq, want) != 0)
-                logf_("clipboard: a paste from the desktop not asked: %s", s->wire.last_error);
-        }
-    }
+    if (o->generation == s->sel[o->primary].generation) clip_read(s, o->primary, type, fd);
     close(fd);
 }
 
@@ -2208,6 +2269,18 @@ static void clip_changed(struct bc_server *s, int k)
 {
     ++s->sel[k].generation;
     if (s->kbd_focus) clip_send_to_client(s, k, wl_resource_get_client(s->kbd_focus->resource));
+    x_selection_follow(s, k);
+}
+
+/* Selection k's source went (its program's doing): the desktop told, and
+   the selection is nobody's. */
+static void clip_source_gone(struct bc_server *s, int k)
+{
+    struct bc_selection *sel = &s->sel[k];
+    if (sel->source_seq) bc_wire_line(&s->wire, "CLIP clear %u", sel->source_seq);
+    sel->source = NULL;
+    sel->source_seq = 0;
+    clip_changed(s, k);
 }
 
 /* The program with the keyboard set selection k to `src` (NULL: none). A
@@ -2239,14 +2312,8 @@ static void source_destroyed(struct wl_resource *resource)
 {
     struct bc_source *src = wl_resource_get_user_data(resource);
     struct bc_server *s = src->server;
-    int k = src->primary, i;
-    if (s->sel[k].source == src) {
-        if (s->sel[k].source_seq) bc_wire_line(&s->wire, "CLIP clear %u", s->sel[k].source_seq);
-        s->sel[k].source = NULL;
-        s->sel[k].source_seq = 0;
-        clip_changed(s, k);
-    }
-    for (i = 0; i < src->ntypes; ++i) free(src->types[i]);
+    if (s->sel[src->primary].source == src) clip_source_gone(s, src->primary);
+    source_free_types(src);
     free(src);
 }
 
@@ -4820,8 +4887,11 @@ static void input_sockets_clear(struct bc_server *s)
    test agrees with the picture the pointer is over, also when a new
    toplevel is shown under a pointer at rest.
 
+   Milestone D: CLIPBOARD and PRIMARY are the clipboard's selections (the
+   X selections section, below).
+
    Not acted on, noted once in the log: _NET_ACTIVE_WINDOW requests and
-   _NET_WM_WINDOW_TYPE; the selections are milestone D.
+   _NET_WM_WINDOW_TYPE.
 
    Measured: per X window, the time from a commit of its surface to its
    frame sent, the minimum and median over its first 60 frames, logged. */
@@ -4856,6 +4926,8 @@ static const char *const bc_atom_names[BC_ATOMS] = {
     "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_MOVERESIZE",
     "_NET_WM_WINDOW_TYPE", "WM_NORMAL_HINTS", "_MOTIF_WM_HINTS", "WM_S0", "_NET_WM_CM_S0",
     "_NET_WM_STATE_FOCUSED",
+    "CLIPBOARD", "TARGETS", "TIMESTAMP", "INCR", "TEXT", "text/plain;charset=utf-8",
+    "x-kde-passwordManagerHint", "_BLIT_SELECTION",
 };
 
 /* One child of the root: an X top-level, from its CreateNotify to its
@@ -5681,6 +5753,934 @@ static void x_window_free(struct bc_server *s, struct bc_xwin *w)
     free(w);
 }
 
+/* ---- X selections (ADR 0228 phase 2, milestone D) ----
+
+   CLIPBOARD and PRIMARY are the clipboard's two selections (ADR 0229) for
+   X programs: X is one more owner and one more reader of the same two
+   selections, beside a Wayland program's source and the desktop's offer,
+   on the same CLIP lines. Nothing is kept: the bytes pass through, a chunk
+   at a time, from the owner's pipe or property to the reader's.
+
+   - An X program takes a selection (XFixes' SelectionNotify, selected on
+     a window of the window manager's): honoured while an X window has X's
+     focus -- X, as a whole, is the program with the keyboard, as only the
+     Wayland program with the keyboard may set a selection. Not the one
+     X client with the focus: X programs copy and paste through other
+     connections (xclip run in an xterm, Wine's clipboard thread), and X
+     keeps no X client from another anyway. With no X window focused it
+     is logged once and left to X: the clipboard stays what it was for
+     everyone else until it next changes, when the window manager takes
+     X's selection back. (Taking it back at once would loop with an X clipboard keeper
+     that takes the selection whenever it is lost.) Honoured, its TARGETS
+     are asked -- ConvertSelection at its own selection time, into a
+     window of the window manager's -- and it becomes the selection's
+     source, an X source (bc_source.x): its best text target
+     (UTF8_STRING, text/plain;charset=utf-8, STRING, TEXT, text/plain, in
+     that order) as the five text aliases, x-kde-passwordManagerHint as
+     itself, and every MIME target (a '/' in its name) as itself. Only the
+     newest ownership's answer counts: XFixes' next event makes an older
+     one's dropped. An X program's selection ending (no owner, its window
+     destroyed, its client gone) ends the source (`CLIP clear`), as does
+     another X program's ownership that is not honoured.
+   - Reading an X source (the desktop's `CLIP read`, a Wayland program's
+     paste) converts its target, at the owner's selection time, into a
+     window of the window manager's and streams the property into the
+     reader's pipe: a STRING reply (Latin-1) made UTF-8, as every text
+     alias here is; INCR a chunk at a time, the next asked for (the
+     property deleted) only when the reader has taken the last.
+   - Any other owner (a Wayland program's source, the desktop's offer):
+     the window manager owns X's selection on a window of its own, again
+     at every change, and gives it up (at its own selection time, from
+     XFixes) when the selection is nobody's. A SelectionRequest while an
+     X window has X's focus is answered: TARGETS; TIMESTAMP; the text
+     targets UTF8_STRING, text/plain;charset=utf-8, TEXT (as UTF8_STRING)
+     and STRING (Latin-1, '?' for what it has not); the secret hint; a
+     Wayland source's other types. The data is read from the owner through
+     a pipe by clip_read, as a Wayland program's paste is; from 64 KiB on
+     it goes INCR in 64 KiB chunks, each after the requestor deleted the
+     last. Anything else -- another client, MULTIPLE, a type nobody
+     offers, any request while no X window has the focus -- is answered
+     with property None.
+   - Every transfer ends when it makes no progress for BC_XSEL_IDLE_MS: an
+     answer not yet given is property None; during an INCR, a stalled
+     owner's is ended with what came and a zero-length chunk (the paste
+     is short) and a requestor that stopped deleting is let go. A reader that stops taking
+     an X owner's INCR is let go, and the owner's further chunks taken and
+     dropped so it finishes. A transfer outlives a change of the
+     selection: it is the old owner's to finish, as a Wayland source's
+     pipe is.
+   - The window manager's own ownership (XFixes naming its window) is never
+     an X source, and a request from its own windows is answered None.
+   - Xwayland gone: every transfer dropped, an X source ended (`CLIP
+     clear`); the next window manager takes the selections again for their
+     owners. */
+
+#define BC_XSEL_CHUNK 65536u
+#define BC_XSEL_IDLE_MS 3000
+
+enum { BC_XFER_TARGETS, BC_XFER_IN, BC_XFER_OUT };
+
+/* One transfer: an X owner's TARGETS (TARGETS) or data (IN) into a window
+   of ours, or a selection's data to an X requestor (OUT). */
+struct bc_xfer {
+    struct wl_list link;              /* bc_x.xfers */
+    struct bc_server *server;
+    int kind;                         /* BC_XFER_* */
+    int k;                            /* 0 CLIPBOARD, 1 PRIMARY */
+    uint32_t serial;                  /* its own, never 0 */
+    int fd;                           /* IN: the reader's pipe; OUT: the owner's; -1 none */
+    struct wl_event_source *fd_source, *timer;
+    unsigned char *buf;               /* the bytes on their way, buf[off..len) */
+    size_t len, off, cap;
+    int incr, eof;
+    int latin1;                       /* IN: a STRING reply, made UTF-8; OUT: STRING asked, made Latin-1 */
+    uint32_t cp;                      /* OUT, STRING: a UTF-8 character split between reads */
+    int need;
+    /* TARGETS and IN: our window the owner writes into, the owner and its time */
+    xcb_window_t window, owner;
+    xcb_timestamp_t time;
+    int draining;                     /* IN: the reader went; the owner's chunks are dropped */
+    /* OUT: the request, the property and type it is answered in */
+    xcb_selection_request_event_t req;
+    xcb_atom_t property, type;
+    int notified, waiting;            /* SelectionNotify sent; a chunk waits for the requestor's delete */
+};
+
+static int x_sel_index(struct bc_server *s, xcb_atom_t atom)
+{
+    if (atom == XCB_ATOM_NONE) return -1;
+    if (atom == s->x.atoms[BC_ATOM_CLIPBOARD]) return 0;
+    if (atom == XCB_ATOM_PRIMARY) return 1;
+    return -1;
+}
+
+static xcb_atom_t x_sel_atom(struct bc_server *s, int k)
+{
+    return k ? XCB_ATOM_PRIMARY : s->x.atoms[BC_ATOM_CLIPBOARD];
+}
+
+static const char *x_sel_name(int k)
+{
+    return k ? "PRIMARY" : "CLIPBOARD";
+}
+
+/* The X client of a window: its id without the resource bits (the X
+   server gives every client the same mask). */
+static uint32_t x_client_of(struct bc_server *s, xcb_window_t window)
+{
+    return window & ~xcb_get_setup(s->x.conn)->resource_id_mask;
+}
+
+/* Whether X has the keyboard: an X window has X's focus (x_activate). */
+static int x_has_keyboard(struct bc_server *s)
+{
+    return s->x.focus != XCB_WINDOW_NONE;
+}
+
+static int x_own_window(struct bc_server *s, xcb_window_t window)
+{
+    return x_client_of(s, window) == xcb_get_setup(s->x.conn)->resource_id_base;
+}
+
+/* Whether the window manager is to own X's selection k: the selection is
+   a Wayland program's or the desktop's. */
+static int x_should_own(struct bc_server *s, int k)
+{
+    const struct bc_selection *sel = &s->sel[k];
+    return sel->source ? !sel->source->x : sel->desk_seq != 0;
+}
+
+static void x_sel_claim(struct bc_server *s, int k)
+{
+    xcb_set_selection_owner(s->x.conn, s->x.sel_window, x_sel_atom(s, k), XCB_CURRENT_TIME);
+    ++s->x.xsel[k].claims;
+    xcb_flush(s->x.conn);
+}
+
+/* Given up at the time it was taken, so a newer owner is never undone. */
+static void x_sel_release(struct bc_server *s, int k)
+{
+    if (s->x.xsel[k].owner != s->x.sel_window) return;
+    xcb_set_selection_owner(s->x.conn, XCB_WINDOW_NONE, x_sel_atom(s, k), s->x.xsel[k].owner_time);
+    xcb_flush(s->x.conn);
+}
+
+/* Selection k changed (clip_changed): the window manager owns X's for a
+   Wayland program or the desktop -- taken again, so X's programs and
+   clipboard keepers see the change -- and gives it up when it is
+   nobody's. An X source is its program's own. */
+static void x_selection_follow(struct bc_server *s, int k)
+{
+    if (s->x.conn == NULL || s->x.sel_window == XCB_WINDOW_NONE) return;
+    if (x_should_own(s, k)) x_sel_claim(s, k);
+    else if (s->x.xsel[k].claims == 0) x_sel_release(s, k);
+}
+
+/* ---- transfers ---- */
+
+static int xfer_deadline(void *data);
+
+static struct bc_xfer *xfer_new(struct bc_server *s, int kind, int k)
+{
+    struct bc_xfer *t = calloc(1, sizeof(*t));
+    if (t == NULL) return NULL;
+    t->server = s;
+    t->kind = kind;
+    t->k = k;
+    t->fd = -1;
+    if (++s->x.xfer_serial == 0) ++s->x.xfer_serial;
+    t->serial = s->x.xfer_serial;
+    t->timer = wl_event_loop_add_timer(s->loop, xfer_deadline, t);
+    if (t->timer == NULL) {
+        free(t);
+        return NULL;
+    }
+    wl_event_source_timer_update(t->timer, BC_XSEL_IDLE_MS);
+    wl_list_insert(&s->x.xfers, &t->link);
+    return t;
+}
+
+static void xfer_free(struct bc_xfer *t)
+{
+    struct bc_server *s = t->server;
+    if (t->timer) wl_event_source_remove(t->timer);
+    if (t->fd_source) wl_event_source_remove(t->fd_source);
+    if (t->fd >= 0) close(t->fd);
+    if (t->window && s->x.conn) {
+        xcb_destroy_window(s->x.conn, t->window);
+        xcb_flush(s->x.conn);
+    }
+    wl_list_remove(&t->link);
+    free(t->buf);
+    free(t);
+}
+
+/* Progress: the deadline moves on. */
+static void xfer_moved(struct bc_xfer *t)
+{
+    wl_event_source_timer_update(t->timer, BC_XSEL_IDLE_MS);
+}
+
+/* Room for `more` bytes after buf[len]. */
+static int xfer_room(struct bc_xfer *t, size_t more)
+{
+    size_t cap;
+    unsigned char *b;
+    if (t->off == t->len) t->off = t->len = 0;
+    if (t->len + more <= t->cap) return 0;
+    if (t->off) {
+        memmove(t->buf, t->buf + t->off, t->len - t->off);
+        t->len -= t->off;
+        t->off = 0;
+        if (t->len + more <= t->cap) return 0;
+    }
+    for (cap = t->cap ? t->cap : 4096; cap < t->len + more; cap *= 2) {}
+    b = realloc(t->buf, cap);
+    if (b == NULL) return -1;
+    t->buf = b;
+    t->cap = cap;
+    return 0;
+}
+
+/* Bytes on their way: as they are, Latin-1 made UTF-8 (IN), or UTF-8 made
+   Latin-1 (OUT; '?' for a character Latin-1 has not, or a broken one). */
+static int xfer_take(struct bc_xfer *t, const unsigned char *in, size_t n)
+{
+    size_t i;
+    if (!t->latin1) {
+        if (xfer_room(t, n) != 0) return -1;
+        memcpy(t->buf + t->len, in, n);
+        t->len += n;
+        return 0;
+    }
+    if (xfer_room(t, 2 * n + 1) != 0) return -1;
+    for (i = 0; i < n; ++i) {
+        unsigned c = in[i];
+        if (t->kind == BC_XFER_IN) {
+            if (c < 0x80) {
+                t->buf[t->len++] = (unsigned char)c;
+            } else {
+                t->buf[t->len++] = (unsigned char)(0xc0 | c >> 6);
+                t->buf[t->len++] = (unsigned char)(0x80 | (c & 0x3f));
+            }
+            continue;
+        }
+        if (t->need && (c & 0xc0) == 0x80) {
+            t->cp = t->cp << 6 | (c & 0x3f);
+            if (--t->need == 0) t->buf[t->len++] = t->cp <= 0xff ? (unsigned char)t->cp : '?';
+            continue;
+        }
+        if (t->need) {
+            t->buf[t->len++] = '?';
+            t->need = 0;
+        }
+        if (c < 0x80) {
+            t->buf[t->len++] = (unsigned char)c;
+        } else if ((c & 0xe0) == 0xc0) {
+            t->cp = c & 0x1f;
+            t->need = 1;
+        } else if ((c & 0xf0) == 0xe0) {
+            t->cp = c & 0x0f;
+            t->need = 2;
+        } else if ((c & 0xf8) == 0xf0) {
+            t->cp = c & 0x07;
+            t->need = 3;
+        } else {
+            t->buf[t->len++] = '?';
+        }
+    }
+    return 0;
+}
+
+/* SelectionNotify to the requestor; property None refuses. */
+static void x_sel_notify(struct bc_server *s, const xcb_selection_request_event_t *req, xcb_atom_t property)
+{
+    /* SendEvent takes 32 bytes; the event is 24. */
+    union {
+        xcb_selection_notify_event_t ev;
+        char bytes[32];
+    } u;
+    memset(&u, 0, sizeof(u));
+    u.ev.response_type = XCB_SELECTION_NOTIFY;
+    u.ev.time = req->time;
+    u.ev.requestor = req->requestor;
+    u.ev.selection = req->selection;
+    u.ev.target = req->target;
+    u.ev.property = property;
+    xcb_send_event(s->x.conn, 0, req->requestor, XCB_EVENT_MASK_NO_EVENT, u.bytes);
+    xcb_flush(s->x.conn);
+}
+
+/* ---- an X program's selection: X to everyone ---- */
+
+/* An X owner's selection k asked for: `target` converted into a window of
+   ours, TARGETS (fd -1) or data into the reader's fd, ours from here.
+   Returns the transfer's serial, 0 when none was made. */
+static uint32_t x_convert(struct bc_server *s, int k, int kind, xcb_atom_t target, xcb_window_t owner,
+                      xcb_timestamp_t time, int fd)
+{
+    struct bc_xfer *t = xfer_new(s, kind, k);
+    uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
+    if (t == NULL) {
+        if (fd >= 0) close(fd);
+        return 0;
+    }
+    t->fd = fd;
+    t->owner = owner;
+    t->time = time;
+    /* A child of the window manager's own window: no CreateNotify on the
+       root, so never taken for a program's window. */
+    t->window = xcb_generate_id(s->x.conn);
+    xcb_create_window(s->x.conn, XCB_COPY_FROM_PARENT, t->window, s->x.wm_window, 0, 0, 1, 1, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK, &mask);
+    xcb_convert_selection(s->x.conn, t->window, x_sel_atom(s, k), target, s->x.atoms[BC_ATOM_BLIT_SELECTION],
+                          time);
+    xcb_flush(s->x.conn);
+    return t->serial;
+}
+
+/* source_send for an X source: its type's target, into a copy of fd. */
+static void x_source_send(struct bc_source *src, const char *type, int fd)
+{
+    struct bc_server *s = src->server;
+    int i, copy;
+    if (s->x.conn == NULL) return;
+    for (i = 0; i < src->ntypes; ++i)
+        if (strcmp(src->types[i], type) == 0) break;
+    if (i == src->ntypes || src->xtargets[i] == XCB_ATOM_NONE) return;
+    copy = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (copy < 0) return;
+    fcntl(copy, F_SETFL, fcntl(copy, F_GETFL) | O_NONBLOCK);
+    x_convert(s, src->primary, BC_XFER_IN, src->xtargets[i], src->xowner, src->xtime, copy);
+}
+
+static void x_source_add(struct bc_source *src, const char *type, xcb_atom_t target)
+{
+    if (src->ntypes >= BC_CLIP_TYPES || strlen(type) > BC_CLIP_TYPE_BYTES || source_has(src, type)) return;
+    if ((src->types[src->ntypes] = strdup(type)) == NULL) return;
+    src->xtargets[src->ntypes++] = target;
+}
+
+#define BC_XSEL_TARGETS 64
+
+/* An X source from its owner's TARGETS: the best text target as the text
+   aliases, the secret hint, the MIME targets. */
+static struct bc_source *x_source_new(struct bc_server *s, int k, xcb_window_t owner, xcb_timestamp_t time,
+                                      const xcb_atom_t *targets, int n)
+{
+    static const char *const text_rank[] = {
+        "UTF8_STRING", "text/plain;charset=utf-8", "STRING", "TEXT", "text/plain",
+    };
+    xcb_get_atom_name_cookie_t cookies[BC_XSEL_TARGETS];
+    char names[BC_XSEL_TARGETS][BC_CLIP_TYPE_BYTES + 1];
+    struct bc_source *src = calloc(1, sizeof(*src));
+    xcb_atom_t text = XCB_ATOM_NONE, secret = XCB_ATOM_NONE;
+    size_t rank = sizeof(text_rank) / sizeof(text_rank[0]), r;
+    int i;
+    if (src == NULL) return NULL;
+    src->server = s;
+    src->primary = k;
+    src->x = 1;
+    src->xowner = owner;
+    src->xtime = time;
+    if (n > BC_XSEL_TARGETS) n = BC_XSEL_TARGETS;
+    for (i = 0; i < n; ++i) cookies[i] = xcb_get_atom_name(s->x.conn, targets[i]);
+    for (i = 0; i < n; ++i) {
+        xcb_get_atom_name_reply_t *reply = xcb_get_atom_name_reply(s->x.conn, cookies[i], NULL);
+        int len = reply ? xcb_get_atom_name_name_length(reply) : 0;
+        names[i][0] = '\0';
+        if (reply && len > 0 && len <= BC_CLIP_TYPE_BYTES) {
+            memcpy(names[i], xcb_get_atom_name_name(reply), (size_t)len);
+            names[i][len] = '\0';
+        }
+        free(reply);
+        for (r = 0; r < rank; ++r)
+            if (strcmp(names[i], text_rank[r]) == 0) {
+                rank = r;
+                text = targets[i];
+            }
+        if (strcmp(names[i], BC_SECRET_TYPE) == 0) secret = targets[i];
+    }
+    if (text != XCB_ATOM_NONE)
+        for (r = 0; r < sizeof(bc_text_types) / sizeof(bc_text_types[0]); ++r)
+            x_source_add(src, bc_text_types[r], text);
+    if (secret != XCB_ATOM_NONE) x_source_add(src, BC_SECRET_TYPE, secret);
+    for (i = 0; i < n; ++i)
+        if (strchr(names[i], '/') && !is_text_type(names[i])) x_source_add(src, names[i], targets[i]);
+    return src;
+}
+
+/* TARGETS answered (reply NULL: refused, or none in time): the source of
+   the newest honoured ownership, or nothing for an older one -- told by
+   the transfer, not by owner and time, which two quick ownerships of one
+   window can share. */
+static void x_targets_answered(struct bc_server *s, struct bc_xfer *t, xcb_get_property_reply_t *reply)
+{
+    struct bc_xsel *x = &s->x.xsel[t->k];
+    struct bc_source *src;
+    int n = 0;
+    if (x->asked != t->serial) return;
+    x->asked = 0;
+    if (reply && reply->type == XCB_ATOM_ATOM && reply->format == 32)
+        n = xcb_get_property_value_length(reply) / 4;
+    src = x_source_new(s, t->k, t->owner, t->time, n ? xcb_get_property_value(reply) : NULL, n);
+    if (src == NULL) return;
+    logf_("X: %s is 0x%x's (%d types%s)", x_sel_name(t->k), (unsigned)t->owner, src->ntypes,
+          source_has(src, BC_SECRET_TYPE) ? ", secret" : "");
+    clip_set_source(s, t->k, src);
+}
+
+static int in_writable(int fd, uint32_t mask, void *data);
+
+/* The reader went or stalled: its pipe closed, what it has not taken
+   dropped. */
+static void in_drop_reader(struct bc_xfer *t)
+{
+    if (t->fd_source) wl_event_source_remove(t->fd_source);
+    t->fd_source = NULL;
+    if (t->fd >= 0) close(t->fd);
+    t->fd = -1;
+    t->draining = 1;
+    t->off = t->len = 0;
+}
+
+/* The owner's bytes into the reader's pipe; when it has them all, the next
+   chunk is asked for (INCR) or the read is over. */
+static void in_write(struct bc_xfer *t)
+{
+    struct bc_server *s = t->server;
+    while (t->fd >= 0 && t->off < t->len) {
+        ssize_t n = write(t->fd, t->buf + t->off, t->len - t->off);
+        if (n > 0) {
+            t->off += (size_t)n;
+            xfer_moved(t);
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (t->fd_source == NULL)
+                t->fd_source = wl_event_loop_add_fd(s->loop, t->fd, WL_EVENT_WRITABLE, in_writable, t);
+            if (t->fd_source) return;
+        }
+        /* The reader closed its end. */
+        in_drop_reader(t);
+    }
+    t->off = t->len = 0;
+    if (t->fd_source) wl_event_source_remove(t->fd_source);
+    t->fd_source = NULL;
+    if (!t->incr) {
+        xfer_free(t);
+        return;
+    }
+    xcb_delete_property(s->x.conn, t->window, s->x.atoms[BC_ATOM_BLIT_SELECTION]);
+    xcb_flush(s->x.conn);
+}
+
+static int in_writable(int fd, uint32_t mask, void *data)
+{
+    (void)fd; (void)mask;
+    in_write(data);
+    return 0;
+}
+
+/* The owner's property, taken (dropped while draining); left in place
+   until the reader has it. Its length, or -1. */
+static int in_take(struct bc_xfer *t, xcb_get_property_reply_t *reply)
+{
+    int n = xcb_get_property_value_length(reply);
+    t->latin1 = reply->type == XCB_ATOM_STRING;
+    if (t->draining || n <= 0) return n;
+    return xfer_take(t, xcb_get_property_value(reply), (size_t)n) == 0 ? n : -1;
+}
+
+static xcb_get_property_reply_t *in_property(struct bc_server *s, struct bc_xfer *t)
+{
+    return xcb_get_property_reply(s->x.conn,
+                                  xcb_get_property(s->x.conn, 0, t->window, s->x.atoms[BC_ATOM_BLIT_SELECTION],
+                                                   XCB_GET_PROPERTY_TYPE_ANY, 0, 0x1fffffff),
+                                  NULL);
+}
+
+/* The owner's answer to our ConvertSelection. */
+static void x_selection_notify(struct bc_server *s, xcb_selection_notify_event_t *ev)
+{
+    struct bc_xfer *t, *found = NULL;
+    xcb_get_property_reply_t *reply;
+    wl_list_for_each(t, &s->x.xfers, link)
+        if (t->kind != BC_XFER_OUT && t->window == ev->requestor) found = t;
+    if ((t = found) == NULL) return;
+    reply = ev->property == XCB_ATOM_NONE ? NULL : in_property(s, t);
+    if (t->kind == BC_XFER_TARGETS) {
+        x_targets_answered(s, t, reply);
+        free(reply);
+        xfer_free(t);
+        return;
+    }
+    if (reply == NULL) {
+        xfer_free(t);  /* refused: the reader's pipe closes empty */
+        return;
+    }
+    xfer_moved(t);
+    if (reply->type == s->x.atoms[BC_ATOM_INCR]) {
+        free(reply);
+        t->incr = 1;
+        xcb_delete_property(s->x.conn, t->window, s->x.atoms[BC_ATOM_BLIT_SELECTION]);
+        xcb_flush(s->x.conn);
+        return;
+    }
+    if (in_take(t, reply) < 0) {
+        free(reply);
+        xfer_free(t);
+        return;
+    }
+    free(reply);
+    in_write(t);
+}
+
+/* INCR: the owner's next chunk; a zero-length one is the end. */
+static void in_chunk(struct bc_server *s, struct bc_xfer *t)
+{
+    xcb_get_property_reply_t *reply = in_property(s, t);
+    int n;
+    if (reply == NULL) {
+        xfer_free(t);
+        return;
+    }
+    xfer_moved(t);
+    n = in_take(t, reply);
+    free(reply);
+    if (n <= 0) {
+        xfer_free(t);
+        return;
+    }
+    in_write(t);
+}
+
+/* ---- everyone's selection to X ---- */
+
+/* TARGETS: what selection k's owner has, as X targets. */
+static void x_send_targets(struct bc_server *s, int k, const xcb_selection_request_event_t *req,
+                           xcb_atom_t property)
+{
+    const struct bc_selection *sel = &s->sel[k];
+    const xcb_atom_t *atoms = s->x.atoms;
+    xcb_atom_t list[8 + BC_CLIP_TYPES];
+    xcb_intern_atom_cookie_t cookies[BC_CLIP_TYPES];
+    int n = 0, other = 0, i;
+    int text = sel->source ? source_text_type(sel->source) != NULL : sel->desk_text;
+    int secret = sel->source ? source_has(sel->source, BC_SECRET_TYPE) : sel->desk_secret;
+    list[n++] = atoms[BC_ATOM_TARGETS];
+    list[n++] = atoms[BC_ATOM_TIMESTAMP];
+    if (text) {
+        list[n++] = atoms[BC_ATOM_UTF8_STRING];
+        list[n++] = atoms[BC_ATOM_TEXT_UTF8];
+        list[n++] = XCB_ATOM_STRING;
+        list[n++] = atoms[BC_ATOM_TEXT];
+    }
+    if (secret) list[n++] = atoms[BC_ATOM_SECRET];
+    if (sel->source)
+        for (i = 0; i < sel->source->ntypes; ++i) {
+            const char *type = sel->source->types[i];
+            if (is_text_type(type) || strcmp(type, BC_SECRET_TYPE) == 0) continue;
+            cookies[other++] = xcb_intern_atom(s->x.conn, 0, (uint16_t)strlen(type), type);
+        }
+    for (i = 0; i < other; ++i) {
+        xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(s->x.conn, cookies[i], NULL);
+        if (reply && reply->atom != XCB_ATOM_NONE) list[n++] = reply->atom;
+        free(reply);
+    }
+    xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_ATOM, 32,
+                        (uint32_t)n, list);
+}
+
+static int out_readable(int fd, uint32_t mask, void *data);
+
+/* An OUT transfer moved on: the answer, INCR's start, its next chunk, its
+   end; the owner's pipe read only while less than a chunk waits. */
+static void out_progress(struct bc_xfer *t)
+{
+    struct bc_server *s = t->server;
+    xcb_connection_t *c = s->x.conn;
+    size_t pending = t->len - t->off;
+    if (!t->incr) {
+        if (pending >= BC_XSEL_CHUNK) {
+            uint32_t size = (uint32_t)pending, mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
+            /* The requestor's deletes, seen: the root and a program's
+               top-level have PropertyChange in the window manager's mask
+               already (which must not be replaced); any other window is
+               selected for it. */
+            if (t->req.requestor != s->x.screen->root && x_window(s, t->req.requestor) == NULL)
+                xcb_change_window_attributes(c, t->req.requestor, XCB_CW_EVENT_MASK, &mask);
+            xcb_change_property(c, XCB_PROP_MODE_REPLACE, t->req.requestor, t->property,
+                                s->x.atoms[BC_ATOM_INCR], 32, 1, &size);
+            x_sel_notify(s, &t->req, t->property);
+            t->notified = t->incr = t->waiting = 1;
+        } else if (t->eof) {
+            xcb_change_property(c, XCB_PROP_MODE_REPLACE, t->req.requestor, t->property, t->type, 8,
+                                (uint32_t)pending, t->buf ? t->buf + t->off : NULL);
+            x_sel_notify(s, &t->req, t->property);
+            xfer_free(t);
+            return;
+        }
+    } else if (!t->waiting) {
+        if (pending >= BC_XSEL_CHUNK || (t->eof && pending)) {
+            size_t n = pending < BC_XSEL_CHUNK ? pending : BC_XSEL_CHUNK;
+            xcb_change_property(c, XCB_PROP_MODE_REPLACE, t->req.requestor, t->property, t->type, 8,
+                                (uint32_t)n, t->buf + t->off);
+            t->off += n;
+            t->waiting = 1;
+        } else if (t->eof) {
+            /* INCR's end: a zero-length chunk. */
+            xcb_change_property(c, XCB_PROP_MODE_REPLACE, t->req.requestor, t->property, t->type, 8, 0, NULL);
+            xcb_flush(c);
+            xfer_free(t);
+            return;
+        }
+    }
+    if (t->fd_source)
+        wl_event_source_fd_update(t->fd_source, t->len - t->off < BC_XSEL_CHUNK ? WL_EVENT_READABLE : 0);
+    xcb_flush(c);
+}
+
+/* The owner's pipe: read until a chunk waits or it ends. */
+static int out_readable(int fd, uint32_t mask, void *data)
+{
+    struct bc_xfer *t = data;
+    unsigned char chunk[16384];
+    (void)mask;
+    while (t->len - t->off < BC_XSEL_CHUNK) {
+        ssize_t n = read(fd, chunk, sizeof(chunk));
+        if (n > 0) {
+            if (xfer_take(t, chunk, (size_t)n) != 0) {
+                if (!t->notified) x_sel_notify(t->server, &t->req, XCB_ATOM_NONE);
+                xfer_free(t);
+                return 0;
+            }
+            xfer_moved(t);
+            continue;
+        }
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
+        /* The owner closed its end (or failed): the end. */
+        if (t->latin1 && t->need && xfer_room(t, 1) == 0) t->buf[t->len++] = '?';
+        t->need = 0;
+        t->eof = 1;
+        wl_event_source_remove(t->fd_source);
+        t->fd_source = NULL;
+        close(t->fd);
+        t->fd = -1;
+        break;
+    }
+    out_progress(t);
+    return 0;
+}
+
+/* A request for selection k's data: its owner asked through a pipe, as a
+   Wayland program's paste is. Returns -1 when nobody was asked. */
+static int x_out_start(struct bc_server *s, int k, const xcb_selection_request_event_t *req, xcb_atom_t property)
+{
+    const struct bc_selection *sel = &s->sel[k];
+    const xcb_atom_t *atoms = s->x.atoms;
+    xcb_atom_t target = req->target, type = target;
+    char name[BC_CLIP_TYPE_BYTES + 1];
+    const char *want = NULL;
+    int latin1 = 0, p[2];
+    struct bc_xfer *t, *next;
+    if (target == atoms[BC_ATOM_UTF8_STRING] || target == atoms[BC_ATOM_TEXT_UTF8] ||
+        target == atoms[BC_ATOM_TEXT] || target == XCB_ATOM_STRING) {
+        want = sel->source ? source_text_type(sel->source) : sel->desk_text ? BC_TEXT_TYPE : NULL;
+        if (target == atoms[BC_ATOM_TEXT]) type = atoms[BC_ATOM_UTF8_STRING];
+        latin1 = target == XCB_ATOM_STRING;
+    } else {
+        xcb_get_atom_name_reply_t *reply =
+            xcb_get_atom_name_reply(s->x.conn, xcb_get_atom_name(s->x.conn, target), NULL);
+        int len = reply ? xcb_get_atom_name_name_length(reply) : 0;
+        if (reply && len > 0 && len <= BC_CLIP_TYPE_BYTES) {
+            memcpy(name, xcb_get_atom_name_name(reply), (size_t)len);
+            name[len] = '\0';
+            want = name;
+        }
+        free(reply);
+    }
+    if (want == NULL || pipe2(p, O_CLOEXEC) != 0) return -1;
+    if (clip_read(s, k, want, p[1]) != 0) {
+        close(p[0]);
+        close(p[1]);
+        return -1;
+    }
+    close(p[1]);
+    fcntl(p[0], F_SETFL, fcntl(p[0], F_GETFL) | O_NONBLOCK);
+    /* A requestor reads its newest answer: an older one into the same
+       property is over (wlroots: "the requestor only reads the latest"). */
+    wl_list_for_each_safe(t, next, &s->x.xfers, link)
+        if (t->kind == BC_XFER_OUT && t->req.requestor == req->requestor && t->property == property) {
+            if (!t->notified) x_sel_notify(s, &t->req, XCB_ATOM_NONE);
+            xfer_free(t);
+        }
+    t = xfer_new(s, BC_XFER_OUT, k);
+    if (t == NULL) {
+        close(p[0]);
+        return -1;
+    }
+    t->req = *req;
+    t->property = property;
+    t->type = type;
+    t->latin1 = latin1;
+    t->fd = p[0];
+    t->fd_source = wl_event_loop_add_fd(s->loop, p[0], WL_EVENT_READABLE, out_readable, t);
+    if (t->fd_source == NULL) {
+        xfer_free(t);
+        return -1;
+    }
+    return 0;
+}
+
+/* A SelectionRequest: the window manager's selections answered, every
+   other refused. */
+static void x_selection_request(struct bc_server *s, xcb_selection_request_event_t *req)
+{
+    int k = x_sel_index(s, req->selection);
+    xcb_atom_t property = req->property != XCB_ATOM_NONE ? req->property : req->target;  /* ICCCM 2.2, obsolete */
+    const xcb_atom_t *atoms = s->x.atoms;
+    if (k < 0 || req->owner != s->x.sel_window || !x_should_own(s, k) || x_own_window(s, req->requestor)) {
+        x_sel_notify(s, req, XCB_ATOM_NONE);
+        return;
+    }
+    if (!x_has_keyboard(s)) {
+        struct bc_xsel *x = &s->x.xsel[k];
+        if (x->refused != x_client_of(s, req->requestor)) {
+            x->refused = x_client_of(s, req->requestor);
+            logf_("X: a read of %s by 0x%x while no X window has the keyboard: refused", x_sel_name(k),
+                  (unsigned)req->requestor);
+        }
+        x_sel_notify(s, req, XCB_ATOM_NONE);
+        return;
+    }
+    if (req->target == atoms[BC_ATOM_TARGETS]) {
+        x_send_targets(s, k, req, property);
+        x_sel_notify(s, req, property);
+    } else if (req->target == atoms[BC_ATOM_TIMESTAMP]) {
+        xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_INTEGER, 32,
+                            1, &s->x.xsel[k].owner_time);
+        x_sel_notify(s, req, property);
+    } else if (x_out_start(s, k, req, property) != 0) {
+        x_sel_notify(s, req, XCB_ATOM_NONE);
+    }
+}
+
+/* XFixes: X's owner of a selection changed. */
+static void x_selection_owner(struct bc_server *s, xcb_xfixes_selection_notify_event_t *ev)
+{
+    int k = x_sel_index(s, ev->selection);
+    struct bc_xsel *x;
+    struct bc_selection *sel;
+    xcb_window_t owner;
+    if (k < 0) return;
+    x = &s->x.xsel[k];
+    sel = &s->sel[k];
+    owner = ev->subtype == XCB_XFIXES_SELECTION_EVENT_SET_SELECTION_OWNER ? ev->owner : XCB_WINDOW_NONE;
+    x->owner = owner;
+    x->owner_time = ev->selection_timestamp;
+    /* An older ownership's TARGETS no longer count. */
+    x->asked = 0;
+    if (owner == s->x.sel_window) {
+        /* The window manager's own: given up again when the selection
+           became nobody's meanwhile. */
+        if (x->claims) --x->claims;
+        if (x->claims == 0 && !x_should_own(s, k)) x_sel_release(s, k);
+        return;
+    }
+    if (owner == XCB_WINDOW_NONE || x_own_window(s, owner)) {
+        if (sel->source && sel->source->x) {
+            struct bc_source *src = sel->source;
+            logf_("X: %s of 0x%x ended", x_sel_name(k), (unsigned)src->xowner);
+            clip_source_gone(s, k);
+            source_cancel(src);
+        } else if (x_should_own(s, k) && x->claims == 0) {
+            x_sel_claim(s, k);  /* taken away from the window manager by another: back */
+        }
+        return;
+    }
+    if (!x_has_keyboard(s)) {
+        if (x->ignored != x_client_of(s, owner)) {
+            x->ignored = x_client_of(s, owner);
+            logf_("X: %s taken by 0x%x while no X window has the keyboard: not the clipboard's",
+                  x_sel_name(k), (unsigned)owner);
+        }
+        if (sel->source && sel->source->x) {
+            struct bc_source *src = sel->source;
+            clip_source_gone(s, k);
+            source_cancel(src);
+        }
+        return;
+    }
+    x->asked = x_convert(s, k, BC_XFER_TARGETS, s->x.atoms[BC_ATOM_TARGETS], owner, ev->selection_timestamp,
+                         -1);
+}
+
+/* PropertyNotify about a transfer: an IN owner's next chunk, an OUT
+   requestor's delete. Returns 1 when it was one (not a window's). */
+static int x_xfer_property(struct bc_server *s, xcb_property_notify_event_t *ev)
+{
+    struct bc_xfer *t;
+    wl_list_for_each(t, &s->x.xfers, link) {
+        if (t->kind != BC_XFER_OUT && t->window == ev->window) {
+            if (t->kind == BC_XFER_IN && t->incr && ev->state == XCB_PROPERTY_NEW_VALUE &&
+                ev->atom == s->x.atoms[BC_ATOM_BLIT_SELECTION] && t->off == t->len)
+                in_chunk(s, t);
+            return 1;
+        }
+        if (t->kind == BC_XFER_OUT && t->req.requestor == ev->window && t->property == ev->atom) {
+            if (t->incr && t->waiting && ev->state == XCB_PROPERTY_DELETE) {
+                t->waiting = 0;
+                xfer_moved(t);
+                out_progress(t);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int xfer_deadline(void *data)
+{
+    struct bc_xfer *t = data;
+    struct bc_server *s = t->server;
+    const char *name = x_sel_name(t->k);
+    if (t->kind == BC_XFER_TARGETS) {
+        logf_("X: %s's owner 0x%x did not answer TARGETS in %d ms", name, (unsigned)t->owner, BC_XSEL_IDLE_MS);
+        x_targets_answered(s, t, NULL);
+        xfer_free(t);
+    } else if (t->kind == BC_XFER_IN) {
+        if (t->fd_source && !t->draining) {
+            /* The reader took nothing: let go; an INCR owner's rest is
+               taken and dropped, so it finishes. */
+            logf_("X: a read of %s: the reader took nothing for %d ms; let go", name, BC_XSEL_IDLE_MS);
+            in_drop_reader(t);
+            if (t->incr) {
+                xcb_delete_property(s->x.conn, t->window, s->x.atoms[BC_ATOM_BLIT_SELECTION]);
+                xcb_flush(s->x.conn);
+                xfer_moved(t);
+            } else {
+                xfer_free(t);
+            }
+        } else {
+            logf_("X: a read of %s: its owner 0x%x gave nothing for %d ms; ended", name, (unsigned)t->owner,
+                  BC_XSEL_IDLE_MS);
+            xfer_free(t);
+        }
+    } else if (!t->notified) {
+        logf_("X: a paste of %s into 0x%x: its owner did not finish in %d ms; refused", name,
+              (unsigned)t->req.requestor, BC_XSEL_IDLE_MS);
+        x_sel_notify(s, &t->req, XCB_ATOM_NONE);
+        xfer_free(t);
+    } else if (t->waiting) {
+        logf_("X: a paste of %s into 0x%x: the requestor took nothing for %d ms; let go", name,
+              (unsigned)t->req.requestor, BC_XSEL_IDLE_MS);
+        xfer_free(t);
+    } else {
+        /* The owner stalled mid-INCR: what came goes, then the end. */
+        logf_("X: a paste of %s into 0x%x: its owner gave nothing for %d ms; ended short", name,
+              (unsigned)t->req.requestor, BC_XSEL_IDLE_MS);
+        if (t->fd_source) wl_event_source_remove(t->fd_source);
+        t->fd_source = NULL;
+        if (t->fd >= 0) close(t->fd);
+        t->fd = -1;
+        t->eof = 1;
+        t->need = 0;
+        xfer_moved(t);
+        out_progress(t);
+    }
+    return 0;
+}
+
+/* The window manager's selection window and XFixes' selection events; the
+   selections a Wayland program or the desktop has, owned. */
+static void x_selections_start(struct bc_server *s)
+{
+    int k;
+    memset(s->x.xsel, 0, sizeof(s->x.xsel));
+    s->x.sel_window = XCB_WINDOW_NONE;
+    if (s->x.xfixes_first == 0) {
+        logf_("X: no XFixes: X programs' selections are not the clipboard's");
+        return;
+    }
+    s->x.sel_window = xcb_generate_id(s->x.conn);
+    xcb_create_window(s->x.conn, XCB_COPY_FROM_PARENT, s->x.sel_window, s->x.wm_window, 0, 0, 1, 1, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, 0, NULL);
+    for (k = 0; k < 2; ++k) {
+        xcb_xfixes_select_selection_input(s->x.conn, s->x.sel_window, x_sel_atom(s, k),
+                                          XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+                                          XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+                                          XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
+        if (x_should_own(s, k)) x_sel_claim(s, k);
+    }
+}
+
+/* The connection going: every transfer dropped (the X side with it). */
+static void x_selections_stop(struct bc_server *s)
+{
+    while (!wl_list_empty(&s->x.xfers)) {
+        struct bc_xfer *t = wl_container_of(s->x.xfers.next, t, link);
+        xfer_free(t);
+    }
+    memset(s->x.xsel, 0, sizeof(s->x.xsel));
+    s->x.sel_window = XCB_WINDOW_NONE;
+    s->x.xfixes_first = 0;
+}
+
+/* Xwayland gone: an X program's selection ended with it. */
+static void x_selections_gone(struct bc_server *s)
+{
+    int k;
+    for (k = 0; k < 2; ++k)
+        if (s->sel[k].source && s->sel[k].source->x) {
+            struct bc_source *src = s->sel[k].source;
+            clip_source_gone(s, k);
+            source_cancel(src);
+        }
+}
+
 /* ---- the window manager's events ---- */
 
 /* A child of the root, known from here on; its focus and property changes
@@ -5996,7 +6996,14 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
         x_configure_notify(s, (xcb_configure_notify_event_t *)ev);
         return;
     case XCB_PROPERTY_NOTIFY:
-        x_property_notify(s, (xcb_property_notify_event_t *)ev);
+        if (!x_xfer_property(s, (xcb_property_notify_event_t *)ev))
+            x_property_notify(s, (xcb_property_notify_event_t *)ev);
+        return;
+    case XCB_SELECTION_REQUEST:
+        x_selection_request(s, (xcb_selection_request_event_t *)ev);
+        return;
+    case XCB_SELECTION_NOTIFY:
+        x_selection_notify(s, (xcb_selection_notify_event_t *)ev);
         return;
     case XCB_CLIENT_MESSAGE:
         x_client_message(s, (xcb_client_message_event_t *)ev);
@@ -6013,6 +7020,9 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
     default:
         if (s->x.xfixes_event && (ev->response_type & 0x7f) == s->x.xfixes_event + XCB_XFIXES_CURSOR_NOTIFY)
             x_cursor_notify(s, (xcb_xfixes_cursor_notify_event_t *)ev);
+        else if (s->x.xfixes_first &&
+                 (ev->response_type & 0x7f) == s->x.xfixes_first + XCB_XFIXES_SELECTION_NOTIFY)
+            x_selection_owner(s, (xcb_xfixes_selection_notify_event_t *)ev);
         return;
     }
 }
@@ -6048,10 +7058,12 @@ static void x_wm_stop(struct bc_server *s)
         struct bc_xwin *w = wl_container_of(s->x.windows.next, w, link);
         x_window_free(s, w);
     }
+    x_selections_stop(s);
     if (s->x.wm_source) wl_event_source_remove(s->x.wm_source);
     s->x.wm_source = NULL;
     if (s->x.conn) xcb_disconnect(s->x.conn);
     s->x.conn = NULL;
+    x_selections_gone(s);
     s->x.screen = NULL;
     s->x.focus = XCB_WINDOW_NONE;
     /* Atoms are the X server's: a new one names them afresh. */
@@ -6121,6 +7133,8 @@ static int x_wm_start(struct bc_server *s)
             xcb_xfixes_query_version_reply(c, xcb_xfixes_query_version(c, XCB_XFIXES_MAJOR_VERSION,
                                                                         XCB_XFIXES_MINOR_VERSION), NULL);
         if (v) logf_("X: XFixes %u.%u", v->major_version, v->minor_version);
+        /* Selection events (XFixes 1): X's owners of CLIPBOARD and PRIMARY. */
+        s->x.xfixes_first = v && v->major_version >= 1 ? ext->first_event : 0;
         /* Cursor names (XFixes 2): CursorNotify when X's cursor changes. */
         s->x.xfixes_event = 0;
         if (v && v->major_version >= 2) {
@@ -6167,6 +7181,7 @@ static int x_wm_start(struct bc_server *s)
     s->x.focus = XCB_WINDOW_NONE;
     xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.screen->root,
                         s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &s->x.focus);
+    x_selections_start(s);
     x_adopt(s);
     xcb_flush(c);
     s->x.wm_source = wl_event_loop_add_fd(s->loop, xcb_get_file_descriptor(c), WL_EVENT_READABLE,
@@ -6603,6 +7618,7 @@ static void x_init(struct bc_server *s, int x11)
     s->x.focus = XCB_WINDOW_NONE;
     wl_list_init(&s->x.surfaces);
     wl_list_init(&s->x.windows);
+    wl_list_init(&s->x.xfers);
     wl_list_init(&s->x.client_gone.link);
     snprintf(s->x.display, sizeof(s->x.display), "-");
     if (!x11) {

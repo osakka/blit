@@ -1,6 +1,7 @@
 /* The stand-in X client of tools/tests/xwayland_gate.py (ADR 0228 phase 2,
-   milestones A and C): one X program, on xcb (and xcb-xfixes, to name its
-   cursor), that does what the gate checks of X windows in Hibr windows.
+   milestones A, C and D): one X program, on xcb (and xcb-xfixes, to name
+   its cursor and watch the selections' owners), that does what the gate
+   checks of X windows in Hibr windows.
 
      x_standin_client [title]
 
@@ -47,6 +48,34 @@
         (XFixesSetCursorName, as libXcursor names the themed ones); U the
         same named "nosuchcursor", a name Blit has no pointer for
 
+   The selections (milestone D), with $XSTANDIN_CLIP_DIR the gate's files:
+   a copy owns the selection with the bytes of a file there, read at the
+   key (TARGETS: TARGETS, TIMESTAMP, UTF8_STRING, text/plain;charset=utf-8,
+   TEXT, and the secret hint for a secret), answered whole under 32 KiB and
+   INCR in 32 KiB chunks from there (each answer its own copy, finished
+   after the selection is lost); a paste converts into a window of its own
+   that is not a top-level (a child of the main window, as toolkits use),
+   INCR taken a chunk at a time, and writes what it got to `pasted`:
+
+     1  copy CLIPBOARD from `copy`       2  copy PRIMARY from `copy-primary`
+     3  copy CLIPBOARD from `copy`, marked secret (x-kde-passwordManagerHint)
+     0  copy CLIPBOARD from `copy`, answering TARGETS and never the data
+     Q  copy CLIPBOARD from `copy-latin1` as STRING only (Latin-1)
+     4  paste CLIPBOARD as UTF8_STRING   5  paste PRIMARY as UTF8_STRING
+     6  paste CLIPBOARD as STRING
+     7  paste CLIPBOARD as UTF8_STRING, and never take an INCR's chunks
+     8  give CLIPBOARD up (SetSelectionOwner None)
+     9  CLIPBOARD's TARGETS
+     W  copy CLIPBOARD from `copy` twice at once, marked secret and then
+        not, at the key's one time (two ownerships in quick succession)
+     E  copy CLIPBOARD from `copy` a second after the key; Y paste
+        CLIPBOARD as UTF8_STRING a second after the key (so the gate can
+        take X's focus away first)
+
+   With $XSTANDIN_CLIP_AT_START `copy` or `paste` it does E's or Y's a
+   second after its window is mapped, with no key: another X client than
+   the one with X's focus (as xclip run from an xterm is).
+
    It prints one line per event, flushed:
 
      XSTANDIN mapped
@@ -79,6 +108,13 @@
                                          maximized-horz, focused, or none
      XSTANDIN moveresize <direction> <button>   sent
      XSTANDIN cursor <name>
+     XSTANDIN copied <sel> <bytes>[ secret|silent|latin1]   it owns <sel>
+     XSTANDIN gave-up <sel>
+     XSTANDIN lost <sel>                 SelectionClear: another owner
+     XSTANDIN owner <sel> self|other|none   XFixes: the selection's owner now
+     XSTANDIN pasted <sel> <target> <bytes> <fnv-1a 64, hex>[ incr]
+     XSTANDIN pasted <sel> <target> none|stalled   refused, or INCR left untaken
+     XSTANDIN targets <sel> <name>,...|none
      XSTANDIN delete                     WM_DELETE_WINDOW: it exits 0
 
    and exits 1 when its connection fails or ends otherwise.
@@ -86,6 +122,7 @@
    Built by tools/tests/xwayland_gate.sh with tcc against libxcb and
    xcb-xfixes (pkg-config, tools/build-flags.sh xcb). */
 #define _GNU_SOURCE
+#include <fcntl.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -93,6 +130,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <xcb/xcb.h>
 #include <xcb/xfixes.h>
 
@@ -118,6 +156,24 @@
 #define KEYCODE_P 33
 #define KEYCODE_J 44
 #define KEYCODE_V 55
+#define KEYCODE_1 10
+#define KEYCODE_2 11
+#define KEYCODE_3 12
+#define KEYCODE_4 13
+#define KEYCODE_5 14
+#define KEYCODE_6 15
+#define KEYCODE_7 16
+#define KEYCODE_8 17
+#define KEYCODE_9 18
+#define KEYCODE_0 19
+#define KEYCODE_Q 24
+#define KEYCODE_W 25
+#define KEYCODE_E 26
+#define KEYCODE_Y 29
+#define DELAY_MS 1000
+/* The stand-in's INCR chunk as an owner (the compositor's is 64 KiB). */
+#define CLIP_CHUNK 32768u
+#define CLIP_SENDS 8
 /* _NET_WM_MOVERESIZE's directions (EWMH) */
 #define MOVERESIZE_SIZE_BOTTOMRIGHT 4
 #define MOVERESIZE_MOVE 8
@@ -135,6 +191,35 @@ static uint16_t menu_w, menu_h;
 static int16_t menu_dx, menu_dy;  /* the menu's place from the window, in X space */
 static xcb_atom_t change_state, protocols, delete_window, utf8, net_wm_name, motif_hints, transient_atom, net_wm_state,
     state_fullscreen, state_max_vert, state_max_horz, state_focused, moveresize;
+
+/* the selections (milestone D) */
+static const char *clip_dir;
+static uint8_t xfixes_first;
+static xcb_window_t paste_window;
+static xcb_atom_t clipboard_atom, targets_atom, timestamp_atom, incr_atom, text_atom, text_utf8_atom, secret_atom,
+    paste_property;
+static struct owned {
+    int on, secret, silent, latin1;
+    unsigned char *data;
+    size_t len;
+    xcb_timestamp_t time;
+} owned[2];
+/* An INCR answer going: its own copy of the bytes. */
+static struct sending {
+    int on;
+    xcb_window_t requestor;
+    xcb_atom_t property, type;
+    unsigned char *data;
+    size_t len, off;
+} sending[CLIP_SENDS];
+static int delayed;  /* KEYCODE_E or KEYCODE_Y due at delayed_at, 0 none */
+static uint64_t delayed_at;
+static struct {
+    int on, k, incr, stall, targets;
+    xcb_atom_t target;
+    unsigned char *buf;
+    size_t len, cap;
+} paste;
 
 static void say(const char *fmt, ...)
 {
@@ -402,6 +487,345 @@ static void cursor_named(const char *name)
     say("cursor %s", name);
 }
 
+/* ---- the selections (milestone D) ---- */
+
+static xcb_atom_t sel_atom(int k)
+{
+    return k ? XCB_ATOM_PRIMARY : clipboard_atom;
+}
+
+static const char *sel_name(int k)
+{
+    return k ? "primary" : "clipboard";
+}
+
+static int sel_index(xcb_atom_t a)
+{
+    return a == clipboard_atom ? 0 : a == XCB_ATOM_PRIMARY ? 1 : -1;
+}
+
+static unsigned long long fnv64(const unsigned char *p, size_t n)
+{
+    unsigned long long h = 0xcbf29ce484222325ull;
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        h ^= p[i];
+        h *= 0x100000001b3ull;
+    }
+    return h;
+}
+
+/* A file of the gate's, whole (NULL with *len 0 when there is none). */
+static unsigned char *clip_file(const char *name, size_t *len)
+{
+    char path[512];
+    unsigned char *data = NULL;
+    size_t cap = 0;
+    ssize_t got;
+    int fd;
+    *len = 0;
+    snprintf(path, sizeof(path), "%s/%s", clip_dir ? clip_dir : ".", name);
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return NULL;
+    for (;;) {
+        if (*len == cap) {
+            unsigned char *more = realloc(data, cap ? cap * 2 : 65536);
+            if (more == NULL) exit(1);
+            data = more;
+            cap = cap ? cap * 2 : 65536;
+        }
+        got = read(fd, data + *len, cap - *len);
+        if (got <= 0) break;
+        *len += (size_t)got;
+    }
+    close(fd);
+    return data;
+}
+
+static void clip_copy(int k, const char *file, int secret, int silent, int latin1, xcb_timestamp_t time)
+{
+    struct owned *o = &owned[k];
+    xcb_get_selection_owner_reply_t *r;
+    free(o->data);
+    o->data = clip_file(file, &o->len);
+    o->secret = secret;
+    o->silent = silent;
+    o->latin1 = latin1;
+    o->time = time;
+    xcb_set_selection_owner(conn, window, sel_atom(k), time);
+    r = xcb_get_selection_owner_reply(conn, xcb_get_selection_owner(conn, sel_atom(k)), NULL);
+    o->on = r && r->owner == window;
+    free(r);
+    say("copied %s %zu%s", sel_name(k), o->len, secret ? " secret" : silent ? " silent" : latin1 ? " latin1" : "");
+}
+
+static void notify(const xcb_selection_request_event_t *req, xcb_atom_t property)
+{
+    union {
+        xcb_selection_notify_event_t ev;
+        char bytes[32];
+    } u;
+    memset(&u, 0, sizeof(u));
+    u.ev.response_type = XCB_SELECTION_NOTIFY;
+    u.ev.time = req->time;
+    u.ev.requestor = req->requestor;
+    u.ev.selection = req->selection;
+    u.ev.target = req->target;
+    u.ev.property = property;
+    xcb_send_event(conn, 0, req->requestor, XCB_EVENT_MASK_NO_EVENT, u.bytes);
+    xcb_flush(conn);
+}
+
+/* Another program's request of a selection the stand-in owns. */
+static void clip_request(const xcb_selection_request_event_t *req)
+{
+    int k = sel_index(req->selection), i;
+    xcb_atom_t property = req->property ? req->property : req->target, type;
+    struct owned *o = k >= 0 ? &owned[k] : NULL;
+    if (o == NULL || !o->on || req->owner != window) {
+        notify(req, XCB_ATOM_NONE);
+        return;
+    }
+    if (req->target == targets_atom) {
+        xcb_atom_t list[7];
+        int n = 0;
+        list[n++] = targets_atom;
+        list[n++] = timestamp_atom;
+        if (o->latin1) {
+            list[n++] = XCB_ATOM_STRING;
+        } else {
+            list[n++] = utf8;
+            list[n++] = text_utf8_atom;
+            list[n++] = text_atom;
+        }
+        if (o->secret) list[n++] = secret_atom;
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_ATOM, 32, (uint32_t)n,
+                            list);
+        notify(req, property);
+        return;
+    }
+    if (req->target == timestamp_atom) {
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_INTEGER, 32, 1, &o->time);
+        notify(req, property);
+        return;
+    }
+    if (req->target == secret_atom && o->secret) {
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_STRING, 8, 6, "secret");
+        notify(req, property);
+        return;
+    }
+    if (o->latin1 ? req->target != XCB_ATOM_STRING
+                  : req->target != utf8 && req->target != text_utf8_atom && req->target != text_atom) {
+        notify(req, XCB_ATOM_NONE);
+        return;
+    }
+    if (o->silent) return;  /* never answered */
+    type = o->latin1 ? XCB_ATOM_STRING : req->target == text_utf8_atom ? text_utf8_atom : utf8;
+    if (o->len < CLIP_CHUNK) {
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, req->requestor, property, type, 8, (uint32_t)o->len,
+                            o->data);
+        notify(req, property);
+        return;
+    }
+    for (i = 0; i < CLIP_SENDS && sending[i].on; ++i) {}
+    if (i == CLIP_SENDS) {
+        notify(req, XCB_ATOM_NONE);
+        return;
+    }
+    {
+        struct sending *t = &sending[i];
+        uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE, size = (uint32_t)o->len;
+        t->data = malloc(o->len);
+        if (t->data == NULL) exit(1);
+        memcpy(t->data, o->data, o->len);
+        t->len = o->len;
+        t->off = 0;
+        t->requestor = req->requestor;
+        t->property = property;
+        t->type = type;
+        t->on = 1;
+        xcb_change_window_attributes(conn, req->requestor, XCB_CW_EVENT_MASK, &mask);
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, req->requestor, property, incr_atom, 32, 1, &size);
+        notify(req, property);
+    }
+}
+
+/* An INCR answer's requestor deleted the last chunk: the next, or the end. */
+static int clip_sending_deleted(const xcb_property_notify_event_t *pn)
+{
+    int i;
+    for (i = 0; i < CLIP_SENDS; ++i) {
+        struct sending *t = &sending[i];
+        size_t n;
+        if (!t->on || t->requestor != pn->window || t->property != pn->atom) continue;
+        if (pn->state != XCB_PROPERTY_DELETE) return 1;
+        n = t->len - t->off < CLIP_CHUNK ? t->len - t->off : CLIP_CHUNK;
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, t->requestor, t->property, t->type, 8, (uint32_t)n,
+                            t->data + t->off);
+        xcb_flush(conn);
+        t->off += n;
+        if (n == 0) {
+            free(t->data);
+            memset(t, 0, sizeof(*t));
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static const char *target_name(xcb_atom_t a)
+{
+    return a == utf8 ? "UTF8_STRING" : a == XCB_ATOM_STRING ? "STRING" : a == targets_atom ? "TARGETS" : "other";
+}
+
+static void paste_start(int k, xcb_atom_t target, int stall, int targets, xcb_timestamp_t time)
+{
+    paste.on = 1;
+    paste.k = k;
+    paste.incr = 0;
+    paste.stall = stall;
+    paste.targets = targets;
+    paste.target = target;
+    paste.len = 0;
+    xcb_delete_property(conn, paste_window, paste_property);
+    xcb_convert_selection(conn, paste_window, sel_atom(k), target, paste_property, time);
+    xcb_flush(conn);
+}
+
+static void paste_add(const void *p, size_t n)
+{
+    if (paste.len + n > paste.cap) {
+        size_t cap = paste.cap ? paste.cap : 65536;
+        while (cap < paste.len + n) cap *= 2;
+        paste.buf = realloc(paste.buf, cap);
+        if (paste.buf == NULL) exit(1);
+        paste.cap = cap;
+    }
+    memcpy(paste.buf + paste.len, p, n);
+    paste.len += n;
+}
+
+static void paste_done(void)
+{
+    char path[512];
+    int fd;
+    snprintf(path, sizeof(path), "%s/pasted", clip_dir ? clip_dir : ".");
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd >= 0) {
+        size_t off = 0;
+        while (off < paste.len) {
+            ssize_t n = write(fd, paste.buf + off, paste.len - off);
+            if (n <= 0) break;
+            off += (size_t)n;
+        }
+        close(fd);
+    }
+    say("pasted %s %s %zu %016llx%s", sel_name(paste.k), target_name(paste.target), paste.len,
+        fnv64(paste.buf, paste.len), paste.incr ? " incr" : "");
+    paste.on = 0;
+}
+
+static xcb_get_property_reply_t *paste_property_get(int delete)
+{
+    return xcb_get_property_reply(conn, xcb_get_property(conn, (uint8_t)delete, paste_window, paste_property,
+                                                         XCB_GET_PROPERTY_TYPE_ANY, 0, 0x1fffffff), NULL);
+}
+
+static void paste_notify(const xcb_selection_notify_event_t *ev)
+{
+    xcb_get_property_reply_t *r;
+    if (!paste.on || ev->requestor != paste_window) return;
+    if (ev->property == XCB_ATOM_NONE) {
+        if (paste.targets) say("targets %s none", sel_name(paste.k));
+        else say("pasted %s %s none", sel_name(paste.k), target_name(paste.target));
+        paste.on = 0;
+        return;
+    }
+    r = paste_property_get(0);
+    if (r == NULL) {
+        say("pasted %s %s none", sel_name(paste.k), target_name(paste.target));
+        paste.on = 0;
+        return;
+    }
+    if (paste.targets) {
+        char text[1024] = "";
+        const xcb_atom_t *a = xcb_get_property_value(r);
+        int i, n = r->format == 32 ? xcb_get_property_value_length(r) / 4 : 0;
+        for (i = 0; i < n; ++i) {
+            xcb_get_atom_name_reply_t *name = xcb_get_atom_name_reply(conn, xcb_get_atom_name(conn, a[i]), NULL);
+            if (name) {
+                if (text[0]) strncat(text, ",", sizeof(text) - strlen(text) - 1);
+                strncat(text, xcb_get_atom_name_name(name),
+                        (size_t)xcb_get_atom_name_name_length(name) < sizeof(text) - strlen(text) - 1
+                            ? (size_t)xcb_get_atom_name_name_length(name) : sizeof(text) - strlen(text) - 1);
+            }
+            free(name);
+        }
+        say("targets %s %s", sel_name(paste.k), text[0] ? text : "none");
+        paste.on = 0;
+    } else if (r->type == incr_atom) {
+        if (paste.stall) {
+            say("pasted %s %s stalled", sel_name(paste.k), target_name(paste.target));
+            paste.on = 0;
+        } else {
+            paste.incr = 1;
+        }
+    } else {
+        paste_add(xcb_get_property_value(r), (size_t)xcb_get_property_value_length(r));
+        paste_done();
+    }
+    if (!paste.stall || r->type != incr_atom) xcb_delete_property(conn, paste_window, paste_property);
+    xcb_flush(conn);
+    free(r);
+}
+
+/* INCR: the owner's next chunk, taken (the delete asks for the next); a
+   zero-length one is the end. */
+static void paste_chunk(const xcb_property_notify_event_t *pn)
+{
+    xcb_get_property_reply_t *r;
+    if (!paste.on || !paste.incr || pn->state != XCB_PROPERTY_NEW_VALUE || pn->atom != paste_property) return;
+    r = paste_property_get(1);
+    if (r == NULL) return;
+    if (xcb_get_property_value_length(r) == 0) paste_done();
+    else paste_add(xcb_get_property_value(r), (size_t)xcb_get_property_value_length(r));
+    xcb_flush(conn);
+    free(r);
+}
+
+static void clip_key(uint8_t code, xcb_timestamp_t time)
+{
+    switch (code) {
+    case KEYCODE_1: clip_copy(0, "copy", 0, 0, 0, time); break;
+    case KEYCODE_2: clip_copy(1, "copy-primary", 0, 0, 0, time); break;
+    case KEYCODE_3: clip_copy(0, "copy", 1, 0, 0, time); break;
+    case KEYCODE_0: clip_copy(0, "copy", 0, 1, 0, time); break;
+    case KEYCODE_Q: clip_copy(0, "copy-latin1", 0, 0, 1, time); break;
+    case KEYCODE_W:
+        clip_copy(0, "copy", 1, 0, 0, time);
+        clip_copy(0, "copy", 0, 0, 0, time);
+        break;
+    case KEYCODE_E:
+    case KEYCODE_Y:
+        delayed = code;
+        delayed_at = now_ms() + DELAY_MS;
+        break;
+    case KEYCODE_4: paste_start(0, utf8, 0, 0, time); break;
+    case KEYCODE_5: paste_start(1, utf8, 0, 0, time); break;
+    case KEYCODE_6: paste_start(0, XCB_ATOM_STRING, 0, 0, time); break;
+    case KEYCODE_7: paste_start(0, utf8, 1, 0, time); break;
+    case KEYCODE_9: paste_start(0, targets_atom, 0, 1, time); break;
+    case KEYCODE_8:
+        xcb_set_selection_owner(conn, XCB_WINDOW_NONE, clipboard_atom, time);
+        xcb_flush(conn);
+        owned[0].on = 0;
+        say("gave-up clipboard");
+        break;
+    default:
+        break;
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *title = argc > 1 ? argv[1] : "Blit X stand-in";
@@ -441,6 +865,15 @@ int main(int argc, char **argv)
     state_focused = atom("_NET_WM_STATE_FOCUSED");
     moveresize = atom("_NET_WM_MOVERESIZE");
     change_state = atom("WM_CHANGE_STATE");
+    clipboard_atom = atom("CLIPBOARD");
+    targets_atom = atom("TARGETS");
+    timestamp_atom = atom("TIMESTAMP");
+    incr_atom = atom("INCR");
+    text_atom = atom("TEXT");
+    text_utf8_atom = atom("text/plain;charset=utf-8");
+    secret_atom = atom("x-kde-passwordManagerHint");
+    paste_property = atom("XSTANDIN_SELECTION");
+    clip_dir = getenv("XSTANDIN_CLIP_DIR");
 
     window = xcb_generate_id(conn);
     values[0] = screen->black_pixel;
@@ -461,6 +894,27 @@ int main(int argc, char **argv)
     fill = xcb_generate_id(conn);
     values[0] = 0x336699;
     xcb_create_gc(conn, fill, window, XCB_GC_FOREGROUND, values);
+    /* The selections: a window of its own to paste into (a child of the
+       main one, not a top-level), and XFixes' word of every new owner. */
+    paste_window = xcb_generate_id(conn);
+    values[0] = XCB_EVENT_MASK_PROPERTY_CHANGE;
+    xcb_create_window(conn, XCB_COPY_FROM_PARENT, paste_window, window, 0, 0, 1, 1, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK, values);
+    {
+        const xcb_query_extension_reply_t *ext = xcb_get_extension_data(conn, &xcb_xfixes_id);
+        xcb_xfixes_query_version_reply_t *v =
+            xcb_xfixes_query_version_reply(conn, xcb_xfixes_query_version(conn, 4, 0), NULL);
+        free(v);
+        if (ext && ext->present) {
+            int k;
+            xfixes_first = ext->first_event;
+            for (k = 0; k < 2; ++k)
+                xcb_xfixes_select_selection_input(conn, window, sel_atom(k),
+                                                  XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+                                                  XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+                                                  XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
+        }
+    }
     xcb_map_window(conn, window);
     xcb_flush(conn);
 
@@ -499,7 +953,14 @@ int main(int argc, char **argv)
             }
             case XCB_MAP_NOTIFY: {
                 xcb_map_notify_event_t *m = (xcb_map_notify_event_t *)ev;
-                if (m->window == window) say("mapped");
+                if (m->window == window) {
+                    const char *at_start = getenv("XSTANDIN_CLIP_AT_START");
+                    say("mapped");
+                    if (at_start && (strcmp(at_start, "copy") == 0 || strcmp(at_start, "paste") == 0)) {
+                        delayed = strcmp(at_start, "copy") == 0 ? KEYCODE_E : KEYCODE_Y;
+                        delayed_at = now_ms() + DELAY_MS;
+                    }
+                }
                 else if (dialog && m->window == dialog) say("dialog");
                 else if (panel && m->window == panel) say("panel");
                 break;
@@ -529,7 +990,24 @@ int main(int argc, char **argv)
             }
             case XCB_PROPERTY_NOTIFY: {
                 xcb_property_notify_event_t *pn = (xcb_property_notify_event_t *)ev;
-                if (pn->window == window && pn->atom == net_wm_state) state_say();
+                if (clip_sending_deleted(pn)) break;
+                if (pn->window == paste_window) paste_chunk(pn);
+                else if (pn->window == window && pn->atom == net_wm_state) state_say();
+                break;
+            }
+            case XCB_SELECTION_REQUEST:
+                clip_request((xcb_selection_request_event_t *)ev);
+                break;
+            case XCB_SELECTION_NOTIFY:
+                paste_notify((xcb_selection_notify_event_t *)ev);
+                break;
+            case XCB_SELECTION_CLEAR: {
+                xcb_selection_clear_event_t *c = (xcb_selection_clear_event_t *)ev;
+                int k = sel_index(c->selection);
+                if (k >= 0 && c->owner == window) {
+                    owned[k].on = 0;
+                    say("lost %s", sel_name(k));
+                }
                 break;
             }
             case XCB_KEY_PRESS: {
@@ -558,6 +1036,7 @@ int main(int argc, char **argv)
                     break;
                 }
                 say("key %u", k->detail);
+                clip_key(k->detail, k->time);
                 if (k->detail == KEYCODE_D) {
                     /* flags (MWM_HINTS_DECORATIONS, 2), functions,
                        decorations (none), input mode, status */
@@ -668,6 +1147,14 @@ int main(int argc, char **argv)
                 break;
             }
             default:
+                if (xfixes_first && (ev->response_type & 0x7f) == xfixes_first + XCB_XFIXES_SELECTION_NOTIFY) {
+                    xcb_xfixes_selection_notify_event_t *n = (xcb_xfixes_selection_notify_event_t *)ev;
+                    int k = sel_index(n->selection);
+                    xcb_window_t owner = n->subtype == XCB_XFIXES_SELECTION_EVENT_SET_SELECTION_OWNER ? n->owner
+                                                                                                    : XCB_WINDOW_NONE;
+                    if (k >= 0)
+                        say("owner %s %s", sel_name(k), owner == window ? "self" : owner ? "other" : "none");
+                }
                 break;
             }
             free(ev);
@@ -676,9 +1163,20 @@ int main(int argc, char **argv)
             fprintf(stderr, "x_standin_client: the connection to the X server ended\n");
             return 1;
         }
+        if (delayed && now_ms() >= delayed_at) {
+            if (delayed == KEYCODE_E) clip_copy(0, "copy", 0, 0, 0, XCB_CURRENT_TIME);
+            else paste_start(0, utf8, 0, 0, XCB_CURRENT_TIME);
+            delayed = 0;
+            continue;
+        }
         if (animate > 0) {
             uint64_t now = now_ms();
             wait = next_frame > now ? (int)(next_frame - now) : 0;
+        }
+        if (delayed) {
+            uint64_t now = now_ms();
+            int until = delayed_at > now ? (int)(delayed_at - now) : 0;
+            if (wait < 0 || until < wait) wait = until;
         }
         p.fd = xcb_get_file_descriptor(conn);
         p.events = POLLIN;
