@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.83 a closing window releases its keys; the pointer where it is
+
+- **Stuck keys:** the focused surface going now takes the keyboard away as
+  any focus change does (keys released, modifiers cleared, leave). On the
+  owner's mini PC every xterm closed within 20 ms after one was ended with
+  Ctrl-D: Xwayland kept Ctrl+D pressed and auto-repeated it (traced with
+  strace on the machine). `compositor_gate` (`--gone-on-ctrl-d`) failed
+  before the fix.
+- **Pointer routing:** keys to the focused session's route, the pointer
+  (motion, presses, the wheel) to the route in the session under it, a
+  release to the route its press went through; `frames.input` says
+  `pointer.here`. Firefox raised from a menu on one display and shown on
+  the other took no pointer (traced on the mini PC). `frame_input_gate`'s
+  new two-display mode failed before the fix.
+- **Suites:** the build environment, 7901992: `compositor_gate`,
+  `xwayland_gate`, ASan/UBSan, `package_artifact_gate`. This host, rebuilt:
+  `all` 188 pass, 12 skip, 0 fail; `renderer` 82 pass, 1 skip;
+  `renderer-gles` 62 pass; `documentation_gate`. (A first host run was
+  stopped: the server was rebuilt under it for the routing change.)
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.82 a popup its program moves follows
 
 - **Popups that move:** `xdg_popup.reposition` and an X menu its program
