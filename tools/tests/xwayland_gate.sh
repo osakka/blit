@@ -1,11 +1,13 @@
 #!/bin/sh
-# ADR 0228 phase 2, milestones A and C: X programs in Hibr windows -- keys
-# and mouse, menus, dialogs, states, move/resize, cursors -- blit-compositor
+# ADR 0228 phase 2, milestones A, C and D: X programs in Hibr windows -- keys
+# and mouse, menus, dialogs, states, move/resize, cursors, copy and paste
+# with the desktop and Wayland programs -- blit-compositor
 # with its Xwayland on, against a fake desktop, with the in-repo X stand-in
-# client (tools/tests/xwayland_gate.py says what is checked). The
-# compositor is built twice: by tcc, as shipped, and by cc under
-# AddressSanitizer and UndefinedBehaviorSanitizer when the host's cc has
-# them.
+# client and the Wayland stand-in for the selections across both (when
+# wayland-client is there; tools/tests/xwayland_gate.py says what is
+# checked). The compositor is built twice: by tcc, as shipped, and by cc
+# under AddressSanitizer and UndefinedBehaviorSanitizer when the host's cc
+# has them.
 #
 # It skips (77, XWAYLAND_GATE_SKIP <reason>) where the compositor's build
 # dependencies or libxcb are missing (tools/build-flags.sh), or `Xwayland`
@@ -45,6 +47,15 @@ xcb_cflags=$(tools/build-flags.sh --cflags xcb)
 xcb_libs=$(tools/build-flags.sh --libs xcb)
 # shellcheck disable=SC2086
 tcc -std=c99 -Wall $xcb_cflags tools/tests/x_standin_client.c $xcb_libs -o "$out/x_standin_client"
+# The Wayland stand-in (`--clip`), for copy and paste between X and Wayland
+# programs; without wayland-client those steps are skipped and said so.
+wl_standin=
+if tools/build-flags.sh --check wayland-client >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    tcc -std=c99 -Wall -I"$proto" $(tools/build-flags.sh --cflags wayland-client) tools/tests/wl_standin_client.c \
+        $protocol_sources $(tools/build-flags.sh --libs wayland-client) -o "$out/wl_standin_client"
+    wl_standin=$out/wl_standin_client
+fi
 
 # blit-server, on the mock display, only for Blit's keymap.
 . tools/tests/gate_display.sh
@@ -52,7 +63,7 @@ gate_display_setup
 trap gate_display_cleanup EXIT
 echo "XWAYLAND_GATE_XWAYLAND $xwayland $major.$minor"
 BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools/tests/xwayland_gate.py \
-    "$out/blit-compositor" "$out/x_standin_client" "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}"
+    "$out/blit-compositor" "$out/x_standin_client" "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}" "$wl_standin"
 
 san="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
 if ${CC:-cc} $san -x c -o "$out/san-probe" - >/dev/null 2>&1 <<'PROBE'
@@ -70,7 +81,7 @@ then
     BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" \
     ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1 \
         $norand python3 tools/tests/xwayland_gate.py "$out/blit-compositor-asan" "$out/x_standin_client" \
-            "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}"
+            "${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}" "$wl_standin"
     echo "XWAYLAND_SANITIZERS_OK address,undefined"
 else
     echo "XWAYLAND_SANITIZERS_SKIP ${CC:-cc} has no -fsanitize=address,undefined"

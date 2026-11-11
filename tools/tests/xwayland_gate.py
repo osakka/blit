@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""ADR 0228 phase 2, milestones A and C: X programs in Hibr windows, keys
-and mouse, menus, dialogs and states, through Xwayland with
-blit-compositor as its window manager.
+"""ADR 0228 phase 2, milestones A, C and D: X programs in Hibr windows, keys
+and mouse, menus, dialogs and states, and copy and paste, through Xwayland
+with blit-compositor as its window manager.
 
-    xwayland_gate.py <blit-compositor> <x_standin_client> [blit-server]
+    xwayland_gate.py <blit-compositor> <x_standin_client> [blit-server [wl_standin_client]]
 
 The gate plays the desktop on a frame channel (compositor_gate's Desktop:
 the version 5 hello answered with window=1 and no dmabuf, so Xwayland draws
@@ -49,7 +49,24 @@ order:
     asking for a place past the root kept inside it, a press at its far
     corner landing; named X cursors as `WINDOW cursor 1 xterm`, and
     `default` for a name Blit has no pointer for;
+  - milestone D (x_milestone_d), the gate as Hibr's clipboard on the CLIP
+    lines: an X program's CLIPBOARD and PRIMARY offered (`CLIP offer`) and
+    read back byte for byte; the desktop's offers pasted by the X program
+    byte for byte (its `CLIP read` answered); STRING both ways as Latin-1;
+    INCR both ways (700001 bytes; to X also 0, 65535 and 65536); a secret
+    offered with x-kde-passwordManagerHint both ways, in TARGETS, and gone
+    from X when the desktop clears it; the owner changing mid-transfer in
+    both directions (the transfer finishes with the old owner's bytes); an
+    X requestor that never takes its INCR chunks, a desktop reader that
+    never reads, and an X owner that never answers -- each ended at the
+    compositor's deadline while it answers the desktop; with the Wayland
+    stand-in (`--clip`), its CLIPBOARD and PRIMARY pasted by X and X's
+    CLIPBOARD pasted by it; an X program giving its selection up is `CLIP
+    clear`;
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
+  - Xwayland killed while an X program owns PRIMARY and the desktop
+    CLIPBOARD (x_restart_part): its offer cleared with its window, and
+    after the restart the desktop's CLIPBOARD pasted by a new X client;
   - `WINDOW quit 0`: the compositor ends 0, Xwayland with it, the sockets
     and the lock removed.
 
@@ -58,7 +75,9 @@ milestone C looks for its named one among them).
 """
 import fcntl
 import os
+import random
 import re
+import select
 import shutil
 import signal
 import socket
@@ -66,6 +85,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 
@@ -487,7 +507,471 @@ def x_milestone_c_steps(desk, lines_to, log, why, said, key, click, route):
             'parent-later cursor=xterm,unknown->default')
 
 
-def x_part(compositor, standin, server, work):
+# ---- milestone D: the X selections ----
+
+KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_Q = 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16
+TEXT = 'text/plain;charset=utf-8'
+SECRET = 'x-kde-passwordManagerHint'
+IDLE_MS = 3000  # the compositor's BC_XSEL_IDLE_MS
+
+
+def fnv64(data):
+    h = 0xcbf29ce484222325
+    for c in data:
+        h = ((h ^ c) * 0x100000001b3) & 0xffffffffffffffff
+    return h
+
+
+def noise(n, seed):
+    return random.Random(seed).randbytes(n)
+
+
+class Clip:
+    """The gate as Hibr's clipboard, and the X stand-in's files and lines."""
+
+    def __init__(self, desk, printed, log, clip_dir):
+        self.desk, self.printed, self.log, self.dir = desk, printed, log, clip_dir
+        self.writers = []
+
+    def why(self):
+        return '%s\n%s' % (self.printed(), self.log())
+
+    def mark(self):
+        return len(self.printed())
+
+    def saw(self, text, since, wait=10):
+        """The X client said `text` since the mark."""
+        line = 'XSTANDIN %s\n' % text
+        wait_for(lambda: line in self.printed()[since:],
+                 lambda: 'the X client did not say %r:\n%s' % (text, self.why()), wait)
+
+    def put(self, name, data):
+        with open(os.path.join(self.dir, name), 'wb') as f:
+            f.write(data)
+
+    def pasted(self):
+        with open(os.path.join(self.dir, 'pasted'), 'rb') as f:
+            return f.read()
+
+    def match(self, pattern, wait=10):
+        """The compositor's next line (frames closed) matches `pattern`."""
+        deadline = time.time() + wait
+        while True:
+            got = self.desk.next(max(0.1, deadline - time.time()))
+            check(got is not None, lambda: 'no line matching %r:\n%s' % (pattern, self.why()))
+            if got[0] == 'frame':
+                os.close(got[2])
+                continue
+            if got[0] == 'frm3':
+                for fd in got[2]:
+                    os.close(fd)
+                continue
+            m = re.fullmatch(pattern, got[1])
+            check(m, lambda: 'got %r, expected %r:\n%s' % (got[1], pattern, self.why()))
+            return m
+
+    def offered(self, sel, secret=False):
+        """An X program's selection offered to the desktop: its seq."""
+        return int(self.match(r'CLIP offer (\d+) %s %s%s' % (sel, re.escape(TEXT), ' ' + SECRET if secret else ''))
+                   .group(1))
+
+    def read_all(self, r, wait=10, limit=None):
+        out = bytearray()
+        deadline = time.time() + wait
+        while limit is None or len(out) < limit:
+            left = deadline - time.time()
+            check(left > 0 and select.select([r], [], [], left)[0],
+                  lambda: 'a read stopped at %d bytes:\n%s' % (len(out), self.why()))
+            chunk = os.read(r, 65536 if limit is None else min(65536, limit - len(out)))
+            if not chunk:
+                break
+            out += chunk
+        return bytes(out)
+
+    def ask(self, seq, type_=TEXT):
+        """`CLIP read` with a pipe: its read end."""
+        r, w = os.pipe()
+        socket.send_fds(self.desk.desk.sock, [b'CLIP read %d %s\n' % (seq, type_.encode())], [w])
+        os.close(w)
+        return r
+
+    def read(self, seq, wait=10):
+        r = self.ask(seq)
+        try:
+            return self.read_all(r, wait)
+        finally:
+            os.close(r)
+
+    def answer(self, seq, data, between=None):
+        """A program's paste of the desktop's offer `seq`: its `CLIP read`
+        answered with `data` from a thread (a large one waits for the
+        reader); `between` (an event pair) pauses it after 300000 bytes."""
+        self.match(r'CLIP read %d %s' % (seq, re.escape(TEXT)))
+        fd = self.desk.desk.clip_fds.pop(0)
+        done = {'error': None}
+
+        def write():
+            try:
+                view = memoryview(data)
+                if between:
+                    sent = 0
+                    while sent < 300000:
+                        sent += os.write(fd, view[sent:300000])
+                    between[0].set()
+                    between[1].wait(20)
+                    view = view[300000:]
+                while len(view):
+                    view = view[os.write(fd, view):]
+            except OSError as e:
+                done['error'] = e
+            finally:
+                os.close(fd)
+        thread = threading.Thread(target=write, daemon=True)
+        thread.start()
+        self.writers.append(thread)
+        return thread, done
+
+    def desk_offers(self, seq, sel, secret=False):
+        """The desktop's offer: the window manager owns X's selection."""
+        m = self.mark()
+        self.desk.send('CLIP offer %d %s %s%s' % (seq, sel, TEXT, ' ' + SECRET if secret else ''))
+        self.saw('owner %s other' % sel, m)
+
+    def pastes(self, sel, target, data, since):
+        """The X client pasted exactly `data`."""
+        self.saw('pasted %s %s %d %016x%s' % (sel, target, len(data), fnv64(data),
+                                              ' incr' if len(data) >= 65536 else ''), since, 20)
+        check(self.pasted() == data, lambda: 'the X client\'s paste differs (%d bytes, wanted %d)'
+              % (len(self.pasted()), len(data)))
+
+
+def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work):
+    """Milestone D on the stand-in's window 1 (400x300, X's focus): the X
+    selections onto CLIP both ways, CLIPBOARD and PRIMARY, Latin-1, INCR,
+    a secret, owners changing mid-transfer, stalled readers and owners,
+    and Wayland programs' copies and pastes. Returns its summary."""
+    c = Clip(desk, printed, log, clip_dir)
+
+    def key(code):
+        lines_to('key %%d %d press' % code, 'key %%d %d release' % code)
+
+    # X copies CLIPBOARD (1): `CLIP offer` of its text, read back byte for byte.
+    small = 'X → Hibr: héllo wörld ✓'.encode()
+    c.put('copy', small)
+    m = c.mark()
+    key(KEY_1)
+    c.saw('copied clipboard %d' % len(small), m)
+    seq = c.offered('clipboard')
+    got = c.read(seq)
+    check(got == small, lambda: 'the desktop read %r, not %r' % (got, small))
+    check(c.read(seq, wait=10) == small, 'a second read differs')
+
+    # The desktop offers CLIPBOARD: the window manager owns X's, and the X
+    # client's paste (4) is a `CLIP read` the desktop answers.
+    data = 'Hibr → X: ünïcode ✓ end'.encode()
+    c.desk_offers(101, 'clipboard')
+    m = c.mark()
+    key(KEY_4)
+    c.answer(101, data)
+    c.pastes('clipboard', 'UTF8_STRING', data, m)
+
+    # PRIMARY both ways (2, 5).
+    middle = b'middle-click from X'
+    c.put('copy-primary', middle)
+    key(KEY_2)
+    seq = c.offered('primary')
+    check(c.read(seq) == middle, 'PRIMARY read back differs')
+    c.desk_offers(102, 'primary')
+    m = c.mark()
+    key(KEY_5)
+    c.answer(102, b'middle-click from Hibr')
+    c.pastes('primary', 'UTF8_STRING', b'middle-click from Hibr', m)
+
+    # Latin-1: STRING asked of the desktop's UTF-8 (6), '?' for what it has
+    # not; an X program's STRING-only copy (Q) read as UTF-8.
+    c.desk_offers(103, 'clipboard')
+    m = c.mark()
+    key(KEY_6)
+    c.answer(103, 'héllo € wörld'.encode())
+    c.pastes('clipboard', 'STRING', 'héllo ? wörld'.encode('latin-1'), m)
+    c.put('copy-latin1', 'café crème'.encode('latin-1'))
+    key(KEY_Q)
+    seq = c.offered('clipboard')
+    got = c.read(seq)
+    check(got == 'café crème'.encode(), lambda: 'a STRING copy read as %r' % got)
+
+    # Large, INCR both ways: an X program's 700001 bytes (its own 32 KiB
+    # chunks) to the desktop; the desktop's to X empty, one byte under the
+    # 64 KiB chunk, exactly it, and 700001 bytes.
+    big = noise(700001, 1)
+    c.put('copy', big)
+    key(KEY_1)
+    seq = c.offered('clipboard')
+    got = c.read(seq, wait=20)
+    check(got == big, lambda: 'an X program\'s 700001 bytes read as %d, differing' % len(got))
+    sizes = []
+    for n, offer in ((0, 104), (65535, 105), (65536, 106), (700001, 107)):
+        data = noise(n, n)
+        c.desk_offers(offer, 'clipboard')
+        m = c.mark()
+        key(KEY_4)
+        c.answer(offer, data)
+        c.pastes('clipboard', 'UTF8_STRING', data, m)
+        sizes.append('%d%s' % (n, '(incr)' if n >= 65536 else ''))
+
+    # A secret: an X program's (3) offered with the hint; the desktop's
+    # listed in TARGETS with it (9), pasted, and gone from X when the
+    # desktop clears it (the Vault's timer): no owner, nothing read.
+    secret = b'hunter2 from X'
+    c.put('copy', secret)
+    key(KEY_3)
+    seq = c.offered('clipboard', secret=True)
+    check(c.read(seq) == secret, 'the X secret read back differs')
+    c.desk_offers(110, 'clipboard', secret=True)
+    m = c.mark()
+    key(KEY_9)
+    c.saw('targets clipboard TARGETS,TIMESTAMP,UTF8_STRING,%s,STRING,TEXT,%s' % (TEXT, SECRET), m)
+    m = c.mark()
+    key(KEY_4)
+    c.answer(110, b'vault secret')
+    c.pastes('clipboard', 'UTF8_STRING', b'vault secret', m)
+    m = c.mark()
+    desk.send('CLIP clear 110')
+    c.saw('owner clipboard none', m)
+    m = c.mark()
+    key(KEY_4)
+    c.saw('pasted clipboard UTF8_STRING none', m)
+    desk.quiet(0.3)
+
+    # The owner changes mid-transfer: the transfer is the old owner's to
+    # finish. The desktop's 700001 bytes to X with a new desktop offer
+    # after 300000 of them; then an X program's 500001 to the desktop, a
+    # new offer after 200000 read.
+    old = noise(700001, 7)
+    c.desk_offers(111, 'clipboard')
+    m = c.mark()
+    key(KEY_4)
+    pause = (threading.Event(), threading.Event())
+    c.answer(111, old, between=pause)
+    check(pause[0].wait(10), lambda: 'the first 300000 bytes were not taken:\n' + c.why())
+    c.desk_offers(112, 'clipboard')
+    pause[1].set()
+    c.pastes('clipboard', 'UTF8_STRING', old, m)
+    m = c.mark()
+    key(KEY_4)
+    c.answer(112, b'the newer offer')
+    c.pastes('clipboard', 'UTF8_STRING', b'the newer offer', m)
+    xold = noise(500001, 8)
+    c.put('copy', xold)
+    key(KEY_1)
+    seq = c.offered('clipboard')
+    r = c.ask(seq)
+    try:
+        first = c.read_all(r, limit=200000)
+        m = c.mark()
+        desk.send('CLIP offer 113 clipboard %s' % TEXT)
+        c.saw('lost clipboard', m)
+        got = first + c.read_all(r, wait=20)
+    finally:
+        os.close(r)
+    check(got == xold, lambda: 'the X program\'s bytes read across its loss: %d, differing' % len(got))
+
+    def responsive(why):
+        """The compositor answers the desktop while a transfer stalls."""
+        m = c.mark()
+        t0 = time.time()
+        desk.send('WINDOW size 1 401 300 activated')
+        c.saw('configure 401x300', m)
+        took = time.time() - t0
+        check(took < IDLE_MS / 1000.0 - 0.5, '%s: the compositor took %.1f s to answer' % (why, took))
+        m = c.mark()
+        desk.send('WINDOW size 1 400 300 activated')
+        c.saw('configure 400x300', m)
+        return took
+
+    # A requestor that never takes an INCR's chunks (7): the compositor
+    # answers meanwhile, lets it go at the deadline, and closes the
+    # desktop's pipe.
+    count = log().count('the requestor took nothing for %d ms; let go' % IDLE_MS)
+    c.desk_offers(114, 'clipboard')
+    m = c.mark()
+    key(KEY_7)
+    writer, wrote = c.answer(114, noise(700001, 14))
+    c.saw('pasted clipboard UTF8_STRING stalled', m)
+    stall_a = responsive('an X requestor stalled')
+    wait_for(lambda: log().count('the requestor took nothing for %d ms; let go' % IDLE_MS) > count,
+             lambda: 'a stalled X requestor was not let go:\n' + c.why(), 10)
+    writer.join(5)
+    check(not writer.is_alive() and isinstance(wrote['error'], BrokenPipeError),
+          lambda: 'the desktop\'s pipe to a stalled requestor stayed open (%r)' % (wrote['error'],))
+    m = c.mark()
+    key(KEY_4)
+    c.answer(114, b'after the stall')
+    c.pastes('clipboard', 'UTF8_STRING', b'after the stall', m)
+
+    # A reader (the desktop) that never reads an X program's 700001 bytes:
+    # let go at the deadline, the X program's INCR still finished.
+    c.put('copy', noise(700001, 15))
+    key(KEY_1)
+    seq = c.offered('clipboard')
+    count = log().count('the reader took nothing for %d ms; let go' % IDLE_MS)
+    r = c.ask(seq)
+    stall_b = responsive('a desktop reader stalled')
+    wait_for(lambda: log().count('the reader took nothing for %d ms; let go' % IDLE_MS) > count,
+             lambda: 'a stalled reader was not let go:\n' + c.why(), 10)
+    os.close(r)
+
+    # An X owner that answers TARGETS and never the data (0): the read ends
+    # empty at the deadline.
+    c.put('copy', b'never sent')
+    key(KEY_0)
+    seq = c.offered('clipboard')
+    t0 = time.time()
+    got = c.read(seq, wait=10)
+    took = time.time() - t0
+    check(got == b'' and took >= IDLE_MS / 1000.0 - 0.5 and 'gave nothing for %d ms; ended' % IDLE_MS in log(),
+          lambda: 'a silent X owner: read %r after %.1f s:\n%s' % (got, took, c.why()))
+
+    # Wayland programs: the stand-in with --clip copies (C, P) and X
+    # pastes them (4, 5); X copies (1) and it pastes (V).
+    cross = 'none (no wl_standin_client)'
+    if wl_standin:
+        out_path = os.path.join(work, 'wl-standin.out')
+        client = cg.start([wl_standin, '--clip', 'Wayland clip'], dict(env, WAYLAND_DISPLAY='blit-0'),
+                          open(out_path, 'w'))
+        wl_printed = lambda: open(out_path).read()
+        try:
+            wid = int(c.match(r'WINDOW new (\d+) 0').group(1))
+            for want in ('WINDOW title %d Wayland clip' % wid, 'WINDOW appid %d blit.standin' % wid,
+                         'WINDOW limits %d 64 48 0 0' % wid, 'WINDOW decor %d server' % wid):
+                c.match(re.escape(want))
+            wait_for(lambda: (desk.quiet(0.1), wid in desk.input_socks)[1],
+                     lambda: 'no INPUT sock for window %d' % wid)
+            route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            route.connect(desk.input_socks[wid])
+            count = [0]
+
+            def wl_key(code):
+                text = ''
+                for state in ('press', 'release'):
+                    count[0] += 1
+                    text += 'INPUT key %d %d %s\nINPUT frame %d %d\n' % (BLIT_PICTURE, code, state, BLIT_PICTURE,
+                                                                           count[0])
+                route.sendall(text.encode())
+            try:
+                m = c.mark()
+                wl_key(46)  # C: copies the clipboard
+                c.offered('clipboard')
+                c.saw('owner clipboard other', m)
+                m = c.mark()
+                key(KEY_4)
+                c.pastes('clipboard', 'UTF8_STRING', b'copied: ' + TEXT.encode(), m)
+                m = c.mark()
+                wl_key(25)  # P: copies the primary
+                c.match(r'CLIP offer \d+ primary %s' % re.escape(TEXT))
+                c.saw('owner primary other', m)
+                m = c.mark()
+                key(KEY_5)
+                c.pastes('primary', 'UTF8_STRING', b'copied: UTF8_STRING', m)
+                c.put('copy', b'from X to Wayland')
+                key(KEY_1)
+                xseq = c.offered('clipboard')
+                wl_key(47)  # V: pastes the clipboard
+                wait_for(lambda: 'STANDIN pasted clipboard from X to Wayland\n' in wl_printed(),
+                         lambda: 'the Wayland program did not paste X\'s copy:\n%s\n%s' % (wl_printed(), c.why()))
+            finally:
+                route.close()
+            # Its window closed: its primary source goes (`CLIP clear`).
+            desk.send('WINDOW close %d' % wid)
+            got = {c.match(r'CLIP clear \d+|WINDOW gone %d' % wid).group(0) for _ in range(2)}
+            check(any(g.startswith('CLIP clear') for g in got), 'the Wayland primary was not cleared: %r' % got)
+            check(client.wait(5) == 0, 'the Wayland clip stand-in failed:\n' + wl_printed())
+        finally:
+            if client.poll() is None:
+                client.kill()
+                client.wait()
+        # X gives its selection up (8): `CLIP clear` of its offer.
+        m = c.mark()
+        key(KEY_8)
+        c.saw('gave-up clipboard', m)
+        c.match(r'CLIP clear %d' % xseq)
+        cross = 'wl->X clipboard+primary, X->wl clipboard, gave-up->CLIP clear'
+    for thread in c.writers:
+        thread.join(5)
+    return ('selections: X->desk clipboard,primary,latin1->utf8 desk->X utf8,primary,STRING->latin1 '
+            'incr X->desk 700001, desk->X %s secret=hint both ways,TARGETS,cleared->none '
+            'owner-change-mid-transfer=finished both ways stalls=requestor %.2f s,reader %.2f s answered,'
+            'let go at %d ms; silent owner->empty %s'
+            % (','.join(sizes), stall_a, stall_b, IDLE_MS, cross))
+
+
+def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
+    """Xwayland killed while an X program owns PRIMARY and the desktop
+    CLIPBOARD: its offer cleared with its window, and the next Xwayland's
+    window manager owns CLIPBOARD again for the desktop. Returns the new
+    Xwayland's pid."""
+    def start(name):
+        out_path = os.path.join(work, name)
+        client = cg.start([standin], dict(env, XSTANDIN_CLIP_DIR=clip_dir), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        c = Clip(desk, printed, log, clip_dir)
+        wid = int(c.match(r'WINDOW new (\d+) 0', 20).group(1))
+        for _ in range(3):
+            c.match(r'WINDOW (title|appid|decor) %d .*' % wid)
+        desk.send('WINDOW size %d 400 300 activated' % wid)
+        wait_for(lambda: (desk.quiet(0.1), wid in desk.input_socks)[1], lambda: 'no INPUT sock for %d' % wid)
+        wait_for(lambda: 'XSTANDIN focus-in' in printed(), lambda: 'no FocusIn:\n' + printed())
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[wid])
+        count = [0]
+
+        def key(code):
+            text = ''
+            for state in ('press', 'release'):
+                count[0] += 1
+                text += 'INPUT key %d %d %s\nINPUT frame %d %d\n' % (BLIT_PICTURE, code, state, BLIT_PICTURE,
+                                                                       count[0])
+            route.sendall(text.encode())
+        return client, c, wid, route, key
+
+    client, c, wid, route, key = start('xstandin-2.out')
+    try:
+        c.put('copy-primary', b'dies with Xwayland')
+        key(KEY_2)
+        pseq = c.offered('primary')
+        c.desk_offers(120, 'clipboard')
+        ready = log().count('X: Xwayland ready on')
+        os.kill(xpid, signal.SIGKILL)
+        got = {c.match(r'CLIP clear \d+|WINDOW gone %d' % wid, 15).group(0) for _ in range(2)}
+        check(got == {'CLIP clear %d' % pseq, 'WINDOW gone %d' % wid},
+              lambda: 'after Xwayland died: %r, wanted CLIP clear %d and WINDOW gone %d' % (got, pseq, wid))
+        client.wait(10)
+    finally:
+        route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    wait_for(lambda: log().count('X: Xwayland ready on') > ready, lambda: 'Xwayland did not start again:\n' + log(),
+             30)
+    xpid = int(re.findall(r'X: Xwayland \S+ started on \S+, pid (\d+)', log())[-1])
+    client, c, wid, route, key = start('xstandin-3.out')
+    try:
+        m = c.mark()
+        key(KEY_4)
+        c.answer(120, b'kept across Xwayland')
+        c.pastes('clipboard', 'UTF8_STRING', b'kept across Xwayland', m)
+        desk.send('WINDOW close %d' % wid)
+        c.match(r'WINDOW gone %d' % wid)
+        check(client.wait(5) == 0, 'the third X client failed')
+    finally:
+        route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return xpid, 'restart=X primary cleared+gone, desktop clipboard owned again and pasted'
+
+
+def x_part(compositor, standin, server, work, wl_standin=None):
     keymap, repeat = blit_keymap(server, work)
     runtime = os.path.join(work, 'run')
     os.mkdir(runtime, 0o700)
@@ -533,7 +1017,9 @@ def x_part(compositor, standin, server, work):
               'a plain Wayland client is shown %s' % seen)
 
         out_path = os.path.join(work, 'xstandin.out')
-        cenv = dict(env, DISPLAY=display)
+        clip_dir = os.path.join(work, 'clip')
+        os.mkdir(clip_dir)
+        cenv = dict(env, DISPLAY=display, XSTANDIN_CLIP_DIR=clip_dir)
         client = cg.start([standin], cenv, open(out_path, 'w'))
         printed = lambda: open(out_path).read()
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Blit X stand-in', 'WINDOW appid 1 blit.xstandin',
@@ -634,6 +1120,8 @@ def x_part(compositor, standin, server, work):
                      lambda: 'the X client did not say %s:\n%s' % (printed_word, printed()))
 
         milestone_c = x_milestone_c(desk, lines_to, printed, lambda: open(log).read())
+        milestone_d = x_milestone_d(desk, lines_to, printed, lambda: open(log).read(), clip_dir, wl_standin,
+                                    env, work)
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
@@ -653,6 +1141,7 @@ def x_part(compositor, standin, server, work):
               lambda: 'the X client exited %d:\n%s' % (status, printed()))
         check('window 1: WM_DELETE_WINDOW' in open(log).read(), 'the log does not say WM_DELETE_WINDOW')
         route.close()
+        xpid, restart = x_restart_part(desk, standin, cenv, clip_dir, lambda: open(log).read(), work, xpid)
 
         desk.send('WINDOW quit 0')
         try:
@@ -667,10 +1156,11 @@ def x_part(compositor, standin, server, work):
               'the X socket or lock outlived the compositor')
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
-                '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s '
-                'close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
+                '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s %s '
+                'close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
-                                     measure.group(1), measure.group(2), frames, milestone_c, len(desk.cursors)))
+                                     measure.group(1), measure.group(2), frames, milestone_c, milestone_d, restart,
+                                     len(desk.cursors)))
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
@@ -686,9 +1176,10 @@ def x_part(compositor, standin, server, work):
 def main():
     compositor, standin = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
     server = os.path.abspath(sys.argv[3]) if len(sys.argv) > 3 else None
+    wl_standin = os.path.abspath(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else None
     work = tempfile.mkdtemp(prefix='blit-xwayland-gate-')
     try:
-        result = x_part(compositor, standin, server, work)
+        result = x_part(compositor, standin, server, work, wl_standin)
         print('XWAYLAND_X_OK %s' % result)
         m = re.search(r'measure=min (\d+) us median (\d+) us', result)
         print('XWAYLAND_MEASURE commit-to-frame-sent first 60 frames: min %s us, median %s us'
