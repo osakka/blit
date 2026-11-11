@@ -859,3 +859,14 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   `BLIT_COMPOSITOR_XWAYLAND=none` is gone: that variable only names a
   stand-in Xwayland now. `compositor_gate` runs with `--x11 off` and
   checks a value other than on or off is refused.
+- **A stuck Ctrl-D (0.3.83, 2026-11-11).** On the owner's mini PC every
+  xterm closed within 20 ms of opening after one had been ended with
+  Ctrl-D. Traced on the machine: xterm itself wrote `\4` to its shell
+  after receiving X auto-repeated KeyRelease/KeyPress of D with Control:
+  Xwayland still held Ctrl and D down, because when the focused surface
+  was destroyed the compositor only dropped its keyboard focus -- no key
+  releases, no leave, and its own keys-down and modifier state kept for
+  the next window. The focused surface going now takes the keyboard away
+  as any focus change does (keys released, modifiers cleared, leave).
+  `compositor_gate` checks it with a client that destroys its window on
+  Ctrl+D and stays; it failed before the fix.

@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -52,7 +52,11 @@
    With --popup, after its first frame it opens one xdg_popup of 80x60
    (anchor rectangle 10,20 30x40, anchor bottom-left, gravity bottom-right,
    offset 2,3: at 12,63 of the toplevel), draws the same pattern in it on
-   its configure, and destroys it on popup_done. With --popup-move, after
+   its configure, and destroys it on popup_done. With --gone-on-ctrl-d, a
+   D pressed with Control down destroys its window (the client stays,
+   printing `STANDIN gone`) and the keyboard's leave then ends it, as an X
+   terminal's window goes under Xwayland when its shell exits on Ctrl-D.
+   With --popup-move, after
    the popup's first frame it repositions it (xdg_popup.reposition, offset
    12,13: at 22,73) and prints `STANDIN popup repositioned <token>`.
 
@@ -170,6 +174,8 @@ struct standin {
     int32_t want_w, want_h;
     int closed;
     int want_popup;
+    int gone_on_ctrl_d, gone;     /* --gone-on-ctrl-d: Ctrl+D destroys the window, as a shell's exit takes an X terminal's */
+    uint32_t mods_dep;            /* the depressed modifiers, as last told */
     int popup_move, popup_moved;  /* --popup-move: reposition it once, after its first frame */
     struct wl_surface *popup_surface;
     /* --sub */
@@ -726,8 +732,11 @@ static void keyboard_enter(void *data, struct wl_keyboard *k, uint32_t serial,
 static void keyboard_leave(void *data, struct wl_keyboard *k, uint32_t serial,
                            struct wl_surface *surface)
 {
+    struct standin *s = data;
     (void)k; (void)serial;
     printf("STANDIN keyboard leave %s\n", surface_name(data, surface));
+    /* Gone: the leave is the last of it; the client ends. */
+    if (s->gone) s->closed = 1;
 }
 
 static void clip_key(struct standin *s, uint32_t key, uint32_t serial);
@@ -738,6 +747,22 @@ static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uin
     struct standin *s = data;
     (void)k; (void)time;
     printf("STANDIN key %u %u\n", key, state);
+    if (s->gone_on_ctrl_d && !s->gone && key == 32 && state == WL_KEYBOARD_KEY_STATE_PRESSED &&
+        (s->mods_dep & 4u)) {
+        /* Its window goes with Ctrl and D still down; the client stays
+           (Xwayland when xterm's shell exits on Ctrl-D). */
+        if (s->popup) popup_done(s, s->popup);
+        if (s->decoration) zxdg_toplevel_decoration_v1_destroy(s->decoration);
+        s->decoration = NULL;
+        xdg_toplevel_destroy(s->toplevel);
+        xdg_surface_destroy(s->xdg_surface);
+        wl_surface_destroy(s->surface);
+        s->toplevel = NULL;
+        s->xdg_surface = NULL;
+        s->surface = NULL;
+        s->gone = 1;
+        printf("STANDIN gone\n");
+    }
     if (s->lock && key == 57 && state == WL_KEYBOARD_KEY_STATE_PRESSED) lock_next(s);
     if (s->clip && state == WL_KEYBOARD_KEY_STATE_PRESSED) clip_key(s, key, serial);
     fflush(stdout);
@@ -974,7 +999,9 @@ static void clip_key(struct standin *s, uint32_t key, uint32_t serial)
 static void keyboard_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t dep,
                                uint32_t lat, uint32_t lock, uint32_t group)
 {
-    (void)data; (void)k; (void)serial;
+    struct standin *s = data;
+    (void)k; (void)serial;
+    s->mods_dep = dep;
     printf("STANDIN modifiers %u %u %u %u\n", dep, lat, lock, group);
 }
 
@@ -1331,6 +1358,7 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--popup-move") == 0) s.want_popup = s.popup_move = 1;
+        else if (strcmp(argv[i], "--gone-on-ctrl-d") == 0) s.gone_on_ctrl_d = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
@@ -1420,9 +1448,9 @@ int main(int argc, char **argv)
         wl_surface_destroy(s.child_surface);
     }
     if (s.decoration) zxdg_toplevel_decoration_v1_destroy(s.decoration);
-    xdg_toplevel_destroy(s.toplevel);
-    xdg_surface_destroy(s.xdg_surface);
-    wl_surface_destroy(s.surface);
+    if (s.toplevel) xdg_toplevel_destroy(s.toplevel);
+    if (s.xdg_surface) xdg_surface_destroy(s.xdg_surface);
+    if (s.surface) wl_surface_destroy(s.surface);
     /* After the window: it goes with its constraint still there. */
     if (s.locked) zwp_locked_pointer_v1_destroy(s.locked);
     if (s.confined) zwp_confined_pointer_v1_destroy(s.confined);

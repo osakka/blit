@@ -1772,7 +1772,15 @@ static void surface_destroyed(struct wl_resource *resource)
     feedback_discard(&surface->pending_feedback);
     feedback_discard(&surface->feedback);
     if (surface->pace) wl_event_source_remove(surface->pace);
-    if (surface->server->kbd_focus == surface) surface->server->kbd_focus = NULL;
+    /* The focused surface going takes the keyboard away as any focus change
+       does: every key still down released to its client, then the leave.
+       Clearing the focus alone left the keys down -- in the compositor's
+       state, so the next window got a stale Control, and in the client's:
+       Xwayland kept them pressed and repeated them, so a Ctrl-D that ended
+       one xterm was typed into every X window focused after it, which
+       exited at once. Its resource is still valid here; the client sees
+       the leave's surface as gone. */
+    if (surface->server->kbd_focus == surface) keyboard_focus(surface->server, NULL);
     constraint_surface_gone(surface);
     if (surface->server->ptr_focus == surface) {
         surface->server->ptr_focus = NULL;

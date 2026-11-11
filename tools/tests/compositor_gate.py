@@ -713,7 +713,8 @@ def input_part(server, compositor, standin, work):
         desk = Desktop(listener)
         desk.line('WINDOW display blit-0 -')
         out_path = os.path.join(work, 'standin-input.out')
-        client = start([standin, '--popup', 'Input'], dict(cenv, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        client = start([standin, '--popup', '--gone-on-ctrl-d', 'Input'], dict(cenv, WAYLAND_DISPLAY='blit-0'),
+                       open(out_path, 'w'))
         printed = lambda: open(out_path).read()
         for want in ('WINDOW new 1 0', 'WINDOW title 1 Input', 'WINDOW appid 1 blit.standin',
                      'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
@@ -817,9 +818,21 @@ def input_part(server, compositor, standin, work):
         # keyboard leaves.
         route.close()
         seen('key 31 0', 'keyboard leave main')
-        desk.send('WINDOW close 1')
+        # The window goes with keys still down while its client stays (an
+        # X terminal whose shell exits on Ctrl-D, under Xwayland): the
+        # stand-in destroys it on Ctrl+D. The keyboard leaves it as at any
+        # focus change -- every key down released to the client, the
+        # modifiers cleared, then the leave -- so no key stays pressed for
+        # the client's next window (Xwayland repeated a stuck Ctrl-D into
+        # every X window focused after one closed that way).
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        lines_to('key 1 29 press', 'key 1 32 press')
+        seen('keyboard enter main', 'modifiers 0 0 0 0', 'key 29 1', 'modifiers 4 0 0 0', 'key 32 1',
+             'key 29 0', 'key 32 0', 'modifiers 0 0 0 0', 'keyboard leave none')
         desk.line('WINDOW gone 1')
-        check(client.wait(5) == 0, 'the input stand-in failed:\n' + printed())
+        check(client.wait(5) == 0 and 'STANDIN gone' in printed(), 'the input stand-in failed:\n' + printed())
+        route.close()
         quit_compositor(desk, comp)
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not installed:\n' + text)
@@ -830,7 +843,8 @@ def input_part(server, compositor, standin, work):
         check(installs == 3 and same >= 2,
               '%d keymaps installed, %d unchanged:\n%s' % (installs, same, text))
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
-                'relative=7,-3+-2,5 focus=line,!activated,route-end %s' % (len(keymap), e2e))
+                'relative=7,-3+-2,5 focus=line,!activated,route-end,gone-with-keys-down->released %s'
+                % (len(keymap), e2e))
     finally:
         for p in (client, comp):
             if p and p.poll() is None:
