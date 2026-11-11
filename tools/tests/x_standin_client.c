@@ -23,11 +23,19 @@
         through the grab) dismisses it, as does Escape or the top-level
         losing X's focus (FocusOut, as Chromium closes its menus when its
         window is deactivated); either way it is destroyed and ungrabbed.
-     N  the same menu, 100x60, placed past the top-level's right edge with
-        WM_TRANSIENT_FOR naming the top-level
-     T  open a dialog: a 200x100 top-level with WM_TRANSIENT_FOR the main
-        one and WM_NORMAL_HINTS minimum 150x80, maximum 300x200; its
+     N  the same menu, 100x60 at 450,320 (inside the dialog, past the
+        top-level), with WM_TRANSIENT_FOR naming the top-level
+     O  the same menu at 330,40, reaching past the top-level's right edge;
+        S, while a menu is open, a submenu at 90,10 from it (80x50, no
+        grab), which goes with the menu
+     T  open a dialog: a 200x100 top-level at 300,250 from the main one
+        (overlapping it and past it), WM_TRANSIENT_FOR the main one and
+        WM_NORMAL_HINTS minimum 150x80, maximum 300x200; its
         WM_DELETE_WINDOW destroys it
+     P  open a panel: a 200x100 top-level asking for 1800,1000 (past the
+        root's edge), maximized from the start (_NET_WM_STATE before its
+        map); J then sets its WM_TRANSIENT_FOR to the main one
+     I  WM_CHANGE_STATE IconicState (the program minimizing its window)
      L  WM_NORMAL_HINTS on the main window: a base size of 200x150 and no
         minimum (the minimum is the base size, ICCCM)
      F  _NET_WM_STATE toggle full screen (a client message to the root)
@@ -36,7 +44,8 @@
      H  the next press sends _NET_WM_MOVERESIZE size bottom-right
      R  _NET_WM_MOVERESIZE move now, with no button down
      C  the window's cursor: a glyph of the core cursor font, named "xterm"
-        (XFixesSetCursorName, as libXcursor names the themed ones)
+        (XFixesSetCursorName, as libXcursor names the themed ones); U the
+        same named "nosuchcursor", a name Blit has no pointer for
 
    It prints one line per event, flushed:
 
@@ -51,20 +60,24 @@
      XSTANDIN button <n> <x>,<y>         a ButtonPress, in the window
      XSTANDIN animated <n>
      XSTANDIN menu <x>,<y> <w>x<h> grab <pointer> <keyboard>
-                                         a menu mapped at x, y (root), its
-                                         grabs' statuses (0 success)
+                                         a menu mapped at x, y from the
+                                         top-level, its grabs' statuses (0
+                                         success)
+     XSTANDIN submenu
      XSTANDIN menu-choice <x>,<y>        a press in the menu
      XSTANDIN menu-key <keycode>         a key the menu's grab got
      XSTANDIN menu-dismissed <why>       a press outside, escape, focus-out
      XSTANDIN dialog                     the dialog mapped
      XSTANDIN dialog-button <n> <x>,<y>  a ButtonPress in the dialog
+     XSTANDIN panel | panel-button <n> <x>,<y> | panel-transient | panel-delete
+     XSTANDIN iconify
      XSTANDIN dialog-delete              its WM_DELETE_WINDOW
      XSTANDIN limits                     the L key
      XSTANDIN state <atoms>              _NET_WM_STATE as the window manager
                                          wrote it: fullscreen, maximized-vert,
                                          maximized-horz, focused, or none
      XSTANDIN moveresize <direction> <button>   sent
-     XSTANDIN cursor xterm
+     XSTANDIN cursor <name>
      XSTANDIN delete                     WM_DELETE_WINDOW: it exits 0
 
    and exits 1 when its connection fails or ends otherwise.
@@ -97,6 +110,12 @@
 #define KEYCODE_H 43
 #define KEYCODE_R 27
 #define KEYCODE_C 54
+#define KEYCODE_U 30
+#define KEYCODE_O 32
+#define KEYCODE_S 39
+#define KEYCODE_I 31
+#define KEYCODE_P 33
+#define KEYCODE_J 44
 /* _NET_WM_MOVERESIZE's directions (EWMH) */
 #define MOVERESIZE_SIZE_BOTTOMRIGHT 4
 #define MOVERESIZE_MOVE 8
@@ -107,11 +126,11 @@
 
 static xcb_connection_t *conn;
 static xcb_screen_t *screen;
-static xcb_window_t window, menu, dialog;
+static xcb_window_t window, menu, submenu, dialog, panel;
 static xcb_gcontext_t gc, fill;
 static uint16_t width = 320, height = 200;
 static uint16_t menu_w, menu_h;
-static xcb_atom_t protocols, delete_window, utf8, net_wm_name, motif_hints, transient_atom, net_wm_state,
+static xcb_atom_t change_state, protocols, delete_window, utf8, net_wm_name, motif_hints, transient_atom, net_wm_state,
     state_fullscreen, state_max_vert, state_max_horz, state_focused, moveresize;
 
 static void say(const char *fmt, ...)
@@ -215,14 +234,36 @@ static void menu_open(int16_t dx, int16_t dy, uint16_t mw, uint16_t mh, int tran
                                                         XCB_CURSOR_NONE, XCB_CURRENT_TIME), NULL);
     gk = xcb_grab_keyboard_reply(conn, xcb_grab_keyboard(conn, 0, menu, XCB_CURRENT_TIME, XCB_GRAB_MODE_ASYNC,
                                                           XCB_GRAB_MODE_ASYNC), NULL);
-    say("menu %d,%d %ux%u grab %d %d", ox + dx, oy + dy, mw, mh, gp ? gp->status : -1, gk ? gk->status : -1);
+    say("menu %d,%d %ux%u grab %d %d", dx, dy, mw, mh, gp ? gp->status : -1, gk ? gk->status : -1);
     free(gp);
     free(gk);
+}
+
+/* A submenu of the open menu: override-redirect at 90,10 from the menu,
+   past its window's edge when the menu is near it, no grab of its own. */
+static void submenu_open(void)
+{
+    uint32_t values[2];
+    xcb_translate_coordinates_reply_t *t;
+    if (!menu || submenu) return;
+    t = xcb_translate_coordinates_reply(conn, xcb_translate_coordinates(conn, menu, screen->root, 0, 0), NULL);
+    submenu = xcb_generate_id(conn);
+    values[0] = screen->white_pixel;
+    values[1] = 1;
+    xcb_create_window(conn, XCB_COPY_FROM_PARENT, submenu, screen->root, (int16_t)((t ? t->dst_x : 0) + 90),
+                      (int16_t)((t ? t->dst_y : 0) + 10), 80, 50, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT,
+                      screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT, values);
+    free(t);
+    xcb_map_window(conn, submenu);
+    xcb_flush(conn);
+    say("submenu");
 }
 
 static void menu_close(void)
 {
     if (!menu) return;
+    if (submenu) xcb_destroy_window(conn, submenu);
+    submenu = 0;
     xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);
     xcb_ungrab_keyboard(conn, XCB_CURRENT_TIME);
     xcb_destroy_window(conn, menu);
@@ -248,11 +289,14 @@ static void dialog_open(void)
     static const char name[] = "X stand-in dialog";
     static const char wm_class[] = "xstandin\0blit.xstandin";
     uint32_t values[2];
+    int16_t ox, oy;
     if (dialog) return;
+    origin(&ox, &oy);
     dialog = xcb_generate_id(conn);
     values[0] = screen->white_pixel;
     values[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_BUTTON_PRESS;
-    xcb_create_window(conn, XCB_COPY_FROM_PARENT, dialog, screen->root, 50, 50, 200, 100, 0,
+    xcb_create_window(conn, XCB_COPY_FROM_PARENT, dialog, screen->root, (int16_t)(ox + 300), (int16_t)(oy + 250),
+                      200, 100, 0,
                       XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK,
                       values);
     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dialog, net_wm_name, utf8, 8, (uint32_t)strlen(name), name);
@@ -262,6 +306,33 @@ static void dialog_open(void)
     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dialog, transient_atom, XCB_ATOM_WINDOW, 32, 1, &window);
     normal_hints(dialog, 16 | 32, 150, 80, 300, 200, 0, 0);  /* PMinSize | PMaxSize */
     xcb_map_window(conn, dialog);
+    xcb_flush(conn);
+}
+
+/* A second plain top-level, asking to be at 1800,1000 -- past the root's
+   edge (1920x1080 until an output says more) -- and maximized from the
+   start (_NET_WM_STATE before its map); its WM_DELETE_WINDOW destroys it. */
+static void panel_open(void)
+{
+    static const char name[] = "X stand-in panel";
+    static const char wm_class[] = "xstandin\0blit.xstandin";
+    uint32_t values[2];
+    xcb_atom_t maximized[2];
+    if (panel) return;
+    panel = xcb_generate_id(conn);
+    values[0] = screen->white_pixel;
+    values[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_BUTTON_PRESS;
+    xcb_create_window(conn, XCB_COPY_FROM_PARENT, panel, screen->root, 1800, 1000, 200, 100, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK,
+                      values);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, panel, net_wm_name, utf8, 8, (uint32_t)strlen(name), name);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, panel, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
+                        sizeof(wm_class), wm_class);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, panel, protocols, XCB_ATOM_ATOM, 32, 1, &delete_window);
+    maximized[0] = state_max_vert;
+    maximized[1] = state_max_horz;
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, panel, net_wm_state, XCB_ATOM_ATOM, 32, 2, maximized);
+    xcb_map_window(conn, panel);
     xcb_flush(conn);
 }
 
@@ -308,9 +379,8 @@ static void state_say(void)
     free(r);
 }
 
-static void cursor_named(void)
+static void cursor_named(const char *name)
 {
-    static const char name[] = "xterm";
     xcb_font_t font = xcb_generate_id(conn);
     xcb_cursor_t cursor = xcb_generate_id(conn);
     xcb_xfixes_query_version_reply_t *v =
@@ -365,6 +435,7 @@ int main(int argc, char **argv)
     state_max_horz = atom("_NET_WM_STATE_MAXIMIZED_HORZ");
     state_focused = atom("_NET_WM_STATE_FOCUSED");
     moveresize = atom("_NET_WM_MOVERESIZE");
+    change_state = atom("WM_CHANGE_STATE");
 
     window = xcb_generate_id(conn);
     values[0] = screen->black_pixel;
@@ -414,6 +485,10 @@ int main(int argc, char **argv)
                     draw_fill(menu, menu_w, menu_h);
                 } else if (dialog && e->window == dialog) {
                     draw_fill(dialog, 200, 100);
+                } else if (panel && e->window == panel) {
+                    draw_fill(panel, 200, 100);
+                } else if (submenu && e->window == submenu) {
+                    draw_fill(submenu, 80, 50);
                 }
                 break;
             }
@@ -421,6 +496,7 @@ int main(int argc, char **argv)
                 xcb_map_notify_event_t *m = (xcb_map_notify_event_t *)ev;
                 if (m->window == window) say("mapped");
                 else if (dialog && m->window == dialog) say("dialog");
+                else if (panel && m->window == panel) say("panel");
                 break;
             }
             case XCB_CONFIGURE_NOTIFY: {
@@ -455,6 +531,7 @@ int main(int argc, char **argv)
                 xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
                 if (menu && k->event == menu) {
                     say("menu-key %u", k->detail);
+                    if (k->detail == KEYCODE_S) submenu_open();
                     if (k->detail == KEYCODE_ESCAPE) {
                         menu_close();
                         say("menu-dismissed escape");
@@ -477,7 +554,21 @@ int main(int argc, char **argv)
                 } else if (k->detail == KEYCODE_M) {
                     menu_open(30, 40, 120, 90, 0);
                 } else if (k->detail == KEYCODE_N) {
-                    menu_open((int16_t)(width + 10), 10, 100, 60, 1);
+                    menu_open(450, 320, 100, 60, 1);
+                } else if (k->detail == KEYCODE_O) {
+                    menu_open(330, 40, 120, 90, 0);
+                } else if (k->detail == KEYCODE_I) {
+                    ewmh(change_state, 3, 0, 0, 0, 0);  /* IconicState */
+                    say("iconify");
+                } else if (k->detail == KEYCODE_P) {
+                    panel_open();
+                } else if (k->detail == KEYCODE_J && panel) {
+                    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, panel, transient_atom, XCB_ATOM_WINDOW, 32, 1,
+                                        &window);
+                    xcb_flush(conn);
+                    say("panel-transient");
+                } else if (k->detail == KEYCODE_U) {
+                    cursor_named("nosuchcursor");
                 } else if (k->detail == KEYCODE_T) {
                     dialog_open();
                 } else if (k->detail == KEYCODE_L) {
@@ -495,7 +586,7 @@ int main(int argc, char **argv)
                 } else if (k->detail == KEYCODE_R) {
                     moveresize_send(0, 0, MOVERESIZE_MOVE, 1);
                 } else if (k->detail == KEYCODE_C) {
-                    cursor_named();
+                    cursor_named("xterm");
                 } else if (k->detail == KEYCODE_SPACE && animate == 0) {
                     animate = ANIMATE_FRAMES;
                     animated = 0;
@@ -518,6 +609,10 @@ int main(int argc, char **argv)
                     say("dialog-button %u %d,%d", b->detail, b->event_x, b->event_y);
                     break;
                 }
+                if (panel && b->event == panel) {
+                    say("panel-button %u %d,%d", b->detail, b->event_x, b->event_y);
+                    break;
+                }
                 say("button %u %d,%d", b->detail, b->event_x, b->event_y);
                 if (press_sends) {
                     /* As a toolkit does before it asks: its own implicit
@@ -536,6 +631,13 @@ int main(int argc, char **argv)
                         xcb_destroy_window(conn, dialog);
                         xcb_flush(conn);
                         dialog = 0;
+                        break;
+                    }
+                    if (panel && m->window == panel) {
+                        say("panel-delete");
+                        xcb_destroy_window(conn, panel);
+                        xcb_flush(conn);
+                        panel = 0;
                         break;
                     }
                     say("delete");
