@@ -259,54 +259,121 @@ static int frame_input_member_gone(BlitSession *session, BlitFrameMember *m)
     return m->seen || frame_was_deleted(session, m->image_id);
 }
 
-/* The one rule: on, the focused session's, the console Blit's, the image
-   there, the compositor still there. */
-static int frame_input_live(BlitRuntime *runtime, const BlitFrameClient *client, BlitFrameInput *in)
+/* The route's session while the route can take input at all: on, the
+   console Blit's, the image there, the compositor still there; else NULL. */
+static BlitSession *frame_input_usable(BlitRuntime *runtime, const BlitFrameClient *client,
+                                       BlitFrameInput *in)
 {
     BlitSession *session;
     if (in == NULL || in->broken != NULL || !in->on || runtime->console_away ||
         !blit_vt_active())
-        return 0;
+        return NULL;
     session = find_session_id(runtime, client->session_id);
-    return session != NULL && session->focused && !frame_input_image_gone(session, in);
+    return session != NULL && !frame_input_image_gone(session, in) ? session : NULL;
+}
+
+/* The session under Blit's pointer; the focused one while Blit knows no
+   pointer position yet (no motion since it started), or none is there. */
+static BlitSession *frame_input_under_pointer(BlitRuntime *runtime)
+{
+    int column, row, px, py, i;
+    BlitSession *under = NULL;
+    if (runtime->pointer_valid)
+        under = mouse_target_px(runtime, runtime->pointer_output, runtime->pointer_x,
+                                runtime->pointer_y, &column, &row, &px, &py);
+    for (i = 0; under == NULL && i < BLIT_MAX_SESSIONS; ++i)
+        if (runtime->sessions[i].used && runtime->sessions[i].focused)
+            under = &runtime->sessions[i];
+    return under;
+}
+
+/* Which route gets what (docs/api.md, "Program windows"): a desktop gives
+   each display's session its own route to a window and turns them all on
+   together, and Blit picks per event. Keys go to the route in Blit's
+   focused session -- `live`; the pointer (motion, presses, the wheel) to
+   the route in the session under the pointer, so a window shown on a
+   display other than the focused session's, or over the seam between two,
+   takes the pointer where it is. Before, the pointer too went only to the
+   focused session's route: a window raised from a menu on one display and
+   shown on another got no motion and its first click at a stale point. */
+static int frame_input_live(BlitRuntime *runtime, const BlitFrameClient *client, BlitFrameInput *in)
+{
+    BlitSession *session = frame_input_usable(runtime, client, in);
+    return session != NULL && session->focused;
+}
+
+static int frame_input_pointer_live(BlitRuntime *runtime, const BlitFrameClient *client,
+                                    BlitFrameInput *in)
+{
+    BlitSession *session = frame_input_usable(runtime, client, in);
+    return session != NULL && session == frame_input_under_pointer(runtime);
+}
+
+/* Every key pressed through the route released. */
+static void frame_input_end_keys(BlitRuntime *runtime, const BlitFrameClient *client, BlitFrameInput *in)
+{
+    unsigned int code;
+    if (in == NULL)
+        return;
+    for (code = 0; code < sizeof(in->keys) && in->keys[code] == 0; ++code) {}
+    if (code == sizeof(in->keys))
+        return;  /* nothing held */
+    for (code = 0; code <= KEY_MAX; ++code)
+        if (frame_input_key_held(in, code)) {
+            frame_input_key_mark(in, code, 0);
+            frame_input_line(find_session_id(runtime, client->session_id), in,
+                             "INPUT key %u %u release\n", in->image_id, code);
+        }
+}
+
+/* Every button pressed through the route released. */
+static void frame_input_end_buttons(BlitRuntime *runtime, const BlitFrameClient *client,
+                                    BlitFrameInput *in)
+{
+    int i;
+    if (in == NULL || in->buttons == 0)
+        return;
+    for (i = 0; i < 3; ++i)
+        if (in->buttons & (1u << i)) {
+            in->buttons &= ~(1u << i);
+            frame_input_line(find_session_id(runtime, client->session_id), in,
+                             "INPUT btn %u %u release\n", in->image_id, frame_input_button_code(i));
+        }
 }
 
 /* Every key and button pressed through the route released. */
 static void frame_input_end(BlitRuntime *runtime, const BlitFrameClient *client, BlitFrameInput *in)
 {
-    BlitSession *session;
-    unsigned int code;
-    int i;
-    if (in == NULL)
-        return;
-    if (in->buttons == 0) {
-        for (code = 0; code < sizeof(in->keys) && in->keys[code] == 0; ++code) {}
-        if (code == sizeof(in->keys))
-            return;  /* nothing held */
-    }
-    session = find_session_id(runtime, client->session_id);
-    for (code = 0; code <= KEY_MAX; ++code)
-        if (frame_input_key_held(in, code)) {
-            frame_input_key_mark(in, code, 0);
-            frame_input_line(session, in, "INPUT key %u %u release\n", in->image_id, code);
-        }
-    for (i = 0; i < 3; ++i)
-        if (in->buttons & (1u << i)) {
-            in->buttons &= ~(1u << i);
-            frame_input_line(session, in, "INPUT btn %u %u release\n", in->image_id,
-                             frame_input_button_code(i));
-        }
+    frame_input_end_keys(runtime, client, in);
+    frame_input_end_buttons(runtime, client, in);
 }
 
-/* The route brought in line with the rule: while live, sent the keymap
-   when it has not been sent this revision (ADR 0228); when not, ended
-   with its releases. Returns whether it is live. */
+/* The route's buttons brought in line: a button pressed through it stays
+   its own until released -- a drag goes on across the seam between two
+   displays -- unless the route can take no input, or its session is
+   neither the focused one nor under the pointer (one display showing
+   another session now). Returns whether the pointer is the route's. */
+static int frame_input_pointer_sync(BlitRuntime *runtime, const BlitFrameClient *client,
+                                    BlitFrameInput *in)
+{
+    BlitSession *session = frame_input_usable(runtime, client, in);
+    BlitSession *under = frame_input_under_pointer(runtime);
+    if (session == NULL || (!session->focused && session != under)) {
+        frame_input_end_buttons(runtime, client, in);
+        return 0;
+    }
+    return session == under;
+}
+
+/* The route brought in line with the keys' rule: while live, sent the
+   keymap when it has not been sent this revision (ADR 0228); when not,
+   its keys released. Returns whether it is live. */
 static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client, BlitFrameInput *in)
 {
     if (in == NULL)
         return 0;
     if (!frame_input_live(runtime, client, in)) {
-        frame_input_end(runtime, client, in);
+        frame_input_end_keys(runtime, client, in);
         return 0;
     }
     if (in->keymap_told != runtime->keymap_revision) {
@@ -358,6 +425,7 @@ static void frame_input_reconcile(BlitRuntime *runtime)
                 continue;
             }
             frame_input_sync(runtime, client, in);
+            frame_input_pointer_sync(runtime, client, in);
             if (session != NULL) {
                 /* A member ends with its picture. */
                 int m = 0;
@@ -484,8 +552,10 @@ static void frame_input_button(BlitRuntime *runtime, int button, int pressed)
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            if (in == NULL || !frame_input_sync(runtime, client, in) ||
-                (!pressed && !(in->buttons & (1u << button))))
+            /* A press to the route under the pointer; a release to the
+               route the button was pressed through. */
+            int here = in != NULL && frame_input_pointer_sync(runtime, client, in);
+            if (in == NULL || (pressed && !here) || (!pressed && !(in->buttons & (1u << button))))
                 continue;
             if (pressed)
                 in->buttons |= 1u << button;
@@ -510,7 +580,7 @@ static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int directi
             continue;
         for (k = 0; k < client->input_capacity; ++k) {
             BlitFrameInput *in = client->inputs[k];
-            if (in == NULL || !frame_input_sync(runtime, client, in) || direction == 0)
+            if (in == NULL || !frame_input_pointer_sync(runtime, client, in) || direction == 0)
                 continue;
             frame_input_line(find_session_id(runtime, client->session_id), in,
                              "INPUT wheel %u %d %d\n", in->image_id,
@@ -591,7 +661,7 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
     }
 }
 
-/* The absolute pointer, to the live route only. */
+/* The absolute pointer, to the route in the session under it. */
 static void frame_input_pointer(BlitRuntime *runtime)
 {
     int i, k;
@@ -600,7 +670,7 @@ static void frame_input_pointer(BlitRuntime *runtime)
         if (!client->used)
             continue;
         for (k = 0; k < client->input_capacity; ++k)
-            if (client->inputs[k] != NULL && frame_input_sync(runtime, client, client->inputs[k]))
+            if (client->inputs[k] != NULL && frame_input_pointer_sync(runtime, client, client->inputs[k]))
                 frame_input_pointer_route(runtime, client, client->inputs[k]);
     }
 }
@@ -1142,16 +1212,19 @@ static size_t frame_input_json(BlitRuntime *runtime, const BlitSession *session,
                                        in->members[m].image_id, in->members[m].x, in->members[m].y);
             /* `picture`: whether the route's picture is in this session -- not
                come yet, or drawn in another display's session, is `absent`:
-               keys still go to a live route, the pointer cannot. */
+               keys still go to a live route, the pointer cannot. `state`
+               `live` is the keys' (the focused session's); `pointer.here`
+               the pointer's (the session under it). */
             n = snprintf(entry, sizeof(entry), "%s{\"image\":%u,\"picture\":\"%s\",\"state\":\"%s\","
                          "\"hold\":\"%s\",\"members\":[%s],"
-                         "\"pointer\":{\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
+                         "\"pointer\":{\"here\":%s,\"surface\":[%d,%d],\"draw\":[%d,%d,%d,%d],"
                          "\"over\":%u,\"sent\":[%.1f,%.1f],\"miss\":\"%s\"}}",
                          first ? "" : ",", in->image_id,
                          session != NULL && graphics_image_find((BlitSession *)session, in->image_id) != NULL
                              ? "present" : "absent",
                          !in->on ? "off" : frame_input_live(runtime, client, in) ? "live" : "on",
                          in->confine ? "confine" : "relative", members,
+                         frame_input_pointer_live(runtime, client, in) ? "true" : "false",
                          in->last_surface[0], in->last_surface[1],
                          in->last_draw[0], in->last_draw[1], in->last_draw[2], in->last_draw[3],
                          in->last_over, in->last_sent[0], in->last_sent[1],

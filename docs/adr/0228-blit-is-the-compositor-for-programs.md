@@ -870,3 +870,14 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   as any focus change does (keys released, modifiers cleared, leave).
   `compositor_gate` checks it with a client that destroys its window on
   Ctrl+D and stays; it failed before the fix.
+- **The pointer where it is (0.3.83, 2026-11-11).** Firefox raised from a
+  menu on one display and shown on the other took no pointer: Blit sent
+  the pointer only to the route in its focused session, the display the
+  menu was on, though the agreed rule (0.3.77, with Hibr's hold, which
+  gives every display's session a route and turns them all on) is keys
+  from the focused session and the pointer from the session under it.
+  Fixed in Blit's frames input: motion, presses and the wheel go to the
+  route in the session under the pointer, a release to the route its
+  press went through (a drag goes on across the seam), keys to the
+  focused session's as before; `frames.input` says `pointer.here`.
+  `frame_input_gate`'s new two-display mode failed before the fix.

@@ -1952,9 +1952,16 @@ trailing newline is optional.
   is on per session: `INPUT on` turns off any other route of the same
   session, on any of its connections, releasing what it held first, so two
   windows never both get the keys even if an `off` is lost. A route is live
-  only while it is on, its connection's session is Blit's focused session,
-  the console is Blit's and its image exists; the desktop, which alone
-  knows which of its windows has focus, sends these.
+  -- it gets the keys -- only while it is on, its connection's session is
+  Blit's focused session, the console is Blit's and its image exists; the
+  desktop, which alone knows which of its windows has focus, sends these.
+  The pointer -- motion, presses, the wheel -- goes to the on route in the
+  session under the pointer (from 0.3.83; before, only to the live one),
+  so a window shown on a display other than the focused session's, or
+  over the seam between two, takes the pointer where it is; a button's
+  release goes to the route it was pressed through, so a drag goes on
+  across the seam, and a route lets go of its buttons when its session is
+  neither focused nor under the pointer.
 - `INPUT hold <image-id> relative|confine` says what the route does while
   its session holds pointer lock (`?7701`); it may be sent any time after
   `INPUT sock`, and neither takes nor gives back the lock, which stays the
@@ -1992,9 +1999,10 @@ trailing newline is optional.
   scroll notches and motions sent, all routes of the session), `dropped`
   (lines a route's socket could not take), `last_error` (an INPUT code, or
   `sock-disconnected`/`sock-full`), and `routes`, one per route: its
-  `image`, `state` (`off`, `on` while on but not live, or `live`), `hold`
-  (`relative` or `confine`), and `pointer`, the last absolute pointer for diagnosing its
-  mapping: `surface` (where it was on the session's surface, in pixels),
+  `image`, `state` (`off`, `on` while on but not live, or `live`: the
+  keys'), `hold` (`relative` or `confine`), and `pointer`, the last absolute pointer for diagnosing its
+  mapping: `here` (whether the pointer is the route's now: on, in the
+  session under the pointer), `surface` (where it was on the session's surface, in pixels),
   `draw` (the picture's drawn rectangle it was mapped through, x, y, width,
   height), `over` (the picture it was over: the route's own or a member's,
   0 before any), `sent` (the position sent to the compositor), and `miss`

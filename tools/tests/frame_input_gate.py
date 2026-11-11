@@ -189,7 +189,7 @@ class Session:
     the gate puts in its command file, so the gate can place, delete and
     lock without a second channel."""
 
-    def __init__(self, server, work, name):
+    def __init__(self, server, work, name, display='display-1'):
         self.server = server
         self.dir = os.path.join(work, name)
         os.mkdir(self.dir)
@@ -200,7 +200,7 @@ class Session:
                       "( while :; do if [ -f {d}/cmd ]; then cat {d}/cmd; rm -f {d}/cmd; fi; "
                       "sleep 0.05; done ) & exec cat > {d}/input\n".format(d=self.dir))
         self.id = server.api('POST', '/v1/terminal-sessions',
-                             {'command': '/bin/sh', 'arguments': [script], 'display_id': 'display-1',
+                             {'command': '/bin/sh', 'arguments': [script], 'display_id': display,
                               'surface': {'width': 40, 'height': 12}})['id']
         wait_for(lambda: os.path.exists(os.path.join(self.dir, 'env')), 'session %s did not start' % name)
         child = dict(line.rstrip('\n').split('=', 1)
@@ -1187,10 +1187,101 @@ def sock():
           % (','.join(cases), moves, confine, notices, frames, several))
 
 
+def displays():
+    """Two displays, a session on each, and the same window routed from
+    both, as a desktop gives each display's session its own route and turns
+    them all on (docs/api.md). Keys go to the route in Blit's focused
+    session; the pointer -- motion, the wheel, a press -- to the route in
+    the session under it, though that one is not focused; a button's
+    release to the route it was pressed through, after a drag onto the
+    other display. Before 0.3.83 the pointer went only to the focused
+    session's route: a window shown on the other display got no motion and
+    its first click at a stale point."""
+    work = tempfile.mkdtemp(prefix='blit-input-displays-gate-')
+    server = Server(19839 + OFFSET, work)
+    receivers = []
+    try:
+        one = server.api('GET', '/v1/displays/display-1')['bounds']
+        two = server.api('GET', '/v1/displays/display-2')['bounds']
+        check(two['x'] >= one['x'] + one['width'] or two['y'] >= one['y'] + one['height'],
+              'the two displays overlap: %s %s' % (one, two))
+        a = Session(server, work, 'a', 'display-1')
+        b = Session(server, work, 'b', 'display-2')
+        server.focus(a.id)
+        cha, chb = Channel(a), Channel(b)
+        cha.frame(41, 1)
+        chb.frame(42, 1)
+        wait_for(lambda: a.graphics(41) and b.graphics(42), 'the pictures did not land')
+        place(a, 41, 3, 5, 20, 5)
+        place(b, 42, 3, 5, 20, 5)
+        ra, rb = LineReceiver(work, 'input-a'), LineReceiver(work, 'input-b')
+        receivers.extend((ra, rb))
+        check(cha.ask('INPUT sock 41 %s\n' % ra.path) == b'INPUT ok 41\n', 'route 41 refused')
+        ra.accept()
+        check(chb.ask('INPUT sock 42 %s\n' % rb.path) == b'INPUT ok 42\n', 'route 42 refused')
+        rb.accept()
+        cha.line('INPUT on 41\n')
+        chb.line('INPUT on 42\n')
+        wait_for(lambda: state(server, a.id, 41) == 'live' and state(server, b.id, 42) == 'on',
+                 lambda: 'routes: %s %s' % (server.input(a.id), server.input(b.id)))
+        ra.read(0.3)
+        rb.read(0.3)
+        ra.drain()
+        rb.drain()
+
+        # Keys: the focused session's route only.
+        for v in (1, 0):
+            server.inject({'kind': 'key', 'code': 30, 'value': v})
+        ra.expect(['key 41 30 press', 'key 41 30 release'], 'keys to the focused session\'s route')
+        rb.nothing('keys to the route of a session not focused')
+
+        # The pointer over the picture on display 2: display 2's route,
+        # though display 1's session has the focus. The surface's origin
+        # from the session's own pixel report, as the sock part finds it.
+        server.inject({'kind': 'pointer_motion', 'x': two['x'] + 301, 'y': two['y'] + 101})
+        report = wait_for(lambda: re.findall(rb'\x1b\[<35;(\d+);(\d+)M', b.sent()),
+                          'no pixel report from display 2\'s session: %r' % b.sent()[-200:])[-1]
+        origin = (two['x'] + 301 - (int(report[0]) - 1), two['y'] + 101 - (int(report[1]) - 1))
+        rb.drain()
+        g = wait_for(lambda: b.graphics(42), 'image 42 is gone')
+        at = [p for p in g['placements'] if p['id'] == 1][0]
+        sx, sy = at['width'] // 2, at['height'] // 2
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + sx, 'y': origin[1] + at['y'] + sy})
+        rb.expect(['ptr 42 %.2f %.2f' % (sx * FRAME_W / at['width'], sy * FRAME_H / at['height'])],
+                  'motion over the picture on the display not focused')
+        ra.nothing('motion to the focused session\'s route, the pointer elsewhere')
+        here = lambda session, image: route(server.input(session), image)['pointer']['here']
+        check(here(b.id, 42) and not here(a.id, 41) and state(server, a.id, 41) == 'live',
+              'frames.input: %s %s' % (server.input(a.id), server.input(b.id)))
+        server.inject({'kind': 'pointer_wheel', 'delta': -1})
+        rb.expect(['wheel 42 0 1'], 'the wheel where the pointer is')
+        ra.nothing('the wheel to the focused session\'s route')
+
+        # A press there; then a drag onto display 1 and the release: the
+        # release to the route the press went through.
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': True})
+        rb.expect(['btn 42 272 press'], 'the press where the pointer is')
+        ra.nothing('the press to the focused session\'s route')
+        server.inject({'kind': 'pointer_motion', 'x': one['x'] + 3, 'y': one['y'] + 3})
+        time.sleep(0.3)
+        server.inject({'kind': 'pointer_button', 'button': 0, 'pressed': False})
+        rb.expect(['btn 42 272 release'], 'the release after a drag onto the other display')
+        ra.nothing('the release to a route that never had the press')
+        return ('keys=focused(41) pointer=under(42,not-focused) wheel=under press=under '
+                'release=pressed-route(drag-across) here=diagnostic')
+    finally:
+        for r in receivers:
+            r.close()
+        server.stop()
+
+
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else 'local'
     if mode == 'sock':
         TAG = 'FRAME_INPUT_SOCK'
         sock()
+    elif mode == 'displays':
+        TAG = 'FRAME_INPUT_DISPLAYS'
+        print('FRAME_INPUT_DISPLAYS_PASS %s' % displays())
     else:
         local()
