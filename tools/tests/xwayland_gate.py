@@ -338,8 +338,10 @@ def x_part(compositor, standin, server, work):
                     continue
                 check(got[1] == 'WINDOW decor 1 %s' % decor, 'got %r, expected WINDOW decor 1 %s' % (got[1], decor))
                 break
-            check('XSTANDIN %s' % printed_word in printed(), lambda: 'the X client did not say %s:\n%s'
-                  % (printed_word, printed()))
+            # The compositor can see the property before the client's own
+            # line is out: waited for, not checked at once.
+            wait_for(lambda: 'XSTANDIN %s' % printed_word in printed(),
+                     lambda: 'the X client did not say %s:\n%s' % (printed_word, printed()))
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
