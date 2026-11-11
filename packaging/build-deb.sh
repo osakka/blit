@@ -438,11 +438,13 @@ echo "$soutput"
 
 # ADR 0228: Blit's Wayland compositor for programs, its own package at
 # Blit's version, suggested by blit. It is the only part of Blit that links
-# libwayland-server and libxkbcommon, so blit itself gains neither. Built
-# by tools/build-tcc.sh from the system's protocol XML (libwayland-bin,
-# wayland-protocols), into a protocol directory of its own in the staging
-# area. Xwayland is Recommended, as the ADR decided: phase 2 runs X11
-# programs under it; phase 1 does not start it, so it is not Depended.
+# libwayland-server, libxkbcommon and libxcb (the X window manager of its
+# Xwayland, with the composite, xfixes and res extensions), so blit itself
+# gains none of them. Built by tools/build-tcc.sh from the system's
+# protocol XML (libwayland-bin, wayland-protocols), into a protocol
+# directory of its own in the staging area. Xwayland is Recommended, as
+# the ADR decided: without it the compositor serves Wayland programs only
+# and says so.
 cstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-compositor-deb.XXXXXX")
 trap 'rm -rf "$stage" "$sstage" "$cstage"' EXIT HUP INT TERM
 cdoc=$cstage/pkg/usr/share/doc/blit-compositor
@@ -465,13 +467,16 @@ them and reconnects to the same socket for up to 60 seconds. It composites
 nothing: each Wayland window is one picture by descriptor on Blit's frame
 channel (wl_shm copied, dmabuf by its own planes), placed and sized by the
 desktop, and its keyboard and mouse come straight from Blit, with the
-keymap and key repeat of Blit's own keyboard settings.
+keymap and key repeat of Blit's own keyboard settings. With Xwayland 23.1
+or later installed (recommended) it runs it for X11 programs, on the
+first free X display, and is its window manager: each X window is a
+picture as a Wayland one is, and the desktop exports DISPLAY beside
+WAYLAND_DISPLAY.
 
 The design is ADR 0228, "Blit is the compositor for programs"
 (docs/adr/0228-blit-is-the-compositor-for-programs.md), and the wire is
 docs/api.md, "Program windows", both installed by the blit package under
-/usr/share/doc/blit/docs/. Phase 2 runs X11 programs under Xwayland, which
-this package recommends.
+/usr/share/doc/blit/docs/.
 EOF
 cat > "$cdoc/copyright" <<EOF
 blit-compositor is part of Blit, Copyright (C) 2026 Omar Sakka, built from
@@ -485,10 +490,11 @@ any later version. On Debian systems the licence text is in
 Its protocol code is generated at build time by wayland-scanner from the
 Wayland protocol descriptions of Debian's wayland-protocols (xdg-shell,
 xdg-decoration, linux-dmabuf, presentation-time, relative-pointer,
-pointer-constraints; Expat/MIT licence, see
+pointer-constraints, xwayland-shell; Expat/MIT licence, see
 /usr/share/doc/wayland-protocols/copyright on a system that has it). It
-links libwayland-server.so.0 and libxkbcommon.so.0 at run time (MIT
-licences; their own copyright files are under /usr/share/doc/).
+links libwayland-server.so.0, libxkbcommon.so.0, libxcb.so.1,
+libxcb-composite.so.0, libxcb-xfixes.so.0 and libxcb-res.so.0 at run time
+(MIT licences; their own copyright files are under /usr/share/doc/).
 EOF
 chmod 0644 "$cdoc/README" "$cdoc/copyright"
 cat > "$cstage/pkg/DEBIAN/control" <<EOF
@@ -498,13 +504,14 @@ Section: x11
 Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
-Depends: blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0
+Depends: blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0
 Recommends: xwayland
 Description: Blit's Wayland compositor for programs in Hibr windows
  blit-compositor is the Wayland compositor for the programs of one Blit
  desktop session: each window is a picture on Blit's frame channel, placed
  and sized by the desktop, with keyboard and mouse straight from Blit and
- Blit's keymap (ADR 0228). Xwayland, recommended, is for X11 programs.
+ Blit's keymap (ADR 0228). With Xwayland, recommended, it runs X11
+ programs too, as their window manager.
 EOF
 coutput=$OUT/blit-compositor_${pkgver}_amd64.deb
 dpkg-deb --build --root-owner-group "$cstage/pkg" "$coutput" >/dev/null

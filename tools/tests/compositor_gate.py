@@ -60,6 +60,14 @@ F_GET_SEALS = 1034
 TOKEN = 'compositor-gate-token'
 
 
+def compositor_env(**more):
+    """blit-compositor's environment (gate_env.process_env) with X off:
+    BLIT_COMPOSITOR_XWAYLAND=none, so `WINDOW display` says `-` for X
+    whether or not the host has Xwayland (tools/tests/xwayland_gate.py is
+    the gate with it on)."""
+    return gate_env.process_env(BLIT_COMPOSITOR_XWAYLAND='none', **more)
+
+
 def fail(why):
     print('COMPOSITOR_GATE_FAIL %s' % why, file=sys.stderr)
     sys.exit(1)
@@ -696,14 +704,14 @@ def input_part(server, compositor, standin, work):
         keymap = answer.read()
         repeat = (int(answer.headers['X-Blit-Repeat-Rate']), int(answer.headers['X-Blit-Repeat-Delay']))
         check(answer.headers['X-Blit-Keymap-Device'] == keyboards[0], 'the default is not keyboard A')
-        cenv = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+        cenv = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                     XDG_RUNTIME_DIR=runtime)
         for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_API_TOKEN'):
             cenv.pop(k, None)
         log = os.path.join(work, 'compositor-input.log')
         comp = start([compositor, '--log', log], cenv, open(os.path.join(work, 'compositor-input.out'), 'w'))
         desk = Desktop(listener)
-        desk.line('WINDOW display blit-0')
+        desk.line('WINDOW display blit-0 -')
         out_path = os.path.join(work, 'standin-input.out')
         client = start([standin, '--popup', 'Input'], dict(cenv, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
         printed = lambda: open(out_path).read()
@@ -852,7 +860,7 @@ def lock_part(compositor, standin, work):
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind('\0' + name)
     listener.listen(2)
-    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     env.pop('WAYLAND_DISPLAY', None)
     env.pop('BLIT_SERVER_PORT', None)
@@ -861,7 +869,7 @@ def lock_part(compositor, standin, work):
     client = None
     try:
         desk = Desktop(listener)
-        desk.line('WINDOW display blit-0')
+        desk.line('WINDOW display blit-0 -')
         out_path = os.path.join(work, 'standin-lock.out')
         client = start([standin, '--lock', 'Lock'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
         printed = lambda: open(out_path).read()
@@ -1046,7 +1054,7 @@ def dmabuf_part(compositor, standin, work):
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind('\0' + name)
     listener.listen(2)
-    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     env.pop('WAYLAND_DISPLAY', None)
     log = os.path.join(work, 'compositor-dmabuf.log')
@@ -1054,7 +1062,7 @@ def dmabuf_part(compositor, standin, work):
     clients = []
     try:
         desk = Desktop(listener, b'OK dmabuf=1 fence=0 formats=XR24/0,AR24/0 window=1\n')
-        desk.line('WINDOW display blit-0')
+        desk.line('WINDOW display blit-0 -')
         cenv = dict(env, WAYLAND_DISPLAY='blit-0')
         out_path = os.path.join(work, 'standin-dmabuf.out')
         client = start([standin, '--dmabuf', 'Dmabuf'], cenv, open(out_path, 'w'))
@@ -1205,7 +1213,7 @@ def sub_restart_part(compositor, standin, work):
     os.mkdir(runtime, 0o700)
     name = 'blit-compositor-gate-sub-restart-%d' % os.getpid()
     listener = listen(name)
-    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     for k in ('WAYLAND_DISPLAY', 'BLIT_COMPOSITOR_RECONNECT_MS'):
         env.pop(k, None)
@@ -1214,7 +1222,7 @@ def sub_restart_part(compositor, standin, work):
     client = None
     try:
         desk = Desktop(listener)
-        desk.line('WINDOW display blit-0')
+        desk.line('WINDOW display blit-0 -')
         out_path = os.path.join(work, 'standin-sub-restart.out')
         client = start([standin, '--sub', '--clip', 'Subbed'], dict(env, WAYLAND_DISPLAY='blit-0'),
                        open(out_path, 'w'))
@@ -1243,7 +1251,7 @@ def sub_restart_part(compositor, standin, work):
         time.sleep(0.5)
         listener = listen(name)
         desk = Desktop(listener)
-        desk.line('WINDOW display blit-0')
+        desk.line('WINDOW display blit-0 -')
         for want in hints:
             desk.line(want)
         desk.line('WINDOW sub 2 1 20 30 64 40 above')
@@ -1297,7 +1305,7 @@ def restart_part(compositor, standin, work):
     display = 'gate-display'
     answer = b'OK dmabuf=1 fence=0 formats=XR24/0,AR24/0 window=1\n'
     listener = listen(name)
-    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime)
     for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_COMPOSITOR_RECONNECT_MS'):
         env.pop(k, None)
@@ -1308,7 +1316,7 @@ def restart_part(compositor, standin, work):
     comp2 = None
     try:
         desk = Desktop(listener, answer)
-        desk.line('WINDOW display %s' % display)
+        desk.line('WINDOW display %s -' % display)
         check(os.path.exists(os.path.join(runtime, display)) and
               not [f for f in os.listdir(runtime) if '-input' in f],
               'no %s, or an input socket before any window, in XDG_RUNTIME_DIR: %s'
@@ -1386,7 +1394,7 @@ def restart_part(compositor, standin, work):
         listener = listen(name)
         desk = Desktop(listener, answer)
         back = time.time() - lost
-        desk.line('WINDOW display %s' % display)
+        desk.line('WINDOW display %s -' % display)
         for image, title in ((1, 'Held'), (2, 'Kept'), (3, 'Late')):
             for want in ('WINDOW new %d 0' % image, 'WINDOW title %d %s' % (image, title),
                          'WINDOW appid %d blit.standin' % image, 'WINDOW limits %d 64 48 0 0' % image,
@@ -1439,7 +1447,7 @@ def restart_part(compositor, standin, work):
         log2 = os.path.join(work, 'compositor-gone.log')
         comp2 = start([compositor, '--log', log2], env2, open(os.path.join(work, 'compositor-gone.out'), 'w'))
         desk = Desktop(listener)
-        desk.line('WINDOW display blit-0')
+        desk.line('WINDOW display blit-0 -')
         gone_path = os.path.join(work, 'standin-gone.out')
         gone = start([standin, 'Gone'], dict(env2, WAYLAND_DISPLAY='blit-0'), open(gone_path, 'w'))
         clients.append(gone)
@@ -1509,7 +1517,7 @@ def desktop_part(compositor, standin, work):
     listener.listen(2)
     # The reconnect bound shortened (for gates only): the ending below is
     # the one after it.
-    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
                XDG_RUNTIME_DIR=runtime, BLIT_COMPOSITOR_RECONNECT_MS='600')
     env.pop('WAYLAND_DISPLAY', None)
     log = os.path.join(work, 'compositor.log')
@@ -1518,9 +1526,10 @@ def desktop_part(compositor, standin, work):
     try:
         desk = Desktop(listener)
         got = desk.next()
-        check(got and got[0] == 'line' and got[1].startswith('WINDOW display '),
-              'the first line is %r, not WINDOW display' % (got,))
-        display = got[1].split(' ', 2)[2]
+        check(got and got[0] == 'line' and got[1].startswith('WINDOW display ') and
+              len(got[1].split(' ')) == 4 and got[1].endswith(' -'),
+              'the first line is %r, not WINDOW display <name> - (X off)' % (got,))
+        display = got[1].split(' ')[2]
         check(display == 'blit-0', 'the first free socket is blit-0, not %r' % display)
         check(os.path.exists(os.path.join(runtime, display)), 'no socket %s in XDG_RUNTIME_DIR' % display)
 
@@ -1695,7 +1704,7 @@ def blit_part(server, compositor, standin, work):
             check(got == b'ERROR 0 EINVAL\n', 'a version %d hello was answered %r' % (version, got))
         v5 = Peer(name, token, 5)
         check(v5.hello == b'OK dmabuf=0 window=0\n', 'a version 5 hello was answered %r' % v5.hello)
-        for line, want in ((b'WINDOW display blit-0\n', b'WINDOW error 0 ENOTSUP\n'),
+        for line, want in ((b'WINDOW display blit-0 -\n', b'WINDOW error 0 ENOTSUP\n'),
                            (b'WINDOW new 7 0\n', b'WINDOW error 7 ENOTSUP\n'),
                            (b'WINDOW size 7 320 200', b'WINDOW error 7 ENOTSUP\n'),
                            (b'WINDOW gone x\n', b'WINDOW error 0 ENOTSUP\n')):
@@ -1709,7 +1718,7 @@ def blit_part(server, compositor, standin, work):
         # picks) -- a client is never left waiting -- and nothing more.
         runtime = os.path.join(work, 'run-blit')
         os.mkdir(runtime, 0o700)
-        cenv = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=token,
+        cenv = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=token,
                     XDG_RUNTIME_DIR=runtime)
         log = os.path.join(work, 'compositor-blit.log')
         comp = start([compositor, '--log', log], cenv, subprocess.DEVNULL)

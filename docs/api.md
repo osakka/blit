@@ -2012,8 +2012,10 @@ until the next Blit, `--display`, programs that survive a desktop restart
 and `WINDOW quit 0`), and Blit its
 `window=0` answer, `GET /v1/input/keymap`, `INPUT sock`, `INPUT member`
 and `INPUT keymap`; no desktop implements its side yet. `blit-compositor`
-is Blit's Wayland compositor for programs (and, in phase 2, their X window
-manager). It composites nothing: each window is one picture by descriptor.
+is Blit's Wayland compositor for programs and, from phase 2 (milestone A,
+unreleased until the next Blit: "X programs" below), the X window manager
+of the Xwayland it runs for X programs. It composites nothing: each window
+is one picture by descriptor.
 It speaks the frame channel above as a producer, with these additions.
 
 - **Who starts it.** The desktop, once per desktop session, with the
@@ -2022,7 +2024,8 @@ It speaks the frame channel above as a producer, with these additions.
   through `hold`. It connects to whatever those variables name, as any
   producer does. It creates `$XDG_RUNTIME_DIR/<name>`, a Wayland
   socket owned by the desktop's user, and says its name (below); the
-  desktop puts it in every program's environment as `WAYLAND_DISPLAY`.
+  desktop puts it in every program's environment as `WAYLAND_DISPLAY`,
+  and the X display of its Xwayland, when there is one, as `DISPLAY`.
   The desktop may pick the name, `blit-compositor --display <name>`, so it
   can export `WAYLAND_DISPLAY` before the compositor answers; without it
   the compositor takes the first free `blit-<n>`. A name is printable
@@ -2037,9 +2040,13 @@ It speaks the frame channel above as a producer, with these additions.
   `window=1` in its `OK` line does not speak `WINDOW`; the compositor then
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
-  The compositor's first line after `OK` is `WINDOW display <name>`, on
-  every connection (a reconnect too: "Programs survive a desktop
-  restart").
+  The compositor's first line after `OK` is `WINDOW display <name>
+  <x-display>`, on every connection (a reconnect too: "Programs survive a
+  desktop restart"): `<name>` the Wayland display, `<x-display>` the X
+  display of its Xwayland, `:<n>`, or `-` when X is off (no Xwayland 23.1
+  or later on `PATH`, no free X display, or Xwayland given up after dying
+  at once three times: "X programs" below). The desktop exports both:
+  `WAYLAND_DISPLAY=<name>`, and `DISPLAY=:<n>` unless it is `-`.
 - **One grammar, version 5** (Blit 0.3.74 and Hibr 0.99.482, which ship
   together: the `blit` package Breaks `hibr (<< 0.99.482)` and Hibr's
   Breaks `blit (<< 0.3.74)`, so there are no compatibility forms). Every
@@ -2059,8 +2066,8 @@ It speaks the frame channel above as a producer, with these additions.
   EINVAL` (a malformed STA1, or a message too short to name its picture),
   `FRAME error 0 EACCES` (the session's user signed out; the connection then
   closes), `INPUT error 0 <code>` and `WINDOW error 0 <code>` (a line with
-  no readable id, or `WINDOW display <name>`, which names a display, not a
-  picture), and `WINDOW quit 0` (the whole compositor). The hello and its
+  no readable id, or `WINDOW display <name> <x-display>`, which names the
+  displays, not a picture), and `WINDOW quit 0` (the whole compositor). The hello and its
   answer are not picture lines and keep their shapes: `OK dmabuf=0
   window=0`, `OK dmabuf=1 fence=<0|1> formats=<list> window=0`, `ERROR 0
   EACCES`, `ERROR 0 EINVAL`; Blit refuses a hello of version 1 to 4 (or
@@ -2305,6 +2312,34 @@ It speaks the frame channel above as a producer, with these additions.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
+- **X programs** (ADR 0228 phase 2, milestone A: one X program in a window,
+  keys and mouse; built in blit-compositor, unreleased until the next
+  Blit). The compositor runs Xwayland (23.1 or later, upstream's X server,
+  `Recommends` of its package) on the first free X display `:<n>`, said on
+  `WINDOW display`, and is its window manager. An X top-level window is a
+  window as a Wayland one is, in the same id space, on the same lines:
+  `WINDOW new <id> 0`, `WINDOW title` (its `_NET_WM_NAME`, else
+  `WM_NAME`), `WINDOW appid` (the class of its `WM_CLASS`), `WINDOW decor
+  <id> server` (X programs leave their frame to the window manager: the
+  desktop draws it), `INPUT sock`, and each frame of its Xwayland surface
+  as a frame of the picture (`FRM1`; `FRM3` when the peer imports dmabufs
+  and Xwayland draws with them). The desktop's `WINDOW size` resizes the
+  X window to exactly that size (`0 0` leaves it to the program) and,
+  with `activated`, gives it X's input focus (and `_NET_ACTIVE_WINDOW`);
+  the keyboard's first key from its route does so too. `WINDOW close`
+  asks the program to close it (`WM_DELETE_WINDOW`), or ends the program
+  when it takes no such request. The window's unmapping or destruction
+  is `WINDOW gone`; mapped again it is a new window with a new id. Keys
+  and the pointer come on its input socket as for any window. Not yet (milestone
+  C, D): override-redirect windows (an X menu or tooltip: not shown),
+  `WM_TRANSIENT_FOR` (every X window says parent 0), `WM_NORMAL_HINTS`
+  (no `WINDOW limits`), `_MOTIF_WM_HINTS`, `_NET_WM_STATE` full screen and
+  maximize, `_NET_WM_MOVERESIZE`, X cursors (an X window's pointer is
+  `WINDOW cursor <id> default`) and the X selections; each is noted once
+  in the compositor's log. When Xwayland dies, its windows are `WINDOW
+  gone` and it is started again on the same display; its X programs end
+  with it. `BLIT_COMPOSITOR_XWAYLAND`, for gates only, names another
+  Xwayland, or `none` for X off.
 - **Input straight from Blit.** blit-compositor takes its windows' input
   from Blit directly, not through the desktop's relay. It listens on an
   input socket of its own for each top-level (`SOCK_STREAM`) and asks once

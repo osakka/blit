@@ -1,5 +1,6 @@
 /* blit-compositor: Blit's Wayland compositor for programs (ADR 0228,
-   phase 1, milestones A, B and C).
+   phase 1, milestones A, B and C), and the X window manager of the
+   Xwayland it runs for X programs (phase 2, milestone A: the X section).
 
      blit-compositor [--display name] [--log path]
 
@@ -7,8 +8,9 @@
    BLIT_FRAME_SOCKET/BLIT_FRAME_TOKEN of the frame channel it serves. It
    connects there as a version 5 producer (blit_compositor_wire.h), listens
    on $XDG_RUNTIME_DIR/<name> (--display's, else blit-<n>, the first free n)
-   and says that name with `WINDOW display <name>`; the desktop puts it in
-   its programs' environment as WAYLAND_DISPLAY.
+   and says that name with `WINDOW display <name> <x-display>`; the desktop
+   puts them in its programs' environment as WAYLAND_DISPLAY and DISPLAY
+   (the X display `:<n>` of its Xwayland, `-` when X is off).
 
    Its programs survive a desktop restart (the restart section): when the
    channel closes, the compositor keeps every client and window, reconnects
@@ -46,11 +48,13 @@
    frame, and so no configure, which waits for the desktop's size.
 
    Built with tools/build-tcc.sh compositor, linked against
-   libwayland-server.so.0 and libxkbcommon.so.0. */
+   libwayland-server.so.0, libxkbcommon.so.0 and libxcb.so.1 with its
+   composite, xfixes and res extensions. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,8 +63,13 @@
 #include <poll.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <linux/dma-buf.h>
 #include <xkbcommon/xkbcommon.h>
+#include <xcb/xcb.h>
+#include <xcb/composite.h>
+#include <xcb/xfixes.h>
+#include <xcb/res.h>
 
 #include <wayland-server.h>
 #include <wayland-server-protocol.h>
@@ -74,6 +83,7 @@
 #include "primary-selection-unstable-v1-server-protocol.h"
 #include "cursor-shape-v1-server-protocol.h"
 #include "appmenu-server-protocol.h"
+#include "xwayland-shell-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 
 #ifndef BLIT_BUILD_VERSION
@@ -85,12 +95,13 @@
 #define BC_VERSION(want, iface) ((want) < (iface).version ? (want) : (iface).version)
 #define BC_SOCKETS 32
 
-enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE };
+enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE, BC_ROLE_XWAYLAND };
 enum { BC_LINK_UP = 0, BC_LINK_DOWN };
 
 struct bc_server;
 struct bc_xdg;
 struct bc_constraint;
+struct bc_xwin;
 
 /* One wl_output global per display mode the desktop has named with
    `WINDOW output` (the line carries the mode, not the display, so two
@@ -149,6 +160,17 @@ struct bc_surface {
     struct wl_resource *appmenu;
     char appmenu_service[256], appmenu_path[256];
     struct bc_constraint *constraint; /* its pointer lock or confinement, one at most */
+    /* An Xwayland surface (the X section): xwayland_surface_v1's serial,
+       pending and then committed (0 none), and its newest buffer, held
+       until the surface is matched to its X window; `xwl_matched` once it
+       is (shown, or of a window Blit does not show). */
+    struct wl_resource *xwl;
+    struct wl_list xwl_link;          /* bc_x.surfaces */
+    uint64_t xwl_serial, xwl_pending;
+    int xwl_matched;
+    struct wl_resource *xwl_held;
+    struct wl_listener xwl_held_destroy;
+    uint64_t commit_us;               /* when its newest commit came */
 };
 
 struct bc_positioner {
@@ -158,6 +180,11 @@ struct bc_positioner {
     int32_t dx, dy;
 };
 
+/* One picture: a window of one of two kinds -- an xdg toplevel, or an X
+   toplevel (`xwin`, the X section) -- or an xdg popup, or a subsurface.
+   A toplevel of either kind is announced, framed, routed and announced
+   again by the same code (window_is_toplevel); what only a kind can do
+   goes through window_configure, window_close and the keyboard's focus. */
 struct bc_xdg {
     /* A toplevel's own input socket, <display>-input-<id> (the input
        section): -1 until it is announced, closed when it goes. */
@@ -222,6 +249,50 @@ struct bc_xdg {
     int cached_attach, cached;
     struct wl_listener cached_buffer_destroy;
     struct wl_list cached_frames, cached_feedback;
+    /* An X toplevel (the X section): its X window; NULL for every other kind. */
+    struct bc_xwin *xwin;
+};
+
+/* Xwayland and its window manager (the X section). The atoms the window
+   manager names, in bc_atom_names' order. */
+enum {
+    BC_ATOM_WL_SURFACE_SERIAL, BC_ATOM_WL_SURFACE_ID, BC_ATOM_WM_PROTOCOLS,
+    BC_ATOM_WM_DELETE_WINDOW, BC_ATOM_WM_TAKE_FOCUS, BC_ATOM_WM_STATE, BC_ATOM_WM_CHANGE_STATE,
+    BC_ATOM_UTF8_STRING, BC_ATOM_NET_WM_NAME, BC_ATOM_NET_SUPPORTING_WM_CHECK,
+    BC_ATOM_NET_SUPPORTED, BC_ATOM_NET_ACTIVE_WINDOW, BC_ATOM_NET_WM_STATE,
+    BC_ATOM_NET_WM_STATE_FULLSCREEN, BC_ATOM_NET_WM_STATE_MAXIMIZED_VERT,
+    BC_ATOM_NET_WM_STATE_MAXIMIZED_HORZ, BC_ATOM_NET_WM_MOVERESIZE, BC_ATOM_NET_WM_WINDOW_TYPE,
+    BC_ATOM_WM_NORMAL_HINTS, BC_ATOM_MOTIF_WM_HINTS, BC_ATOM_WM_S0, BC_ATOM_NET_WM_CM_S0,
+    BC_ATOMS
+};
+
+struct bc_x {
+    int on;                           /* X programs are served: the display is ours */
+    int stopping;                     /* the compositor is ending: no restart */
+    char path[256];                   /* the Xwayland program */
+    char display[16];                 /* ":<number>", "-" when X is off */
+    int number;                       /* the display's number, -1 none */
+    int listen_fd[2];                 /* @/tmp/.X11-unix/X<n> and /tmp/.X11-unix/X<n> */
+    pid_t pid;                        /* Xwayland, 0 none */
+    struct wl_client *client;         /* its Wayland connection, the one it was given */
+    struct wl_listener client_gone;
+    int wm_fd;                        /* our end of -wm, until the window manager takes it */
+    int ready_fd;                     /* -displayfd: a line when it is ready */
+    struct wl_event_source *ready_source, *restart, *child;
+    uint64_t started_us;
+    int quick_deaths;                 /* deaths in a row within BC_X_QUICK_US of a start */
+    struct wl_global *shell;          /* xwayland_shell_v1, for that client only */
+    struct wl_list surfaces;          /* bc_surface with an xwayland_surface_v1 role */
+    /* the window manager, on the -wm connection */
+    xcb_connection_t *conn;
+    struct wl_event_source *wm_source;
+    xcb_screen_t *screen;
+    xcb_window_t wm_window;
+    xcb_atom_t atoms[BC_ATOMS];
+    int xres;                         /* X-Resource 1.2: a window's client pid */
+    struct wl_list windows;           /* bc_xwin: the root's children */
+    xcb_window_t focus;               /* the window given X focus, XCB_WINDOW_NONE none */
+    unsigned logged;                  /* BC_X_LOGGED_*: a later milestone's request, noted once */
 };
 
 /* The clipboard (ADR 0229): a program's selection source. */
@@ -296,6 +367,7 @@ struct bc_server {
     uint32_t buttons_down;            /* BTN_LEFT + n */
     uint32_t button_serial;           /* the serial of the newest press, sent to every pointer */
     int pointer_batch;                /* a pointer event since the last frame */
+    struct bc_x x;                    /* Xwayland and its window manager (the X section) */
     FILE *log;
     int status;
 };
@@ -308,6 +380,13 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface);
 static void constraints_window_gone(struct bc_xdg *x);
 static void constraint_ask_surface(struct bc_surface *surface);
 static void constraint_surface_gone(struct bc_surface *surface);
+static int x_hold(struct bc_surface *surface, struct wl_resource *buffer, int attached);
+static void x_surface_committed(struct bc_surface *surface);
+static void x_surface_gone(struct bc_surface *surface);
+static void x_frame_measure(struct bc_xdg *x, struct bc_surface *surface);
+static void x_configure(struct bc_xdg *x);
+static void x_close(struct bc_xdg *x);
+static void x_focus_follows(struct bc_server *s, struct bc_surface *surface);
 
 static void logf_(const char *fmt, ...)
 {
@@ -348,6 +427,12 @@ static void window_set_output(struct bc_xdg *x, struct bc_output *o);
 static struct bc_output *output_default(struct bc_server *s);
 static struct wl_resource *output_resource(struct bc_output *o, struct wl_client *client);
 
+/* A toplevel of either kind: an xdg toplevel or an X one. */
+static int window_is_toplevel(const struct bc_xdg *x)
+{
+    return x && (x->toplevel != NULL || x->xwin != NULL);
+}
+
 static int xdg_parent_id(struct bc_xdg *x)
 {
     return x->parent && x->parent->id ? (int)x->parent->id : 0;
@@ -384,6 +469,26 @@ static void send_decor(struct bc_xdg *x)
 {
     bc_wire_line(&x->server->wire, "WINDOW decor %u %s", x->id,
                  x->decor_mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE ? "server" : "client");
+}
+
+/* A toplevel's title and app id, from its program in whatever kind of
+   window: cleaned (bc_text_clean), kept, and said when changed. */
+static void window_set_title(struct bc_xdg *x, const char *text)
+{
+    char clean[BC_TEXT_BYTES + 1];
+    bc_text_clean(clean, text);
+    if (strcmp(clean, x->title) == 0) return;
+    memcpy(x->title, clean, sizeof(clean));
+    if (x->id) bc_wire_line(&x->server->wire, "WINDOW title %u %s", x->id, x->title);
+}
+
+static void window_set_appid(struct bc_xdg *x, const char *text)
+{
+    char clean[BC_TEXT_BYTES + 1];
+    bc_text_clean(clean, text);
+    if (strcmp(clean, x->appid) == 0) return;
+    memcpy(x->appid, clean, sizeof(clean));
+    if (x->id) bc_wire_line(&x->server->wire, "WINDOW appid %u %s", x->id, x->appid);
 }
 
 static int window_input_listen(struct bc_xdg *x);
@@ -518,6 +623,21 @@ static void configure_if_ready(struct bc_xdg *x)
 {
     if (x->toplevel && x->initial)
         send_toplevel_configure(x);
+}
+
+/* The desktop's `WINDOW size` to the window's program, by its kind: an xdg
+   configure, or the X window resized and focused (the X section). */
+static void window_configure(struct bc_xdg *x)
+{
+    if (x->xwin) x_configure(x);
+    else configure_if_ready(x);
+}
+
+/* The desktop's `WINDOW close`, by the window's kind. */
+static void window_close(struct bc_xdg *x)
+{
+    if (x->xwin) x_close(x);
+    else if (x->toplevel) xdg_toplevel_send_close(x->toplevel);
 }
 
 /* ---- zwp_linux_dmabuf_v1: FRM3, zero copy ---- */
@@ -1062,7 +1182,7 @@ static struct bc_xdg *sub_root(const struct bc_xdg *sub, int32_t *ox, int32_t *o
         if (p->xdg) {
             if (ox) *ox = x;
             if (oy) *oy = y;
-            return p->xdg->toplevel ? p->xdg : NULL;
+            return window_is_toplevel(p->xdg) ? p->xdg : NULL;
         }
         sub = p->sub;
     }
@@ -1078,7 +1198,7 @@ static struct bc_xdg *surface_window(struct bc_surface *surface)
     if (surface->sub) return sub_root(surface->sub, NULL, NULL);
     x = surface->xdg;
     while (x && x->popup && x->parent) x = x->parent;
-    return x && x->toplevel ? x : NULL;
+    return window_is_toplevel(x) ? x : NULL;
 }
 
 /* Synchronized, by its own mode or an ancestor's (wl_subsurface). */
@@ -1387,6 +1507,20 @@ static void surface_input_region(struct wl_client *client, struct wl_resource *r
 
 static int sub_apply_buffer(struct bc_xdg *sub, struct wl_resource *buffer, int attached);
 static void subs_parent_applied(struct bc_surface *parent);
+
+/* A committed buffer as a frame of a window or popup of either kind: sent
+   (send_buffer's result), and the picture mapped at the buffer's size. */
+static int picture_frame(struct bc_xdg *x, struct bc_surface *surface, struct wl_resource *buffer)
+{
+    struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
+    struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
+    int sent = send_buffer(x, surface, buffer);
+    x->mapped = 1;
+    x->hidden = 0;
+    x->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf ? dmabuf->width : 0;
+    x->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf ? dmabuf->height : 0;
+    return sent;
+}
 static void sub_cache(struct bc_xdg *sub, struct wl_resource *buffer, int attached);
 static void sub_apply_cached(struct bc_xdg *sub);
 
@@ -1470,17 +1604,19 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
                 x->configured = 1;
             }
         }
+        if (attached && buffer) sent = picture_frame(x, surface, buffer);
+    } else if (x && x->xwin) {
+        /* An X toplevel: each buffer a frame. Xwayland unmaps a window by
+           X's UnmapNotify (the X section), never by a NULL buffer. */
         if (attached && buffer) {
-            struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
-            struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
-            sent = send_buffer(x, surface, buffer);
-            x->mapped = 1;
-            x->hidden = 0;
-            x->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf ? dmabuf->width : 0;
-            x->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf ? dmabuf->height : 0;
+            sent = picture_frame(x, surface, buffer);
+            if (sent != BC_SENT_NONE) x_frame_measure(x, surface);
         }
     } else if (sub) {
         sent = sub_apply_buffer(sub, buffer, attached);
+    } else if (surface->role == BC_ROLE_XWAYLAND) {
+        /* Not yet matched to its X window: held for its first frame. */
+        sent = x_hold(surface, buffer, attached);
     }
     /* Copied or not shown (a cursor): the client's again. An FRM3 frame is
        the client's again at Blit's `FRAME release`. A frame nothing took
@@ -1505,8 +1641,12 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
     struct wl_resource *buffer = surface->pending_buffer;
     int attached = surface->pending_attach;
     (void)client;
+    surface->commit_us = now_us();
     set_pending_buffer(surface, NULL);
     surface->pending_attach = 0;
+    /* An Xwayland surface's serial is applied with the commit, and may
+       match it to its X window now (the X section). */
+    if (surface->xwl_pending) x_surface_committed(surface);
     if (sub && sub_effectively_sync(sub)) {
         /* Synchronized: kept until the parent's commit applies it. */
         sub_cache(sub, buffer, attached);
@@ -1580,6 +1720,8 @@ static void surface_destroyed(struct wl_resource *resource)
         surface->server->ptr_focus = NULL;
         surface->server->buttons_down = 0;
     }
+    /* An X toplevel's picture goes with its surface (the X section). */
+    x_surface_gone(surface);
     if (surface->xdg) {
         /* The role object outlived its surface (a client error, or the
            client's teardown order): the window is gone either way. */
@@ -1671,6 +1813,8 @@ static void compositor_create_surface(struct wl_client *client, struct wl_resour
     surface->pace = wl_event_loop_add_timer(surface->server->loop, frames_pace_timer, surface);
     surface->pending_buffer_destroy.notify = pending_buffer_gone;
     wl_list_init(&surface->pending_buffer_destroy.link);
+    wl_list_init(&surface->xwl_link);
+    wl_list_init(&surface->xwl_held_destroy.link);
     wl_resource_set_implementation(surface->resource, &surface_impl, surface, surface_destroyed);
 }
 
@@ -2419,7 +2563,7 @@ static void subs_parent_applied(struct bc_surface *parent)
         if (c->cached && sub_effectively_sync(c)) sub_apply_cached(c);
     }
     root = parent->sub ? sub_root(parent->sub, NULL, NULL)
-                       : parent->xdg && parent->xdg->toplevel ? parent->xdg : NULL;
+                       : window_is_toplevel(parent->xdg) ? parent->xdg : NULL;
     subs_show(root, NULL, 1);
 }
 
@@ -3087,26 +3231,16 @@ static void toplevel_set_title(struct wl_client *client, struct wl_resource *res
                                const char *title)
 {
     struct bc_xdg *x = toplevel_xdg(resource);
-    char clean[BC_TEXT_BYTES + 1];
     (void)client;
-    if (x == NULL) return;
-    bc_text_clean(clean, title);
-    if (strcmp(clean, x->title) == 0) return;
-    memcpy(x->title, clean, sizeof(clean));
-    if (x->id) bc_wire_line(&x->server->wire, "WINDOW title %u %s", x->id, x->title);
+    if (x) window_set_title(x, title);
 }
 
 static void toplevel_set_app_id(struct wl_client *client, struct wl_resource *resource,
                                 const char *appid)
 {
     struct bc_xdg *x = toplevel_xdg(resource);
-    char clean[BC_TEXT_BYTES + 1];
     (void)client;
-    if (x == NULL) return;
-    bc_text_clean(clean, appid);
-    if (strcmp(clean, x->appid) == 0) return;
-    memcpy(x->appid, clean, sizeof(clean));
-    if (x->id) bc_wire_line(&x->server->wire, "WINDOW appid %u %s", x->id, x->appid);
+    if (x) window_set_appid(x, appid);
 }
 
 /* A program's own frame asks the desktop to run a drag or show the window
@@ -3447,7 +3581,7 @@ static void wm_get_xdg_surface(struct wl_client *client, struct wl_resource *res
 {
     struct bc_surface *surface = wl_resource_get_user_data(surface_resource);
     struct bc_xdg *x;
-    if (surface->role == BC_ROLE_SUBSURFACE || surface->xdg) {
+    if (surface->role == BC_ROLE_SUBSURFACE || surface->role == BC_ROLE_XWAYLAND || surface->xdg) {
         wl_resource_post_error(resource, XDG_WM_BASE_ERROR_ROLE, "the surface already has a role");
         return;
     }
@@ -3819,6 +3953,8 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
         logf_("keyboard: leave window %u", s->kbd_focus->xdg ? s->kbd_focus->xdg->id : 0);
     }
     s->kbd_focus = surface;
+    /* An X window's keyboard is X's focus too (the X section). */
+    x_focus_follows(s, surface);
     if (surface == NULL) return;
     /* The selections, before the keyboard enters (wl_data_device). */
     clip_send_to_client(s, 0, wl_resource_get_client(surface->resource));
@@ -4222,7 +4358,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         return;
     }
     x = window_by_id(s, conn->id);
-    if (x == NULL || x->toplevel == NULL || x->surface == NULL) return;  /* gone meanwhile */
+    if (!window_is_toplevel(x) || x->surface == NULL) return;  /* gone meanwhile */
     switch (in.kind) {
     case BC_INPUT_KEY: {
         uint32_t bit = 1u << (in.code % 8);
@@ -4485,6 +4621,1475 @@ static void input_sockets_clear(struct bc_server *s)
     closedir(d);
 }
 
+/* ---- X programs: Xwayland and its window manager (ADR 0228, phase 2) ----
+
+   X11 programs run under Xwayland, upstream's X server, started by the
+   compositor with it and an ordinary Wayland client of it; the compositor
+   is its X window manager, on libxcb. The server is upstream's, the
+   behaviour is ours, as libwayland's is.
+
+   Xwayland. `Xwayland` on PATH (BLIT_COMPOSITOR_XWAYLAND names another
+   program, `none` turns X off; gates only), 23.1 or later (its `-version`;
+   older has no xwayland_shell_v1 and is refused with the reason). Absent,
+   refused, or with no free display, X is off, said once, and `WINDOW
+   display` says `-` for it. Else the compositor takes the first free
+   display n from 0 to 32 as X does -- /tmp/.X<n>-lock with its pid (a
+   stale one, of a dead pid, taken over), the listening sockets
+   @/tmp/.X11-unix/X<n> (abstract) and /tmp/.X11-unix/X<n> -- and runs
+
+       Xwayland :<n> -rootless -listenfd 3 -listenfd 4 -wm 5 -displayfd 7
+
+   with WAYLAND_SOCKET=6, one end of a socketpair the compositor made a
+   wl_client of: that client, and only it, is shown xwayland_shell_v1 (a
+   global filter) and may bind it. No -terminate: it lives as long as the
+   compositor. Its output goes to the compositor's log. The display is
+   `WINDOW display <wayland-name> :<n>` from the first line on, so the
+   desktop exports DISPLAY with WAYLAND_DISPLAY; X clients that come before
+   Xwayland is ready wait in the sockets' backlog. When Xwayland dies
+   (SIGCHLD; its status logged) its windows go and it is started again a
+   moment later, on the same display; dying within 5 s of its start three
+   times in a row stops that: X is off until the compositor restarts, the
+   sockets close so X programs fail at once, and a desktop that connects
+   again is told `-`. At the compositor's end it is ended (SIGTERM, then
+   SIGKILL after a second) and the sockets and lock removed.
+
+   The window manager. When -displayfd's line comes, the compositor
+   connects on its end of -wm: CompositeRedirectSubwindows(root, Manual)
+   first (every top-level's pixels are the compositor's, by its surface),
+   then SubstructureRedirect and SubstructureNotify on the root (refused
+   when another window manager holds them), the atoms, a window of its
+   own named by _NET_SUPPORTING_WM_CHECK, _NET_SUPPORTED, WM_S0 and
+   _NET_WM_CM_S0 owned; a window an X program mapped before that is mapped
+   again under it (x_adopt). Each child of the root is a bc_xwin from its
+   CreateNotify; a MapRequest reads its properties (WM_NAME and
+   _NET_WM_NAME, WM_CLASS, WM_PROTOCOLS, WM_HINTS), sets WM_STATE Normal
+   and maps it; PropertyNotify keeps them current.
+
+   The association: Xwayland gives each mapped top-level a wl_surface with
+   the xwayland_surface_v1 role, sets a serial on it (applied at the
+   surface's commit) and tells the window manager the same serial in a
+   WL_SURFACE_SERIAL client message (l[0] its low 32 bits, l[1] its high)
+   on the window. The two arrive on two sockets in either order; the
+   second matches them. A buffer committed before the match is held (not
+   released) and is the window's first frame. WL_SURFACE_ID, the older
+   way, is never used: an Xwayland that sends it is too old, and its
+   windows are not shown.
+
+   Matched, an X toplevel is a picture as an xdg toplevel is (`xwin` set,
+   window_is_toplevel): `WINDOW new`, `title` (_NET_WM_NAME, else WM_NAME),
+   `appid` (WM_CLASS's class), `decor server` (the desktop draws its frame),
+   its input socket; each commit of its surface one frame; `WINDOW gone`
+   when it is unmapped or destroyed or its surface goes (a remap is a new
+   surface, a new serial and a new id). The desktop's `WINDOW size`
+   resizes it (ConfigureWindow, border 0, at its own X position; a
+   synthetic ConfigureNotify when the size is unchanged, ICCCM 4.1.5) and,
+   with `activated`, gives it X's focus; a ConfigureRequest is honoured
+   before the desktop's first size and answered with that size after it.
+   `WINDOW close` sends WM_DELETE_WINDOW when the window takes it, else
+   kills its client. The keyboard entering an X window's surface gives
+   that window X's focus too: SetInputFocus when its WM_HINTS take input,
+   WM_TAKE_FOCUS when it asks for that (ICCCM 4.1.7), and
+   _NET_ACTIVE_WINDOW; leaving it, the focus is None. Keys and the pointer
+   reach Xwayland as the wl_seat events any client gets on its surface.
+
+   Later milestones (ADR 0228): override-redirect windows (menus and
+   tooltips) are matched and not shown; _NET_WM_STATE, _NET_WM_MOVERESIZE,
+   _NET_ACTIVE_WINDOW and WM_CHANGE_STATE requests, WM_NORMAL_HINTS,
+   _MOTIF_WM_HINTS, _NET_WM_WINDOW_TYPE and WM_TRANSIENT_FOR, cursors and
+   selections are noted once in the log and not acted on.
+
+   Measured: per X window, the time from a commit of its surface to its
+   frame sent, the minimum and median over its first 60 frames, logged. */
+
+#define BC_X_DISPLAYS 33
+#define BC_X_QUICK_US 5000000ull
+#define BC_X_QUICK_LIMIT 3
+#define BC_X_MEASURE 60
+/* WM_STATE's states (ICCCM 4.1.3.1). */
+#define BC_WM_STATE_WITHDRAWN 0u
+#define BC_WM_STATE_NORMAL 1u
+
+enum {
+    BC_X_LOGGED_ID = 1u << 0, BC_X_LOGGED_STATE = 1u << 1, BC_X_LOGGED_MOVERESIZE = 1u << 2,
+    BC_X_LOGGED_ACTIVE = 1u << 3, BC_X_LOGGED_ICONIFY = 1u << 4, BC_X_LOGGED_HINTS = 1u << 5,
+    BC_X_LOGGED_TRANSIENT = 1u << 6, BC_X_LOGGED_TYPE = 1u << 7,
+};
+
+static const char *const bc_atom_names[BC_ATOMS] = {
+    "WL_SURFACE_SERIAL", "WL_SURFACE_ID", "WM_PROTOCOLS", "WM_DELETE_WINDOW", "WM_TAKE_FOCUS",
+    "WM_STATE", "WM_CHANGE_STATE", "UTF8_STRING", "_NET_WM_NAME", "_NET_SUPPORTING_WM_CHECK",
+    "_NET_SUPPORTED", "_NET_ACTIVE_WINDOW", "_NET_WM_STATE", "_NET_WM_STATE_FULLSCREEN",
+    "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_MOVERESIZE",
+    "_NET_WM_WINDOW_TYPE", "WM_NORMAL_HINTS", "_MOTIF_WM_HINTS", "WM_S0", "_NET_WM_CM_S0",
+};
+
+/* One child of the root: an X top-level, from its CreateNotify to its
+   DestroyNotify. */
+struct bc_xwin {
+    struct wl_list link;              /* bc_x.windows */
+    xcb_window_t window;
+    int override_redirect;
+    int16_t x, y;
+    uint16_t width, height;
+    uint64_t serial;                  /* WL_SURFACE_SERIAL, 0 until Xwayland says */
+    struct bc_surface *surface;       /* its surface, once matched */
+    struct bc_xdg *pic;               /* its picture while shown */
+    char title[BC_TEXT_BYTES + 1], appid[BC_TEXT_BYTES + 1];
+    int title_net;                    /* the title is _NET_WM_NAME's: WM_NAME is not read */
+    int deletes, takes_focus;         /* WM_PROTOCOLS: WM_DELETE_WINDOW, WM_TAKE_FOCUS */
+    int input;                        /* WM_HINTS' input, 1 when it says nothing */
+    uint32_t pid;                     /* its client's process, 0 unknown (X-Resource) */
+    int or_logged;                    /* an override-redirect window, noted once */
+    int remapping;                    /* unmapped by the window manager to be mapped again */
+    uint32_t measure[BC_X_MEASURE];   /* commit to frame sent, us, its first frames */
+    int measured, measure_said;
+};
+
+static int x_launch(struct bc_server *s);
+
+/* A request of a later milestone, noted once for the whole display. */
+static void x_note(struct bc_server *s, unsigned what, const char *text)
+{
+    if (s->x.logged & what) return;
+    s->x.logged |= what;
+    logf_("X: %s (a later milestone of ADR 0228 phase 2; noted once)", text);
+}
+
+static struct bc_xwin *x_window(struct bc_server *s, xcb_window_t window)
+{
+    struct bc_xwin *w;
+    wl_list_for_each(w, &s->x.windows, link)
+        if (w->window == window) return w;
+    return NULL;
+}
+
+/* ---- the window manager's view of one window ---- */
+
+/* The window's first frames: the time from each commit of its surface to
+   its frame sent, said at the BC_X_MEASURE-th, or when it goes before. */
+static void x_measure_say(struct bc_xwin *w, struct bc_xdg *x)
+{
+    uint32_t sorted[BC_X_MEASURE], t;
+    int i, j, n = w->measured;
+    if (n == 0 || w->measure_said) return;
+    w->measure_said = 1;
+    memcpy(sorted, w->measure, sizeof(uint32_t) * (size_t)n);
+    for (i = 1; i < n; ++i)
+        for (j = i; j > 0 && sorted[j - 1] > sorted[j]; --j) {
+            t = sorted[j]; sorted[j] = sorted[j - 1]; sorted[j - 1] = t;
+        }
+    logf_("window %u: X commit to frame sent over its first %d frames: min %u us, median %u us",
+          x->id, n, sorted[0], (sorted[(n - 1) / 2] + sorted[n / 2]) / 2);
+}
+
+static void x_frame_measure(struct bc_xdg *x, struct bc_surface *surface)
+{
+    struct bc_xwin *w = x->xwin;
+    if (w == NULL || x->server->link != BC_LINK_UP || w->measured >= BC_X_MEASURE) return;
+    w->measure[w->measured++] = (uint32_t)(now_us() - surface->commit_us);
+    if (w->measured == BC_X_MEASURE) x_measure_say(w, x);
+}
+
+static void xwl_held_gone(struct wl_listener *listener, void *data)
+{
+    struct bc_surface *sf = wl_container_of(listener, sf, xwl_held_destroy);
+    (void)data;
+    wl_list_remove(&sf->xwl_held_destroy.link);
+    wl_list_init(&sf->xwl_held_destroy.link);
+    sf->xwl_held = NULL;
+}
+
+static void x_set_held(struct bc_surface *sf, struct wl_resource *buffer)
+{
+    if (sf->xwl_held) {
+        wl_list_remove(&sf->xwl_held_destroy.link);
+        wl_list_init(&sf->xwl_held_destroy.link);
+    }
+    sf->xwl_held = buffer;
+    if (buffer) {
+        sf->xwl_held_destroy.notify = xwl_held_gone;
+        wl_resource_add_destroy_listener(buffer, &sf->xwl_held_destroy);
+    }
+}
+
+/* A buffer of an Xwayland surface not yet matched to its window: the
+   newest is held, unreleased, to be the window's first frame when the
+   match comes; the one before it goes back to Xwayland. Its callbacks are
+   answered at the refresh, as for a frame nothing took. A matched surface
+   with no picture (a window Blit does not show) has its buffers back at
+   once. */
+static int x_hold(struct bc_surface *sf, struct wl_resource *buffer, int attached)
+{
+    struct wl_resource *old = sf->xwl_held;
+    if (!attached) return BC_SENT_NONE;
+    if (sf->xwl_matched || buffer == NULL) {
+        x_set_held(sf, NULL);
+        if (old && old != buffer) wl_buffer_send_release(old);
+        return BC_SENT_NONE;
+    }
+    if (old && old != buffer) wl_buffer_send_release(old);
+    x_set_held(sf, buffer);
+    feedback_discard(&sf->feedback);
+    frames_taken(sf);
+    return BC_SENT_HELD;
+}
+
+/* Latin-1 (an X STRING) as UTF-8, NUL-terminated within `size`. */
+static void x_latin1(char *out, size_t size, const unsigned char *in, size_t len)
+{
+    size_t n = 0, i;
+    for (i = 0; i < len && in[i] && n + 3 <= size; ++i) {
+        if (in[i] < 0x80) {
+            out[n++] = (char)in[i];
+        } else {
+            out[n++] = (char)(0xc0 | in[i] >> 6);
+            out[n++] = (char)(0x80 | (in[i] & 0x3f));
+        }
+    }
+    out[n] = '\0';
+}
+
+static void x_set_title(struct bc_xwin *w, const char *text)
+{
+    bc_text_clean(w->title, text);
+    if (w->pic) window_set_title(w->pic, w->title);
+}
+
+/* A property's value as text, by its type: UTF8_STRING as it is, STRING
+   (Latin-1) converted; any other type (COMPOUND_TEXT) its ASCII. */
+static void x_text(struct bc_server *s, xcb_get_property_reply_t *reply, char *out, size_t size)
+{
+    const unsigned char *v = xcb_get_property_value(reply);
+    size_t len = (size_t)xcb_get_property_value_length(reply), i, n = 0;
+    if (reply->format != 8) len = 0;
+    if (reply->type == XCB_ATOM_STRING) {
+        x_latin1(out, size, v, len);
+        return;
+    }
+    for (i = 0; i < len && v[i] && n + 1 < size; ++i)
+        if (reply->type == s->x.atoms[BC_ATOM_UTF8_STRING] || v[i] < 0x80) out[n++] = (char)v[i];
+    out[n] = '\0';
+}
+
+/* One of the window's properties, read (its reply) or changed. */
+static void x_property(struct bc_server *s, struct bc_xwin *w, xcb_atom_t atom,
+                       xcb_get_property_reply_t *reply)
+{
+    xcb_atom_t *atoms = s->x.atoms;
+    char text[4 * BC_TEXT_BYTES + 1];
+    if (atom == atoms[BC_ATOM_NET_WM_NAME]) {
+        if (reply && reply->type == atoms[BC_ATOM_UTF8_STRING] &&
+            xcb_get_property_value_length(reply) > 0) {
+            x_text(s, reply, text, sizeof(text));
+            w->title_net = 1;
+            x_set_title(w, text);
+        } else {
+            /* Gone: WM_NAME's again, at its next change. */
+            w->title_net = 0;
+        }
+    } else if (atom == XCB_ATOM_WM_NAME) {
+        if (w->title_net || reply == NULL) return;
+        x_text(s, reply, text, sizeof(text));
+        x_set_title(w, text);
+    } else if (atom == XCB_ATOM_WM_CLASS) {
+        /* "instance\0class\0": the app id is the class. */
+        const char *v;
+        size_t len, first;
+        if (reply == NULL || reply->format != 8) return;
+        v = xcb_get_property_value(reply);
+        len = (size_t)xcb_get_property_value_length(reply);
+        first = strnlen(v, len);
+        if (first + 1 < len) {
+            v += first + 1;
+            len -= first + 1;
+        }
+        len = strnlen(v, len);
+        if (len >= sizeof(text)) len = sizeof(text) - 1;
+        memcpy(text, v, len);
+        text[len] = '\0';
+        bc_text_clean(w->appid, text);
+        if (w->pic) window_set_appid(w->pic, w->appid);
+    } else if (atom == atoms[BC_ATOM_WM_PROTOCOLS]) {
+        const xcb_atom_t *list;
+        int i, n;
+        w->deletes = w->takes_focus = 0;
+        if (reply == NULL || reply->type != XCB_ATOM_ATOM || reply->format != 32) return;
+        list = xcb_get_property_value(reply);
+        n = xcb_get_property_value_length(reply) / 4;
+        for (i = 0; i < n; ++i) {
+            if (list[i] == atoms[BC_ATOM_WM_DELETE_WINDOW]) w->deletes = 1;
+            if (list[i] == atoms[BC_ATOM_WM_TAKE_FOCUS]) w->takes_focus = 1;
+        }
+    } else if (atom == XCB_ATOM_WM_HINTS) {
+        /* flags, then input when flags has InputHint (1). */
+        const uint32_t *v;
+        w->input = 1;
+        if (reply == NULL || reply->format != 32 || xcb_get_property_value_length(reply) < 8) return;
+        v = xcb_get_property_value(reply);
+        if (v[0] & 1u) w->input = v[1] != 0;
+    } else if (atom == atoms[BC_ATOM_WM_NORMAL_HINTS] || atom == atoms[BC_ATOM_MOTIF_WM_HINTS]) {
+        x_note(s, BC_X_LOGGED_HINTS, "a window's WM_NORMAL_HINTS or _MOTIF_WM_HINTS (limits, decor)");
+    } else if (atom == XCB_ATOM_WM_TRANSIENT_FOR) {
+        x_note(s, BC_X_LOGGED_TRANSIENT, "a window's WM_TRANSIENT_FOR (its parent)");
+    } else if (atom == atoms[BC_ATOM_NET_WM_WINDOW_TYPE]) {
+        x_note(s, BC_X_LOGGED_TYPE, "a window's _NET_WM_WINDOW_TYPE");
+    }
+}
+
+/* Every property the window manager reads, read now (a MapRequest). */
+static void x_read_properties(struct bc_server *s, struct bc_xwin *w)
+{
+    xcb_connection_t *c = s->x.conn;
+    const xcb_atom_t props[] = { s->x.atoms[BC_ATOM_NET_WM_NAME], XCB_ATOM_WM_NAME, XCB_ATOM_WM_CLASS,
+                                 s->x.atoms[BC_ATOM_WM_PROTOCOLS], XCB_ATOM_WM_HINTS };
+    xcb_get_property_cookie_t cookies[sizeof(props) / sizeof(props[0])];
+    xcb_res_query_client_ids_cookie_t pid_cookie = { 0 };
+    size_t i;
+    for (i = 0; i < sizeof(props) / sizeof(props[0]); ++i)
+        cookies[i] = xcb_get_property(c, 0, w->window, props[i], XCB_ATOM_ANY, 0, 2048);
+    if (s->x.xres) {
+        xcb_res_client_id_spec_t spec;
+        spec.client = w->window;
+        spec.mask = XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID;
+        pid_cookie = xcb_res_query_client_ids(c, 1, &spec);
+    }
+    w->title_net = 0;
+    for (i = 0; i < sizeof(props) / sizeof(props[0]); ++i) {
+        xcb_get_property_reply_t *reply = xcb_get_property_reply(c, cookies[i], NULL);
+        /* A property the window does not have is a reply of type None. */
+        x_property(s, w, props[i], reply && reply->type != XCB_ATOM_NONE ? reply : NULL);
+        free(reply);
+    }
+    if (s->x.xres) {
+        xcb_res_query_client_ids_reply_t *reply = xcb_res_query_client_ids_reply(c, pid_cookie, NULL);
+        if (reply) {
+            xcb_res_client_id_value_iterator_t it = xcb_res_query_client_ids_ids_iterator(reply);
+            for (; it.rem; xcb_res_client_id_value_next(&it))
+                if ((it.data->spec.mask & XCB_RES_CLIENT_ID_MASK_LOCAL_CLIENT_PID) &&
+                    xcb_res_client_id_value_value_length(it.data) == 1)
+                    w->pid = *xcb_res_client_id_value_value(it.data);
+            free(reply);
+        }
+    }
+}
+
+static void x_set_wm_state(struct bc_server *s, struct bc_xwin *w, uint32_t state)
+{
+    uint32_t value[2];
+    value[0] = state;
+    value[1] = XCB_WINDOW_NONE;
+    xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, w->window, s->x.atoms[BC_ATOM_WM_STATE],
+                        s->x.atoms[BC_ATOM_WM_STATE], 32, 2, value);
+}
+
+/* An ICCCM client message (WM_PROTOCOLS) to the window. */
+static void x_send_protocol(struct bc_server *s, struct bc_xwin *w, xcb_atom_t protocol)
+{
+    xcb_client_message_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.response_type = XCB_CLIENT_MESSAGE;
+    ev.format = 32;
+    ev.window = w->window;
+    ev.type = s->x.atoms[BC_ATOM_WM_PROTOCOLS];
+    ev.data.data32[0] = protocol;
+    ev.data.data32[1] = XCB_CURRENT_TIME;
+    xcb_send_event(s->x.conn, 0, w->window, XCB_EVENT_MASK_NO_EVENT, (const char *)&ev);
+}
+
+/* X's focus to window `w` (NULL: to none), and _NET_ACTIVE_WINDOW. */
+static void x_activate(struct bc_server *s, struct bc_xwin *w)
+{
+    xcb_window_t window = w ? w->window : XCB_WINDOW_NONE;
+    if (s->x.conn == NULL || s->x.focus == window) return;
+    s->x.focus = window;
+    xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, s->x.screen->root,
+                        s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &window);
+    if (w == NULL) {
+        xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, XCB_WINDOW_NONE, XCB_CURRENT_TIME);
+    } else {
+        /* ICCCM 4.1.7: input from WM_HINTS is the window's own to take
+           with SetInputFocus; WM_TAKE_FOCUS, when it asks for it, lets it
+           move the focus itself (a globally active window takes it only
+           so). */
+        if (w->input)
+            xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, w->window, XCB_CURRENT_TIME);
+        if (w->takes_focus) x_send_protocol(s, w, s->x.atoms[BC_ATOM_WM_TAKE_FOCUS]);
+    }
+    xcb_flush(s->x.conn);
+    if (w && w->pic)
+        logf_("window %u: X focus (0x%x%s%s)", w->pic->id, (unsigned)w->window,
+              w->input ? ", SetInputFocus" : "", w->takes_focus ? ", WM_TAKE_FOCUS" : "");
+}
+
+static void x_focus_follows(struct bc_server *s, struct bc_surface *surface)
+{
+    struct bc_xdg *x = surface ? surface_window(surface) : NULL;
+    if (s->x.conn == NULL) return;
+    if (x && x->xwin) x_activate(s, x->xwin);
+    else x_activate(s, NULL);
+}
+
+/* The window resized to w x h at its own X position, border 0; a
+   synthetic ConfigureNotify when the size does not change (ICCCM 4.1.5:
+   the client is told either way). */
+static void x_resize(struct bc_server *s, struct bc_xwin *w, uint16_t width, uint16_t height)
+{
+    uint32_t values[5];
+    int same = width == w->width && height == w->height;
+    values[0] = (uint32_t)(int32_t)w->x;
+    values[1] = (uint32_t)(int32_t)w->y;
+    values[2] = width;
+    values[3] = height;
+    values[4] = 0;
+    xcb_configure_window(s->x.conn, w->window,
+                         XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH |
+                             XCB_CONFIG_WINDOW_HEIGHT | XCB_CONFIG_WINDOW_BORDER_WIDTH,
+                         values);
+    w->width = width;
+    w->height = height;
+    if (same) {
+        xcb_configure_notify_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.response_type = XCB_CONFIGURE_NOTIFY;
+        ev.event = w->window;
+        ev.window = w->window;
+        ev.x = w->x;
+        ev.y = w->y;
+        ev.width = width;
+        ev.height = height;
+        xcb_send_event(s->x.conn, 0, w->window, XCB_EVENT_MASK_STRUCTURE_NOTIFY, (const char *)&ev);
+    }
+}
+
+/* The desktop's `WINDOW size` for an X toplevel: its size (0 0 leaves it
+   to the program), and X's focus when it is activated. */
+static void x_configure(struct bc_xdg *x)
+{
+    struct bc_server *s = x->server;
+    struct bc_xwin *w = x->xwin;
+    if (s->x.conn == NULL || w == NULL) return;
+    if (x->size_w > 0 && x->size_h > 0 && x->size_w <= 32767 && x->size_h <= 32767)
+        x_resize(s, w, (uint16_t)x->size_w, (uint16_t)x->size_h);
+    if (x->size_fullscreen || x->size_maximized)
+        x_note(s, BC_X_LOGGED_STATE, "the desktop's full screen or maximized state for an X window");
+    if (x->size_activated) x_activate(s, w);
+    else if (s->x.focus == w->window) x_activate(s, NULL);
+    xcb_flush(s->x.conn);
+}
+
+/* The desktop's `WINDOW close`: WM_DELETE_WINDOW, else the client killed. */
+static void x_close(struct bc_xdg *x)
+{
+    struct bc_server *s = x->server;
+    struct bc_xwin *w = x->xwin;
+    if (s->x.conn == NULL || w == NULL) return;
+    if (w->deletes) {
+        x_send_protocol(s, w, s->x.atoms[BC_ATOM_WM_DELETE_WINDOW]);
+        logf_("window %u: WM_DELETE_WINDOW", x->id);
+    } else {
+        xcb_kill_client(s->x.conn, w->window);
+        logf_("window %u: takes no WM_DELETE_WINDOW; its X client is killed", x->id);
+    }
+    xcb_flush(s->x.conn);
+}
+
+/* The window and its surface matched: shown as a picture, unless it is an
+   override-redirect window (a later milestone). */
+static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *sf)
+{
+    struct bc_xdg *x;
+    struct wl_resource *held = sf->xwl_held;
+    w->surface = sf;
+    sf->xwl_matched = 1;
+    x_set_held(sf, NULL);
+    if (w->override_redirect) {
+        if (!w->or_logged)
+            logf_("X: window 0x%x is override-redirect (a menu or tooltip): not shown before "
+                  "milestone C of ADR 0228 phase 2", (unsigned)w->window);
+        w->or_logged = 1;
+        if (held) wl_buffer_send_release(held);
+        return;
+    }
+    x = calloc(1, sizeof(*x));
+    if (x == NULL) {
+        logf_("X: window 0x%x: out of memory, not shown", (unsigned)w->window);
+        if (held) wl_buffer_send_release(held);
+        return;
+    }
+    x->server = s;
+    x->surface = sf;
+    x->xwin = w;
+    x->input_fd = -1;
+    x->kept.fd = -1;
+    x->initial = 1;
+    /* X programs leave their frame to the window manager: the desktop's. */
+    x->decor_mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+    memcpy(x->title, w->title, sizeof(x->title));
+    memcpy(x->appid, w->appid, sizeof(x->appid));
+    wl_list_init(&x->cached_frames);
+    wl_list_init(&x->cached_feedback);
+    wl_list_init(&x->cached_buffer_destroy.link);
+    wl_list_insert(&s->windows, &x->link);
+    sf->xdg = x;
+    w->pic = x;
+    if (s->wire.window) {
+        announce_toplevel(x);
+        logf_("window %u: X window 0x%x %dx%d, its client's pid %u (0 unknown)", x->id,
+              (unsigned)w->window, w->width, w->height, w->pid);
+    } else {
+        logf_("X window 0x%x \"%s\" is not shown: the peer has no window=1", (unsigned)w->window,
+              w->title);
+    }
+    if (held) {
+        int sent = picture_frame(x, sf, held);
+        if (sent != BC_SENT_HELD) wl_buffer_send_release(held);
+    }
+    /* Sized by the desktop before? Not this picture: a new id waits for
+       the desktop's size. */
+}
+
+/* The window's picture gone (unmapped, destroyed, its surface gone, or
+   Xwayland gone): `WINDOW gone`, and the surface's match ended. */
+static void x_unmatch(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_xdg *x = w->pic, *other;
+    w->surface = NULL;
+    w->serial = 0;
+    if (x == NULL) return;
+    x_measure_say(w, x);
+    if (s->x.focus == w->window) x_activate(s, NULL);
+    window_gone(x);
+    if (x->surface) x->surface->xdg = NULL;
+    wl_list_for_each(other, &s->windows, link)
+        if (other->parent == x) other->parent = NULL;
+    wl_list_remove(&x->link);
+    free(x);
+    w->pic = NULL;
+}
+
+/* An Xwayland surface destroyed: its window's picture goes with it. */
+static void x_surface_gone(struct bc_surface *sf)
+{
+    struct bc_server *s = sf->server;
+    struct bc_xwin *w;
+    if (sf->role != BC_ROLE_XWAYLAND) return;
+    wl_list_for_each(w, &s->x.windows, link)
+        if (w->surface == sf) x_unmatch(s, w);
+    if (sf->xwl) wl_resource_set_user_data(sf->xwl, NULL);
+    sf->xwl = NULL;
+    x_set_held(sf, NULL);
+    wl_list_remove(&sf->xwl_link);
+    wl_list_init(&sf->xwl_link);
+}
+
+/* A surface's serial applied at its commit: matched to the window that
+   has the same serial, when its WL_SURFACE_SERIAL came first. */
+static void x_surface_committed(struct bc_surface *sf)
+{
+    struct bc_server *s = sf->server;
+    struct bc_xwin *w;
+    sf->xwl_serial = sf->xwl_pending;
+    sf->xwl_pending = 0;
+    wl_list_for_each(w, &s->x.windows, link)
+        if (w->serial == sf->xwl_serial && w->surface == NULL) {
+            x_match(s, w, sf);
+            return;
+        }
+}
+
+/* WL_SURFACE_SERIAL on a window: matched to the surface whose committed
+   serial it is, when that commit came first. */
+static void x_serial_message(struct bc_server *s, xcb_client_message_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    struct bc_surface *sf;
+    uint64_t serial = (uint64_t)ev->data.data32[1] << 32 | ev->data.data32[0];
+    if (w == NULL) {
+        logf_("X: WL_SURFACE_SERIAL for 0x%x, no window of the root", (unsigned)ev->window);
+        return;
+    }
+    if (w->surface) {
+        logf_("X: a second WL_SURFACE_SERIAL for window 0x%x while it is matched", (unsigned)w->window);
+        return;
+    }
+    w->serial = serial;
+    wl_list_for_each(sf, &s->x.surfaces, xwl_link)
+        if (sf->xwl_serial == serial && !sf->xwl_matched) {
+            x_match(s, w, sf);
+            return;
+        }
+}
+
+static void x_window_free(struct bc_server *s, struct bc_xwin *w)
+{
+    x_unmatch(s, w);
+    if (s->x.focus == w->window) s->x.focus = XCB_WINDOW_NONE;
+    wl_list_remove(&w->link);
+    free(w);
+}
+
+/* ---- the window manager's events ---- */
+
+/* A child of the root, known from here on; its focus and property changes
+   selected. */
+static struct bc_xwin *x_window_new(struct bc_server *s, xcb_window_t window, int16_t x, int16_t y,
+                                    uint16_t width, uint16_t height, int override_redirect)
+{
+    struct bc_xwin *w;
+    uint32_t mask = XCB_EVENT_MASK_FOCUS_CHANGE | XCB_EVENT_MASK_PROPERTY_CHANGE;
+    if (window == s->x.wm_window || x_window(s, window)) return NULL;
+    w = calloc(1, sizeof(*w));
+    if (w == NULL) return NULL;
+    w->window = window;
+    w->override_redirect = override_redirect;
+    w->x = x;
+    w->y = y;
+    w->width = width;
+    w->height = height;
+    w->input = 1;
+    wl_list_insert(s->x.windows.prev, &w->link);
+    xcb_change_window_attributes(s->x.conn, w->window, XCB_CW_EVENT_MASK, &mask);
+    return w;
+}
+
+static void x_create_notify(struct bc_server *s, xcb_create_notify_event_t *ev)
+{
+    if (ev->parent == s->x.screen->root)
+        x_window_new(s, ev->window, ev->x, ev->y, ev->width, ev->height, ev->override_redirect);
+}
+
+/* The root's children from before the window manager: an X program that
+   mapped its window in the moment between Xwayland's start and the window
+   manager's had its WL_SURFACE_SERIAL go to no one, so each such window is
+   unmapped and mapped again under the window manager -- a new surface and
+   serial, matched and shown as any other. */
+static void x_adopt(struct bc_server *s)
+{
+    xcb_connection_t *c = s->x.conn;
+    xcb_query_tree_reply_t *tree = xcb_query_tree_reply(c, xcb_query_tree(c, s->x.screen->root), NULL);
+    xcb_window_t *children;
+    int i, n;
+    if (tree == NULL) return;
+    children = xcb_query_tree_children(tree);
+    n = xcb_query_tree_children_length(tree);
+    for (i = 0; i < n; ++i) {
+        xcb_get_window_attributes_reply_t *a =
+            xcb_get_window_attributes_reply(c, xcb_get_window_attributes(c, children[i]), NULL);
+        xcb_get_geometry_reply_t *g = xcb_get_geometry_reply(c, xcb_get_geometry(c, children[i]), NULL);
+        struct bc_xwin *w = a && g ? x_window_new(s, children[i], g->x, g->y, g->width, g->height,
+                                                  a->override_redirect)
+                                   : NULL;
+        if (w && a->map_state == XCB_MAP_STATE_VIEWABLE && !w->override_redirect) {
+            x_read_properties(s, w);
+            w->remapping = 1;
+            xcb_unmap_window(c, w->window);
+            x_set_wm_state(s, w, BC_WM_STATE_NORMAL);
+            xcb_map_window(c, w->window);
+            logf_("X: window 0x%x was mapped before the window manager: mapped again", (unsigned)w->window);
+        }
+        free(a);
+        free(g);
+    }
+    free(tree);
+}
+
+static void x_map_request(struct bc_server *s, xcb_map_request_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    if (w == NULL) {
+        /* Not a child of the root we were told of: mapped as asked. */
+        xcb_map_window(s->x.conn, ev->window);
+        return;
+    }
+    x_read_properties(s, w);
+    x_set_wm_state(s, w, BC_WM_STATE_NORMAL);
+    xcb_map_window(s->x.conn, w->window);
+}
+
+static void x_unmap_notify(struct bc_server *s, xcb_unmap_notify_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    if (w == NULL) return;
+    x_unmatch(s, w);
+    if (w->remapping) w->remapping = 0;  /* x_adopt's: mapped again already */
+    else if (!w->override_redirect) x_set_wm_state(s, w, BC_WM_STATE_WITHDRAWN);
+}
+
+static void x_configure_request(struct bc_server *s, xcb_configure_request_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    uint32_t values[4];
+    uint16_t mask = 0;
+    int n = 0;
+    if (w == NULL) return;
+    if (w->pic && w->pic->size_w > 0 && w->pic->size_h > 0) {
+        /* Shown and sized by the desktop: its size stands, and the client
+           is told so. */
+        x_resize(s, w, (uint16_t)w->pic->size_w, (uint16_t)w->pic->size_h);
+        return;
+    }
+    /* Before the desktop's size: the geometry asked for. Stacking is the
+       desktop's: not passed on. */
+    if (ev->value_mask & XCB_CONFIG_WINDOW_X) { mask |= XCB_CONFIG_WINDOW_X; values[n++] = (uint32_t)(int32_t)ev->x; }
+    if (ev->value_mask & XCB_CONFIG_WINDOW_Y) { mask |= XCB_CONFIG_WINDOW_Y; values[n++] = (uint32_t)(int32_t)ev->y; }
+    if (ev->value_mask & XCB_CONFIG_WINDOW_WIDTH) { mask |= XCB_CONFIG_WINDOW_WIDTH; values[n++] = ev->width; }
+    if (ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT) { mask |= XCB_CONFIG_WINDOW_HEIGHT; values[n++] = ev->height; }
+    if (mask) xcb_configure_window(s->x.conn, w->window, mask, values);
+}
+
+static void x_configure_notify(struct bc_server *s, xcb_configure_notify_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    if (w == NULL || ev->event != s->x.screen->root) return;
+    w->x = ev->x;
+    w->y = ev->y;
+    w->width = ev->width;
+    w->height = ev->height;
+    w->override_redirect = ev->override_redirect;
+}
+
+static void x_client_message(struct bc_server *s, xcb_client_message_event_t *ev)
+{
+    xcb_atom_t *atoms = s->x.atoms;
+    if (ev->type == atoms[BC_ATOM_WL_SURFACE_SERIAL] && ev->format == 32) {
+        x_serial_message(s, ev);
+    } else if (ev->type == atoms[BC_ATOM_WL_SURFACE_ID]) {
+        if (!(s->x.logged & BC_X_LOGGED_ID))
+            logf_("X: Xwayland named a surface by WL_SURFACE_ID, not xwayland_shell_v1: it is "
+                  "older than 23.1 or did not bind the shell; its windows are not shown");
+        s->x.logged |= BC_X_LOGGED_ID;
+    } else if (ev->type == atoms[BC_ATOM_NET_WM_STATE]) {
+        x_note(s, BC_X_LOGGED_STATE, "_NET_WM_STATE requests (full screen, maximized)");
+    } else if (ev->type == atoms[BC_ATOM_NET_WM_MOVERESIZE]) {
+        x_note(s, BC_X_LOGGED_MOVERESIZE, "_NET_WM_MOVERESIZE (a program's own move and resize)");
+    } else if (ev->type == atoms[BC_ATOM_NET_ACTIVE_WINDOW]) {
+        x_note(s, BC_X_LOGGED_ACTIVE, "_NET_ACTIVE_WINDOW requests (a program raising its window)");
+    } else if (ev->type == atoms[BC_ATOM_WM_CHANGE_STATE]) {
+        x_note(s, BC_X_LOGGED_ICONIFY, "WM_CHANGE_STATE (a program minimizing its window)");
+    }
+}
+
+static void x_property_notify(struct bc_server *s, xcb_property_notify_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    xcb_get_property_reply_t *reply;
+    if (w == NULL) return;
+    if (ev->state == XCB_PROPERTY_DELETE) {
+        x_property(s, w, ev->atom, NULL);
+        return;
+    }
+    reply = xcb_get_property_reply(s->x.conn,
+                                   xcb_get_property(s->x.conn, 0, w->window, ev->atom, XCB_ATOM_ANY, 0, 2048),
+                                   NULL);
+    x_property(s, w, ev->atom, reply && reply->type != XCB_ATOM_NONE ? reply : NULL);
+    free(reply);
+}
+
+static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
+{
+    switch (ev->response_type & 0x7f) {
+    case 0: {
+        /* BadWindow is a window gone before our request about it (its
+           WM_STATE at its unmap, a focus): X's ordinary race, not said. */
+        xcb_generic_error_t *e = (xcb_generic_error_t *)ev;
+        if (e->error_code != XCB_WINDOW)
+            logf_("X: error %u on request %u.%u (sequence %u, resource 0x%x)", e->error_code,
+                  e->major_code, e->minor_code, e->sequence, e->resource_id);
+        return;
+    }
+    case XCB_CREATE_NOTIFY:
+        x_create_notify(s, (xcb_create_notify_event_t *)ev);
+        return;
+    case XCB_DESTROY_NOTIFY: {
+        struct bc_xwin *w = x_window(s, ((xcb_destroy_notify_event_t *)ev)->window);
+        if (w) x_window_free(s, w);
+        return;
+    }
+    case XCB_MAP_REQUEST:
+        x_map_request(s, (xcb_map_request_event_t *)ev);
+        return;
+    case XCB_MAP_NOTIFY: {
+        xcb_map_notify_event_t *m = (xcb_map_notify_event_t *)ev;
+        struct bc_xwin *w = x_window(s, m->window);
+        if (w) w->override_redirect = m->override_redirect;
+        return;
+    }
+    case XCB_UNMAP_NOTIFY:
+        x_unmap_notify(s, (xcb_unmap_notify_event_t *)ev);
+        return;
+    case XCB_CONFIGURE_REQUEST:
+        x_configure_request(s, (xcb_configure_request_event_t *)ev);
+        return;
+    case XCB_CONFIGURE_NOTIFY:
+        x_configure_notify(s, (xcb_configure_notify_event_t *)ev);
+        return;
+    case XCB_PROPERTY_NOTIFY:
+        x_property_notify(s, (xcb_property_notify_event_t *)ev);
+        return;
+    case XCB_CLIENT_MESSAGE:
+        x_client_message(s, (xcb_client_message_event_t *)ev);
+        return;
+    case XCB_FOCUS_IN: {
+        xcb_focus_in_event_t *f = (xcb_focus_in_event_t *)ev;
+        struct bc_xwin *w = x_window(s, f->event);
+        /* A program moving X's focus itself (milestone A only notes it). */
+        if (w && w->pic && f->event != s->x.focus && f->mode == XCB_NOTIFY_MODE_NORMAL &&
+            f->detail != XCB_NOTIFY_DETAIL_POINTER)
+            logf_("window %u: its program took X's focus itself", w->pic->id);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+static void x_wm_stop(struct bc_server *s);
+
+static int on_x_events(int fd, uint32_t mask, void *data)
+{
+    struct bc_server *s = data;
+    xcb_generic_event_t *ev;
+    int count = 0;
+    (void)fd;
+    if (s->x.conn == NULL) return 0;
+    while ((ev = xcb_poll_for_event(s->x.conn)) != NULL) {
+        x_event(s, ev);
+        free(ev);
+        ++count;
+        if (s->x.conn == NULL) return 0;
+    }
+    if (xcb_connection_has_error(s->x.conn) || (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR))) {
+        logf_("X: the window manager's connection to Xwayland ended");
+        x_wm_stop(s);
+        return 0;
+    }
+    if (count) xcb_flush(s->x.conn);
+    return count;
+}
+
+/* Every window forgotten (their pictures gone) and the connection closed. */
+static void x_wm_stop(struct bc_server *s)
+{
+    while (!wl_list_empty(&s->x.windows)) {
+        struct bc_xwin *w = wl_container_of(s->x.windows.next, w, link);
+        x_window_free(s, w);
+    }
+    if (s->x.wm_source) wl_event_source_remove(s->x.wm_source);
+    s->x.wm_source = NULL;
+    if (s->x.conn) xcb_disconnect(s->x.conn);
+    s->x.conn = NULL;
+    s->x.screen = NULL;
+    s->x.focus = XCB_WINDOW_NONE;
+    if (s->x.wm_fd >= 0) close(s->x.wm_fd);
+    s->x.wm_fd = -1;
+}
+
+/* The window manager on its connection, once Xwayland is ready. Returns 0
+   when it manages the display. */
+static int x_wm_start(struct bc_server *s)
+{
+    xcb_connection_t *c;
+    xcb_intern_atom_cookie_t cookies[BC_ATOMS];
+    const xcb_query_extension_reply_t *ext;
+    xcb_generic_error_t *error;
+    uint32_t mask;
+    xcb_atom_t supported[8];
+    static const char name[] = "blit-compositor";
+    int i;
+    c = xcb_connect_to_fd(s->x.wm_fd, NULL);
+    s->x.wm_fd = -1;  /* the connection's now, closed with it */
+    if (xcb_connection_has_error(c)) {
+        logf_("X: the window manager could not connect to Xwayland (xcb error %d)",
+              xcb_connection_has_error(c));
+        xcb_disconnect(c);
+        return -1;
+    }
+    s->x.conn = c;
+    s->x.screen = xcb_setup_roots_iterator(xcb_get_setup(c)).data;
+    xcb_prefetch_extension_data(c, &xcb_composite_id);
+    xcb_prefetch_extension_data(c, &xcb_xfixes_id);
+    xcb_prefetch_extension_data(c, &xcb_res_id);
+    for (i = 0; i < BC_ATOMS; ++i)
+        cookies[i] = xcb_intern_atom(c, 0, (uint16_t)strlen(bc_atom_names[i]), bc_atom_names[i]);
+    ext = xcb_get_extension_data(c, &xcb_composite_id);
+    if (ext == NULL || !ext->present) {
+        logf_("X: Xwayland has no Composite extension; no window manager");
+        x_wm_stop(s);
+        return -1;
+    }
+    /* Composite first: every top-level's pixels are its surface's. */
+    xcb_composite_redirect_subwindows(c, s->x.screen->root, XCB_COMPOSITE_REDIRECT_MANUAL);
+    mask = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY | XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
+           XCB_EVENT_MASK_PROPERTY_CHANGE;
+    error = xcb_request_check(c, xcb_change_window_attributes_checked(c, s->x.screen->root,
+                                                                      XCB_CW_EVENT_MASK, &mask));
+    if (error) {
+        logf_("X: another window manager holds the root (X error %u)", error->error_code);
+        free(error);
+        x_wm_stop(s);
+        return -1;
+    }
+    for (i = 0; i < BC_ATOMS; ++i) {
+        xcb_intern_atom_reply_t *reply = xcb_intern_atom_reply(c, cookies[i], NULL);
+        s->x.atoms[i] = reply ? reply->atom : XCB_ATOM_NONE;
+        free(reply);
+    }
+    ext = xcb_get_extension_data(c, &xcb_xfixes_id);
+    if (ext && ext->present) {
+        xcb_xfixes_query_version_reply_t *v =
+            xcb_xfixes_query_version_reply(c, xcb_xfixes_query_version(c, XCB_XFIXES_MAJOR_VERSION,
+                                                                        XCB_XFIXES_MINOR_VERSION), NULL);
+        if (v) logf_("X: XFixes %u.%u", v->major_version, v->minor_version);
+        free(v);
+    }
+    s->x.xres = 0;
+    ext = xcb_get_extension_data(c, &xcb_res_id);
+    if (ext && ext->present) {
+        xcb_res_query_version_reply_t *v =
+            xcb_res_query_version_reply(c, xcb_res_query_version(c, XCB_RES_MAJOR_VERSION,
+                                                                  XCB_RES_MINOR_VERSION), NULL);
+        s->x.xres = v && (v->server_major > 1 || (v->server_major == 1 && v->server_minor >= 2));
+        free(v);
+    }
+    /* A window of its own: _NET_SUPPORTING_WM_CHECK, the selections a
+       window manager and a compositing manager own (ICCCM 2.8, EWMH). */
+    s->x.wm_window = xcb_generate_id(c);
+    xcb_create_window(c, XCB_COPY_FROM_PARENT, s->x.wm_window, s->x.screen->root, 0, 0, 10, 10, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, s->x.screen->root_visual, 0, NULL);
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.wm_window, s->x.atoms[BC_ATOM_NET_WM_NAME],
+                        s->x.atoms[BC_ATOM_UTF8_STRING], 8, (uint32_t)strlen(name), name);
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.screen->root,
+                        s->x.atoms[BC_ATOM_NET_SUPPORTING_WM_CHECK], XCB_ATOM_WINDOW, 32, 1,
+                        &s->x.wm_window);
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.wm_window,
+                        s->x.atoms[BC_ATOM_NET_SUPPORTING_WM_CHECK], XCB_ATOM_WINDOW, 32, 1,
+                        &s->x.wm_window);
+    supported[0] = s->x.atoms[BC_ATOM_NET_WM_STATE];
+    supported[1] = s->x.atoms[BC_ATOM_NET_WM_STATE_FULLSCREEN];
+    supported[2] = s->x.atoms[BC_ATOM_NET_WM_STATE_MAXIMIZED_VERT];
+    supported[3] = s->x.atoms[BC_ATOM_NET_WM_STATE_MAXIMIZED_HORZ];
+    supported[4] = s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW];
+    supported[5] = s->x.atoms[BC_ATOM_NET_WM_MOVERESIZE];
+    supported[6] = s->x.atoms[BC_ATOM_NET_WM_NAME];
+    supported[7] = s->x.atoms[BC_ATOM_NET_SUPPORTING_WM_CHECK];
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.screen->root, s->x.atoms[BC_ATOM_NET_SUPPORTED],
+                        XCB_ATOM_ATOM, 32, 8, supported);
+    xcb_set_selection_owner(c, s->x.wm_window, s->x.atoms[BC_ATOM_WM_S0], XCB_CURRENT_TIME);
+    xcb_set_selection_owner(c, s->x.wm_window, s->x.atoms[BC_ATOM_NET_WM_CM_S0], XCB_CURRENT_TIME);
+    s->x.focus = XCB_WINDOW_NONE;
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.screen->root,
+                        s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &s->x.focus);
+    x_adopt(s);
+    xcb_flush(c);
+    s->x.wm_source = wl_event_loop_add_fd(s->loop, xcb_get_file_descriptor(c), WL_EVENT_READABLE,
+                                          on_x_events, s);
+    /* Events xcb read while waiting for the replies above are in its
+       queue, not the socket: checked after every dispatch. */
+    if (s->x.wm_source) wl_event_source_check(s->x.wm_source);
+    return 0;
+}
+
+/* ---- Xwayland, the process ---- */
+
+/* Xwayland's -version text: its version, or -1 when it says none. */
+static int x_version_of(const char *text, int *major, int *minor)
+{
+    const char *p = text;
+    while ((p = strstr(p, "Version ")) != NULL) {
+        p += 8;
+        if (*p >= '0' && *p <= '9' && sscanf(p, "%d.%d", major, minor) == 2) return 0;
+    }
+    return -1;
+}
+
+/* Runs `path -version` and reads what it says (Xwayland says it on
+   standard error), at most three seconds. */
+static int x_version_text(const char *path, char *out, size_t size)
+{
+    int fd[2], status;
+    size_t n = 0;
+    pid_t pid;
+    uint64_t until = now_us() + 3000000u;
+    if (pipe2(fd, O_CLOEXEC) != 0) return -1;
+    pid = fork();
+    if (pid < 0) {
+        close(fd[0]);
+        close(fd[1]);
+        return -1;
+    }
+    if (pid == 0) {
+        sigset_t none;
+        sigemptyset(&none);
+        sigprocmask(SIG_SETMASK, &none, NULL);
+        dup2(fd[1], 1);
+        dup2(fd[1], 2);
+        execl(path, path, "-version", (char *)NULL);
+        _exit(127);
+    }
+    close(fd[1]);
+    while (n + 1 < size) {
+        struct pollfd p;
+        ssize_t got;
+        uint64_t now = now_us();
+        if (now >= until) break;
+        p.fd = fd[0];
+        p.events = POLLIN;
+        if (poll(&p, 1, (int)((until - now) / 1000u) + 1) <= 0) break;
+        got = read(fd[0], out + n, size - 1 - n);
+        if (got <= 0) break;
+        n += (size_t)got;
+    }
+    out[n] = '\0';
+    close(fd[0]);
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0);
+    return 0;
+}
+
+/* The Xwayland to run: BLIT_COMPOSITOR_XWAYLAND's (a path, or a name on
+   PATH), else `Xwayland` on PATH. */
+static int x_find(const char *want, char *out, size_t size)
+{
+    const char *path = getenv("PATH"), *p, *end;
+    if (strchr(want, '/')) {
+        if (access(want, X_OK) != 0) return -1;
+        snprintf(out, size, "%s", want);
+        return 0;
+    }
+    for (p = path ? path : "/usr/bin:/bin"; *p; p = *end ? end + 1 : end) {
+        end = strchr(p, ':');
+        if (end == NULL) end = p + strlen(p);
+        if (end > p && (size_t)snprintf(out, size, "%.*s/%s", (int)(end - p), p, want) < size &&
+            access(out, X_OK) == 0)
+            return 0;
+    }
+    return -1;
+}
+
+/* /tmp/.X11-unix as X expects it: ours or root's, and not one others can
+   write into unless it is sticky. */
+static int x_socket_dir(void)
+{
+    struct stat st;
+    if (mkdir("/tmp/.X11-unix", 01777) == 0) chmod("/tmp/.X11-unix", 01777);
+    else if (errno != EEXIST) return -1;
+    if (lstat("/tmp/.X11-unix", &st) != 0 || !S_ISDIR(st.st_mode) ||
+        (st.st_uid != 0 && st.st_uid != getuid()) ||
+        (!(st.st_mode & S_ISVTX) && (st.st_mode & (S_IWGRP | S_IWOTH))))
+        return -1;
+    return 0;
+}
+
+static int x_listen(const char *path, int abstract)
+{
+    struct sockaddr_un addr;
+    socklen_t len;
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) return -1;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    memcpy(addr.sun_path + (abstract ? 1 : 0), path, strlen(path));
+    len = (socklen_t)(offsetof(struct sockaddr_un, sun_path) + (abstract ? 1 : 0) + strlen(path));
+    if (!abstract) unlink(path);
+    /* A backlog for the X programs that come before Xwayland is ready. */
+    if (bind(fd, (struct sockaddr *)&addr, len) != 0 || listen(fd, 64) != 0) {
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* The first free display: its lock taken (a dead pid's taken over) and
+   both its sockets bound. Returns its number, or -1. */
+static int x_sockets(struct bc_server *s)
+{
+    int n;
+    if (x_socket_dir() != 0) return -1;
+    for (n = 0; n < BC_X_DISPLAYS; ++n) {
+        char lock[32], path[32], pid[16];
+        int fd = -1;
+        snprintf(lock, sizeof(lock), "/tmp/.X%d-lock", n);
+        snprintf(path, sizeof(path), "/tmp/.X11-unix/X%d", n);
+        fd = open(lock, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0444);
+        if (fd < 0) {
+            /* Another's, unless its pid is dead. */
+            char held[16] = { 0 };
+            long other;
+            int r = open(lock, O_RDONLY | O_CLOEXEC);
+            if (r < 0) continue;
+            if (read(r, held, sizeof(held) - 1) <= 0) held[0] = '\0';
+            close(r);
+            other = strtol(held, NULL, 10);
+            if (other <= 0 || kill((pid_t)other, 0) == 0 || errno != ESRCH || unlink(lock) != 0)
+                continue;
+            fd = open(lock, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0444);
+            if (fd < 0) continue;
+        }
+        snprintf(pid, sizeof(pid), "%10d\n", (int)getpid());
+        if (write(fd, pid, 11) != 11) {
+            close(fd);
+            unlink(lock);
+            continue;
+        }
+        close(fd);
+        s->x.listen_fd[0] = x_listen(path, 1);
+        s->x.listen_fd[1] = s->x.listen_fd[0] >= 0 ? x_listen(path, 0) : -1;
+        if (s->x.listen_fd[1] < 0) {
+            if (s->x.listen_fd[0] >= 0) close(s->x.listen_fd[0]);
+            s->x.listen_fd[0] = -1;
+            unlink(lock);
+            continue;
+        }
+        return n;
+    }
+    return -1;
+}
+
+static void x_sockets_close(struct bc_server *s)
+{
+    char path[32];
+    int k;
+    for (k = 0; k < 2; ++k)
+        if (s->x.listen_fd[k] >= 0) close(s->x.listen_fd[k]);
+    s->x.listen_fd[0] = s->x.listen_fd[1] = -1;
+    if (s->x.number < 0) return;
+    snprintf(path, sizeof(path), "/tmp/.X11-unix/X%d", s->x.number);
+    unlink(path);
+    snprintf(path, sizeof(path), "/tmp/.X%d-lock", s->x.number);
+    unlink(path);
+}
+
+/* Xwayland's Wayland connection is gone: its surfaces went with it. */
+static void x_client_gone(struct wl_listener *listener, void *data)
+{
+    struct bc_server *s = wl_container_of(listener, s, x.client_gone);
+    (void)data;
+    wl_list_remove(&s->x.client_gone.link);
+    wl_list_init(&s->x.client_gone.link);
+    s->x.client = NULL;
+    x_wm_stop(s);
+    /* It ends itself without its compositor; SIGCHLD restarts it. */
+    if (s->x.pid > 0) kill(s->x.pid, SIGTERM);
+}
+
+static int on_x_ready(int fd, uint32_t mask, void *data)
+{
+    struct bc_server *s = data;
+    char buf[32];
+    ssize_t got = (mask & WL_EVENT_READABLE) ? read(fd, buf, sizeof(buf) - 1) : 0;
+    if (got > 0 && buf[got - 1] != '\n') return 0;  /* the rest of its line follows */
+    wl_event_source_remove(s->x.ready_source);
+    s->x.ready_source = NULL;
+    close(s->x.ready_fd);
+    s->x.ready_fd = -1;
+    if (got <= 0) {
+        logf_("X: Xwayland closed -displayfd without saying it is ready");
+        return 0;  /* its SIGCHLD follows */
+    }
+    if (x_wm_start(s) != 0) {
+        if (s->x.pid > 0) kill(s->x.pid, SIGTERM);
+        return 0;
+    }
+    logf_("X: Xwayland ready on %s after %llu ms: window manager on (pid %d)", s->x.display,
+          (unsigned long long)((now_us() - s->x.started_us) / 1000u), (int)s->x.pid);
+    return 0;
+}
+
+/* Xwayland ended: its windows gone, and started again unless it keeps
+   dying at once. */
+static int on_x_child(int signal_number, void *data)
+{
+    struct bc_server *s = data;
+    int status;
+    pid_t pid;
+    uint64_t lived;
+    (void)signal_number;
+    if (s->x.pid <= 0 || (pid = waitpid(s->x.pid, &status, WNOHANG)) != s->x.pid) return 0;
+    s->x.pid = 0;
+    if (WIFEXITED(status)) logf_("X: Xwayland exited with status %d", WEXITSTATUS(status));
+    else if (WIFSIGNALED(status)) logf_("X: Xwayland was killed by signal %d", WTERMSIG(status));
+    x_wm_stop(s);
+    if (s->x.ready_source) wl_event_source_remove(s->x.ready_source);
+    s->x.ready_source = NULL;
+    if (s->x.ready_fd >= 0) close(s->x.ready_fd);
+    s->x.ready_fd = -1;
+    if (s->x.client) wl_client_destroy(s->x.client);
+    if (s->x.stopping) return 0;
+    lived = now_us() - s->x.started_us;
+    s->x.quick_deaths = lived < BC_X_QUICK_US ? s->x.quick_deaths + 1 : 0;
+    if (s->x.quick_deaths >= BC_X_QUICK_LIMIT) {
+        logf_("X: Xwayland died within %llu s of its start %d times in a row: X programs are off "
+              "until the compositor restarts", BC_X_QUICK_US / 1000000ull, s->x.quick_deaths);
+        x_sockets_close(s);
+        s->x.on = 0;
+        /* A desktop that connects from here on is told X is off. */
+        snprintf(s->x.display, sizeof(s->x.display), "-");
+        return 0;
+    }
+    logf_("X: starting Xwayland again on %s", s->x.display);
+    wl_event_source_timer_update(s->x.restart, s->x.quick_deaths ? 1000 * s->x.quick_deaths : 100);
+    return 0;
+}
+
+static int on_x_restart(void *data)
+{
+    struct bc_server *s = data;
+    if (s->x.on && !s->x.stopping && s->x.pid == 0 && x_launch(s) != 0)
+        wl_event_source_timer_update(s->x.restart, 2000);
+    return 0;
+}
+
+/* Xwayland started on the display: its Wayland client made of a
+   socketpair, its window manager's connection, its ready pipe. */
+static int x_launch(struct bc_server *s)
+{
+    int wl[2] = { -1, -1 }, wm[2] = { -1, -1 }, ready[2] = { -1, -1 };
+    pid_t pid;
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wl) != 0 ||
+        socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wm) != 0 || pipe2(ready, O_CLOEXEC) != 0) {
+        logf_("X: Xwayland not started: %s", strerror(errno));
+        goto fail;
+    }
+    s->x.client = wl_client_create(s->display, wl[0]);
+    if (s->x.client == NULL) {
+        logf_("X: Xwayland not started: no Wayland client for it");
+        goto fail;
+    }
+    wl[0] = -1;  /* the client's */
+    s->x.client_gone.notify = x_client_gone;
+    wl_client_add_destroy_listener(s->x.client, &s->x.client_gone);
+    s->x.started_us = now_us();
+    pid = fork();
+    if (pid < 0) {
+        logf_("X: Xwayland not started: fork: %s", strerror(errno));
+        wl_client_destroy(s->x.client);
+        goto fail;
+    }
+    if (pid == 0) {
+        /* The descriptors it is given at 3 to 7 and no other; the signals
+           libwayland blocks for its signalfd, and SIGPIPE, as they were. */
+        int given[5], k, fd;
+        char display[16];
+        sigset_t none;
+        sigemptyset(&none);
+        sigprocmask(SIG_SETMASK, &none, NULL);
+        signal(SIGPIPE, SIG_DFL);
+        if (s->log) {
+            dup2(fileno(s->log), 1);
+            dup2(fileno(s->log), 2);
+        }
+        given[0] = s->x.listen_fd[0];
+        given[1] = s->x.listen_fd[1];
+        given[2] = wm[1];
+        given[3] = wl[1];
+        given[4] = ready[1];
+        for (k = 0; k < 5; ++k)
+            if ((given[k] = fcntl(given[k], F_DUPFD, 64)) < 0) _exit(127);
+        for (k = 0; k < 5; ++k)
+            if (dup2(given[k], 3 + k) < 0) _exit(127);
+        if (close_range(8, ~0u, 0) != 0)
+            for (fd = 8; fd < 65536; ++fd) close(fd);
+        setenv("WAYLAND_SOCKET", "6", 1);
+        unsetenv("WAYLAND_DISPLAY");
+        snprintf(display, sizeof(display), ":%d", s->x.number);
+        execl(s->x.path, "Xwayland", display, "-rootless", "-listenfd", "3", "-listenfd", "4", "-wm", "5",
+              "-displayfd", "7", (char *)NULL);
+        _exit(127);
+    }
+    close(wl[1]);
+    close(wm[1]);
+    close(ready[1]);
+    s->x.pid = pid;
+    s->x.wm_fd = wm[0];
+    s->x.ready_fd = ready[0];
+    s->x.ready_source = wl_event_loop_add_fd(s->loop, ready[0], WL_EVENT_READABLE, on_x_ready, s);
+    logf_("X: Xwayland %s started on %s, pid %d", s->x.path, s->x.display, (int)pid);
+    return 0;
+fail:
+    if (wl[0] >= 0) close(wl[0]);
+    if (wl[1] >= 0) close(wl[1]);
+    if (wm[0] >= 0) close(wm[0]);
+    if (wm[1] >= 0) close(wm[1]);
+    if (ready[0] >= 0) close(ready[0]);
+    if (ready[1] >= 0) close(ready[1]);
+    return -1;
+}
+
+/* ---- xwayland_shell_v1: Xwayland's surfaces, for its client only ---- */
+
+static void xwl_surface_set_serial(struct wl_client *client, struct wl_resource *resource,
+                                   uint32_t lo, uint32_t hi)
+{
+    struct bc_surface *sf = wl_resource_get_user_data(resource);
+    uint64_t serial = (uint64_t)hi << 32 | lo;
+    (void)client;
+    if (sf == NULL) return;
+    if (serial == 0) {
+        wl_resource_post_error(resource, XWAYLAND_SURFACE_V1_ERROR_INVALID_SERIAL, "serial 0");
+        return;
+    }
+    if (sf->xwl_serial || sf->xwl_pending) {
+        wl_resource_post_error(resource, XWAYLAND_SURFACE_V1_ERROR_ALREADY_ASSOCIATED,
+                               "the surface already has a serial");
+        return;
+    }
+    sf->xwl_pending = serial;
+}
+
+static void xwl_surface_destroyed(struct wl_resource *resource)
+{
+    struct bc_surface *sf = wl_resource_get_user_data(resource);
+    /* The association stands (xwayland-shell); only the object goes. */
+    if (sf) sf->xwl = NULL;
+}
+
+static const struct xwayland_surface_v1_interface xwl_surface_impl = {
+    .set_serial = xwl_surface_set_serial,
+    .destroy = bc_destroy_request,
+};
+
+static void shell_get_xwayland_surface(struct wl_client *client, struct wl_resource *resource,
+                                       uint32_t id, struct wl_resource *surface_resource)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_surface *sf = wl_resource_get_user_data(surface_resource);
+    struct wl_resource *r;
+    if (sf->role != BC_ROLE_NONE || sf->xdg || sf->sub) {
+        wl_resource_post_error(resource, XWAYLAND_SHELL_V1_ERROR_ROLE, "the surface already has a role");
+        return;
+    }
+    r = wl_resource_create(client, &xwayland_surface_v1_interface, wl_resource_get_version(resource), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &xwl_surface_impl, sf, xwl_surface_destroyed);
+    sf->role = BC_ROLE_XWAYLAND;
+    sf->xwl = r;
+    wl_list_insert(&s->x.surfaces, &sf->xwl_link);
+}
+
+static const struct xwayland_shell_v1_interface xwl_shell_impl = {
+    .destroy = bc_destroy_request,
+    .get_xwayland_surface = shell_get_xwayland_surface,
+};
+
+static void bind_xwayland_shell(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct bc_server *s = data;
+    struct wl_resource *r;
+    if (client != s->x.client) {
+        wl_client_post_implementation_error(client, "xwayland_shell_v1 is Xwayland's only");
+        return;
+    }
+    r = wl_resource_create(client, &xwayland_shell_v1_interface, (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &xwl_shell_impl, s, NULL);
+}
+
+/* xwayland_shell_v1 is shown only to the Xwayland the compositor started. */
+static bool x_global_filter(const struct wl_client *client, const struct wl_global *global, void *data)
+{
+    struct bc_server *s = data;
+    return global != s->x.shell || (s->x.client != NULL && client == s->x.client);
+}
+
+/* X programs on, or off with the reason said once. */
+static void x_off(struct bc_server *s, const char *why)
+{
+    logf_("X: X programs are off: %s; the compositor serves Wayland programs only", why);
+    snprintf(s->x.display, sizeof(s->x.display), "-");
+}
+
+static void x_init(struct bc_server *s)
+{
+    const char *want = getenv("BLIT_COMPOSITOR_XWAYLAND");
+    char text[4096], why[512];
+    int major = 0, minor = 0;
+    s->x.number = -1;
+    s->x.listen_fd[0] = s->x.listen_fd[1] = -1;
+    s->x.wm_fd = s->x.ready_fd = -1;
+    s->x.focus = XCB_WINDOW_NONE;
+    wl_list_init(&s->x.surfaces);
+    wl_list_init(&s->x.windows);
+    wl_list_init(&s->x.client_gone.link);
+    snprintf(s->x.display, sizeof(s->x.display), "-");
+    if (want && strcmp(want, "none") == 0) {
+        x_off(s, "BLIT_COMPOSITOR_XWAYLAND=none");
+        return;
+    }
+    if (x_find(want && *want ? want : "Xwayland", s->x.path, sizeof(s->x.path)) != 0) {
+        snprintf(why, sizeof(why), "%s not found%s", want && *want ? want : "Xwayland",
+                 want && *want && strchr(want, '/') ? "" : " on PATH");
+        x_off(s, why);
+        return;
+    }
+    if (x_version_text(s->x.path, text, sizeof(text)) != 0 ||
+        x_version_of(text, &major, &minor) != 0) {
+        snprintf(why, sizeof(why), "%s -version said no version (\"%.80s\")", s->x.path, text);
+        x_off(s, why);
+        return;
+    }
+    if (major < 23 || (major == 23 && minor < 1)) {
+        snprintf(why, sizeof(why), "%s is Xwayland %d.%d; Blit needs 23.1 or later "
+                 "(xwayland_shell_v1)", s->x.path, major, minor);
+        x_off(s, why);
+        return;
+    }
+    s->x.number = x_sockets(s);
+    if (s->x.number < 0) {
+        x_off(s, "no free X display from :0 to :32 (/tmp/.X<n>-lock, /tmp/.X11-unix)");
+        return;
+    }
+    snprintf(s->x.display, sizeof(s->x.display), ":%d", s->x.number);
+    s->x.shell = wl_global_create(s->display, &xwayland_shell_v1_interface,
+                                  BC_VERSION(1, xwayland_shell_v1_interface), s, bind_xwayland_shell);
+    s->x.child = wl_event_loop_add_signal(s->loop, SIGCHLD, on_x_child, s);
+    s->x.restart = wl_event_loop_add_timer(s->loop, on_x_restart, s);
+    if (s->x.shell == NULL || s->x.child == NULL || s->x.restart == NULL) {
+        x_sockets_close(s);
+        x_off(s, "could not set up for Xwayland");
+        return;
+    }
+    wl_display_set_global_filter(s->display, x_global_filter, s);
+    s->x.on = 1;
+    logf_("X: Xwayland %d.%d (%s) for X programs on DISPLAY=%s", major, minor, s->x.path, s->x.display);
+    if (x_launch(s) != 0) wl_event_source_timer_update(s->x.restart, 2000);
+}
+
+/* The compositor's end: Xwayland ended, the display given back. */
+static void x_finish(struct bc_server *s)
+{
+    int k;
+    s->x.stopping = 1;
+    x_wm_stop(s);
+    if (s->x.ready_source) wl_event_source_remove(s->x.ready_source);
+    s->x.ready_source = NULL;
+    if (s->x.ready_fd >= 0) close(s->x.ready_fd);
+    s->x.ready_fd = -1;
+    if (s->x.client) wl_client_destroy(s->x.client);
+    if (s->x.pid > 0) {
+        int status;
+        kill(s->x.pid, SIGTERM);
+        for (k = 0; k < 100 && waitpid(s->x.pid, &status, WNOHANG) == 0; ++k) {
+            struct timespec ts = { 0, 10000000 };
+            nanosleep(&ts, NULL);
+        }
+        if (k == 100) {
+            kill(s->x.pid, SIGKILL);
+            waitpid(s->x.pid, &status, 0);
+        }
+        s->x.pid = 0;
+    }
+    if (s->x.restart) wl_event_source_remove(s->x.restart);
+    if (s->x.child) wl_event_source_remove(s->x.child);
+    s->x.restart = s->x.child = NULL;
+    x_sockets_close(s);
+}
+
 /* `FRAME error <id> <code>`. Replies come in the order frames are
    read and an accepted frame gets none, so a refusal is the newest frame
    of the picture -- an FRM3 still held, unless an FRM1 went after it
@@ -4525,7 +6130,7 @@ static void handle_line(struct bc_server *s, const char *line)
     switch (bc_parse_line(line, &l)) {
     case BC_LINE_SIZE:
         x = window_by_id(s, l.id);
-        if (x == NULL || x->toplevel == NULL) {
+        if (!window_is_toplevel(x)) {
             logf_("WINDOW size for %u, which is no toplevel here", l.id);
             return;
         }
@@ -4540,11 +6145,11 @@ static void handle_line(struct bc_server *s, const char *line)
         logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,
               l.fullscreen ? " fullscreen" : "", l.maximized ? " maximized" : "",
               l.activated ? " activated" : "");
-        configure_if_ready(x);
+        window_configure(x);
         return;
     case BC_LINE_OUTPUT:
         x = window_by_id(s, l.id);
-        if (x == NULL || x->toplevel == NULL) {
+        if (!window_is_toplevel(x)) {
             logf_("WINDOW output for %u, which is no toplevel here", l.id);
             return;
         }
@@ -4561,9 +6166,9 @@ static void handle_line(struct bc_server *s, const char *line)
         return;
     case BC_LINE_CLOSE:
         x = window_by_id(s, l.id);
-        if (x && x->toplevel) {
+        if (window_is_toplevel(x)) {
             logf_("window %u: close", l.id);
-            xdg_toplevel_send_close(x->toplevel);
+            window_close(x);
         } else if (x && x->popup) {
             logf_("popup %u: done", l.id);
             xdg_popup_send_popup_done(x->popup);
@@ -4789,11 +6394,11 @@ static void reannounce(struct bc_server *s)
     struct bc_xdg *x;
     struct bc_constraint *c;
     int windows = 0, frames = 0;
-    bc_wire_line(w, "WINDOW display %s", s->socket_name);
+    bc_wire_line(w, "WINDOW display %s %s", s->socket_name, s->x.display);
     wl_list_for_each(x, &s->windows, link) x->replay = 0;
-    /* Toplevels in creation order (the list is newest first). */
+    /* Toplevels of either kind in creation order (the list is newest first). */
     wl_list_for_each_reverse(x, &s->windows, link) {
-        if (x->toplevel == NULL) continue;
+        if (!window_is_toplevel(x)) continue;
         if (x->id == 0) {
             /* Never announced: the peer before had no window=1. */
             if (x->initial) announce_toplevel(x);
@@ -4827,7 +6432,7 @@ static void reannounce(struct bc_server *s)
     /* Each top-level's subsurfaces, after its popups. */
     wl_list_for_each(x, &s->windows, link) x->sub_shown = x->subsurface ? 0 : x->sub_shown;
     wl_list_for_each_reverse(x, &s->windows, link)
-        if (x->toplevel && x->id) windows += subs_show(x, NULL, 0);
+        if (window_is_toplevel(x) && x->id) windows += subs_show(x, NULL, 0);
     /* Each shown window's newest frame. */
     wl_list_for_each_reverse(x, &s->windows, link)
         if (x->id && x->mapped && (!x->subsurface || x->sub_shown)) {
@@ -4979,7 +6584,9 @@ static void usage(FILE *out)
     fprintf(out, "usage: blit-compositor [--display name] [--log path]\n"
                  "  Blit's Wayland compositor for programs (ADR 0228). Needs BLIT_FRAME_SOCKET,\n"
                  "  BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR; listens on $XDG_RUNTIME_DIR/<name>,\n"
-                 "  --display's (refused, status 2, when in use or invalid), else blit-<n>.\n");
+                 "  --display's (refused, status 2, when in use or invalid), else blit-<n>.\n"
+                 "  With Xwayland 23.1 or later on PATH it runs it for X programs and is its\n"
+                 "  window manager; the X display goes to the desktop with the Wayland one.\n");
 }
 
 /* Why `name` cannot be the display --display asks for, or NULL: it is one
@@ -5193,7 +6800,10 @@ int main(int argc, char **argv)
     server.sigint_source = wl_event_loop_add_signal(server.loop, SIGINT, on_signal, &server);
     server.redial = wl_event_loop_add_timer(server.loop, on_redial, &server);
     logf_("listening on %s/%s", runtime, server.socket_name);
-    bc_wire_line(&server.wire, "WINDOW display %s", server.socket_name);
+    /* X programs, when Xwayland is here (the X section): the display is
+       said with the Wayland one. */
+    x_init(&server);
+    bc_wire_line(&server.wire, "WINDOW display %s %s", server.socket_name, server.x.display);
 
     wl_display_run(server.display);
 
@@ -5204,6 +6814,8 @@ int main(int argc, char **argv)
         wl_list_remove(&conn->link);
         free(conn);
     }
+    /* Xwayland first: its windows go and it ends (the X section). */
+    x_finish(&server);
     /* Each window's input socket goes with its window; any left (a
        window never destroyed) go here. */
     wl_display_destroy_clients(server.display);
