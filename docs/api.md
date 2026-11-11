@@ -2014,8 +2014,9 @@ until the next Blit, `--display`, programs that survive a desktop restart
 and `WINDOW quit 0`), and Blit its
 `window=0` answer, `GET /v1/input/keymap`, `INPUT sock`, `INPUT member`
 and `INPUT keymap`; no desktop implements its side yet. `blit-compositor`
-is Blit's Wayland compositor for programs and, from phase 2 (milestone A,
-unreleased until the next Blit: "X programs" below), the X window manager
+is Blit's Wayland compositor for programs and, from phase 2 (milestone A
+in 0.3.78, milestone C unreleased until the next Blit: "X programs"
+below), the X window manager
 of the Xwayland it runs for X programs. It composites nothing: each window
 is one picture by descriptor.
 It speaks the frame channel above as a producer, with these additions.
@@ -2169,10 +2170,12 @@ It speaks the frame channel above as a producer, with these additions.
     Blit's pointer art: a CSS cursor name (`default`, `text`, `pointer`,
     `wait`, the `*-resize` names, ...) as the program named it through
     `wp_cursor_shape_v1`, or `none` to hide the pointer (`wl_pointer.
-    set_cursor` with no surface, as games do). A program's own cursor image
-    (`set_cursor` with a surface) is never drawn: it is `default`, the
-    display's own pointer. Sent for the top-level whose surface has the
-    pointer, once per change, and again when the window is announced again.
+    set_cursor` with no surface, as games do); for an X program, the name X
+    gives its cursor, in the same vocabulary ("X programs", below). A
+    program's own cursor image (`set_cursor` with a surface) is never
+    drawn: it is `default`, the display's own pointer. Sent for the
+    top-level whose surface has the pointer, once per change, and again
+    when the window is announced again.
     The desktop relays the name unchanged as that window's OSC 22 shape (a
     name Blit has no art for shows the display's own pointer), so Blit and
     `hold` gain nothing new for it.
@@ -2217,7 +2220,8 @@ It speaks the frame channel above as a producer, with these additions.
   - `WINDOW close <id>`: `xdg_toplevel.close` (in phase 2,
     `WM_DELETE_WINDOW`); what to do if the program lingers is the desktop's.
     For a popup it is `xdg_popup.popup_done` -- the desktop sends it for a
-    click outside a grabbing popup.
+    click outside a grabbing popup; an X popup closes itself ("X
+    programs", below).
   - `WINDOW quit 0`: the person quit the desktop; the compositor ends
     every program at once and exits, status 0, without reconnecting. Only
     id 0 (the whole compositor) is defined; any other is not a `quit`
@@ -2314,9 +2318,10 @@ It speaks the frame channel above as a producer, with these additions.
 - **Windows nobody launched through the desktop** -- a program started
   from a terminal with `WAYLAND_DISPLAY` set -- still produce `WINDOW new`,
   and the desktop opens a window for them.
-- **X programs** (ADR 0228 phase 2, milestone A: one X program in a window,
-  keys and mouse; built in blit-compositor, unreleased until the next
-  Blit). The compositor runs Xwayland (23.1 or later, upstream's X server,
+- **X programs** (ADR 0228 phase 2: milestone A, X programs in windows
+  with keys and mouse, from 0.3.78; milestone C, their menus, dialogs,
+  states, move and resize and cursors, unreleased until the next Blit).
+  The compositor runs Xwayland (23.1 or later, upstream's X server,
   `Recommends` of its package) on the first free X display `:<n>`, said on
   `WINDOW display`, and is its window manager. An X top-level window is a
   window as a Wayland one is, in the same id space, on the same lines:
@@ -2334,16 +2339,60 @@ It speaks the frame channel above as a producer, with these additions.
   asks the program to close it (`WM_DELETE_WINDOW`), or ends the program
   when it takes no such request. The window's unmapping or destruction
   is `WINDOW gone`; mapped again it is a new window with a new id. Keys
-  and the pointer come on its input socket as for any window. Not yet (milestone
-  C, D): override-redirect windows (an X menu or tooltip: not shown),
-  `WM_TRANSIENT_FOR` (every X window says parent 0), `WM_NORMAL_HINTS`
-  (no `WINDOW limits`), `_NET_WM_STATE` full screen and
-  maximize, `_NET_WM_MOVERESIZE`, X cursors (an X window's pointer is
-  `WINDOW cursor <id> default`) and the X selections; each is noted once
-  in the compositor's log. When Xwayland dies, its windows are `WINDOW
-  gone` and it is started again on the same display; its X programs end
-  with it. `BLIT_COMPOSITOR_XWAYLAND`, for gates only, names another
-  Xwayland, or `none` for X off.
+  and the pointer come on its input socket as for any window.
+  From milestone C (unreleased until the next Blit) each of an X
+  program's requests is the line its Wayland equivalent produces:
+  - `WM_TRANSIENT_FOR` is the window's parent, `WINDOW new <id> <parent>`
+    (and `WINDOW parent` when it changes), as `xdg_toplevel.set_parent`.
+  - `WM_NORMAL_HINTS`' minimum and maximum size are `WINDOW limits` (its
+    base size is the minimum when it gives no minimum, as ICCCM says), as
+    `set_min_size` and `set_max_size`.
+  - `_NET_WM_STATE` full screen and maximized are `WINDOW fullscreen` and
+    `WINDOW maximize`, as `set_fullscreen` and `set_maximized`: the
+    property the program set before mapping the window, and its requests
+    after (add, remove, toggle; maximized is vertical and horizontal
+    both). The desktop's `WINDOW size` states come back as the window's
+    `_NET_WM_STATE` (full screen, maximized, `activated` as focused).
+  - `_NET_WM_MOVERESIZE` (a program's own title bar or edge, as Steam's)
+    is `WINDOW move` or `WINDOW resize <edges>`, as `xdg_toplevel.move`
+    and `resize`, under the same rule: only while a press the compositor
+    delivered to that window is down (the button the message names; X has
+    no serial). Its keyboard move and size are ignored and logged.
+  - `WM_CHANGE_STATE` to Iconic is `WINDOW minimize`.
+  - X's cursor is `WINDOW cursor <id> <name>` by the name X programs give
+    their cursors (XFixes; libXcursor names every themed cursor, `left_ptr`,
+    `xterm`, `hand2`, or the CSS names GTK asks for), when Blit's pointer
+    vocabulary has it -- its OSC 22 names take the X names as aliases --
+    else `default`; `none` while X hides it.
+  - An override-redirect window (an X menu, dropdown or tooltip) is a
+    `WINDOW popup <id> <parent> <x> <y>`, as an `xdg_popup` is, and the
+    desktop joins it to its top-level's route with `INPUT member` as for
+    any popup. Its parent is the top-level its `WM_TRANSIENT_FOR` names;
+    else the one under its origin in X space (a popup there first: a
+    submenu over its menu); else the X top-level the pointer is in. Its
+    offset is its place relative to that top-level in X space, where
+    every X top-level keeps its own position (the program's; the window
+    manager never moves it): X space is a virtual layout, and the desktop
+    places the pictures. A popup the program moves after it is shown keeps
+    its first place (logged; the draft has no line for a popup that moves,
+    for either kind). One whose origin is in no X window and that names
+    none is not shown (logged).
+  - X menus take their input as X programs expect: the keys and the
+    pointer of their top-level's route reach the menu through its X
+    grabs, and a press anywhere in the program's windows outside the menu
+    reaches the menu, which closes itself. X has no `popup_done`, and the
+    window manager does not unmap another program's override-redirect
+    window: `WINDOW close` for an X popup is noted in the log and nothing
+    more. When the desktop takes the window's focus (its `WINDOW size`
+    without `activated`), X's focus and `_NET_ACTIVE_WINDOW` leave it,
+    and X toolkits close their menus on that. A press outside every X
+    window does not reach X at all.
+  Not yet: `_NET_ACTIVE_WINDOW` requests and `_NET_WM_WINDOW_TYPE` (noted
+  once in the compositor's log), and the X selections (milestone D). When
+  Xwayland dies, its windows are `WINDOW gone` and it is started again on
+  the same display; its X programs end with it.
+  `BLIT_COMPOSITOR_XWAYLAND`, for gates only, names another Xwayland, or
+  `none` for X off.
 - **Input straight from Blit.** blit-compositor takes its windows' input
   from Blit directly, not through the desktop's relay. It listens on an
   input socket of its own for each top-level (`SOCK_STREAM`) and asks once
