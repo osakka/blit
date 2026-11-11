@@ -44,11 +44,29 @@ display" and the compositor's log says why.
 An X program's window is a Hibr window like any other: its title and
 application name, placed and sized by the desktop, keys and mouse, and
 Hibr's close asks it to close. A program that draws its own frame (Steam)
-says so, and Hibr's frame stays off, as for Firefox. Not yet in milestone A: its menus and
-tooltips (they do not show), its own full screen, maximize and
-move/resize requests, its own pointer shapes (the display's pointer
-shows), dialogs kept with their parent, and copy and paste with X
-programs; these are milestones C and D.
+says so, and Hibr's frame stays off, as for Firefox.
+
+*From the next Blit (milestone C):*
+
+- **Menus, dropdowns and tooltips** show over their window, where the
+  program puts them, and take the keys and the mouse as the program
+  expects: choose with a click or the keys, and a click elsewhere in the
+  program's windows closes the menu. Switching to another window takes
+  the focus from the program, which is how X programs that close their
+  menus on losing the focus are told (which programs do is still to be
+  checked on real hardware, Steam first). A click on the desktop or in a
+  Wayland program does not reach X, so a program that waits for a click
+  of its own keeps its menu open until you come back to it.
+- **Dialogs** belong to their window, as a Wayland program's do, and a
+  window's minimum and maximum size hold when you resize it.
+- **The program's own buttons**: full screen, maximize, minimize, and
+  moving and resizing from its own title bar and edges (Steam's) work as
+  for a Wayland program.
+- **Pointer shapes**: the program's named cursors (text, hand, resize,
+  ...) are Blit's own pointer for that name, as for a Wayland program; a
+  cursor the program draws without a name is the display's pointer.
+
+Copy and paste with X programs is milestone D.
 
 ## Using the window
 
@@ -65,9 +83,11 @@ programs; these are milestones C and D.
 
 ## Not yet
 
-- **X11 programs beyond one plain window**: menus and tooltips, their
-  full screen and pointer shapes, the X clipboard, and Steam -- ADR 0228
-  phase 2's milestones B to E (above).
+- **X11 programs**: the X clipboard, Big Picture full screen and Proton
+  games -- ADR 0228 phase 2's milestones D and E (above). A menu its
+  program moves while it is open stays where it first showed; a program
+  whose only window is an override-redirect one (some games' full-screen
+  windows) does not show.
 - **Programs' menus in Hibr's bar** (the global menu): Blit's side is in
   0.3.77, Hibr's to follow. Qt and KDE programs, and GTK 3 ones with the
   appmenu module, get it; Firefox and GTK 4 programs keep their own menus.
@@ -95,4 +115,6 @@ minimize and raise, Restart Desktop -- besides `compositor_gate`, which
 checks every line of the wire with a stand-in program, and
 `xwayland_gate`, which runs an X stand-in program under the compositor's
 Xwayland (map, title and class, a drawing pixel for pixel, a resize,
-focus, a key and a click, close).
+focus, a key and a click, its menus with their grabs, a dialog and its
+limits, full screen and maximize both ways, its own move and resize, a
+named cursor, close).

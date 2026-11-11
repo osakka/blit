@@ -494,8 +494,8 @@ docs/api.md, "Program windows", both installed by the blit package under
 EOF
 cat > "$cdoc/copyright" <<EOF
 blit-compositor is part of Blit, Copyright (C) 2026 Omar Sakka, built from
-src/blit_compositor.c and src/blit_compositor_wire.h in the Blit source
-tree. It is free software: you can redistribute it and/or modify it under
+src/blit_compositor.c, src/blit_compositor_wire.h and src/blit_pointer_names.h
+in the Blit source tree. It is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
 Software Foundation, either version 3 of the License, or (at your option)
 any later version. On Debian systems the licence text is in

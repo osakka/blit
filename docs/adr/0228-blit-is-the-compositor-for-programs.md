@@ -311,22 +311,61 @@ section; `docs/api.md`, "X programs"):
 - Focus by ICCCM 4.1.7: `SetInputFocus` only when `WM_HINTS` takes input,
   `WM_TAKE_FOCUS` only to a window that lists it in `WM_PROTOCOLS`
   (wlroots sends it to every window); a program that moves X's focus
-  itself is logged, not reverted (milestone C decides, with Steam).
-- No stacking: no `_NET_CLIENT_LIST(_STACKING)`, and a ConfigureRequest's
-  sibling and stack mode are dropped -- stacking is the desktop's. A
-  ConfigureRequest after the desktop's size is answered with that size and
-  a synthetic ConfigureNotify (ICCCM 4.1.5); wlroots hands it to its
-  compositor.
-- Override-redirect windows are matched and not shown until milestone C.
+  itself is logged, not reverted (still so after milestone C: nothing
+  seen needed more). With no window focused, the focus is PointerRoot,
+  as wlroots (from milestone C; None before): None discards the
+  keyboard a grabbing menu still needs.
+- Stacking is the desktop's to draw; X's stacking only decides X's hit
+  test: no `_NET_CLIENT_LIST(_STACKING)`, and a ConfigureRequest's
+  sibling and stack mode are dropped. From milestone C X's order follows
+  Blit's pointer: the toplevel under it is raised above the topmost other
+  shown toplevel before the pointer's event goes to Xwayland, and again
+  when a new toplevel is shown under a pointer at rest, never above
+  override-redirect windows (wlroots' restack rule); wlroots restacks on
+  activation, because its compositor's screen positions are the X
+  positions, which ours are not (below). A ConfigureRequest after the
+  desktop's size is answered with that size and a synthetic
+  ConfigureNotify (ICCCM 4.1.5); wlroots hands it to its compositor.
+- Toplevels keep the X position their program asks for, kept inside the
+  root (from milestone C): X confines its pointer to the root, the
+  largest output (the compositor's outputs all sit at 0,0), so a press
+  past its edge reached X at the edge (the gate measured 390,170 arrive
+  as 219,170). wlroots' compositors move X windows to their screen
+  positions, inside the outputs by construction.
+- Override-redirect windows (from milestone C) are popups of a toplevel,
+  where wlroots shows them as unmanaged surfaces at their absolute X
+  position: the wire has popups, not free-standing surfaces. The parent
+  is the toplevel `WM_TRANSIENT_FOR` names, else the one under the
+  window's origin in X space (a shown popup there first), else the X
+  toplevel the pointer is in; one with none is not shown. One its program
+  moves while it is shown keeps its first place (logged, as
+  `xdg_popup.reposition` is); wlroots follows its geometry.
+- X has no `popup_done`, and neither the window manager nor wlroots
+  unmaps another program's override-redirect window: the desktop's
+  `WINDOW close` for an X popup is logged. Menus close by X's own means --
+  a press their grab gets, or their window losing X's focus.
+- `_NET_WM_STATE` (milestone C) is written only from the desktop's
+  `WINDOW size` states; a request from the program is a request
+  (`WINDOW fullscreen`, `WINDOW maximize`) and a toggle is from what the
+  property says. Maximized is both directions, as xdg has no half;
+  wlroots keeps each flag and leaves it to its compositor. Modal, hidden,
+  sticky, shaded, above, below and attention are not kept.
+- `_NET_WM_MOVERESIZE` (milestone C) is let through only while a press
+  the compositor delivered to the window is held (the button the message
+  names), xdg's rule without the serial X does not have; wlroots emits
+  every request and leaves the check to its compositor.
+- X cursors (milestone C) are names, never images: XFixes' CursorNotify
+  name through Blit's pointer table, `default` for an unnamed one.
+  wlroots shows the image Xwayland sets with `wl_pointer.set_cursor`.
 - Windows mapped before the window manager started (an X program waiting
   in the socket's backlog while Xwayland got ready) are unmapped and
   mapped again under it, so Xwayland sends a serial someone hears; wlroots
   starts lazily, its window manager up before the first client.
 - `_NET_SUPPORTED` names what the ADR lists (state, full screen,
-  maximized, active window, move/resize, name, the check window), not
-  wlroots' focused, modal, hidden and client lists, which nothing keeps
-  here; the states and move/resize are advertised ahead of milestone C and
-  their requests logged until then.
+  maximized, active window, move/resize, name, the check window) and,
+  from milestone C, focused; not wlroots' modal, hidden and client lists,
+  which nothing keeps here. `_NET_ACTIVE_WINDOW` requests are logged: the
+  draft has no line for a program raising its window.
 - Xwayland gets exactly its five descriptors (`close_range` past them) and
   an unblocked signal mask (libwayland's signalfd blocks SIGTERM, SIGINT and
   SIGCHLD, which a child inherits); the listening sockets have a backlog of
@@ -756,3 +795,57 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   stayed on top of it. A window moved to another display stopped
   updating: Hibr's hold waited for a `FRAME release` from the display the
   window had left, fixed in Hibr 0.99.488.
+- **Milestone C, built (2026-11-11; unreleased until the next Blit).**
+  What Steam showed, each X request onto the line its Wayland equivalent
+  already produces, through one setter for both kinds, with no wire
+  change (`src/blit_compositor.c`, the X section; `docs/api.md`, "X
+  programs"):
+  - override-redirect windows are `WINDOW popup` at their offset from
+    their toplevel in X space; toplevels keep their own X position, a
+    virtual layout Hibr does not see. Xwayland turns a pointer on any of
+    its surfaces into a root position by that window's X position
+    (`xwayland-input.c`, Xwayland 24.1), so Blit's member mapping and X
+    agree. Grabs are X's: keys and presses in the program's windows reach
+    the grabbing menu;
+  - `WM_TRANSIENT_FOR` the parent; `WM_NORMAL_HINTS` `WINDOW limits`;
+    `_NET_WM_STATE` full screen and maximize both ways;
+    `_NET_WM_MOVERESIZE` `WINDOW move`/`resize`; `WM_CHANGE_STATE`
+    Iconic `WINDOW minimize`; XFixes cursor names `WINDOW cursor`
+    (`blit_pointer_name_shape`, moved to `src/blit_pointer_names.h` so the
+    compositor asks Blit's one table).
+  - Found by the gate, not by reading: a click on window 1 where its
+    dialog overlapped it in X space went to the dialog (X's own stacking
+    decides), hence X's stacking follows Blit's pointer; and a raise and
+    a press sent in the same instant race inside Xwayland, which takes
+    input before requests -- a person's press comes after the pointer got
+    there, and the gate waits for the raise as a person would. Then, on
+    the advice of a review, a dialog shown under a pointer at rest (the
+    raise moved to its showing too) and a window past the root's edge
+    (clamped, hence the window manager keeps toplevels inside the root).
+  - Evidence: `xwayland_gate` (Xwayland 24.1 in the Debian 13 build
+    environment) passes under tcc and ASan/UBSan with the stand-in's new
+    keys -- menus as popups 2 and 3 at 30,40 (a key and a choice through
+    their grabs, dismissed by a press outside); dialog `WINDOW new 4 1`
+    with limits 150x80-300x200, shown under a pointer at rest, a press
+    there with no move reaching window 1; popup 5 in the dialog by
+    `WM_TRANSIENT_FOR` window 1 (`WINDOW close` logged, dismissed on
+    deactivation); a submenu, popup 7, of window 1 by the menu under its
+    origin while the pointer was on the dialog; a base size as limits;
+    full screen and maximize on and off with the states written back;
+    move and bottom-right resize with a press held, refused without one;
+    `WINDOW minimize 1` from WM_CHANGE_STATE; a panel asking for
+    1800,1000 placed at 1720,980, a press at its far corner landing,
+    maximized before its map and given its parent after; `WINDOW cursor 1
+    xterm`, and `default` for an unknown name. Hibr's side read: its
+    focus loss sends `WINDOW size` without `activated` (`dt_natsize`),
+    which is what deactivates X. `compositor_gate` and `pointer_art_gate`
+    pass.
+  - Pending: Steam's menus, dropdowns, title bar and cursors on the
+    owner's machine. Open: a moving popup's line (the draft has none for
+    either kind); an X program whose only window is override-redirect
+    (some games) is not shown, nor one whose origin is in no X window
+    while the pointer is in none (not gated: the gate cannot take the
+    pointer away); a menu whose toolkit closes only on its own grab's
+    click stays open after a click outside every X window; a toplevel
+    larger than the root takes its pointer clamped past the root's edge;
+    the raise-and-press race above, for synthetic input.

@@ -1,10 +1,11 @@
 #!/bin/sh
-# ADR 0228 phase 2, milestone A: one X program in a Hibr window, keys and
-# mouse -- blit-compositor with its Xwayland on, against a fake desktop,
-# with the in-repo X stand-in client (tools/tests/xwayland_gate.py says
-# what is checked). The compositor is built twice: by tcc, as shipped, and
-# by cc under AddressSanitizer and UndefinedBehaviorSanitizer when the
-# host's cc has them.
+# ADR 0228 phase 2, milestones A and C: X programs in Hibr windows -- keys
+# and mouse, menus, dialogs, states, move/resize, cursors -- blit-compositor
+# with its Xwayland on, against a fake desktop, with the in-repo X stand-in
+# client (tools/tests/xwayland_gate.py says what is checked). The
+# compositor is built twice: by tcc, as shipped, and by cc under
+# AddressSanitizer and UndefinedBehaviorSanitizer when the host's cc has
+# them.
 #
 # It skips (77, XWAYLAND_GATE_SKIP <reason>) where the compositor's build
 # dependencies or libxcb are missing (tools/build-flags.sh), or `Xwayland`
