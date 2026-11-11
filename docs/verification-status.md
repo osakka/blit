@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.79 the keymap's indicators (Xwayland crashed 120 s after a key)
+
+- **Fix:** Xwayland died (SIGSEGV at 0x8) about 120 s after the last key
+  in any X window -- seen on the owner's HP with Steam open. Debian's
+  xwayland-dbgsym 24.1.6-1 put it in AccessXTimeoutExpire ->
+  XkbUpdateAllDeviceIndicators -> XkbUpdateLedAutoState: Blit's keymap had
+  no indicators, and Xwayland applying a keymap with none frees its
+  keyboards' indicator maps (_XkbCopyIndicators) while their LED state
+  still points into them. The keymap now names and defines "Caps Lock"
+  and "Num Lock", lit while Lock and Num Lock are locked.
+- **Gates:** `xkb_keymap_check` requires both indicators (off at first,
+  lit by the key carrying the lock's keysym; fails on 0.3.78's keymap);
+  `xwayland_gate` runs Xwayland with `+accessx 1` and checks it outlives
+  the timeout (on the owner's desktop: passes, and fails with 0.3.78's
+  keymap by the same SIGSEGV at 0x8).
+- **Suites:** this host, main d730a33 rebuilt: `all` 187 pass, 13 skip, 0
+  fail; `renderer` 82 pass, 1 skip; `renderer-gles` 62 pass. The owner's
+  Debian 13 desktop, d730a33: `compositor_gate` and `xwayland_gate`
+  (median 1.4-1.5 ms) with ASan/UBSan, the packages built there and
+  `package_artifact_gate` passing; brought here by scp, checksums
+  verified.
+- **Published** to hibr-apt (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.78 X programs, milestone A (ADR 0228 phase 2)
 
 - **X programs:** `blit-compositor` starts Xwayland (23.1 or later,
