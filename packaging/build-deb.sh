@@ -38,7 +38,6 @@ if [ ! -d "$HIBR_ROOT/include" ] || [ ! -d "$HIBR_ROOT/mods" ]; then
 fi
 
 if [ ! -x "$RUNTIME_BINARY" ] || [ ! -x "$UPDATE_HELPER" ] ||
-   [ ! -x "$BUNDLE/bin/blit-server" ] ||
    [ ! -f "$VERSION_FILE" ] || [ ! -f "$HIBR_ENTRYPOINT" ] ||
    [ ! -f "$HIBR_LOGIN_WRAPPER" ] ||
    [ ! -f "$HIBR_LOGIN_ENTRYPOINT" ] ||
@@ -58,6 +57,7 @@ fi
 # was testing a binary nobody was releasing (issue #59).  The gate now takes
 # the canonical binary; this keeps the staging directory from being a second,
 # stale answer to "which server is this".
+mkdir -p "$BUNDLE/bin"
 cp -a "$RUNTIME_BINARY" "$BUNDLE/bin/blit-server"
 
 # The updater is a separate root-owned service.  Reject the historical failure

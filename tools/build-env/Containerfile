@@ -1,0 +1,12 @@
+# Blit's build environment: Debian 13 with the packages listed in
+# `packages` (tools/build-env/run.sh builds and runs it). Nothing of Blit's
+# is in the image; the checkout is mounted at run time.
+# apt retries a failed download (a flaky link to the mirror broke builds).
+FROM docker.io/library/debian:trixie
+COPY packages /tmp/packages
+RUN printf "Acquire::Retries \"10\";\n" > /etc/apt/apt.conf.d/80retries && \
+    apt-get update && \
+    sed -e 's/#.*//' -e '/^[[:space:]]*$/d' /tmp/packages | \
+        xargs apt-get install -y --no-install-recommends && \
+    rm -f /etc/apt/apt.conf.d/80retries && \
+    rm -rf /var/lib/apt/lists/* /tmp/packages

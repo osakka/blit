@@ -743,3 +743,16 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
 - **Phase 0 dropped (2026-11-10).** With gamescope removed there is no
   path left to measure against; the owner dropped phase 0's latency
   condition from the phase 2 criterion.
+- **Milestone A on real hardware (0.3.78, 2026-11-11).** xterm opened as
+  a Hibr window on the owner's HP, and Steam reached its sign-in window.
+  Then Xwayland 24.1.6 died (SIGSEGV at 0x8) about 120 s after a key:
+  its AccessX timeout updates every keyboard's indicators, and Blit's
+  keymap had none, so applying it had freed the indicator maps the LED
+  state pointed into (Debian's xwayland-dbgsym located it). 0.3.79's
+  keymap names "Caps Lock" and "Num Lock"; `xwayland_gate` runs Xwayland
+  with `+accessx 1` and checks it outlives the timeout. With 0.3.79 the
+  owner ran Steam and a game. `_MOTIF_WM_HINTS` (decor) moved forward
+  from milestone C in 0.3.80: Steam draws its own frame and the desktop's
+  stayed on top of it. A window moved to another display stopped
+  updating: Hibr's hold waited for a `FRAME release` from the display the
+  window had left, fixed in Hibr 0.99.488.

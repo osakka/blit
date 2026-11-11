@@ -22,6 +22,8 @@
      XSTANDIN drew <w>x<h>
      XSTANDIN focus-in
      XSTANDIN key <keycode>              a KeyPress
+     XSTANDIN undecorated|decorated      the D key toggled _MOTIF_WM_HINTS'
+                                         "no decorations" (as Steam sets it)
      XSTANDIN button <n> <x>,<y>         a ButtonPress, in the window
      XSTANDIN animated <n>
      XSTANDIN delete                     WM_DELETE_WINDOW: it exits 0
@@ -43,6 +45,7 @@
 #define ANIMATE_FRAMES 150
 #define ANIMATE_MS 16
 #define KEYCODE_SPACE 65
+#define KEYCODE_D 40
 
 static xcb_connection_t *conn;
 static xcb_screen_t *screen;
@@ -112,9 +115,9 @@ int main(int argc, char **argv)
     static const char wm_class[] = "xstandin\0blit.xstandin";
     const xcb_setup_t *setup;
     xcb_format_iterator_t f;
-    xcb_atom_t protocols, delete_window, utf8, net_wm_name;
+    xcb_atom_t protocols, delete_window, utf8, net_wm_name, motif_hints;
     uint32_t values[2];
-    int animate = 0, animated = 0, bpp = 0;
+    int animate = 0, animated = 0, bpp = 0, undecorated = 0;
     uint64_t next_frame = 0;
 
     conn = xcb_connect(NULL, NULL);
@@ -135,6 +138,7 @@ int main(int argc, char **argv)
     delete_window = atom("WM_DELETE_WINDOW");
     utf8 = atom("UTF8_STRING");
     net_wm_name = atom("_NET_WM_NAME");
+    motif_hints = atom("_MOTIF_WM_HINTS");
 
     window = xcb_generate_id(conn);
     values[0] = screen->black_pixel;
@@ -193,6 +197,19 @@ int main(int argc, char **argv)
             case XCB_KEY_PRESS: {
                 xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
                 say("key %u", k->detail);
+                if (k->detail == KEYCODE_D) {
+                    /* flags (MWM_HINTS_DECORATIONS, 2), functions,
+                       decorations (none), input mode, status */
+                    static const uint32_t none[5] = { 2, 0, 0, 0, 0 };
+                    undecorated = !undecorated;
+                    if (undecorated)
+                        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, window, motif_hints, motif_hints,
+                                            32, 5, none);
+                    else
+                        xcb_delete_property(conn, window, motif_hints);
+                    xcb_flush(conn);
+                    say(undecorated ? "undecorated" : "decorated");
+                }
                 if (k->detail == KEYCODE_SPACE && animate == 0) {
                     animate = ANIMATE_FRAMES;
                     animated = 0;

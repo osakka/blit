@@ -4738,6 +4738,7 @@ struct bc_xwin {
     int title_net;                    /* the title is _NET_WM_NAME's: WM_NAME is not read */
     int deletes, takes_focus;         /* WM_PROTOCOLS: WM_DELETE_WINDOW, WM_TAKE_FOCUS */
     int input;                        /* WM_HINTS' input, 1 when it says nothing */
+    int undecorated;                  /* _MOTIF_WM_HINTS: no decorations (it draws its own frame) */
     uint32_t pid;                     /* its client's process, 0 unknown (X-Resource) */
     int or_logged;                    /* an override-redirect window, noted once */
     int remapping;                    /* unmapped by the window manager to be mapped again */
@@ -4927,8 +4928,28 @@ static void x_property(struct bc_server *s, struct bc_xwin *w, xcb_atom_t atom,
         if (reply == NULL || reply->format != 32 || xcb_get_property_value_length(reply) < 8) return;
         v = xcb_get_property_value(reply);
         if (v[0] & 1u) w->input = v[1] != 0;
-    } else if (atom == atoms[BC_ATOM_WM_NORMAL_HINTS] || atom == atoms[BC_ATOM_MOTIF_WM_HINTS]) {
-        x_note(s, BC_X_LOGGED_HINTS, "a window's WM_NORMAL_HINTS or _MOTIF_WM_HINTS (limits, decor)");
+    } else if (atom == atoms[BC_ATOM_MOTIF_WM_HINTS]) {
+        /* flags, functions, decorations, ...: with MWM_HINTS_DECORATIONS
+           (2) in flags and no decorations, the program draws its own frame
+           or none (Steam), so the desktop draws none: `WINDOW decor <id>
+           client`, as for a Wayland program that asks for client-side
+           decoration. Any decoration, no such flag, or no property: the
+           desktop's frame. */
+        const uint32_t *v;
+        uint32_t mode;
+        w->undecorated = 0;
+        if (reply && reply->format == 32 && xcb_get_property_value_length(reply) >= 12) {
+            v = xcb_get_property_value(reply);
+            w->undecorated = (v[0] & 2u) && v[2] == 0;
+        }
+        mode = w->undecorated ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+                              : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+        if (w->pic && w->pic->decor_mode != mode) {
+            w->pic->decor_mode = mode;
+            if (w->pic->id) send_decor(w->pic);
+        }
+    } else if (atom == atoms[BC_ATOM_WM_NORMAL_HINTS]) {
+        x_note(s, BC_X_LOGGED_HINTS, "a window's WM_NORMAL_HINTS (its limits)");
     } else if (atom == XCB_ATOM_WM_TRANSIENT_FOR) {
         x_note(s, BC_X_LOGGED_TRANSIENT, "a window's WM_TRANSIENT_FOR (its parent)");
     } else if (atom == atoms[BC_ATOM_NET_WM_WINDOW_TYPE]) {
@@ -4941,7 +4962,8 @@ static void x_read_properties(struct bc_server *s, struct bc_xwin *w)
 {
     xcb_connection_t *c = s->x.conn;
     const xcb_atom_t props[] = { s->x.atoms[BC_ATOM_NET_WM_NAME], XCB_ATOM_WM_NAME, XCB_ATOM_WM_CLASS,
-                                 s->x.atoms[BC_ATOM_WM_PROTOCOLS], XCB_ATOM_WM_HINTS };
+                                 s->x.atoms[BC_ATOM_WM_PROTOCOLS], XCB_ATOM_WM_HINTS,
+                                 s->x.atoms[BC_ATOM_MOTIF_WM_HINTS] };
     xcb_get_property_cookie_t cookies[sizeof(props) / sizeof(props[0])];
     xcb_res_query_client_ids_cookie_t pid_cookie = { 0 };
     size_t i;
@@ -5122,8 +5144,10 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
     x->input_fd = -1;
     x->kept.fd = -1;
     x->initial = 1;
-    /* X programs leave their frame to the window manager: the desktop's. */
-    x->decor_mode = ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+    /* X programs leave their frame to the window manager, the desktop,
+       unless _MOTIF_WM_HINTS says no decorations (they draw their own). */
+    x->decor_mode = w->undecorated ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+                                   : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
     memcpy(x->title, w->title, sizeof(x->title));
     memcpy(x->appid, w->appid, sizeof(x->appid));
     wl_list_init(&x->cached_frames);

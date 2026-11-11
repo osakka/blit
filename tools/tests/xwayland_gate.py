@@ -30,6 +30,8 @@ order:
     key: run with `+accessx 1` (1 s instead of X's 120), the timeout updates
     every keyboard's indicators, which crashed Xwayland 24.1 when Blit's
     keymap had none (src/blit_xkb_keymap.h);
+  - _MOTIF_WM_HINTS with no decorations (the D key): `WINDOW decor 1
+    client`, and taken away, `WINDOW decor 1 server`;
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
   - `WINDOW quit 0`: the compositor ends 0, Xwayland with it, the sockets
     and the lock removed.
@@ -58,7 +60,7 @@ import gate_env  # noqa: E402
 ROOT = cg.ROOT
 TOKEN = cg.TOKEN
 BLIT_PICTURE = 1259388934
-KEY_A, KEY_SPACE, BTN_LEFT = 30, 57, 0x110
+KEY_A, KEY_D, KEY_SPACE, BTN_LEFT = 30, 32, 57, 0x110
 
 
 def fail(why):
@@ -319,6 +321,26 @@ def x_part(compositor, standin, server, work):
               'X: Xwayland exited' not in text,
               lambda: 'Xwayland did not outlive its AccessX timeout (the keymap\'s indicators):\n' + text)
 
+        # _MOTIF_WM_HINTS "no decorations" (the D key; Steam sets it): the
+        # program draws its own frame, `WINDOW decor 1 client`; taken away,
+        # the desktop's again, `WINDOW decor 1 server`.
+        for printed_word, decor in (('undecorated', 'client'), ('decorated', 'server')):
+            lines_to('key %%d %d press' % KEY_D, 'key %%d %d release' % KEY_D)
+            deadline = time.time() + 10
+            while True:
+                got = desk.next(max(0.1, deadline - time.time()))
+                check(got is not None, lambda: 'no WINDOW decor 1 %s after _MOTIF_WM_HINTS:\n%s\n%s'
+                      % (decor, printed(), open(log).read()))
+                if got[0] == 'frame':
+                    os.close(got[2])
+                    continue
+                if got[1].startswith('WINDOW cursor'):
+                    continue
+                check(got[1] == 'WINDOW decor 1 %s' % decor, 'got %r, expected WINDOW decor 1 %s' % (got[1], decor))
+                break
+            check('XSTANDIN %s' % printed_word in printed(), lambda: 'the X client did not say %s:\n%s'
+                  % (printed_word, printed()))
+
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
         while True:
@@ -351,7 +373,7 @@ def x_part(compositor, standin, server, work):
               'the X socket or lock outlived the compositor')
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
-                '(%d frames) accessx=1s->Xwayland-lived close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
+                '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
                                      measure.group(1), measure.group(2), frames, len(desk.cursors)))
     finally:

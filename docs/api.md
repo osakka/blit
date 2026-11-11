@@ -2323,7 +2323,9 @@ It speaks the frame channel above as a producer, with these additions.
   `WINDOW new <id> 0`, `WINDOW title` (its `_NET_WM_NAME`, else
   `WM_NAME`), `WINDOW appid` (the class of its `WM_CLASS`), `WINDOW decor
   <id> server` (X programs leave their frame to the window manager: the
-  desktop draws it), `INPUT sock`, and each frame of its Xwayland surface
+  desktop draws it) or `client` when its `_MOTIF_WM_HINTS` say no
+  decorations (it draws its own frame or none, as Steam does; said again
+  when the property changes, from 0.3.80), `INPUT sock`, and each frame of its Xwayland surface
   as a frame of the picture (`FRM1`; `FRM3` when the peer imports dmabufs
   and Xwayland draws with them). The desktop's `WINDOW size` resizes the
   X window to exactly that size (`0 0` leaves it to the program) and,
@@ -2335,7 +2337,7 @@ It speaks the frame channel above as a producer, with these additions.
   and the pointer come on its input socket as for any window. Not yet (milestone
   C, D): override-redirect windows (an X menu or tooltip: not shown),
   `WM_TRANSIENT_FOR` (every X window says parent 0), `WM_NORMAL_HINTS`
-  (no `WINDOW limits`), `_MOTIF_WM_HINTS`, `_NET_WM_STATE` full screen and
+  (no `WINDOW limits`), `_NET_WM_STATE` full screen and
   maximize, `_NET_WM_MOVERESIZE`, X cursors (an X window's pointer is
   `WINDOW cursor <id> default`) and the X selections; each is noted once
   in the compositor's log. When Xwayland dies, its windows are `WINDOW

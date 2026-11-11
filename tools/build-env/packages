@@ -1,0 +1,41 @@
+# Debian 13 packages of Blit's build environment (tools/build-env/run.sh):
+# the build's pkg-config modules at their docs/toolchain.md minimums or
+# newer, the compilers, Xwayland for xwayland_gate, and what the gates and
+# packaging run. One package a line; `#` starts a comment.
+
+# Compilers and pkg-config
+tcc
+gcc
+libc6-dev
+pkgconf
+
+# blit-server
+libdrm-dev
+libfreetype-dev
+libharfbuzz-dev
+zlib1g-dev
+libegl-dev
+libgles-dev
+libgbm-dev
+
+# blit-compositor
+libwayland-dev
+libwayland-bin
+libxkbcommon-dev
+wayland-protocols
+plasma-wayland-protocols
+libxcb1-dev
+libxcb-composite0-dev
+libxcb-xfixes0-dev
+libxcb-res0-dev
+
+# Gates and packaging
+xwayland
+ruby
+python3
+git
+dpkg-dev
+file
+binutils
+xz-utils
+ca-certificates

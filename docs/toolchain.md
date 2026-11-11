@@ -91,6 +91,31 @@ HarfBuzz, libutil and zlib.
 | HarfBuzz headers | `vendor/harfbuzz`: pinned unmodified 6.0.0 public headers only |
 | KMS runtime | Not testable here: no `/dev/dri` device node exposed |
 
+## Build environment
+
+Releases are built and checked in one environment on any host with podman:
+`tools/build-env/`, Debian 13 with the packages in
+`tools/build-env/packages` -- every module above at or past its minimum,
+TCC and the host compiler, Xwayland 24.1 for `xwayland_gate`, and what the
+gates and packaging run. `tools/build-env/run.sh COMMAND...` runs a command
+there in the checkout, mounted at `/blit` whichever checkout it is (so
+`blit-server`'s debug information, which records source paths, and with
+it every package, is the same bytes from any checkout on any host), as
+the calling user;
+the image is built on first use and again when `Containerfile` or
+`packages` change (its tag is their hash). Where rootless podman cannot run
+a container (an unprivileged LXC host cannot mount `/proc` for it), it runs
+podman through `sudo -n`.
+
+`tools/release/build-release.sh OUTDIR`, with `BLIT_HIBR_ROOT` naming the
+Hibr tree of `packaging/HIBR_VERSION` (both inside the checkout), builds a
+release there: the server, the update helper and the compositor;
+`compositor_gate` and `xwayland_gate`, where a skip is a failure; the
+packages into OUTDIR; `releases/<version>.yaml`; and
+`package_artifact_gate`. The host's own Debian 12 cannot build
+`blit-compositor` (wayland-protocols 1.31, Xwayland 22.1); the environment
+is what lets this host release without another machine.
+
 ## Font dependency
 
 TCC compiles the shared raster with FreeType and HarfBuzz's public C API.

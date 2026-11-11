@@ -43,7 +43,8 @@ display" and the compositor's log says why.
 
 An X program's window is a Hibr window like any other: its title and
 application name, placed and sized by the desktop, keys and mouse, and
-Hibr's close asks it to close. Not yet in milestone A: its menus and
+Hibr's close asks it to close. A program that draws its own frame (Steam)
+says so, and Hibr's frame stays off, as for Firefox. Not yet in milestone A: its menus and
 tooltips (they do not show), its own full screen, maximize and
 move/resize requests, its own pointer shapes (the display's pointer
 shows), dialogs kept with their parent, and copy and paste with X
