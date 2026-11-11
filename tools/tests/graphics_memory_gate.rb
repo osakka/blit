@@ -138,8 +138,13 @@ class Program
     @fifo = File.join(@dir, 'fifo')
     system('mkfifo', @fifo) or raise 'mkfifo'
     # A background job's standard input is /dev/null unless it says otherwise.
-    script = 'stty raw -echo; exec 3<&0; cat <&3 > "$1/replies" & ' \
-             'while read -r step < "$1/fifo"; do [ "$step" = quit ] && break; cat "$1/$step"; done; ' \
+    # The FIFO is held open, read-write, for the whole loop: reopened for each
+    # line, an open could land while the gate's previous writer was still
+    # closing, read end-of-file, end the loop, and leave the gate's next
+    # write waiting for a reader for ever (seen 1 in 50 runs: the 300 s
+    # timeouts of graphics_memory_gate). Read-write it never sees EOF.
+    script = 'stty raw -echo; exec 3<&0; cat <&3 > "$1/replies" & exec 4<>"$1/fifo"; ' \
+             'while read -r step <&4; do [ "$step" = quit ] && break; cat "$1/$step"; done; ' \
              'sleep 600'
     code, created = request('POST', '/v1/terminal-sessions',
                             { command: '/bin/sh', arguments: ['-c', script, name, @dir],
@@ -153,7 +158,11 @@ class Program
     @steps += 1
     name = "step#{@steps}"
     File.binwrite(File.join(@dir, name), bytes)
-    File.write(@fifo, "#{name}\n")
+    # Opening a FIFO to write waits for its reader: a session that never
+    # started its loop fails here, by name, rather than hanging the gate.
+    Timeout.timeout(20) { File.write(@fifo, "#{name}\n") }
+  rescue Timeout::Error
+    check(false, "session #{@id} never read its FIFO (step #{@steps})")
   end
 
   def state
