@@ -69,7 +69,20 @@ says so, and Hibr's frame stays off, as for Firefox.
   ...) are Blit's own pointer for that name, as for a Wayland program; a
   cursor the program draws without a name is the display's pointer.
 
-Copy and paste with X programs is milestone D.
+*Milestone D (in development):*
+
+- **Copy and paste** with X programs is the one clipboard, as for any
+  program: copy in an X program and paste in Hibr, a terminal or a
+  Wayland program, and the other way, Ctrl-C/V and the middle-click
+  selection both, large ones too. Text is UTF-8 everywhere; an older X
+  program that only speaks Latin-1 gets `?` for what Latin-1 has not.
+  Only the X program with the keyboard can copy or paste, as for Wayland
+  programs, so a program in the background cannot read the clipboard.
+  Vault passwords paste into X programs and leave them when the Vault's
+  timer ends; a program keeps what it already pasted, and an X clipboard
+  manager, if you run one, keeps them unless it honours the password
+  mark. A program that stops answering mid-paste is given up after 3
+  seconds, so a paste never hangs: it gets what came in time, or nothing.
 
 ## Using the window
 
@@ -86,8 +99,8 @@ Copy and paste with X programs is milestone D.
 
 ## Not yet
 
-- **X11 programs**: the X clipboard, Big Picture full screen and Proton
-  games -- ADR 0228 phase 2's milestones D and E (above). A menu its
+- **X11 programs**: Big Picture full screen and Proton games -- ADR 0228
+  phase 2's milestone E (above); drag and drop with X programs. A menu its
   program moves while it is open stays where it first showed; a program
   whose only window is an override-redirect one (some games' full-screen
   windows) does not show.
