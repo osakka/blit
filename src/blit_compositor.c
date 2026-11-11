@@ -85,6 +85,7 @@
 #include "appmenu-server-protocol.h"
 #include "xwayland-shell-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
+#include "blit_pointer_names.h"
 
 #ifndef BLIT_BUILD_VERSION
 #define BLIT_BUILD_VERSION "dev"
@@ -297,6 +298,14 @@ struct bc_x {
     struct wl_list windows;           /* bc_xwin: the root's children */
     xcb_window_t focus;               /* the window given X focus, XCB_WINDOW_NONE none */
     uint32_t stack_seq;               /* the newest stacking count (bc_xwin.stack) */
+    /* X's cursor (XFixes): the name of the cursor X shows, as `WINDOW
+       cursor` says it ("" none known), whether Xwayland's last
+       wl_pointer.set_cursor showed one, and the names of cursor atoms. */
+    uint8_t xfixes_event;             /* XFixes' first event, 0: no cursor names */
+    char cursor[24];
+    int cursor_shown;
+    struct { xcb_atom_t atom; char name[24]; } cursor_names[16];
+    unsigned cursor_next;
     unsigned logged;                  /* BC_X_LOGGED_*: a later milestone's request, noted once */
 };
 
@@ -394,6 +403,8 @@ static void x_close(struct bc_xdg *x);
 static void x_popup_close(struct bc_xdg *x);
 static void x_focus_follows(struct bc_server *s, struct bc_surface *surface);
 static void x_pointer_over(struct bc_server *s, struct bc_surface *surface);
+static const char *x_cursor_of(struct bc_server *s, struct wl_client *client, int shown);
+static void x_pointer_entered(struct bc_server *s, struct bc_surface *surface);
 
 static void logf_(const char *fmt, ...)
 {
@@ -2952,7 +2963,7 @@ static void pointer_set_cursor(struct wl_client *client, struct wl_resource *res
 {
     struct bc_server *s = wl_resource_get_user_data(resource);
     (void)serial; (void)x; (void)y;
-    if (surface) {
+    if (surface && client != s->x.client) {
         struct bc_surface *cs = wl_resource_get_user_data(surface);
         if (!cs->cursor_logged) {
             cs->cursor_logged = 1;
@@ -2960,7 +2971,8 @@ static void pointer_set_cursor(struct wl_client *client, struct wl_resource *res
                   "(it names no shape: wp_cursor_shape_v1 is the way)");
         }
     }
-    cursor_set(s, client, surface ? "default" : "none");
+    /* Xwayland's image is X's cursor, which X names (the X section). */
+    cursor_set(s, client, x_cursor_of(s, client, surface != NULL));
 }
 
 static void shape_set(struct wl_client *client, struct wl_resource *resource, uint32_t serial,
@@ -4112,6 +4124,7 @@ static void pointer_focus(struct bc_server *s, struct bc_surface *surface, doubl
     seat_for_client(r, &s->pointers, surface)
         wl_pointer_send_enter(r, wl_display_next_serial(s->display), surface->resource,
                               wl_fixed_from_double(lx), wl_fixed_from_double(ly));
+    x_pointer_entered(s, surface);
 }
 
 /* Relative motion, Blit's raw counts under its relative hold (the
@@ -4792,11 +4805,7 @@ static void input_sockets_clear(struct bc_server *s)
 #define BC_MOVERESIZE_MOVE 8u
 #define BC_MOVERESIZE_CANCEL 11u
 
-enum {
-    BC_X_LOGGED_ID = 1u << 0, BC_X_LOGGED_STATE = 1u << 1, BC_X_LOGGED_MOVERESIZE = 1u << 2,
-    BC_X_LOGGED_ACTIVE = 1u << 3, BC_X_LOGGED_ICONIFY = 1u << 4, BC_X_LOGGED_HINTS = 1u << 5,
-    BC_X_LOGGED_TRANSIENT = 1u << 6, BC_X_LOGGED_TYPE = 1u << 7,
-};
+enum { BC_X_LOGGED_ID = 1u << 0, BC_X_LOGGED_ACTIVE = 1u << 1, BC_X_LOGGED_TYPE = 1u << 2 };
 
 static const char *const bc_atom_names[BC_ATOMS] = {
     "WL_SURFACE_SERIAL", "WL_SURFACE_ID", "WM_PROTOCOLS", "WM_DELETE_WINDOW", "WM_TAKE_FOCUS",
@@ -5242,6 +5251,67 @@ static void x_pointer_over(struct bc_server *s, struct bc_surface *surface)
     struct bc_xdg *x = surface ? surface_window(surface) : NULL;
     if (s->x.conn == NULL || x == NULL || x->xwin == NULL) return;
     x_raise(s, x->xwin);
+}
+
+/* X's cursor. X programs name their cursors -- libXcursor names every
+   themed one it loads (XFixesSetCursorName: "left_ptr", "xterm",
+   "hand2", or the CSS names GTK asks for) -- and XFixes says the name of
+   the one X shows whenever it changes (CursorNotify). That name is the
+   window's `WINDOW cursor` when Blit's own table draws a pointer for it
+   (blit_pointer_name_shape: Blit's OSC 22 names take X's as aliases, so
+   there is one table, Blit's); a cursor with no name, or one Blit does not
+   know, is `default`, the display's own pointer. Xwayland draws the X
+   cursor as an image (wl_pointer.set_cursor with a surface), which says
+   only that a cursor is shown, not which; with no surface (X hid it) it is
+   `none`. Sent for the window under the pointer, as for a Wayland one. */
+static const char *x_cursor_name(struct bc_server *s, xcb_atom_t atom)
+{
+    xcb_get_atom_name_reply_t *reply;
+    unsigned i;
+    char name[24];
+    int len;
+    if (atom == XCB_ATOM_NONE) return "default";
+    for (i = 0; i < sizeof(s->x.cursor_names) / sizeof(s->x.cursor_names[0]); ++i)
+        if (s->x.cursor_names[i].atom == atom) return s->x.cursor_names[i].name;
+    reply = xcb_get_atom_name_reply(s->x.conn, xcb_get_atom_name(s->x.conn, atom), NULL);
+    len = reply ? xcb_get_atom_name_name_length(reply) : 0;
+    snprintf(name, sizeof(name), "default");
+    if (len > 0 && len < (int)sizeof(name)) {
+        memcpy(name, xcb_get_atom_name_name(reply), (size_t)len);
+        name[len] = '\0';
+        if (blit_pointer_name_shape(name) == -1) snprintf(name, sizeof(name), "default");
+    }
+    free(reply);
+    i = s->x.cursor_next++ % (sizeof(s->x.cursor_names) / sizeof(s->x.cursor_names[0]));
+    s->x.cursor_names[i].atom = atom;
+    memcpy(s->x.cursor_names[i].name, name, sizeof(name));
+    return s->x.cursor_names[i].name;
+}
+
+static void x_cursor_notify(struct bc_server *s, xcb_xfixes_cursor_notify_event_t *ev)
+{
+    snprintf(s->x.cursor, sizeof(s->x.cursor), "%s", x_cursor_name(s, ev->name));
+    if (s->x.cursor_shown && s->x.client) cursor_set(s, s->x.client, s->x.cursor);
+}
+
+/* The name for a wl_pointer.set_cursor: Xwayland's says X's cursor is
+   shown (its name) or hidden; any other client's image is `default`. */
+static const char *x_cursor_of(struct bc_server *s, struct wl_client *client, int shown)
+{
+    if (client == NULL || client != s->x.client) return shown ? "default" : "none";
+    s->x.cursor_shown = shown;
+    if (!shown) return "none";
+    return s->x.cursor[0] ? s->x.cursor : "default";
+}
+
+/* The pointer entered an Xwayland surface: X's cursor is the window's
+   until X says another (Xwayland may not set one again when the cursor
+   is the same). */
+static void x_pointer_entered(struct bc_server *s, struct bc_surface *surface)
+{
+    if (s->x.client && s->x.cursor_shown && s->x.cursor[0] &&
+        wl_resource_get_client(surface->resource) == s->x.client)
+        cursor_set(s, s->x.client, s->x.cursor);
 }
 
 /* The window resized to w x h at its own X position, border 0; a
@@ -5838,6 +5908,8 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
         return;
     }
     default:
+        if (s->x.xfixes_event && (ev->response_type & 0x7f) == s->x.xfixes_event + XCB_XFIXES_CURSOR_NOTIFY)
+            x_cursor_notify(s, (xcb_xfixes_cursor_notify_event_t *)ev);
         return;
     }
 }
@@ -5879,6 +5951,11 @@ static void x_wm_stop(struct bc_server *s)
     s->x.conn = NULL;
     s->x.screen = NULL;
     s->x.focus = XCB_WINDOW_NONE;
+    /* Atoms are the X server's: a new one names them afresh. */
+    s->x.xfixes_event = 0;
+    s->x.cursor[0] = '\0';
+    s->x.cursor_shown = 0;
+    memset(s->x.cursor_names, 0, sizeof(s->x.cursor_names));
     if (s->x.wm_fd >= 0) close(s->x.wm_fd);
     s->x.wm_fd = -1;
 }
@@ -5939,6 +6016,12 @@ static int x_wm_start(struct bc_server *s)
             xcb_xfixes_query_version_reply(c, xcb_xfixes_query_version(c, XCB_XFIXES_MAJOR_VERSION,
                                                                         XCB_XFIXES_MINOR_VERSION), NULL);
         if (v) logf_("X: XFixes %u.%u", v->major_version, v->minor_version);
+        /* Cursor names (XFixes 2): CursorNotify when X's cursor changes. */
+        s->x.xfixes_event = 0;
+        if (v && v->major_version >= 2) {
+            s->x.xfixes_event = ext->first_event;
+            xcb_xfixes_select_cursor_input(c, s->x.screen->root, XCB_XFIXES_CURSOR_NOTIFY_MASK_DISPLAY_CURSOR);
+        }
         free(v);
     }
     s->x.xres = 0;
