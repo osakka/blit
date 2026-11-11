@@ -9,6 +9,24 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.84 X copy and paste (ADR 0228 phase 2, milestone D)
+
+- **X selections:** CLIPBOARD and PRIMARY onto the one clipboard, both
+  ways, on the existing `CLIP` lines: an X program is one more owner and
+  reader. Text targets mapped (UTF8_STRING first, STRING as Latin-1),
+  INCR at 64 KiB both ways, the Vault's `x-kde-passwordManagerHint` kept
+  both ways and the X selection given up at the desktop's `CLIP clear`,
+  3 s deadlines on every transfer, ownership only while an X window has
+  the keyboard (as wlroots). Open: a `CLIP read` pipe cut short carries
+  no error (a wire change).
+- **Suites:** the build environment, 1cbbd2c: `xwayland_gate` (selections
+  byte for byte, 700001-byte INCR both ways, secret, stalls, quick
+  ownerships, another X client, Xwayland restart) and `compositor_gate`,
+  both with ASan/UBSan; gcc `-Wall -Wextra` clean; `package_artifact_gate`.
+  This host, rebuilt: `all` 188 pass, 12 skip, 0 fail; `renderer` 82
+  pass, 1 skip; `renderer-gles` 62 pass; `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.83 a closing window releases its keys; the pointer where it is
 
 - **Stuck keys:** the focused surface going now takes the keyboard away as
