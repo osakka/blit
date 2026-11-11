@@ -317,6 +317,9 @@ struct bc_x {
        at most one per BC_X_RESTORE_MS (the rest by `restore`, a timer). */
     unsigned focus_seq;
     uint32_t restored_ms;
+    uint32_t focus_log_ms[2];         /* x_focus_log_due: the last line of each kind */
+    int focus_logged[2];
+    unsigned focus_hushed[2];
     int restored, restore_due;
     struct wl_event_source *restore;
     uint32_t stack_seq;               /* the newest stacking count (bc_xwin.stack) */
@@ -5545,8 +5548,9 @@ static void x_set_wm_state(struct bc_server *s, struct bc_xwin *w, uint32_t stat
                         s->x.atoms[BC_ATOM_WM_STATE], 32, 2, value);
 }
 
-/* An ICCCM client message (WM_PROTOCOLS) to the window. */
-static void x_send_protocol(struct bc_server *s, struct bc_xwin *w, xcb_atom_t protocol)
+/* An ICCCM client message (WM_PROTOCOLS) to the window: its request's
+   sequence. */
+static unsigned x_send_protocol(struct bc_server *s, struct bc_xwin *w, xcb_atom_t protocol)
 {
     xcb_client_message_event_t ev;
     memset(&ev, 0, sizeof(ev));
@@ -5556,7 +5560,7 @@ static void x_send_protocol(struct bc_server *s, struct bc_xwin *w, xcb_atom_t p
     ev.type = s->x.atoms[BC_ATOM_WM_PROTOCOLS];
     ev.data.data32[0] = protocol;
     ev.data.data32[1] = XCB_CURRENT_TIME;
-    xcb_send_event(s->x.conn, 0, w->window, XCB_EVENT_MASK_NO_EVENT, (const char *)&ev);
+    return xcb_send_event(s->x.conn, 0, w->window, XCB_EVENT_MASK_NO_EVENT, (const char *)&ev).sequence;
 }
 
 /* X's focus put on window `w` (NULL: PointerRoot), whatever X has now:
@@ -5578,7 +5582,9 @@ static void x_give_focus(struct bc_server *s, struct bc_xwin *w)
             s->x.focus_seq = xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, w->window,
                                                  XCB_CURRENT_TIME).sequence;
         if (w->takes_focus) {
-            x_send_protocol(s, w, s->x.atoms[BC_ATOM_WM_TAKE_FOCUS]);
+            /* The focus changes from here too: what X did before is
+               superseded (x_focus_in). */
+            s->x.focus_seq = x_send_protocol(s, w, s->x.atoms[BC_ATOM_WM_TAKE_FOCUS]);
             w->take_focus_ms = now_ms();
             w->take_focus_sent = 1;
         }
@@ -7266,49 +7272,78 @@ static void x_property_notify(struct bc_server *s, xcb_property_notify_event_t *
     free(reply);
 }
 
-/* The window of program `client` the window manager sent WM_TAKE_FOCUS
+/* One program: one X connection, or one process (X-Resource's pid) --
+   a program may hold several connections (Wine opens one per thread). */
+static int x_same_program(struct bc_server *s, const struct bc_xwin *a, const struct bc_xwin *b)
+{
+    return a && b && (x_client_of(s, a->window) == x_client_of(s, b->window) || (a->pid && a->pid == b->pid));
+}
+
+/* The window of `w`'s program the window manager sent WM_TAKE_FOCUS
    within BC_X_ANSWER_MS (the one with X's focus first), or NULL: a focus
    that program moves now is its answer (ICCCM 4.1.7). */
 #define BC_X_ANSWER_MS 1000u
-static struct bc_xwin *x_answering(struct bc_server *s, uint32_t client)
+static struct bc_xwin *x_answering(struct bc_server *s, const struct bc_xwin *w)
 {
     struct bc_xwin *o, *found = NULL;
     uint32_t now = now_ms();
     wl_list_for_each(o, &s->x.windows, link)
-        if (o->take_focus_sent && now - o->take_focus_ms < BC_X_ANSWER_MS && x_client_of(s, o->window) == client &&
+        if (o->take_focus_sent && now - o->take_focus_ms < BC_X_ANSWER_MS && x_same_program(s, o, w) &&
             (found == NULL || o->window == s->x.focus))
             found = o;
     return found;
 }
 
+/* Whether a line about the focus is said now: at most one a second of
+   each kind (0 a program took it, 1 it left every window), the rest
+   counted into the next (`hushed`), so a program fighting for the focus
+   does not fill the log. */
+static int x_focus_log_due(struct bc_server *s, int k, unsigned *hushed)
+{
+    uint32_t now = now_ms();
+    if (s->x.focus_logged[k] && now - s->x.focus_log_ms[k] < 1000u) {
+        ++s->x.focus_hushed[k];
+        return 0;
+    }
+    s->x.focus_logged[k] = 1;
+    s->x.focus_log_ms[k] = now;
+    *hushed = s->x.focus_hushed[k];
+    s->x.focus_hushed[k] = 0;
+    return 1;
+}
+
 /* X's focus follows the desktop's activated window, x.focus (ADR 0228):
    a FocusIn the window manager did not cause puts it back, and when a
    program moved it onto a window of its own, that program asks for its
-   window with `WINDOW activate <id> x-focus` (window_ask_activate). The
-   desktop answers with `WINDOW size ... activated` or not at all. Not a
-   program taking the focus:
-   - the window manager's own SetInputFocus and anything X did before it
-     (an event whose sequence is older than x.focus_seq is superseded);
+   window with `WINDOW activate <id> x-focus` (window_ask_activate; one
+   not shown yet asks with its WINDOW new). The desktop answers with
+   `WINDOW size ... activated` or not at all. Not a program taking the
+   focus:
+   - the window manager's own SetInputFocus or WM_TAKE_FOCUS and anything
+     X did before it (an event whose sequence is older than x.focus_seq is
+     superseded);
    - a keyboard grab (mode Grab and Ungrab: the keyboard's events go to
      the grabbing window, the focus stays; X menus) and PointerRoot's
      following of the pointer (detail Pointer);
-   - the program with the focus moving it onto an override-redirect
-     window of its own (a menu that takes the focus inside its grab, as
-     some toolkits do);
+   - the activated program (x_same_program) moving it onto an
+     override-redirect window of its own, or onto a popup of the activated
+     window (a menu that takes the focus inside its grab, as some toolkits
+     do);
    - a program's answer to WM_TAKE_FOCUS (x_answering): ICCCM lets it put
      the focus on whichever window of its own it wants (a dialog its
-     window is waiting on); that window is asked for, and the focus stays.
-     An answer to an older WM_TAKE_FOCUS, for a window no longer
-     activated, is put back and asks for nothing.
+     window is waiting on); that window is asked for, and the focus stays
+     (putting it back would only send WM_TAKE_FOCUS again). An answer to
+     an older WM_TAKE_FOCUS, for a window no longer activated, is put back
+     and asks for nothing.
    A focus that left every window (the root has it: a program set it to
    None or PointerRoot, or its focused menu went and X reverted it) is put
    back too. A focus taken while another client grabs the keyboard (mode
    WhileGrabbed) is a focus taken all the same. */
 static void x_focus_in(struct bc_server *s, xcb_focus_in_event_t *f)
 {
-    struct bc_xwin *w, *answered;
+    struct bc_xwin *w, *answered, *focused;
     struct bc_xdg *ask = NULL;
-    uint32_t client;
+    unsigned hushed;
     if (f->mode != XCB_NOTIFY_MODE_NORMAL && f->mode != XCB_NOTIFY_MODE_WHILE_GRABBED) return;
     if (f->detail == XCB_NOTIFY_DETAIL_POINTER) return;
     if ((int32_t)(((xcb_generic_event_t *)f)->full_sequence - s->x.focus_seq) < 0) return;
@@ -7318,17 +7353,18 @@ static void x_focus_in(struct bc_server *s, xcb_focus_in_event_t *f)
         if (s->x.focus == XCB_WINDOW_NONE || f->detail == XCB_NOTIFY_DETAIL_VIRTUAL ||
             f->detail == XCB_NOTIFY_DETAIL_NONLINEAR_VIRTUAL)
             return;
-        logf_("X: the focus left every window (a program set it so, or the window it was on went): put back");
+        if (x_focus_log_due(s, 1, &hushed))
+            logf_("X: the focus left every window (a program set it so, or the window it was on went): "
+                  "put back (%u more times within the second before)", hushed);
         x_restore_focus(s);
         return;
     }
     w = x_window(s, f->event);
     if (w == NULL || w->window == s->x.focus) return;
-    client = x_client_of(s, w->window);
-    answered = x_answering(s, client);
+    focused = s->x.focus != XCB_WINDOW_NONE ? x_window(s, s->x.focus) : NULL;
+    answered = x_answering(s, w);
     if (w->pic && !w->pic->xpopup) ask = w->pic;
-    else if (w->pic && w->pic->parent && w->pic->parent->xwin &&
-             x_client_of(s, w->pic->parent->xwin->window) == client)
+    else if (w->pic && w->pic->parent && w->pic->parent->xwin && x_same_program(s, w->pic->parent->xwin, w))
         ask = w->pic->parent;
     if (answered && answered->window == s->x.focus) {
         /* Its answer to WM_TAKE_FOCUS: the focus where it put it. */
@@ -7339,15 +7375,18 @@ static void x_focus_in(struct bc_server *s, xcb_focus_in_event_t *f)
         }
         return;
     }
-    if (!answered && w->override_redirect && s->x.focus != XCB_WINDOW_NONE &&
-        x_client_of(s, s->x.focus) == client)
+    if (!answered && w->override_redirect && focused &&
+        (x_same_program(s, w, focused) || (w->pic && w->pic->parent == focused->pic)))
         return;  /* the focused program's own menu */
     if (answered) {
-        logf_("X window 0x%x: a late answer to WM_TAKE_FOCUS: the focus put back", (unsigned)w->window);
+        if (x_focus_log_due(s, 0, &hushed))
+            logf_("X window 0x%x: a late answer to WM_TAKE_FOCUS: the focus put back", (unsigned)w->window);
     } else {
-        logf_("%s 0x%x: its program took X's focus itself: put back%s", w->override_redirect ? "X menu" : "X window",
-              (unsigned)w->window, ask ? "" : " (no shown window of its own to ask for)");
+        if (x_focus_log_due(s, 0, &hushed))
+            logf_("%s 0x%x: its program took X's focus itself: put back (%u more times within the second before)",
+                  w->override_redirect ? "X menu" : "X window", (unsigned)w->window, hushed);
         if (ask) window_ask_activate(ask, "x-focus");
+        else if (!w->override_redirect && w->pic == NULL) w->ask = "x-focus";  /* said with its WINDOW new */
     }
     x_restore_focus(s);
 }
@@ -7462,6 +7501,8 @@ static void x_wm_stop(struct bc_server *s)
     s->x.restore = NULL;
     s->x.restore_due = s->x.restored = 0;
     s->x.focus_seq = 0;
+    memset(s->x.focus_logged, 0, sizeof(s->x.focus_logged));
+    memset(s->x.focus_hushed, 0, sizeof(s->x.focus_hushed));
     if (s->x.conn) xcb_disconnect(s->x.conn);
     s->x.conn = NULL;
     x_selections_gone(s);

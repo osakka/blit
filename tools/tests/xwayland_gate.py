@@ -1074,8 +1074,11 @@ def x_focus_part(desk, lines_to, printed, log, standin, xenv, work):
         desk.quiet(1.2)
         check('asks for the focus again (x-focus) within 1000 ms: not said again' in log(),
               lambda: 'the repeated asks were not noted:\n' + log())
-        check(log().count('its program took X\'s focus itself: put back') >= 3,
-              lambda: 'the focus was not put back three times:\n' + log())
+        # Put back three times (the thief takes again only at a loss, and
+        # window 1 ended with the focus); logged once, the rest within
+        # that second counted.
+        check(log().count('its program took X\'s focus itself: put back') == 1,
+              lambda: 'the putting back was not logged once:\n' + log())
         m = c.mark()
         key(KEY_A)
         c.saw('key %d' % (KEY_A + 8), m)
