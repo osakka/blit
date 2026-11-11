@@ -338,8 +338,10 @@ section; `docs/api.md`, "X programs"):
   is the toplevel `WM_TRANSIENT_FOR` names, else the one under the
   window's origin in X space (a shown popup there first), else the X
   toplevel the pointer is in; one with none is not shown. One its program
-  moves while it is shown keeps its first place (logged, as
-  `xdg_popup.reposition` is); wlroots follows its geometry.
+  moves while it is shown is `WINDOW popup` again at its new offset, as an
+  `xdg_popup.reposition` is (0.3.82, agreed with Hibr, whose frames module
+  already took a repeated popup line as a move), as wlroots follows its
+  geometry.
 - X has no `popup_done`, and neither the window manager nor wlroots
   unmaps another program's override-redirect window: the desktop's
   `WINDOW close` for an X popup is logged. Menus close by X's own means --

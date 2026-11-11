@@ -2110,7 +2110,10 @@ It speaks the frame channel above as a producer, with these additions.
   - `WINDOW popup <id> <parent> <x> <y>`: a popup or menu, its own picture,
     at an offset in the parent's surface pixels (not on-screen pixels: the
     desktop may show the parent scaled); the desktop keeps it there when the
-    parent moves, and may draw it past the parent's window.
+    parent moves, and may draw it past the parent's window. Sent again for
+    the same id when the program moves the popup (`xdg_popup.reposition`,
+    or an X menu moved by its program; from 0.3.82): the desktop moves the
+    popup it has, from its next frame.
   - `WINDOW sub <id> <parent> <x> <y> <w> <h> above|below`: a subsurface
     (`wl_subsurface`), its own picture, as a popup's is, with no `WINDOW
     new`: owned, moved, hidden and closed with its top-level, never in the
@@ -2375,8 +2378,8 @@ It speaks the frame channel above as a producer, with these additions.
     inside the X screen, the largest `WINDOW output`, since X confines its
     pointer to it; never moved after that): X space is a virtual layout,
     and the desktop places the pictures. A popup the program moves after
-    it is shown keeps its first place (logged; the draft has no line for a
-    popup that moves, for either kind). One whose origin is in no X
+    it is shown is `WINDOW popup` again at its new offset, as a Wayland
+    popup's reposition is (0.3.82). One whose origin is in no X
     window and that names none is not shown (logged). The pointer over
     the part of a top-level larger than the X screen reaches X at the
     screen's edge.

@@ -66,6 +66,7 @@
      XSTANDIN submenu
      XSTANDIN menu-choice <x>,<y>        a press in the menu
      XSTANDIN menu-key <keycode>         a key the menu's grab got
+     XSTANDIN menu-moved <x>,<y>         the V key in the menu moved it there
      XSTANDIN menu-dismissed <why>       a press outside, escape, focus-out
      XSTANDIN dialog                     the dialog mapped
      XSTANDIN dialog-button <n> <x>,<y>  a ButtonPress in the dialog
@@ -116,6 +117,7 @@
 #define KEYCODE_I 31
 #define KEYCODE_P 33
 #define KEYCODE_J 44
+#define KEYCODE_V 55
 /* _NET_WM_MOVERESIZE's directions (EWMH) */
 #define MOVERESIZE_SIZE_BOTTOMRIGHT 4
 #define MOVERESIZE_MOVE 8
@@ -130,6 +132,7 @@ static xcb_window_t window, menu, submenu, dialog, panel;
 static xcb_gcontext_t gc, fill;
 static uint16_t width = 320, height = 200;
 static uint16_t menu_w, menu_h;
+static int16_t menu_dx, menu_dy;  /* the menu's place from the window, in X space */
 static xcb_atom_t change_state, protocols, delete_window, utf8, net_wm_name, motif_hints, transient_atom, net_wm_state,
     state_fullscreen, state_max_vert, state_max_horz, state_focused, moveresize;
 
@@ -220,6 +223,8 @@ static void menu_open(int16_t dx, int16_t dy, uint16_t mw, uint16_t mh, int tran
     menu = xcb_generate_id(conn);
     menu_w = mw;
     menu_h = mh;
+    menu_dx = dx;
+    menu_dy = dy;
     values[0] = screen->white_pixel;
     values[1] = 1;
     values[2] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_KEY_PRESS;
@@ -532,6 +537,20 @@ int main(int argc, char **argv)
                 if (menu && k->event == menu) {
                     say("menu-key %u", k->detail);
                     if (k->detail == KEYCODE_S) submenu_open();
+                    if (k->detail == KEYCODE_V) {
+                        /* The program moves its open menu, 20 right and
+                           10 down, as a toolkit repositions one. */
+                        int16_t ox, oy;
+                        uint32_t at[2];
+                        origin(&ox, &oy);
+                        menu_dx += 20;
+                        menu_dy += 10;
+                        at[0] = (uint32_t)(int32_t)(ox + menu_dx);
+                        at[1] = (uint32_t)(int32_t)(oy + menu_dy);
+                        xcb_configure_window(conn, menu, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, at);
+                        xcb_flush(conn);
+                        say("menu-moved %d,%d", menu_dx, menu_dy);
+                    }
                     if (k->detail == KEYCODE_ESCAPE) {
                         menu_close();
                         say("menu-dismissed escape");

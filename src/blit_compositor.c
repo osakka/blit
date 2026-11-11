@@ -689,12 +689,18 @@ static void popup_close(struct bc_xdg *x)
     }
 }
 
-/* A popup its program moved after it was shown: the draft has no line for
-   that, so the desktop keeps it at its first place. Either kind. */
+/* A popup its program moved after it was shown (xdg_popup.reposition, or
+   an X menu moved by its program): its new offset, and `WINDOW popup`
+   again with it, which the desktop takes as a move of the popup it has
+   (docs/api.md). The move shows with the popup's next frame. Either kind. */
 static void popup_moved(struct bc_xdg *x, int32_t px, int32_t py)
 {
-    logf_("popup %u: moved by its program to %d,%d; the draft has no line for a popup that moves",
-          x->id, px, py);
+    struct bc_xdg *p = x->parent;
+    x->px = px;
+    x->py = py;
+    if (x->id == 0 || p == NULL || p->id == 0) return;
+    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + px, p->gy + py);
+    logf_("popup %u: moved by its program to %d,%d", x->id, p->gx + px, p->gy + py);
 }
 
 /* ---- zwp_linux_dmabuf_v1: FRM3, zero copy ---- */

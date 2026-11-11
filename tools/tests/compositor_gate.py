@@ -1543,7 +1543,7 @@ def desktop_part(compositor, standin, work):
         check(os.path.exists(os.path.join(runtime, display)), 'no socket %s in XDG_RUNTIME_DIR' % display)
 
         client_out = os.path.join(work, 'standin.out')
-        client = start([standin, '--popup'], dict(env, WAYLAND_DISPLAY=display), open(client_out, 'w'))
+        client = start([standin, '--popup-move'], dict(env, WAYLAND_DISPLAY=display), open(client_out, 'w'))
         desk.line('WINDOW new 1 0')
         desk.line('WINDOW title 1 Blit stand-in')
         desk.line('WINDOW appid 1 blit.standin')
@@ -1561,6 +1561,12 @@ def desktop_part(compositor, standin, work):
         # bottom-right, offset 2,3), sized by its positioner, not the desktop.
         desk.line('WINDOW popup 2 1 12 63')
         desk.frame(80, 60, image_id=2)
+        # Repositioned by its program (offset 12,13): `WINDOW popup 2` again
+        # at its new offset, and its frame drawn there.
+        desk.line('WINDOW popup 2 1 22 73')
+        desk.frame(80, 60, image_id=2)
+        wait_for(lambda: 'STANDIN popup repositioned 7' in open(client_out).read(),
+                 'the popup was not told repositioned')
         desk.send('WINDOW close 2')
         desk.line('WINDOW gone 2')
 

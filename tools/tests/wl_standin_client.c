@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -52,7 +52,9 @@
    With --popup, after its first frame it opens one xdg_popup of 80x60
    (anchor rectangle 10,20 30x40, anchor bottom-left, gravity bottom-right,
    offset 2,3: at 12,63 of the toplevel), draws the same pattern in it on
-   its configure, and destroys it on popup_done.
+   its configure, and destroys it on popup_done. With --popup-move, after
+   the popup's first frame it repositions it (xdg_popup.reposition, offset
+   12,13: at 22,73) and prints `STANDIN popup repositioned <token>`.
 
    With --states, after its first frame it asks to be maximized, minimized
    and unmaximized, then opens a second toplevel, "Child", gives it this
@@ -168,6 +170,7 @@ struct standin {
     int32_t want_w, want_h;
     int closed;
     int want_popup;
+    int popup_move, popup_moved;  /* --popup-move: reposition it once, after its first frame */
     struct wl_surface *popup_surface;
     /* --sub */
     int sub_script, sub_step;
@@ -416,6 +419,19 @@ static void popup_surface_configure(void *data, struct xdg_surface *xs, uint32_t
     struct standin *s = data;
     xdg_surface_ack_configure(xs, serial);
     draw(s, s->popup_surface, 80, 60);
+    if (s->popup_move && !s->popup_moved && s->popup) {
+        /* The same positioner with offset 12,13: at 22,73 of the toplevel. */
+        struct xdg_positioner *pos = xdg_wm_base_create_positioner(s->wm_base);
+        s->popup_moved = 1;
+        xdg_positioner_set_size(pos, 80, 60);
+        xdg_positioner_set_anchor_rect(pos, 10, 20, 30, 40);
+        xdg_positioner_set_anchor(pos, XDG_POSITIONER_ANCHOR_BOTTOM_LEFT);
+        xdg_positioner_set_gravity(pos, XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT);
+        xdg_positioner_set_offset(pos, 12, 13);
+        xdg_popup_reposition(s->popup, pos, 7);
+        xdg_positioner_destroy(pos);
+        printf("STANDIN popup reposition\n");
+    }
 }
 
 static const struct xdg_surface_listener popup_surface_listener = { popup_surface_configure };
@@ -441,7 +457,8 @@ static void popup_done(void *data, struct xdg_popup *p)
 
 static void popup_repositioned(void *data, struct xdg_popup *p, uint32_t token)
 {
-    (void)data; (void)p; (void)token;
+    (void)data; (void)p;
+    printf("STANDIN popup repositioned %u\n", token);
 }
 
 static const struct xdg_popup_listener popup_listener = {
@@ -1313,6 +1330,7 @@ int main(int argc, char **argv)
     memset(&s, 0, sizeof(s));
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
+        else if (strcmp(argv[i], "--popup-move") == 0) s.want_popup = s.popup_move = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;

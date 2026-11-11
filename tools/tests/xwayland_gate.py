@@ -36,7 +36,8 @@ order:
   - milestone C (x_milestone_c): override-redirect menus as `WINDOW
     popup` at their X offset, a key and a choice through their grabs,
     dismissed by a press outside and by the window's deactivation (with
-    `WINDOW close` for the popup noted); a menu's parent by
+    `WINDOW close` for the popup noted; a menu its program moves is `WINDOW
+    popup` again at its new offset); a menu's parent by
     WM_TRANSIENT_FOR where its origin is in another window, a submenu's by
     the menu under its origin where the pointer is in another window; a
     transient dialog `WINDOW new 4 1` with its WM_NORMAL_HINTS as `WINDOW
@@ -78,6 +79,7 @@ TOKEN = cg.TOKEN
 BLIT_PICTURE = 1259388934
 KEY_A, KEY_D, KEY_SPACE, BTN_LEFT = 30, 32, 57, 0x110
 KEY_M, KEY_N, KEY_T, KEY_L, KEY_F, KEY_X, KEY_G, KEY_H, KEY_R, KEY_C = 50, 49, 20, 38, 33, 45, 34, 35, 19, 46
+KEY_V = 47
 KEY_O, KEY_S, KEY_I, KEY_P, KEY_J, KEY_U, KEY_ESC = 24, 31, 23, 25, 36, 22, 1
 
 
@@ -324,7 +326,12 @@ def x_milestone_c_steps(desk, lines_to, log, why, said, key, click, route):
     said('menu 30,40 120x90 grab 0 0')
     key(KEY_A)
     said('menu-key %d' % (KEY_A + 8))
-    click(30 + 10, 40 + 12)
+    # The program moves its open menu (V, 20 right and 10 down): `WINDOW
+    # popup 2` again at its new offset, and a press there is in it.
+    key(KEY_V)
+    said('menu-moved 50,50')
+    desk.lines(['WINDOW popup 2 1 50 50'], why=why)
+    click(50 + 10, 50 + 12)
     said('menu-choice 10,12')
     desk.lines(['WINDOW gone 2'], why=why)
 
@@ -472,7 +479,7 @@ def x_milestone_c_steps(desk, lines_to, log, why, said, key, click, route):
         lines_to('ptr %d 20.00 20.00', 'ptr %d 21.00 20.00')
         wait_for(lambda: (desk.quiet(0.1), line in desk.cursors[before:])[1],
                  lambda: 'no %s (%s):\n%s' % (line, desk.cursors, why()))
-    return ('menus=popup 2,3 at 30,40 (choice 10,12, dismissed by press), popup 5 at 450,320 by '
+    return ('menus=popup 2,3 at 30,40 (moved->50,50, choice 10,12, dismissed by press), popup 5 at 450,320 by '
             'WM_TRANSIENT_FOR (close noted, dismissed on focus-out), submenu 7 at 420,50 by its menu '
             'dialog=new 4 1 limits 150x80-300x200, press under it with no move->window 1 '
             'hints=base 200x150 state=fullscreen,maximize on/off both ways moveresize=move,bottom-right,'
