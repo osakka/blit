@@ -310,9 +310,10 @@ section; `docs/api.md`, "X programs"):
   later, as wlroots' `wlr_surface` does.
 - Focus by ICCCM 4.1.7: `SetInputFocus` only when `WM_HINTS` takes input,
   `WM_TAKE_FOCUS` only to a window that lists it in `WM_PROTOCOLS`
-  (wlroots sends it to every window); a program that moves X's focus
-  itself is logged, not reverted (still so after milestone C: nothing
-  seen needed more). With no window focused, the focus is PointerRoot,
+  (wlroots sends it to every window); a program that moved X's focus
+  itself was logged, not reverted, until 0.3.85: now it is put back and
+  the program asks with `WINDOW activate` (Evidence, "X focus follows
+  the desktop"). With no window focused, the focus is PointerRoot,
   as wlroots (from milestone C; None before): None discards the
   keyboard a grabbing menu still needs.
 - Stacking is the desktop's to draw; X's stacking only decides X's hit
@@ -366,8 +367,8 @@ section; `docs/api.md`, "X programs"):
 - `_NET_SUPPORTED` names what the ADR lists (state, full screen,
   maximized, active window, move/resize, name, the check window) and,
   from milestone C, focused; not wlroots' modal, hidden and client lists,
-  which nothing keeps here. `_NET_ACTIVE_WINDOW` requests are logged: the
-  draft has no line for a program raising its window.
+  which nothing keeps here. `_NET_ACTIVE_WINDOW` requests are `WINDOW
+  activate <id> x-active` (0.3.85; logged only, before).
 - Xwayland gets exactly its five descriptors (`close_range` past them) and
   an unblocked signal mask (libwayland's signalfd blocks SIGTERM, SIGINT and
   SIGCHLD, which a child inherits); the listening sockets have a backlog of
@@ -983,3 +984,82 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     (Hibr keeps what it read); an X clipboard manager can read while an
     X window has the keyboard (above); real programs (xterm's PRIMARY on selecting, a password manager's
     hint, Steam's fields) are to be checked on the owner's machine.
+- **X focus follows the desktop (0.3.85, 2026-11-11).** On the owner's
+  machine Steam's main window took X's input focus itself (its own
+  SetInputFocus) 2.8 s after the desktop had activated its game; the
+  compositor only logged it, so from then on X gave the keys arriving on
+  the game's route to Steam. Agreed with Hibr: one new line, compositor to
+  desktop, `WINDOW activate <id> x-focus|x-active|xdg-activation` (the
+  program asks for its window; the desktop grants with `WINDOW size ...
+  activated` or says nothing), and the rule that X's focus always follows
+  the desktop's activated window (`src/blit_compositor.c`, x_focus_in,
+  window_ask_activate, the activation section; `docs/api.md`):
+  - A FocusIn the window manager did not cause puts X's focus back on the
+    activated window by the activation's own path (SetInputFocus /
+    WM_TAKE_FOCUS; PointerRoot when none is activated) and the program asks
+    `x-focus` for its toplevel (a menu's: the toplevel it belongs to). The
+    window manager's own SetInputFocus and what X did before it are told
+    apart by sequence number: an event older than the newest
+    SetInputFocus is superseded by it. Grabs (mode Grab and Ungrab) and
+    PointerRoot's pointer tracking are not focus changes; a focus taken
+    while a keyboard grab is active (WhileGrabbed) is. The activated
+    program moving the focus onto an override-redirect window of its own
+    (a menu that takes the focus in its grab) is its own; a program's
+    answer to WM_TAKE_FOCUS within 1 s may put the focus on any of its
+    windows (ICCCM 4.1.7; a dialog its window waits on) -- that window is
+    asked for and the focus stays, where putting it back would only send
+    WM_TAKE_FOCUS again; a late answer, for a window no longer activated,
+    is put back and asks for nothing. The root's FocusIn (the focus on
+    None, PointerRoot or the root itself: a program set it so, or its
+    focused menu went and X reverted it) is put back too; its Virtual and
+    NonlinearVirtual details, the focus going below it, are not (a first
+    run of the gate put the focus back after every activation of the
+    desktop's: the gate now checks that it does not). BadMatch on
+    SetInputFocus, a window unmapped before the focus reached it, is X's
+    race and not logged.
+  - Bounds: putting back is at most once per 50 ms (a timer does the
+    rest), so a program that takes the focus at every loss costs at most
+    20 rounds a second; a window's ask is said at most once per second,
+    the quiet period ended by the desktop's grant, so it cannot flood the
+    channel.
+  - `_NET_ACTIVE_WINDOW` for a toplevel is `x-active` (one for a window not
+    shown yet asks with its `WINDOW new`). Wayland programs get
+    `xdg_activation_v1` 1 (staging, wayland-protocols 1.44 in the build
+    environment carries version 1): a token is issued at the token's
+    commit (`done`, 128 random bits), used once, expires after 30 s, the
+    newest 16 kept; activate with it for a toplevel is `xdg-activation`.
+    An unknown, used, replaced or expired token, or a surface that is no
+    toplevel, asks for nothing (each kind logged once). set_serial and
+    set_surface are honoured as the protocol has them (taken, and an error
+    after commit) and logged with the token -- whether the serial is the
+    newest key or button press the compositor gave that client -- but do
+    not decide validity: the line has no word for them and which asks to
+    grant is the desktop's policy. No window the desktop has activated
+    asks.
+  - Evidence: `xwayland_gate` (Xwayland 24.1, Debian 13 build
+    environment) passes under tcc and ASan/UBSan: a second X client that
+    takes X's focus a second after its window shows and again at each of
+    its next two losses gets one `WINDOW activate 12 x-focus` (the other
+    two said once in the log as within the quiet period), the focus put
+    back three times (window 1's stand-in sees FocusOut, FocusIn) and a
+    key reaching window 1, none the thief; the desktop's grant gives the
+    thief the focus and a key, with no put-back of the desktop's own
+    change; back to window 1, the thief lets go; a dialog's
+    `_NET_ACTIVE_WINDOW` is `WINDOW activate 13 x-active`; a menu that
+    takes X's focus inside its grab asks for nothing (a probe build showed
+    the menu's FocusIn reaching that branch) and gets its key through the
+    grab, and when it goes X's revert to the root is put back on window
+    1. Milestones C and D pass unchanged, so their menus, grabs and
+    deactivations asked for nothing. `compositor_gate` passes under tcc
+    and ASan/UBSan with `--activate` (window 13): a token never issued
+    asks for nothing (logged); a token asked with a key press's serial and
+    the surface is `WINDOW activate 13 xdg-activation`; used again,
+    nothing; activated by the desktop, nothing. Its log counts 44 frames
+    sent, not 41: the activation window's three (its own size, the
+    desktop's, and activated).
+  - Open: Steam and its game on the owner's machine; Hibr's side of the
+    line (its focus-stealing setting); a stricter token (valid only with
+    the serial of a press the compositor gave the asking client), if the
+    desktop wants the compositor to vouch; a focus taken during another
+    client's keyboard grab and put back moves it off the grabbing
+    program's menu window, if that had the focus.

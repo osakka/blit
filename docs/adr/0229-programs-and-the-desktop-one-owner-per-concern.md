@@ -62,7 +62,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Cursor images (wl_pointer.set_cursor surfaces) | none: never drawn, the display's own pointer (`default`) | -- | decided (owner: the same cursors we already have) |
 | The global menu (programs' menus in Hibr's bar) | the program serves them (D-Bus, `com.canonical.dbusmenu`), Hibr shows them | `WINDOW appmenu <id> <service> <path>` (org_kde_kwin_appmenu); `- -` none | 0.3.77 (owner confirmed, Hibr #500) |
 | Drag and drop | Hibr | `CLIP` extended with a drag | later |
-| Activation (xdg_activation: a launched program's window raised) | Hibr | `WINDOW activate <id>` | later |
+| Activation: a program asks for its window's focus (xdg_activation's token; an X program's `_NET_ACTIVE_WINDOW`, or X's focus taken itself and put back) | program asks, Hibr decides (its focus-stealing setting) | `WINDOW activate <id> x-focus\|x-active\|xdg-activation`; granted with `WINDOW size ... activated` | 0.3.85 |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |
 | Text input and input methods | Hibr | zwp_text_input_v3 | later |
 | Scale (HiDPI): viewporter, fractional scale | Blit's outputs | `WINDOW output` with a scale | later |
@@ -70,7 +70,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Touch, tablets, shortcut inhibit | Blit | the input route | later |
 | Launching, app ids and icons (.desktop) | Hibr | none: the app id names it | Hibr's |
 | Terminals and `WAYLAND_DISPLAY` | Hibr | the environment at start | Hibr's |
-| X programs (phase 2) | as above | the X display name on `WINDOW display <wayland-name> <x-display>`; otherwise none new: `_MOTIF_WM_HINTS` is `decor`, `_NET_WM_MOVERESIZE` is `move`/`resize`, the X selections are `CLIP` | phase 2 |
+| X programs (phase 2) | as above | the X display name on `WINDOW display <wayland-name> <x-display>`; otherwise none new: `_MOTIF_WM_HINTS` is `decor`, `_NET_WM_MOVERESIZE` is `move`/`resize`, the X selections are `CLIP`, `_NET_ACTIVE_WINDOW` and X's focus taken are `activate` | phase 2 |
 | Keyboard grab for games (every key to the program) | the program asks, Hibr grants | keyboard-shortcuts-inhibit; the `INPUT keep` question decided with it | with phase 2's games |
 | No screen saver mid-game or mid-video | Hibr | idle-inhibit: `WINDOW idle <id> on|off` | with phase 2's games |
 | Gamepads | the program (Steam reads `/dev/input` itself) | none: a device permission on the machine | -- |
@@ -147,8 +147,8 @@ All lines follow version 5's grammar, `<WORD> <verb> <id> ...`.
 
 ### What is not done here
 
-Drag and drop, activation, idle inhibit, text input, scale, the portals
-and touch are the "later" rows: each has its owner and its wire's shape
+Drag and drop, idle inhibit, text input, scale, the portals
+and touch are the "later" rows (activation came in 0.3.85): each has its owner and its wire's shape
 above, and each is its own change with its own gate. Nothing in this
 release half-implements one of them.
 

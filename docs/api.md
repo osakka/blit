@@ -2196,6 +2196,21 @@ It speaks the frame channel above as a producer, with these additions.
     `WINDOW size` comes when the desktop restores it.
   - `WINDOW parent <id> <parent|0>`: a transient parent set or cleared after
     `WINDOW new`.
+  - `WINDOW activate <id> <reason>` (0.3.85): the program asks for its
+    top-level `<id>` to have the focus. `<reason>` is one word: `x-focus`
+    (an X program took X's input focus itself onto one of its windows;
+    the compositor has put it back, "X programs" below), `x-active` (an X
+    program's `_NET_ACTIVE_WINDOW` request for its window) or
+    `xdg-activation` (a Wayland program's `xdg_activation_v1.activate` with
+    a token the compositor issued, unused and at most 30 s old). Focus is
+    the desktop's: it grants with `WINDOW size ... activated`, or refuses
+    by saying nothing (its focus-stealing policy). Never sent for a window
+    the desktop has activated, nor for a popup; one asked for before its
+    `WINDOW new` comes right after it. A window that asks again within 1 s
+    of its last ask is not said again, until the desktop activates it: a
+    program fighting for the focus cannot flood the channel. A desktop
+    that does not know the line ignores it (Hibr before it logs it as not
+    known) or answers `WINDOW error`, which the compositor logs.
   - `WINDOW hide <id>`: the program unmapped the window; the id stays, and
     its next frame shows it again where the desktop kept it.
   - `WINDOW gone <id>`: sent after every buffer of that id is released;
@@ -2346,7 +2361,23 @@ It speaks the frame channel above as a producer, with these additions.
   and Xwayland draws with them). The desktop's `WINDOW size` resizes the
   X window to exactly that size (`0 0` leaves it to the program) and,
   with `activated`, gives it X's input focus (and `_NET_ACTIVE_WINDOW`);
-  the keyboard's first key from its route does so too. `WINDOW close`
+  the keyboard's first key from its route does so too. X's focus always
+  follows the desktop's activated window (0.3.85): an X program that takes
+  X's input focus itself (its own `SetInputFocus`) onto another window
+  gets it put back on the activated one, by the same `SetInputFocus` /
+  `WM_TAKE_FOCUS` as the desktop's activation (PointerRoot when none is
+  activated), and asks with `WINDOW activate <id> x-focus` for its
+  top-level (a menu's: the top-level it belongs to). So keys arriving on
+  a window's route always reach that window's program. Not taking the
+  focus: the window manager's own focus changes, a keyboard grab (X
+  menus), the activated program putting the focus on a menu of its own,
+  and a program's answer to `WM_TAKE_FOCUS` (ICCCM lets it put the focus
+  on any of its windows: that window is asked for, and the focus stays).
+  A focus that leaves every window (a program set it to None, or its
+  focused menu went) is put back too. Putting back is at most once per
+  50 ms, so a program that takes the focus at every loss costs little.
+  `_NET_ACTIVE_WINDOW` for a top-level is `WINDOW activate <id>
+  x-active`. `WINDOW close`
   asks the program to close it (`WM_DELETE_WINDOW`), or ends the program
   when it takes no such request. The window's unmapping or destruction
   is `WINDOW gone`; mapped again it is a new window with a new id. Keys
@@ -2424,8 +2455,8 @@ It speaks the frame channel above as a producer, with these additions.
     one under way ends short with what came; the reader's pipe closes.
     When the desktop clears a selection (`CLIP clear`), X's owner goes at
     once (a paste already under way is the desktop's pipe to finish).
-  Not yet: `_NET_ACTIVE_WINDOW` requests and `_NET_WM_WINDOW_TYPE` (noted
-  once in the compositor's log), and X drag and drop. When Xwayland dies,
+  Not yet: `_NET_WM_WINDOW_TYPE` (noted once in the compositor's log), and
+  X drag and drop. When Xwayland dies,
   its windows are `WINDOW gone`, an X program's selection is `CLIP clear`,
   and it is started again on the same display; its X programs end with
   it.

@@ -87,11 +87,23 @@ says so, and Hibr's frame stays off, as for Firefox.
   mid-paste is given up after 3 seconds, so a paste never hangs: it gets
   what came in time, or nothing.
 
+*Since Blit 0.3.85:*
+
+- **A program asking for the focus is the desktop's call.** Keys always
+  go to the window the desktop has focused: an X program that grabs the
+  keyboard's focus for itself (Steam's window taking it from the game you
+  are playing) gets it taken back at once, and its request goes to the
+  desktop, which focuses that window or not (its focus-stealing setting).
+  The same holds for an X program asking to be the active window and for
+  a Wayland program asking with an activation token (a launcher raising
+  the program it started). A program that keeps asking is heard once a
+  second at most.
+
 ## Using the window
 
 | What | What happens |
 | --- | --- |
-| Keyboard | Goes to the focused window, with Blit's keyboard layout and key repeat (the keyboard settings in Blit's Control Panel pane). |
+| Keyboard | Goes to the focused window, with Blit's keyboard layout and key repeat (the keyboard settings in Blit's Control Panel pane). A program cannot take the focus itself; it can ask, and the desktop decides. |
 | Mouse | Clicks, scrolling, menus and popups land where they are drawn; a press on a background window focuses it first. A game can lock the pointer after a click; Hibr's release key gives it back. |
 | Pointer shape | The program names it (text, hand, resize, ...) and Blit draws its own pointer for that name: the same cursors as everywhere else. A program's own cursor pictures are never drawn. Shapes show over the focused window; the text cursor shows everywhere. |
 | Copy and paste | One clipboard with Hibr's terminals and applications, as text. Vault passwords paste in and are cleared again when the Vault's timer ends, and never enter the clipboard history. Middle-click paste (the primary selection) works between programs. |
@@ -134,6 +146,7 @@ minimize and raise, Restart Desktop -- besides `compositor_gate`, which
 checks every line of the wire with a stand-in program, and
 `xwayland_gate`, which runs an X stand-in program under the compositor's
 Xwayland (map, title and class, a drawing pixel for pixel, a resize,
-focus, a key and a click, its menus with their grabs, a dialog and its
+focus (and taken back from a program that takes it itself), a key and a
+click, its menus with their grabs, a dialog and its
 limits, full screen and maximize both ways, its own move and resize, a
 named cursor, close).
