@@ -1612,7 +1612,8 @@ def desktop_part(compositor, standin, work):
         # Pointer constraints, asked of the desktop with WINDOW lock.
         check(versions.get('zwp_pointer_constraints_v1') == '1', 'pointer constraints: %s' % versions)
         check(versions.get('wp_presentation') == '1', 'no wp_presentation 1: %s' % versions)
-        check('STANDIN presentation presented=5 discarded=0 refresh=16666666' in output,
+        # Six: the popup draws again after its program moves it.
+        check('STANDIN presentation presented=6 discarded=0 refresh=16666666' in output,
               'the stand-in\'s frames were not each presented at 60 Hz:\n%s' % output)
         for want in ('STANDIN decoration server',
                      'STANDIN configure 320x200\n', 'STANDIN configure 500x300 activated\n',
@@ -1622,7 +1623,7 @@ def desktop_part(compositor, standin, work):
                      'STANDIN output geometry Blit blit-compositor', 'STANDIN output scale 1',
                      'STANDIN output name BLIT-1', 'STANDIN output mode 1920x1080\n',
                      'STANDIN capabilities 2 3 4\n', 'STANDIN enter BLIT-1 1920x1080@60000\n',
-                     'STANDIN done draws=5 releases=5 frames=5'):
+                     'STANDIN done draws=6 releases=6 frames=5'):
             check(want in output, 'the stand-in did not print %r:\n%s' % (want, output))
         check(sorted(desk.input_socks) == [1, 3], 'INPUT sock for the toplevels only: %s' % desk.input_socks)
         # The output is the display's, never a window's size.
@@ -1650,7 +1651,7 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('40 frames sent, 0 failed' in text, 'the log does not count 40 frames:\n%s' % text)
+        check('41 frames sent, 0 failed' in text, 'the log does not count 41 frames (40, and the popup again after its move):\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
