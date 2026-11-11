@@ -37,9 +37,18 @@ if ! $podman_cmd image exists "$image"; then
     $podman_cmd build --network=host -t "$image" -f "$DIR/Containerfile" "$DIR" >&2
 fi
 
+# The variables a build or a gate reads, passed by value when set: sudo
+# does not pass the caller's environment on. They go before the image, the
+# command after it.
+set -- "$image" "$@"
+for name in BLIT_GATE_TIMEOUT BLIT_GATE_PACKAGE BLIT_HIBR_ROOT; do
+    eval "isset=\${$name+set}"
+    [ "$isset" = set ] || continue
+    eval "value=\$$name"
+    set -- -e "$name=$value" "$@"
+done
 # shellcheck disable=SC2086
 exec $podman_cmd run --rm --network=host \
     --user "$(id -u):$(id -g)" -e HOME=/tmp -e LANG=C.UTF-8 \
-    -e BLIT_HIBR_ROOT -e BLIT_GATE_PACKAGE -e BLIT_GATE_TIMEOUT \
     -v "$ROOT:/blit" -w /blit \
-    "$image" "$@"
+    "$@"
