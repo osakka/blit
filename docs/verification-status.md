@@ -9,6 +9,20 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.85 the pointer's session once per event
+
+- **Fix (a 0.3.83 regression):** the session under the pointer was looked
+  up once per input route, every route of every channel, on every mouse
+  motion, button and wheel notch; a desktop gives each display's session a
+  route to every window, so moving the mouse cost Blit time per route (the
+  owner saw Blit's CPU rise while moving windows). Each event asks once.
+- **Suites:** the build environment, 831a15f: `compositor_gate`,
+  `xwayland_gate`, ASan/UBSan, `package_artifact_gate`. This host, rebuilt:
+  `all` 188 pass, 12 skip, 0 fail (`frame_input_gate`'s three modes);
+  `renderer` 82 pass, 1 skip; `renderer-gles` 62 pass;
+  `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.84 X copy and paste (ADR 0228 phase 2, milestone D)
 
 - **X selections:** CLIPBOARD and PRIMARY onto the one clipboard, both
