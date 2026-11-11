@@ -2401,7 +2401,7 @@ It speaks the frame channel above as a producer, with these additions.
     without `activated`), X's focus and `_NET_ACTIVE_WINDOW` leave it,
     and X toolkits close their menus on that. A press outside every X
     window does not reach X at all.
-  - From milestone D (in development), X's CLIPBOARD and PRIMARY are the
+  - From milestone D (0.3.84), X's CLIPBOARD and PRIMARY are the
     clipboard's two selections, on the `CLIP` lines below with nothing
     new: an X program is one more owner and reader, as a Wayland program
     is, and X as a whole is "the program with the keyboard" while an X

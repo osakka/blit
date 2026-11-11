@@ -69,7 +69,7 @@ says so, and Hibr's frame stays off, as for Firefox.
   ...) are Blit's own pointer for that name, as for a Wayland program; a
   cursor the program draws without a name is the display's pointer.
 
-*Milestone D (in development):*
+*Since Blit 0.3.84 (milestone D):*
 
 - **Copy and paste** with X programs is the one clipboard, as for any
   program: copy in an X program and paste in Hibr, a terminal or a

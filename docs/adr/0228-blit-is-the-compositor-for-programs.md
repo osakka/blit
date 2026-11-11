@@ -417,7 +417,7 @@ loader and 32-bit Mesa, PipeWire or Pulse, and udev access to controllers
 Planned: phase 0's numbers; per phase, the stand-in-client gates, the full
 and GLES suites, and the owner's live check named above.
 
-**Phase 1, milestone A (0.3.71, in development, 2026-11-09).** The first
+**Phase 1, milestone A (released in 0.3.71, 2026-11-09).** The first
 stand-in-client build for Blit and Hibr to test against.
 
 - `blit-compositor` (`src/blit_compositor.c`, its frame channel in
@@ -485,7 +485,7 @@ stand-in-client build for Blit and Hibr to test against.
   `wl_data_device_manager`, `wp_viewporter`, subsurfaces composited, the
   package, and the live check with vkcube.
 
-**Phase 1, milestone B (0.3.71, in development, 2026-11-10).** Every line
+**Phase 1, milestone B (released in 0.3.71, 2026-11-10).** Every line
 of `docs/api.md` "Program windows" as agreed with Hibr, except the
 proposals named there.
 
@@ -538,7 +538,7 @@ proposals named there.
   mini PC: vkcube's dmabuf frames imported by Blit's GPU, its pacing and
   keys and mouse.
 
-**Phase 1, milestone C (0.3.72, in development, 2026-11-10).** The
+**Phase 1, milestone C (released in 0.3.72, 2026-11-10).** The
 Blit-side work that closes phase 1, apart from the owner's live check.
 
 - **Pointer lock and confinement.** `zwp_pointer_constraints_v1` (version
@@ -881,7 +881,7 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   press went through (a drag goes on across the seam), keys to the
   focused session's as before; `frames.input` says `pointer.here`.
   `frame_input_gate`'s new two-display mode failed before the fix.
-- **Milestone D (2026-11-11; in development, not released).** The X
+- **Milestone D (2026-11-11; released in 0.3.84).** The X
   selections onto `CLIP`, with no wire change (`src/blit_compositor.c`,
   "X selections"; `docs/api.md`, "X programs" and "The clipboard"). X is
   one more owner and reader of the clipboard's two selections, through
