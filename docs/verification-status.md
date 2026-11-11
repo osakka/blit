@@ -9,6 +9,30 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.78 X programs, milestone A (ADR 0228 phase 2)
+
+- **X programs:** `blit-compositor` starts Xwayland (23.1 or later,
+  xwayland_shell_v1) and is its window manager on libxcb: an X program's
+  window is a Hibr window (title, class, size from the desktop, focus, keys
+  and clicks, close by WM_DELETE_WINDOW). `WINDOW display <wayland> <x>`
+  names the X display (`-` when X is off); Hibr 0.99.486 exports
+  `DISPLAY`. Xwayland is restarted when it dies; three quick deaths turn
+  X off with the reason logged. Menus, tooltips, X states and pointer
+  shapes, and selections are milestones C and D.
+- **Fix:** `zoomed_effects_gate` stops its server before removing its
+  directory (a pass could end in ENOENT).
+- **Suites:** this host, main 011c130 rebuilt: `all` 186 pass, 13 skip, 1
+  fail (`zoomed_effects_gate`'s cleanup race, fixed in 9f0f8f7 and passing
+  three runs); `renderer` 82 pass, 1 skip; `renderer-gles` 62 pass, 0
+  fail -- the first real GLES run since 0.3.72: 0.3.73-0.3.77's "GLES
+  `renderer`" lines were the `renderer` suite, which runs on the CPU
+  compositor. The owner's Debian 13 desktop, 9f0f8f7, real Xwayland
+  24.1.6: `xwayland_gate` (commit to frame sent, first 60 frames: median
+  1.2-1.5 ms) and `compositor_gate`, both with ASan/UBSan; the packages
+  built there and `package_artifact_gate` passing; brought here by scp,
+  checksums verified.
+- **Published** to hibr-apt (blit, blit-compositor).
+
 ## 2026-11-10: 0.3.77 input routes per session; the global menu's wire (ADR 0229)
 
 - **Fix (a 0.3.76 regression):** one route per compositor window socket
