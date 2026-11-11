@@ -9,6 +9,23 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.86 programs ask the desktop for focus
+
+- **`WINDOW activate <id> x-focus|x-active|xdg-activation`:** a program's
+  request for focus goes to the desktop, which grants it with `activated`
+  or refuses (its focus-stealing setting, Hibr #507). X's focus follows the
+  desktop's activated window: a program that takes it uninvited (Steam
+  from its own game, on the owner's mini PC) has it put back and asks.
+  `xdg_activation_v1` offered (tokens once, 30 s). Menus in their grab, and
+  a program's answer to WM_TAKE_FOCUS within 1 s, keep focus.
+- **Suites:** the build environment, 41dd199: `xwayland_gate` (a thief put
+  back x3 with one ask, grants, _NET_ACTIVE_WINDOW, a focused menu) and
+  `compositor_gate` (tokens: bad, used, valid), both with ASan/UBSan; gcc
+  `-Wall -Wextra` clean; `package_artifact_gate`. This host, rebuilt: `all`
+  188 pass, 12 skip, 0 fail; `renderer` 82 pass, 1 skip; `renderer-gles`
+  62 pass; `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.85 the pointer's session once per event
 
 - **Fix (a 0.3.83 regression):** the session under the pointer was looked
