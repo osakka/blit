@@ -59,7 +59,10 @@ order:
     both directions (the transfer finishes with the old owner's bytes); an
     X requestor that never takes its INCR chunks, a desktop reader that
     never reads, and an X owner that never answers -- each ended at the
-    compositor's deadline while it answers the desktop; with the Wayland
+    compositor's deadline while it answers the desktop; two ownerships in
+    quick succession by one window at one time making one offer, the
+    newer's; a copy and a paste made after X's focus was taken away, the
+    one not the clipboard's and the other refused; with the Wayland
     stand-in (`--clip`), its CLIPBOARD and PRIMARY pasted by X and X's
     CLIPBOARD pasted by it; an X program giving its selection up is `CLIP
     clear`;
@@ -510,6 +513,7 @@ def x_milestone_c_steps(desk, lines_to, log, why, said, key, click, route):
 # ---- milestone D: the X selections ----
 
 KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_Q = 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 16
+KEY_W, KEY_E, KEY_Y = 17, 18, 21
 TEXT = 'text/plain;charset=utf-8'
 SECRET = 'x-kde-passwordManagerHint'
 IDLE_MS = 3000  # the compositor's BC_XSEL_IDLE_MS
@@ -832,6 +836,48 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work)
     check(got == b'' and took >= IDLE_MS / 1000.0 - 0.5 and 'gave nothing for %d ms; ended' % IDLE_MS in log(),
           lambda: 'a silent X owner: read %r after %.1f s:\n%s' % (got, took, c.why()))
 
+    # Two ownerships at once by one window at one time (W, secret and then
+    # not): one offer, the newer's -- the older's TARGETS answer dropped.
+    c.put('copy', b'twice')
+    m = c.mark()
+    key(KEY_W)
+    c.saw('copied clipboard 5', m)
+    seq = c.offered('clipboard')
+    desk.quiet(0.5)
+    check(c.read(seq) == b'twice', 'the newer of two quick ownerships read back differs')
+
+    # The keyboard rule: a copy (E) and a paste (Y) the X program makes a
+    # second after the desktop took X's focus from it -- its ownership is
+    # not the clipboard's (no offer; logged), its read refused (None).
+    ignored = "whose program does not have the keyboard: not the clipboard's"
+    refused = 'whose program does not have the keyboard: refused'
+    c.desk_offers(115, 'clipboard')
+    count = log().count(ignored)
+    m = c.mark()
+    key(KEY_E)
+    c.saw('key %d' % (KEY_E + 8), m)
+    desk.send('WINDOW size 1 400 300')
+    c.saw('focus-out', m)
+    c.saw('copied clipboard 5', m)
+    wait_for(lambda: log().count(ignored) > count, lambda: 'a copy without the keyboard was taken:\n' + c.why())
+    desk.quiet(0.5)
+    c.desk_offers(116, 'clipboard')
+    m = c.mark()
+    desk.send('WINDOW size 1 400 300 activated')
+    c.saw('focus-in', m)
+    count = log().count(refused)
+    m = c.mark()
+    key(KEY_Y)
+    c.saw('key %d' % (KEY_Y + 8), m)
+    desk.send('WINDOW size 1 400 300')
+    c.saw('focus-out', m)
+    c.saw('pasted clipboard UTF8_STRING none', m)
+    check(log().count(refused) > count, lambda: 'a paste without the keyboard was not refused:\n' + c.why())
+    desk.quiet(0.3)
+    m = c.mark()
+    desk.send('WINDOW size 1 400 300 activated')
+    c.saw('focus-in', m)
+
     # Wayland programs: the stand-in with --clip copies (C, P) and X
     # pastes them (4, 5); X copies (1) and it pastes (V).
     cross = 'none (no wl_standin_client)'
@@ -901,8 +947,8 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work)
     return ('selections: X->desk clipboard,primary,latin1->utf8 desk->X utf8,primary,STRING->latin1 '
             'incr X->desk 700001, desk->X %s secret=hint both ways,TARGETS,cleared->none '
             'owner-change-mid-transfer=finished both ways stalls=requestor %.2f s,reader %.2f s answered,'
-            'let go at %d ms; silent owner->empty %s'
-            % (','.join(sizes), stall_a, stall_b, IDLE_MS, cross))
+            'let go at %d ms; silent owner->empty two-quick-owners->one offer keyboard-rule=copy ignored,read refused '
+            '%s' % (','.join(sizes), stall_a, stall_b, IDLE_MS, cross))
 
 
 def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):

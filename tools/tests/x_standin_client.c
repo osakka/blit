@@ -66,6 +66,11 @@
      7  paste CLIPBOARD as UTF8_STRING, and never take an INCR's chunks
      8  give CLIPBOARD up (SetSelectionOwner None)
      9  CLIPBOARD's TARGETS
+     W  copy CLIPBOARD from `copy` twice at once, marked secret and then
+        not, at the key's one time (two ownerships in quick succession)
+     E  copy CLIPBOARD from `copy` a second after the key; Y paste
+        CLIPBOARD as UTF8_STRING a second after the key (so the gate can
+        take X's focus away first)
 
    It prints one line per event, flushed:
 
@@ -158,6 +163,10 @@
 #define KEYCODE_9 18
 #define KEYCODE_0 19
 #define KEYCODE_Q 24
+#define KEYCODE_W 25
+#define KEYCODE_E 26
+#define KEYCODE_Y 29
+#define DELAY_MS 1000
 /* The stand-in's INCR chunk as an owner (the compositor's is 64 KiB). */
 #define CLIP_CHUNK 32768u
 #define CLIP_SENDS 8
@@ -199,6 +208,8 @@ static struct sending {
     unsigned char *data;
     size_t len, off;
 } sending[CLIP_SENDS];
+static int delayed;  /* KEYCODE_E or KEYCODE_Y due at delayed_at, 0 none */
+static uint64_t delayed_at;
 static struct {
     int on, k, incr, stall, targets;
     xcb_atom_t target;
@@ -786,6 +797,15 @@ static void clip_key(uint8_t code, xcb_timestamp_t time)
     case KEYCODE_3: clip_copy(0, "copy", 1, 0, 0, time); break;
     case KEYCODE_0: clip_copy(0, "copy", 0, 1, 0, time); break;
     case KEYCODE_Q: clip_copy(0, "copy-latin1", 0, 0, 1, time); break;
+    case KEYCODE_W:
+        clip_copy(0, "copy", 1, 0, 0, time);
+        clip_copy(0, "copy", 0, 0, 0, time);
+        break;
+    case KEYCODE_E:
+    case KEYCODE_Y:
+        delayed = code;
+        delayed_at = now_ms() + DELAY_MS;
+        break;
     case KEYCODE_4: paste_start(0, utf8, 0, 0, time); break;
     case KEYCODE_5: paste_start(1, utf8, 0, 0, time); break;
     case KEYCODE_6: paste_start(0, XCB_ATOM_STRING, 0, 0, time); break;
@@ -1132,9 +1152,20 @@ int main(int argc, char **argv)
             fprintf(stderr, "x_standin_client: the connection to the X server ended\n");
             return 1;
         }
+        if (delayed && now_ms() >= delayed_at) {
+            if (delayed == KEYCODE_E) clip_copy(0, "copy", 0, 0, 0, XCB_CURRENT_TIME);
+            else paste_start(0, utf8, 0, 0, XCB_CURRENT_TIME);
+            delayed = 0;
+            continue;
+        }
         if (animate > 0) {
             uint64_t now = now_ms();
             wait = next_frame > now ? (int)(next_frame - now) : 0;
+        }
+        if (delayed) {
+            uint64_t now = now_ms();
+            int until = delayed_at > now ? (int)(delayed_at - now) : 0;
+            if (wait < 0 || until < wait) wait = until;
         }
         p.fd = xcb_get_file_descriptor(conn);
         p.events = POLLIN;
