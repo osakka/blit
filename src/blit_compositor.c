@@ -1,6 +1,7 @@
 /* blit-compositor: Blit's Wayland compositor for programs (ADR 0228,
    phase 1, milestones A, B and C), and the X window manager of the
-   Xwayland it runs for X programs (phase 2, milestone A: the X section).
+   Xwayland it runs for X programs (phase 2, milestones A and C: the X
+   section).
 
      blit-compositor [--display name] [--log path]
 
@@ -4772,14 +4773,38 @@ static void input_sockets_clear(struct bc_server *s)
    kills its client. The keyboard entering an X window's surface gives
    that window X's focus too: SetInputFocus when its WM_HINTS take input,
    WM_TAKE_FOCUS when it asks for that (ICCCM 4.1.7), and
-   _NET_ACTIVE_WINDOW; leaving it, the focus is None. Keys and the pointer
-   reach Xwayland as the wl_seat events any client gets on its surface.
+   _NET_ACTIVE_WINDOW; leaving it, the focus is PointerRoot. Keys and the
+   pointer reach Xwayland as the wl_seat events any client gets on its
+   surface.
 
-   Later milestones (ADR 0228): override-redirect windows (menus and
-   tooltips) are matched and not shown; _NET_WM_STATE, _NET_WM_MOVERESIZE,
-   _NET_ACTIVE_WINDOW and WM_CHANGE_STATE requests, WM_NORMAL_HINTS,
-   _MOTIF_WM_HINTS, _NET_WM_WINDOW_TYPE and WM_TRANSIENT_FOR, cursors and
-   selections are noted once in the log and not acted on.
+   Milestone C: each X request onto the line its Wayland equivalent
+   already produces, through the same setters. WM_TRANSIENT_FOR is the
+   parent (`WINDOW new <id> <parent>`, `WINDOW parent`); WM_NORMAL_HINTS'
+   minimum (else base) and maximum are `WINDOW limits`; _MOTIF_WM_HINTS
+   with no decorations is `decor client`; _NET_WM_STATE full screen and
+   maximized (the property before the map, requests after) are `WINDOW
+   fullscreen` and `WINDOW maximize`, and the desktop's `WINDOW size`
+   states are written back as the property; _NET_WM_MOVERESIZE is `WINDOW
+   move` and `WINDOW resize` under xdg's press rule; WM_CHANGE_STATE
+   Iconic is `WINDOW minimize`; XFixes' cursor names are `WINDOW cursor`.
+
+   An override-redirect window (a menu, a dropdown, a tooltip) is a
+   `WINDOW popup` of the toplevel it belongs to (x_popup_parent), at its
+   offset from that toplevel in X space. Toplevels keep their X position
+   (the program's, never moved by the window manager after the desktop's
+   first size): X space is a stable, virtual layout and Hibr places the
+   pictures. Xwayland turns a pointer on any of its surfaces into a root
+   position by that surface's window's X position, so a popup's pointer
+   (Blit maps it into its toplevel's pixels, INPUT member; pointer_target
+   gives it to the popup's surface) lands where X has the menu. Menus'
+   grabs are X's own: a press anywhere in the program's windows reaches
+   the grabbing menu, which closes on a press outside itself; when the
+   desktop deactivates the window, X's focus leaves it and its menus close
+   themselves. X's stacking follows Blit's pointer (x_raise) so X's hit
+   test agrees with the picture the pointer is over.
+
+   Not acted on, noted once in the log: _NET_ACTIVE_WINDOW requests and
+   _NET_WM_WINDOW_TYPE; the selections are milestone D.
 
    Measured: per X window, the time from a commit of its surface to its
    frame sent, the minimum and median over its first 60 frames, logged. */

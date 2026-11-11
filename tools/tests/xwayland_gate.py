@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""ADR 0228 phase 2, milestone A: one X program in a Hibr window, keys and
-mouse, through Xwayland with blit-compositor as its window manager.
+"""ADR 0228 phase 2, milestones A and C: X programs in Hibr windows, keys
+and mouse, menus, dialogs and states, through Xwayland with
+blit-compositor as its window manager.
 
     xwayland_gate.py <blit-compositor> <x_standin_client> [blit-server]
 
@@ -32,12 +33,21 @@ order:
     keymap had none (src/blit_xkb_keymap.h);
   - _MOTIF_WM_HINTS with no decorations (the D key): `WINDOW decor 1
     client`, and taken away, `WINDOW decor 1 server`;
+  - milestone C (x_milestone_c): override-redirect menus as `WINDOW
+    popup` at their X offset, a key and a choice through their grabs,
+    dismissed by a press outside and by the window's deactivation (with
+    `WINDOW close` for the popup noted); a transient dialog `WINDOW new 5
+    1` with its WM_NORMAL_HINTS as `WINDOW limits`, and a press on window
+    1 under it in X space reaching window 1; a base size as limits;
+    _NET_WM_STATE full screen and maximize both ways; _NET_WM_MOVERESIZE
+    move and resize with a press held, refused with none; a named X
+    cursor as `WINDOW cursor 1 xterm`;
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
   - `WINDOW quit 0`: the compositor ends 0, Xwayland with it, the sockets
     and the lock removed.
 
-`WINDOW cursor` lines (Xwayland's cursor image, the display's pointer until
-milestone C) may come at any point and are only counted.
+`WINDOW cursor` lines may come at any point and are set aside (counted;
+milestone C looks for its named one among them).
 """
 import fcntl
 import os
