@@ -29,7 +29,8 @@
 #               manager, ADR 0228 phase 2)
 #   xkbcommon   xkbcommon
 #   wayland-client  the in-repo stand-in Wayland client (gates)
-#   xcb         libxcb alone: the in-repo stand-in X client (gates)
+#   xcb         libxcb and its xfixes extension: the in-repo stand-in X
+#               client (gates), which names its cursor
 #
 # A module missing or older than its minimum stops the build here, naming
 # the module and the minimum: a blocked capability gate, never a fallback.
@@ -80,7 +81,7 @@ group() {
                 lmods='wayland-server xkbcommon xcb xcb-composite xcb-xfixes xcb-res'; extra= ;;
     xkbcommon) cmods=xkbcommon; lmods=xkbcommon; extra= ;;
     wayland-client) cmods=wayland-client; lmods=wayland-client; extra= ;;
-    xcb) cmods=xcb; lmods=xcb; extra= ;;
+    xcb) cmods='xcb xcb-xfixes'; lmods='xcb xcb-xfixes'; extra= ;;
     *) die "build-flags: unknown group '$1' (see tools/build-flags.sh)" ;;
     esac
 }

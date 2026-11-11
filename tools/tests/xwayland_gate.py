@@ -61,6 +61,7 @@ ROOT = cg.ROOT
 TOKEN = cg.TOKEN
 BLIT_PICTURE = 1259388934
 KEY_A, KEY_D, KEY_SPACE, BTN_LEFT = 30, 32, 57, 0x110
+KEY_M, KEY_N, KEY_T, KEY_L, KEY_F, KEY_X, KEY_G, KEY_H, KEY_R, KEY_C = 50, 49, 20, 38, 33, 45, 34, 35, 19, 46
 
 
 def fail(why):
@@ -127,6 +128,51 @@ class Desk:
             before += 1
         fail('no %dx%d frame of the pattern within %.0f s (%d other frames, the last %s)'
              % (width, height, wait, before, last))
+
+    def lines(self, wanted, wait=10.0, why=lambda: ''):
+        """The lines `wanted`, in order, and no other line; frames between
+        are closed and kept as (image, width, height) in the list returned."""
+        frames = []
+        deadline = time.time() + wait
+        for want in wanted:
+            while True:
+                got = self.next(max(0.1, deadline - time.time()))
+                check(got is not None, lambda: 'no %r (wanted %r):\n%s' % (want, wanted, why()))
+                if got[0] == 'frame':
+                    frames.append((got[1][0], got[1][2], got[1][3]))
+                    os.close(got[2])
+                    continue
+                if got[0] != 'line':
+                    os.close(got[2][0])
+                    continue
+                check(got[1] == want, lambda: 'got %r, expected %r:\n%s' % (got[1], want, why()))
+                break
+        return frames
+
+    def frames_of(self, image, wait=10.0, why=lambda: ''):
+        """Frames until one of picture `image`: its (width, height). A line
+        meanwhile fails."""
+        deadline = time.time() + wait
+        while True:
+            got = self.next(max(0.1, deadline - time.time()))
+            check(got is not None, lambda: 'no frame of picture %d:\n%s' % (image, why()))
+            check(got[0] == 'frame', lambda: 'got %r while waiting for a frame of %d:\n%s'
+                  % (got[:2], image, why()))
+            os.close(got[2])
+            if got[1][0] == image:
+                return got[1][2], got[1][3]
+
+    def quiet(self, wait):
+        """`wait` seconds with no line but cursor lines: frames closed."""
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            got = self.next(max(0.05, deadline - time.time()))
+            if got is None:
+                continue
+            if got[0] == 'frame':
+                os.close(got[2])
+                continue
+            fail('got %r, expected no line' % (got[:2],))
 
     def send(self, line):
         self.desk.send(line)
@@ -195,6 +241,148 @@ def blit_keymap(server, work):
         except subprocess.TimeoutExpired:
             blit.kill()
             blit.wait()
+
+
+def x_milestone_c(desk, lines_to, printed, log):
+    """Milestone C, on the stand-in's window 1 (400x300, activated, at 0,0
+    in X space): its menus as popups, a dialog with its parent and limits,
+    WM_NORMAL_HINTS, _NET_WM_STATE both ways, _NET_WM_MOVERESIZE and a
+    named X cursor. Returns what it saw, for the summary line."""
+    why = lambda: '%s\n%s' % (printed(), log())
+
+    def key(code):
+        lines_to('key %%d %d press' % code, 'key %%d %d release' % code)
+
+    seen = [len(printed())]
+
+    def said(text, wait=10):
+        """The X client says `text` after what it said last time."""
+        line = 'XSTANDIN %s\n' % text
+        wait_for(lambda: line in printed()[seen[0]:], lambda: 'the X client did not say %r:\n%s'
+                 % (text, why()), wait)
+        seen[0] = printed().index(line, seen[0]) + len(line)
+
+    def click(x, y):
+        lines_to('ptr %%d %d.00 %d.00' % (x, y), 'btn %%d %d press' % BTN_LEFT, 'btn %%d %d release' % BTN_LEFT)
+
+    # A menu (M): override-redirect at 30,40 from window 1 in X space, which
+    # grabs the pointer and the keyboard -- `WINDOW popup 2 1 30 40` and its
+    # own frames. The desktop joins it to window 1's route (INPUT member), so
+    # Blit sends the pointer over it in window 1's pixels: the compositor
+    # gives it to the menu's surface, and Xwayland puts it at the menu's own
+    # X position. A key reaches the menu by its grab; a press in it is a
+    # choice at its own 10,12; the menu goes, and so does its picture.
+    key(KEY_M)
+    desk.lines(['WINDOW popup 2 1 30 40'], why=why)
+    size = desk.frames_of(2, why=why)
+    check(size == (120, 90), 'the menu\'s frame is %dx%d, not 120x90' % size)
+    said('menu 30,40 120x90 grab 0 0')
+    key(KEY_A)
+    said('menu-key %d' % (KEY_A + 8))
+    click(30 + 10, 40 + 12)
+    said('menu-choice 10,12')
+    desk.lines(['WINDOW gone 2'], why=why)
+
+    # Again (M), and a press on window 1 outside it: the grab gives the
+    # press to the menu at its own -25,-35, and it dismisses itself.
+    key(KEY_M)
+    desk.lines(['WINDOW popup 3 1 30 40'], why=why)
+    desk.frames_of(3, why=why)
+    click(5, 5)
+    said('menu-dismissed press -25,-35')
+    desk.lines(['WINDOW gone 3'], why=why)
+
+    # A menu past window 1's right edge (N), its WM_TRANSIENT_FOR window 1:
+    # `WINDOW popup 4 1 410 10`. The desktop closes it when the window loses
+    # its focus (Hibr's native_focus): `WINDOW close 4` (an X menu has no
+    # popup_done: noted), then `WINDOW size` without `activated` -- X's
+    # focus leaves the window, and the menu closes itself on its FocusOut.
+    key(KEY_N)
+    desk.lines(['WINDOW popup 4 1 410 10'], why=why)
+    desk.frames_of(4, why=why)
+    said('menu 410,10 100x60 grab 0 0')
+    desk.send('WINDOW close 4')
+    wait_for(lambda: 'popup 4: WINDOW close for an X menu' in log(), lambda: 'WINDOW close 4 not noted:\n' + why())
+    desk.send('WINDOW size 1 400 300')
+    said('menu-dismissed focus-out')
+    desk.lines(['WINDOW gone 4'], why=why)
+    desk.send('WINDOW size 1 400 300 activated')
+    said('state focused')
+
+    # A dialog (T): WM_TRANSIENT_FOR window 1, WM_NORMAL_HINTS minimum
+    # 150x80 and maximum 300x200 -- `WINDOW new 5 1` and `WINDOW limits`;
+    # `WINDOW close 5` is its WM_DELETE_WINDOW.
+    key(KEY_T)
+    desk.lines(['WINDOW new 5 1', 'WINDOW title 5 X stand-in dialog', 'WINDOW appid 5 blit.xstandin',
+                'WINDOW limits 5 150 80 300 200', 'WINDOW decor 5 server'], why=why)
+    said('dialog')
+    # Window 1 and the dialog overlap in X space (the dialog at 50,50): the
+    # pointer over window 1 there raises it in X's stacking (its
+    # ConfigureNotify), so a press there is window 1's, as Blit's pointer
+    # says. (The raise and an event in the same instant race inside
+    # Xwayland, which takes input before requests; a person's press comes
+    # after the pointer got there.)
+    lines_to('ptr %d 60.00 60.00')
+    said('configure 400x300')
+    click(60, 60)
+    said('button 1 60,60')
+    desk.send('WINDOW close 5')
+    desk.lines(['WINDOW gone 5'], why=why)
+    said('dialog-delete')
+
+    # WM_NORMAL_HINTS changed on window 1 (L): a base size and no minimum is
+    # a minimum of the base size.
+    key(KEY_L)
+    desk.lines(['WINDOW limits 1 200 150 0 0'], why=why)
+
+    # _NET_WM_STATE (F, X): the program's toggles are `WINDOW fullscreen`
+    # and `WINDOW maximize`; the desktop's `WINDOW size` states come back as
+    # the property, and the next toggle is from them.
+    key(KEY_F)
+    desk.lines(['WINDOW fullscreen 1 on'], why=why)
+    desk.send('WINDOW size 1 800 600 fullscreen activated')
+    said('state fullscreen focused')
+    key(KEY_F)
+    desk.lines(['WINDOW fullscreen 1 off'], why=why)
+    key(KEY_X)
+    desk.lines(['WINDOW maximize 1 on'], why=why)
+    desk.send('WINDOW size 1 1000 700 maximized activated')
+    said('state maximized-vert maximized-horz focused')
+    key(KEY_X)
+    desk.lines(['WINDOW maximize 1 off'], why=why)
+    desk.send('WINDOW size 1 400 300 activated')
+    said('configure 400x300')
+
+    # _NET_WM_MOVERESIZE (G, H): sent while the press that asked is held,
+    # `WINDOW move 1` and `WINDOW resize 1 bottom-right`; with no press down
+    # (R), ignored and logged.
+    key(KEY_G)
+    lines_to('ptr %d 100.00 50.00', 'btn %%d %d press' % BTN_LEFT)
+    said('moveresize 8 1')
+    desk.lines(['WINDOW move 1'], why=why)
+    lines_to('btn %%d %d release' % BTN_LEFT)
+    key(KEY_H)
+    lines_to('ptr %d 395.00 295.00', 'btn %%d %d press' % BTN_LEFT)
+    said('moveresize 4 1')
+    desk.lines(['WINDOW resize 1 bottom-right'], why=why)
+    lines_to('btn %%d %d release' % BTN_LEFT)
+    ignored = log().count('window 1: a move, resize or menu without a press on it is ignored')
+    key(KEY_R)
+    wait_for(lambda: log().count('window 1: a move, resize or menu without a press on it is ignored') > ignored,
+             lambda: 'a _NET_WM_MOVERESIZE with no press was not refused:\n' + why())
+    desk.quiet(0.5)
+
+    # A named X cursor (C): `WINDOW cursor 1 xterm`, the name as the program
+    # gave it (XFixes), which Blit's own table draws.
+    key(KEY_C)
+    said('cursor xterm')
+    lines_to('ptr %d 20.00 20.00', 'ptr %d 21.00 20.00')
+    wait_for(lambda: (desk.quiet(0.1), 'WINDOW cursor 1 xterm' in desk.cursors)[1],
+             lambda: 'no WINDOW cursor 1 xterm (%s):\n%s' % (desk.cursors, why()))
+    return ('menus=popup 2,3 at 30,40 (choice 10,12, dismissed by press), popup 4 at 410,10 transient '
+            '(close noted, dismissed on focus-out) dialog=new 5 1 limits 150x80-300x200 hints=base 200x150 '
+            'state=fullscreen,maximize on/off both ways moveresize=move,bottom-right,no-press refused '
+            'cursor=xterm')
 
 
 def x_part(compositor, standin, server, work):
@@ -343,6 +531,8 @@ def x_part(compositor, standin, server, work):
             wait_for(lambda: 'XSTANDIN %s' % printed_word in printed(),
                      lambda: 'the X client did not say %s:\n%s' % (printed_word, printed()))
 
+        milestone_c = x_milestone_c(desk, lines_to, printed, lambda: open(log).read())
+
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
         while True:
@@ -375,9 +565,10 @@ def x_part(compositor, standin, server, work):
               'the X socket or lock outlived the compositor')
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
-                '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
+                '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s '
+                'close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
-                                     measure.group(1), measure.group(2), frames, len(desk.cursors)))
+                                     measure.group(1), measure.group(2), frames, milestone_c, len(desk.cursors)))
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

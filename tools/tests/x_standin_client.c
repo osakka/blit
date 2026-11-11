@@ -1,6 +1,6 @@
 /* The stand-in X client of tools/tests/xwayland_gate.py (ADR 0228 phase 2,
-   milestone A): one X program, on xcb alone, that does what the gate checks
-   of an X window in a Hibr window.
+   milestones A and C): one X program, on xcb (and xcb-xfixes, to name its
+   cursor), that does what the gate checks of X windows in Hibr windows.
 
      x_standin_client [title]
 
@@ -14,6 +14,30 @@
    request size. A press of the space bar (keycode 65) draws it again 150
    times, 16 ms apart, for the compositor's measure of its first 60 frames.
 
+   Keys (X keycodes: evdev + 8) that each do one thing an X program does:
+
+     D  toggle _MOTIF_WM_HINTS "no decorations" (as Steam sets it)
+     M  open a menu: an override-redirect 120x90 window at 30,40 from the
+        top-level, which grabs the pointer and the keyboard (as X menus
+        do). A press in it is a choice, a press anywhere else (reported
+        through the grab) dismisses it, as does Escape or the top-level
+        losing X's focus (FocusOut, as Chromium closes its menus when its
+        window is deactivated); either way it is destroyed and ungrabbed.
+     N  the same menu, 100x60, placed past the top-level's right edge with
+        WM_TRANSIENT_FOR naming the top-level
+     T  open a dialog: a 200x100 top-level with WM_TRANSIENT_FOR the main
+        one and WM_NORMAL_HINTS minimum 150x80, maximum 300x200; its
+        WM_DELETE_WINDOW destroys it
+     L  WM_NORMAL_HINTS on the main window: a base size of 200x150 and no
+        minimum (the minimum is the base size, ICCCM)
+     F  _NET_WM_STATE toggle full screen (a client message to the root)
+     X  _NET_WM_STATE toggle maximized, vertical and horizontal
+     G  the next press sends _NET_WM_MOVERESIZE move with its button
+     H  the next press sends _NET_WM_MOVERESIZE size bottom-right
+     R  _NET_WM_MOVERESIZE move now, with no button down
+     C  the window's cursor: a glyph of the core cursor font, named "xterm"
+        (XFixesSetCursorName, as libXcursor names the themed ones)
+
    It prints one line per event, flushed:
 
      XSTANDIN mapped
@@ -21,17 +45,32 @@
      XSTANDIN configure <w>x<h>          every ConfigureNotify, synthetic too
      XSTANDIN drew <w>x<h>
      XSTANDIN focus-in
+     XSTANDIN focus-out
      XSTANDIN key <keycode>              a KeyPress
-     XSTANDIN undecorated|decorated      the D key toggled _MOTIF_WM_HINTS'
-                                         "no decorations" (as Steam sets it)
+     XSTANDIN undecorated|decorated      the D key
      XSTANDIN button <n> <x>,<y>         a ButtonPress, in the window
      XSTANDIN animated <n>
+     XSTANDIN menu <x>,<y> <w>x<h> grab <pointer> <keyboard>
+                                         a menu mapped at x, y (root), its
+                                         grabs' statuses (0 success)
+     XSTANDIN menu-choice <x>,<y>        a press in the menu
+     XSTANDIN menu-key <keycode>         a key the menu's grab got
+     XSTANDIN menu-dismissed <why>       a press outside, escape, focus-out
+     XSTANDIN dialog                     the dialog mapped
+     XSTANDIN dialog-button <n> <x>,<y>  a ButtonPress in the dialog
+     XSTANDIN dialog-delete              its WM_DELETE_WINDOW
+     XSTANDIN limits                     the L key
+     XSTANDIN state <atoms>              _NET_WM_STATE as the window manager
+                                         wrote it: fullscreen, maximized-vert,
+                                         maximized-horz, focused, or none
+     XSTANDIN moveresize <direction> <button>   sent
+     XSTANDIN cursor xterm
      XSTANDIN delete                     WM_DELETE_WINDOW: it exits 0
 
    and exits 1 when its connection fails or ends otherwise.
 
-   Built by tools/tests/xwayland_gate.sh with tcc against libxcb (pkg-config
-   xcb, tools/build-flags.sh). */
+   Built by tools/tests/xwayland_gate.sh with tcc against libxcb and
+   xcb-xfixes (pkg-config, tools/build-flags.sh xcb). */
 #define _GNU_SOURCE
 #include <poll.h>
 #include <stdarg.h>
@@ -41,17 +80,39 @@
 #include <string.h>
 #include <time.h>
 #include <xcb/xcb.h>
+#include <xcb/xfixes.h>
 
 #define ANIMATE_FRAMES 150
 #define ANIMATE_MS 16
+#define KEYCODE_ESCAPE 9
 #define KEYCODE_SPACE 65
 #define KEYCODE_D 40
+#define KEYCODE_M 58
+#define KEYCODE_N 57
+#define KEYCODE_T 28
+#define KEYCODE_L 46
+#define KEYCODE_F 41
+#define KEYCODE_X 53
+#define KEYCODE_G 42
+#define KEYCODE_H 43
+#define KEYCODE_R 27
+#define KEYCODE_C 54
+/* _NET_WM_MOVERESIZE's directions (EWMH) */
+#define MOVERESIZE_SIZE_BOTTOMRIGHT 4
+#define MOVERESIZE_MOVE 8
+/* _NET_WM_STATE's actions */
+#define STATE_TOGGLE 2
+/* XC_xterm of the core cursor font */
+#define GLYPH_XTERM 152
 
 static xcb_connection_t *conn;
 static xcb_screen_t *screen;
-static xcb_window_t window;
-static xcb_gcontext_t gc;
+static xcb_window_t window, menu, dialog;
+static xcb_gcontext_t gc, fill;
 static uint16_t width = 320, height = 200;
+static uint16_t menu_w, menu_h;
+static xcb_atom_t protocols, delete_window, utf8, net_wm_name, motif_hints, transient_atom, net_wm_state,
+    state_fullscreen, state_max_vert, state_max_horz, state_focused, moveresize;
 
 static void say(const char *fmt, ...)
 {
@@ -101,11 +162,169 @@ static void draw(void)
     say("drew %ux%u", width, height);
 }
 
+/* A window filled with one colour. */
+static void draw_fill(xcb_window_t w, uint16_t fw, uint16_t fh)
+{
+    xcb_rectangle_t r = { 0, 0, fw, fh };
+    xcb_poly_fill_rectangle(conn, w, fill, 1, &r);
+    xcb_flush(conn);
+}
+
 static uint64_t now_ms(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+/* The main window's root position. */
+static void origin(int16_t *x, int16_t *y)
+{
+    xcb_translate_coordinates_reply_t *t =
+        xcb_translate_coordinates_reply(conn, xcb_translate_coordinates(conn, window, screen->root, 0, 0), NULL);
+    *x = t ? t->dst_x : 0;
+    *y = t ? t->dst_y : 0;
+    free(t);
+}
+
+/* A menu as X toolkits make one: override-redirect, mapped, then the
+   pointer and the keyboard grabbed (owner_events false: every press and
+   key reaches the menu, in its coordinates). */
+static void menu_open(int16_t dx, int16_t dy, uint16_t mw, uint16_t mh, int transient)
+{
+    uint32_t values[3];
+    int16_t ox, oy;
+    xcb_grab_pointer_reply_t *gp;
+    xcb_grab_keyboard_reply_t *gk;
+    if (menu) return;
+    origin(&ox, &oy);
+    menu = xcb_generate_id(conn);
+    menu_w = mw;
+    menu_h = mh;
+    values[0] = screen->white_pixel;
+    values[1] = 1;
+    values[2] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_KEY_PRESS;
+    xcb_create_window(conn, XCB_COPY_FROM_PARENT, menu, screen->root, (int16_t)(ox + dx), (int16_t)(oy + dy),
+                      mw, mh, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
+                      XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, values);
+    if (transient)
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, menu, transient_atom, XCB_ATOM_WINDOW, 32, 1, &window);
+    xcb_map_window(conn, menu);
+    gp = xcb_grab_pointer_reply(conn, xcb_grab_pointer(conn, 0, menu, XCB_EVENT_MASK_BUTTON_PRESS,
+                                                        XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, XCB_WINDOW_NONE,
+                                                        XCB_CURSOR_NONE, XCB_CURRENT_TIME), NULL);
+    gk = xcb_grab_keyboard_reply(conn, xcb_grab_keyboard(conn, 0, menu, XCB_CURRENT_TIME, XCB_GRAB_MODE_ASYNC,
+                                                          XCB_GRAB_MODE_ASYNC), NULL);
+    say("menu %d,%d %ux%u grab %d %d", ox + dx, oy + dy, mw, mh, gp ? gp->status : -1, gk ? gk->status : -1);
+    free(gp);
+    free(gk);
+}
+
+static void menu_close(void)
+{
+    if (!menu) return;
+    xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);
+    xcb_ungrab_keyboard(conn, XCB_CURRENT_TIME);
+    xcb_destroy_window(conn, menu);
+    xcb_flush(conn);
+    menu = 0;
+}
+
+/* WM_NORMAL_HINTS (ICCCM 4.1.2.3): flags, then 17 values. */
+static void normal_hints(xcb_window_t w, uint32_t flags, int32_t min_w, int32_t min_h, int32_t max_w,
+                         int32_t max_h, int32_t base_w, int32_t base_h)
+{
+    int32_t v[18];
+    memset(v, 0, sizeof(v));
+    v[0] = (int32_t)flags;
+    v[5] = min_w; v[6] = min_h;
+    v[7] = max_w; v[8] = max_h;
+    v[15] = base_w; v[16] = base_h;
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, w, XCB_ATOM_WM_NORMAL_HINTS, XCB_ATOM_WM_SIZE_HINTS, 32, 18, v);
+}
+
+static void dialog_open(void)
+{
+    static const char name[] = "X stand-in dialog";
+    static const char wm_class[] = "xstandin\0blit.xstandin";
+    uint32_t values[2];
+    if (dialog) return;
+    dialog = xcb_generate_id(conn);
+    values[0] = screen->white_pixel;
+    values[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_BUTTON_PRESS;
+    xcb_create_window(conn, XCB_COPY_FROM_PARENT, dialog, screen->root, 50, 50, 200, 100, 0,
+                      XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual, XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK,
+                      values);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dialog, net_wm_name, utf8, 8, (uint32_t)strlen(name), name);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dialog, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8,
+                        sizeof(wm_class), wm_class);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dialog, protocols, XCB_ATOM_ATOM, 32, 1, &delete_window);
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dialog, transient_atom, XCB_ATOM_WINDOW, 32, 1, &window);
+    normal_hints(dialog, 16 | 32, 150, 80, 300, 200, 0, 0);  /* PMinSize | PMaxSize */
+    xcb_map_window(conn, dialog);
+    xcb_flush(conn);
+}
+
+/* An EWMH request: a client message about the main window, to the root. */
+static void ewmh(xcb_atom_t type, uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3, uint32_t d4)
+{
+    xcb_client_message_event_t ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.response_type = XCB_CLIENT_MESSAGE;
+    ev.format = 32;
+    ev.window = window;
+    ev.type = type;
+    ev.data.data32[0] = d0;
+    ev.data.data32[1] = d1;
+    ev.data.data32[2] = d2;
+    ev.data.data32[3] = d3;
+    ev.data.data32[4] = d4;
+    xcb_send_event(conn, 0, screen->root,
+                   XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, (const char *)&ev);
+    xcb_flush(conn);
+}
+
+static void moveresize_send(int16_t root_x, int16_t root_y, uint32_t direction, uint32_t button)
+{
+    ewmh(moveresize, (uint32_t)root_x, (uint32_t)root_y, direction, button, 1);
+    say("moveresize %u %u", direction, button);
+}
+
+/* _NET_WM_STATE as the window manager wrote it. */
+static void state_say(void)
+{
+    xcb_get_property_reply_t *r = xcb_get_property_reply(
+        conn, xcb_get_property(conn, 0, window, net_wm_state, XCB_ATOM_ATOM, 0, 32), NULL);
+    char text[128] = "";
+    int i, n = r && r->format == 32 ? xcb_get_property_value_length(r) / 4 : 0;
+    const xcb_atom_t *v = r ? xcb_get_property_value(r) : NULL;
+    for (i = 0; i < n; ++i) {
+        const char *name = v[i] == state_fullscreen ? "fullscreen" : v[i] == state_max_vert ? "maximized-vert"
+                         : v[i] == state_max_horz ? "maximized-horz" : v[i] == state_focused ? "focused" : "other";
+        strncat(text, " ", sizeof(text) - strlen(text) - 1);
+        strncat(text, name, sizeof(text) - strlen(text) - 1);
+    }
+    say("state%s", n ? text : " none");
+    free(r);
+}
+
+static void cursor_named(void)
+{
+    static const char name[] = "xterm";
+    xcb_font_t font = xcb_generate_id(conn);
+    xcb_cursor_t cursor = xcb_generate_id(conn);
+    xcb_xfixes_query_version_reply_t *v =
+        xcb_xfixes_query_version_reply(conn, xcb_xfixes_query_version(conn, 4, 0), NULL);
+    free(v);
+    xcb_open_font(conn, font, 6, "cursor");
+    xcb_create_glyph_cursor(conn, cursor, font, font, GLYPH_XTERM, GLYPH_XTERM + 1, 0, 0, 0, 0xffff, 0xffff,
+                            0xffff);
+    xcb_close_font(conn, font);
+    xcb_xfixes_set_cursor_name(conn, cursor, (uint16_t)strlen(name), name);
+    xcb_change_window_attributes(conn, window, XCB_CW_CURSOR, &cursor);
+    xcb_free_cursor(conn, cursor);
+    xcb_flush(conn);
+    say("cursor %s", name);
 }
 
 int main(int argc, char **argv)
@@ -115,9 +334,9 @@ int main(int argc, char **argv)
     static const char wm_class[] = "xstandin\0blit.xstandin";
     const xcb_setup_t *setup;
     xcb_format_iterator_t f;
-    xcb_atom_t protocols, delete_window, utf8, net_wm_name, motif_hints;
     uint32_t values[2];
     int animate = 0, animated = 0, bpp = 0, undecorated = 0;
+    uint32_t press_sends = 0;  /* a _NET_WM_MOVERESIZE direction + 1 for the next press, 0 none */
     uint64_t next_frame = 0;
 
     conn = xcb_connect(NULL, NULL);
@@ -139,11 +358,18 @@ int main(int argc, char **argv)
     utf8 = atom("UTF8_STRING");
     net_wm_name = atom("_NET_WM_NAME");
     motif_hints = atom("_MOTIF_WM_HINTS");
+    transient_atom = XCB_ATOM_WM_TRANSIENT_FOR;
+    net_wm_state = atom("_NET_WM_STATE");
+    state_fullscreen = atom("_NET_WM_STATE_FULLSCREEN");
+    state_max_vert = atom("_NET_WM_STATE_MAXIMIZED_VERT");
+    state_max_horz = atom("_NET_WM_STATE_MAXIMIZED_HORZ");
+    state_focused = atom("_NET_WM_STATE_FOCUSED");
+    moveresize = atom("_NET_WM_MOVERESIZE");
 
     window = xcb_generate_id(conn);
     values[0] = screen->black_pixel;
     values[1] = XCB_EVENT_MASK_EXPOSURE | XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_KEY_PRESS |
-                XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_FOCUS_CHANGE;
+                XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_FOCUS_CHANGE | XCB_EVENT_MASK_PROPERTY_CHANGE;
     xcb_create_window(conn, XCB_COPY_FROM_PARENT, window, screen->root, 0, 0, width, height, 0,
                       XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
                       XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, values);
@@ -156,6 +382,9 @@ int main(int argc, char **argv)
     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, window, protocols, XCB_ATOM_ATOM, 32, 1, &delete_window);
     gc = xcb_generate_id(conn);
     xcb_create_gc(conn, gc, window, 0, NULL);
+    fill = xcb_generate_id(conn);
+    values[0] = 0x336699;
+    xcb_create_gc(conn, fill, window, XCB_GC_FOREGROUND, values);
     xcb_map_window(conn, window);
     xcb_flush(conn);
 
@@ -175,17 +404,28 @@ int main(int argc, char **argv)
         }
         while ((ev = xcb_poll_for_event(conn)) != NULL) {
             switch (ev->response_type & 0x7f) {
-            case XCB_EXPOSE:
-                if (((xcb_expose_event_t *)ev)->count == 0) {
+            case XCB_EXPOSE: {
+                xcb_expose_event_t *e = (xcb_expose_event_t *)ev;
+                if (e->count != 0) break;
+                if (e->window == window) {
                     say("expose");
                     draw();
+                } else if (menu && e->window == menu) {
+                    draw_fill(menu, menu_w, menu_h);
+                } else if (dialog && e->window == dialog) {
+                    draw_fill(dialog, 200, 100);
                 }
                 break;
-            case XCB_MAP_NOTIFY:
-                say("mapped");
+            }
+            case XCB_MAP_NOTIFY: {
+                xcb_map_notify_event_t *m = (xcb_map_notify_event_t *)ev;
+                if (m->window == window) say("mapped");
+                else if (dialog && m->window == dialog) say("dialog");
                 break;
+            }
             case XCB_CONFIGURE_NOTIFY: {
                 xcb_configure_notify_event_t *c = (xcb_configure_notify_event_t *)ev;
+                if (c->window != window) break;
                 width = c->width;
                 height = c->height;
                 say("configure %ux%u", c->width, c->height);
@@ -194,8 +434,33 @@ int main(int argc, char **argv)
             case XCB_FOCUS_IN:
                 if (((xcb_focus_in_event_t *)ev)->detail != XCB_NOTIFY_DETAIL_POINTER) say("focus-in");
                 break;
+            case XCB_FOCUS_OUT: {
+                xcb_focus_out_event_t *o = (xcb_focus_out_event_t *)ev;
+                if (o->detail == XCB_NOTIFY_DETAIL_POINTER || o->event != window) break;
+                if (o->mode != XCB_NOTIFY_MODE_GRAB && o->mode != XCB_NOTIFY_MODE_UNGRAB) {
+                    say("focus-out");
+                    if (menu) {
+                        menu_close();
+                        say("menu-dismissed focus-out");
+                    }
+                }
+                break;
+            }
+            case XCB_PROPERTY_NOTIFY: {
+                xcb_property_notify_event_t *pn = (xcb_property_notify_event_t *)ev;
+                if (pn->window == window && pn->atom == net_wm_state) state_say();
+                break;
+            }
             case XCB_KEY_PRESS: {
                 xcb_key_press_event_t *k = (xcb_key_press_event_t *)ev;
+                if (menu && k->event == menu) {
+                    say("menu-key %u", k->detail);
+                    if (k->detail == KEYCODE_ESCAPE) {
+                        menu_close();
+                        say("menu-dismissed escape");
+                    }
+                    break;
+                }
                 say("key %u", k->detail);
                 if (k->detail == KEYCODE_D) {
                     /* flags (MWM_HINTS_DECORATIONS, 2), functions,
@@ -209,8 +474,29 @@ int main(int argc, char **argv)
                         xcb_delete_property(conn, window, motif_hints);
                     xcb_flush(conn);
                     say(undecorated ? "undecorated" : "decorated");
-                }
-                if (k->detail == KEYCODE_SPACE && animate == 0) {
+                } else if (k->detail == KEYCODE_M) {
+                    menu_open(30, 40, 120, 90, 0);
+                } else if (k->detail == KEYCODE_N) {
+                    menu_open((int16_t)(width + 10), 10, 100, 60, 1);
+                } else if (k->detail == KEYCODE_T) {
+                    dialog_open();
+                } else if (k->detail == KEYCODE_L) {
+                    normal_hints(window, 256, 0, 0, 0, 0, 200, 150);  /* PBaseSize */
+                    xcb_flush(conn);
+                    say("limits");
+                } else if (k->detail == KEYCODE_F) {
+                    ewmh(net_wm_state, STATE_TOGGLE, state_fullscreen, 0, 1, 0);
+                } else if (k->detail == KEYCODE_X) {
+                    ewmh(net_wm_state, STATE_TOGGLE, state_max_vert, state_max_horz, 1, 0);
+                } else if (k->detail == KEYCODE_G) {
+                    press_sends = MOVERESIZE_MOVE + 1;
+                } else if (k->detail == KEYCODE_H) {
+                    press_sends = MOVERESIZE_SIZE_BOTTOMRIGHT + 1;
+                } else if (k->detail == KEYCODE_R) {
+                    moveresize_send(0, 0, MOVERESIZE_MOVE, 1);
+                } else if (k->detail == KEYCODE_C) {
+                    cursor_named();
+                } else if (k->detail == KEYCODE_SPACE && animate == 0) {
                     animate = ANIMATE_FRAMES;
                     animated = 0;
                     next_frame = 0;
@@ -219,12 +505,39 @@ int main(int argc, char **argv)
             }
             case XCB_BUTTON_PRESS: {
                 xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
+                if (menu && b->event == menu) {
+                    if (b->event_x >= 0 && b->event_y >= 0 && b->event_x < menu_w && b->event_y < menu_h) {
+                        say("menu-choice %d,%d", b->event_x, b->event_y);
+                    } else {
+                        say("menu-dismissed press %d,%d", b->event_x, b->event_y);
+                    }
+                    menu_close();
+                    break;
+                }
+                if (dialog && b->event == dialog) {
+                    say("dialog-button %u %d,%d", b->detail, b->event_x, b->event_y);
+                    break;
+                }
                 say("button %u %d,%d", b->detail, b->event_x, b->event_y);
+                if (press_sends) {
+                    /* As a toolkit does before it asks: its own implicit
+                       grab let go (EWMH _NET_WM_MOVERESIZE). */
+                    xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);
+                    moveresize_send(b->root_x, b->root_y, press_sends - 1, b->detail);
+                    press_sends = 0;
+                }
                 break;
             }
             case XCB_CLIENT_MESSAGE: {
                 xcb_client_message_event_t *m = (xcb_client_message_event_t *)ev;
                 if (m->type == protocols && m->format == 32 && m->data.data32[0] == delete_window) {
+                    if (dialog && m->window == dialog) {
+                        say("dialog-delete");
+                        xcb_destroy_window(conn, dialog);
+                        xcb_flush(conn);
+                        dialog = 0;
+                        break;
+                    }
                     say("delete");
                     free(ev);
                     xcb_destroy_window(conn, window);
