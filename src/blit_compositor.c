@@ -249,8 +249,11 @@ struct bc_xdg {
     int cached_attach, cached;
     struct wl_listener cached_buffer_destroy;
     struct wl_list cached_frames, cached_feedback;
-    /* An X toplevel (the X section): its X window; NULL for every other kind. */
+    /* An X window (the X section): its X window; NULL for every other kind.
+       `xpopup`: an override-redirect one, shown as a popup of `parent`
+       at px, py. */
     struct bc_xwin *xwin;
+    int xpopup;
 };
 
 /* Xwayland and its window manager (the X section). The atoms the window
@@ -292,6 +295,7 @@ struct bc_x {
     int xres;                         /* X-Resource 1.2: a window's client pid */
     struct wl_list windows;           /* bc_xwin: the root's children */
     xcb_window_t focus;               /* the window given X focus, XCB_WINDOW_NONE none */
+    uint32_t stack_seq;               /* the newest stacking count (bc_xwin.stack) */
     unsigned logged;                  /* BC_X_LOGGED_*: a later milestone's request, noted once */
 };
 
@@ -386,6 +390,7 @@ static void x_surface_gone(struct bc_surface *surface);
 static void x_frame_measure(struct bc_xdg *x, struct bc_surface *surface);
 static void x_configure(struct bc_xdg *x);
 static void x_close(struct bc_xdg *x);
+static void x_popup_close(struct bc_xdg *x);
 static void x_focus_follows(struct bc_server *s, struct bc_surface *surface);
 
 static void logf_(const char *fmt, ...)
@@ -430,7 +435,14 @@ static struct wl_resource *output_resource(struct bc_output *o, struct wl_client
 /* A toplevel of either kind: an xdg toplevel or an X one. */
 static int window_is_toplevel(const struct bc_xdg *x)
 {
-    return x && (x->toplevel != NULL || x->xwin != NULL);
+    return x && (x->toplevel != NULL || (x->xwin != NULL && !x->xpopup));
+}
+
+/* A popup of either kind: an xdg popup, or an X override-redirect window
+   (a menu, a dropdown, a tooltip: the X section). */
+static int window_is_popup(const struct bc_xdg *x)
+{
+    return x && (x->popup != NULL || x->xpopup);
 }
 
 static int xdg_parent_id(struct bc_xdg *x)
@@ -443,6 +455,16 @@ static void send_limits(struct bc_xdg *x)
     bc_wire_line(&x->server->wire, "WINDOW limits %u %d %d %d %d", x->id, x->min_w, x->min_h,
                  x->max_w, x->max_h);
     x->limits_sent = 1;
+}
+
+/* `WINDOW limits` when they change (xdg's at the commit that applies them,
+   X's WM_NORMAL_HINTS when the property does): pixels, 0 for none. */
+static void window_set_limits(struct bc_xdg *x, int32_t min_w, int32_t min_h, int32_t max_w, int32_t max_h)
+{
+    if (x->min_w == min_w && x->min_h == min_h && x->max_w == max_w && x->max_h == max_h) return;
+    x->min_w = min_w; x->min_h = min_h;
+    x->max_w = max_w; x->max_h = max_h;
+    if (x->id) send_limits(x);
 }
 
 /* `WINDOW appmenu`: where the window's program serves its menus (the
@@ -541,8 +563,8 @@ static void announce_popup(struct bc_xdg *x)
     x->id = bc_wire_new_id(&x->server->wire);
     bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + x->px,
                  p->gy + x->py);
-    logf_("popup %u: parent %u at %d,%d %dx%d", x->id, p->id, p->gx + x->px, p->gy + x->py,
-          x->positioner.width, x->positioner.height);
+    logf_("popup %u: parent %u at %d,%d%s", x->id, p->id, p->gx + x->px, p->gy + x->py,
+          x->xpopup ? " (an X override-redirect window)" : "");
     window_set_output(x, p->output);
 }
 
@@ -638,6 +660,26 @@ static void window_close(struct bc_xdg *x)
 {
     if (x->xwin) x_close(x);
     else if (x->toplevel) xdg_toplevel_send_close(x->toplevel);
+}
+
+/* The desktop's `WINDOW close` for a popup: the person went elsewhere.
+   xdg_popup's popup_done; an X menu has no such request (the X section). */
+static void popup_close(struct bc_xdg *x)
+{
+    if (x->xwin) {
+        x_popup_close(x);
+    } else if (x->popup) {
+        logf_("popup %u: done", x->id);
+        xdg_popup_send_popup_done(x->popup);
+    }
+}
+
+/* A popup its program moved after it was shown: the draft has no line for
+   that, so the desktop keeps it at its first place. Either kind. */
+static void popup_moved(struct bc_xdg *x, int32_t px, int32_t py)
+{
+    logf_("popup %u: moved by its program to %d,%d; the draft has no line for a popup that moves",
+          x->id, px, py);
 }
 
 /* ---- zwp_linux_dmabuf_v1: FRM3, zero copy ---- */
@@ -1197,7 +1239,7 @@ static struct bc_xdg *surface_window(struct bc_surface *surface)
     if (surface == NULL) return NULL;
     if (surface->sub) return sub_root(surface->sub, NULL, NULL);
     x = surface->xdg;
-    while (x && x->popup && x->parent) x = x->parent;
+    while (window_is_popup(x) && x->parent) x = x->parent;
     return window_is_toplevel(x) ? x : NULL;
 }
 
@@ -1563,12 +1605,7 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
                 if (x->id) send_decor(x);
             }
         }
-        if (x->toplevel && (x->pmin_w != x->min_w || x->pmin_h != x->min_h ||
-                            x->pmax_w != x->max_w || x->pmax_h != x->max_h)) {
-            x->min_w = x->pmin_w; x->min_h = x->pmin_h;
-            x->max_w = x->pmax_w; x->max_h = x->pmax_h;
-            if (x->id) send_limits(x);
-        }
+        if (x->toplevel) window_set_limits(x, x->pmin_w, x->pmin_h, x->pmax_w, x->pmax_h);
         if (attached && buffer && !x->acked) {
             wl_resource_post_error(x->resource, XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER,
                                    "a buffer committed before the first configure was acknowledged");
@@ -2870,7 +2907,7 @@ static void window_move_output(struct bc_server *s, struct bc_xdg *x, struct bc_
     struct bc_xdg *other;
     window_set_output(x, o);
     wl_list_for_each(other, &s->windows, link)
-        if (other->popup && other->parent == x && other->id) window_set_output(other, o);
+        if (window_is_popup(other) && other->parent == x && other->id) window_set_output(other, o);
 }
 
 /* ---- wl_seat: keyboard and pointer (their events: the input section) ---- */
@@ -3211,20 +3248,23 @@ static struct bc_xdg *toplevel_xdg(struct wl_resource *resource)
     return wl_resource_get_user_data(resource);
 }
 
+/* A toplevel's transient parent, of either kind (xdg_toplevel.set_parent,
+   X's WM_TRANSIENT_FOR): `WINDOW parent` when it changes after `WINDOW new`. */
+static void window_set_parent(struct bc_xdg *x, struct bc_xdg *p)
+{
+    int before = xdg_parent_id(x);
+    if (p == x) p = NULL;
+    x->parent = p;
+    if (x->id && xdg_parent_id(x) != before)
+        bc_wire_line(&x->server->wire, "WINDOW parent %u %d", x->id, xdg_parent_id(x));
+}
+
 static void toplevel_set_parent(struct wl_client *client, struct wl_resource *resource,
                                 struct wl_resource *parent)
 {
     struct bc_xdg *x = toplevel_xdg(resource);
     (void)client;
-    if (x == NULL) return;
-    {
-        struct bc_xdg *p = parent ? toplevel_xdg(parent) : NULL;
-        int before = xdg_parent_id(x);
-        if (p == x) p = NULL;
-        x->parent = p;
-        if (x->id && xdg_parent_id(x) != before)
-            bc_wire_line(&x->server->wire, "WINDOW parent %u %d", x->id, xdg_parent_id(x));
-    }
+    if (x) window_set_parent(x, parent ? toplevel_xdg(parent) : NULL);
 }
 
 static void toplevel_set_title(struct wl_client *client, struct wl_resource *resource,
@@ -3244,20 +3284,40 @@ static void toplevel_set_app_id(struct wl_client *client, struct wl_resource *re
 }
 
 /* A program's own frame asks the desktop to run a drag or show the window
-   menu (ADR 0229): only with the serial of a press still down on that
-   window, so no program starts one by itself. */
+   menu (ADR 0229): only while a press the compositor delivered to that
+   window is still down, so no program starts one by itself. `press_ok` is
+   what the request says of that press: xdg names its serial, X's
+   _NET_WM_MOVERESIZE its button (the X section). One rule for both. */
+static int window_grab_ok(struct bc_xdg *x, int press_ok)
+{
+    struct bc_server *s;
+    if (x == NULL || x->id == 0) return 0;
+    s = x->server;
+    if (s->link != BC_LINK_UP || !s->wire.window || s->buttons_down == 0 || !press_ok ||
+        surface_window(s->ptr_focus) != x) {
+        logf_("window %u: a move, resize or menu without a press on it is ignored", x->id);
+        return 0;
+    }
+    return 1;
+}
+
 static struct bc_xdg *toplevel_grab_window(struct wl_resource *resource, uint32_t serial)
 {
     struct bc_xdg *x = wl_resource_get_user_data(resource);
-    struct bc_server *s;
-    if (x == NULL || x->id == 0) return NULL;
-    s = x->server;
-    if (s->link != BC_LINK_UP || !s->wire.window || s->buttons_down == 0 ||
-        serial != s->button_serial || surface_window(s->ptr_focus) != x) {
-        logf_("window %u: a move, resize or menu without a press on it is ignored", x->id);
-        return NULL;
-    }
-    return x;
+    if (x == NULL) return NULL;
+    return window_grab_ok(x, serial == x->server->button_serial) ? x : NULL;
+}
+
+/* `WINDOW move` and `WINDOW resize <edges>`, for a window window_grab_ok
+   let through. */
+static void window_move(struct bc_xdg *x)
+{
+    bc_wire_line(&x->server->wire, "WINDOW move %u", x->id);
+}
+
+static void window_resize(struct bc_xdg *x, const char *edges)
+{
+    bc_wire_line(&x->server->wire, "WINDOW resize %u %s", x->id, edges);
 }
 
 static void toplevel_show_window_menu(struct wl_client *client, struct wl_resource *resource,
@@ -3276,7 +3336,7 @@ static void toplevel_move(struct wl_client *client, struct wl_resource *resource
 {
     struct bc_xdg *x = toplevel_grab_window(resource, serial);
     (void)client; (void)seat;
-    if (x) bc_wire_line(&x->server->wire, "WINDOW move %u", x->id);
+    if (x) window_move(x);
 }
 
 static void toplevel_resize(struct wl_client *client, struct wl_resource *resource,
@@ -3295,8 +3355,7 @@ static void toplevel_resize(struct wl_client *client, struct wl_resource *resour
         wl_resource_post_error(resource, XDG_TOPLEVEL_ERROR_INVALID_RESIZE_EDGE, "edge %u", edges);
         return;
     }
-    if ((x = toplevel_grab_window(resource, serial)) != NULL)
-        bc_wire_line(&x->server->wire, "WINDOW resize %u %s", x->id, names[edges]);
+    if ((x = toplevel_grab_window(resource, serial)) != NULL) window_resize(x, names[edges]);
 }
 
 static void toplevel_set_max_size(struct wl_client *client, struct wl_resource *resource,
@@ -3327,14 +3386,28 @@ static void toplevel_set_min_size(struct wl_client *client, struct wl_resource *
     x->pmin_h = h;
 }
 
-/* Maximize and minimize are the program's requests: the desktop decides,
-   and answers with WINDOW size (xdg-shell lets a compositor ignore them).
-   Until the desktop answers, the current configure stands. */
+/* Maximize, full screen and minimize are the program's requests, of
+   either kind (xdg_toplevel's; X's _NET_WM_STATE and WM_CHANGE_STATE): the
+   desktop decides, and answers with WINDOW size (xdg-shell lets a
+   compositor ignore them). Until the desktop answers, the current
+   configure stands. */
 static void toplevel_maximize(struct bc_xdg *x, int on)
 {
     if (x->maximize == on) return;
     x->maximize = on;
     if (x->id) bc_wire_line(&x->server->wire, "WINDOW maximize %u %s", x->id, on ? "on" : "off");
+}
+
+static void window_set_fullscreen(struct bc_xdg *x, int on)
+{
+    x->fullscreen = on;
+    if (x->id) bc_wire_line(&x->server->wire, "WINDOW fullscreen %u %s", x->id, on ? "on" : "off");
+}
+
+static void window_minimize(struct bc_xdg *x)
+{
+    if (x->id) bc_wire_line(&x->server->wire, "WINDOW minimize %u", x->id);
+    else x->minimize = 1;
 }
 
 static void toplevel_set_maximized(struct wl_client *client, struct wl_resource *resource)
@@ -3355,9 +3428,7 @@ static void toplevel_set_minimized(struct wl_client *client, struct wl_resource 
 {
     struct bc_xdg *x = toplevel_xdg(resource);
     (void)client;
-    if (x == NULL) return;
-    if (x->id) bc_wire_line(&x->server->wire, "WINDOW minimize %u", x->id);
-    else x->minimize = 1;
+    if (x) window_minimize(x);
 }
 
 static void toplevel_set_fullscreen(struct wl_client *client, struct wl_resource *resource,
@@ -3365,18 +3436,14 @@ static void toplevel_set_fullscreen(struct wl_client *client, struct wl_resource
 {
     struct bc_xdg *x = toplevel_xdg(resource);
     (void)client; (void)output;
-    if (x == NULL) return;
-    x->fullscreen = 1;
-    if (x->id) bc_wire_line(&x->server->wire, "WINDOW fullscreen %u on", x->id);
+    if (x) window_set_fullscreen(x, 1);
 }
 
 static void toplevel_unset_fullscreen(struct wl_client *client, struct wl_resource *resource)
 {
     struct bc_xdg *x = toplevel_xdg(resource);
     (void)client;
-    if (x == NULL) return;
-    x->fullscreen = 0;
-    if (x->id) bc_wire_line(&x->server->wire, "WINDOW fullscreen %u off", x->id);
+    if (x) window_set_fullscreen(x, 0);
 }
 
 static const struct xdg_toplevel_interface toplevel_impl = {
@@ -3428,8 +3495,7 @@ static void popup_reposition(struct wl_client *client, struct wl_resource *resou
     if (x == NULL) return;
     x->positioner = *(struct bc_positioner *)wl_resource_get_user_data(positioner);
     positioner_place(&x->positioner, &x->px, &x->py);
-    logf_("popup %u: repositioned to %d,%d; the draft has no line for a popup that moves",
-          x->id, x->px, x->py);
+    popup_moved(x, x->px, x->py);
     if (!x->configured) return;
     xdg_popup_send_repositioned(resource, token);
     xdg_popup_send_configure(resource, x->px, x->py, x->positioner.width, x->positioner.height);
@@ -3980,7 +4046,7 @@ static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, 
     struct bc_xdg *p;
     wl_list_for_each(p, &s->windows, link) {
         double ox, oy;
-        if (!p->popup || p->parent != x || !p->mapped || !p->id || p->surface == NULL) continue;
+        if (!window_is_popup(p) || p->parent != x || !p->mapped || !p->id || p->surface == NULL) continue;
         ox = x->gx + p->px - p->gx;
         oy = x->gy + p->py - p->gy;
         if (px >= ox && py >= oy && px < ox + p->buffer_w && py < oy + p->buffer_h) {
@@ -4023,7 +4089,7 @@ static void surface_origin(struct bc_surface *surface, double *ox, double *oy)
         }
         return;
     }
-    if (p && p->popup && p->parent) {
+    if (window_is_popup(p) && p->parent) {
         *ox = p->parent->gx + p->px - p->gx;
         *oy = p->parent->gy + p->py - p->gy;
     }
@@ -4740,7 +4806,9 @@ struct bc_xwin {
     int input;                        /* WM_HINTS' input, 1 when it says nothing */
     int undecorated;                  /* _MOTIF_WM_HINTS: no decorations (it draws its own frame) */
     uint32_t pid;                     /* its client's process, 0 unknown (X-Resource) */
-    int or_logged;                    /* an override-redirect window, noted once */
+    int or_logged;                    /* an override-redirect window with no parent, noted once */
+    xcb_window_t transient_for;       /* WM_TRANSIENT_FOR, XCB_WINDOW_NONE none */
+    uint32_t stack;                   /* its place in X's stacking: higher is above */
     int remapping;                    /* unmapped by the window manager to be mapped again */
     uint32_t measure[BC_X_MEASURE];   /* commit to frame sent, us, its first frames */
     int measured, measure_said;
@@ -4951,7 +5019,10 @@ static void x_property(struct bc_server *s, struct bc_xwin *w, xcb_atom_t atom,
     } else if (atom == atoms[BC_ATOM_WM_NORMAL_HINTS]) {
         x_note(s, BC_X_LOGGED_HINTS, "a window's WM_NORMAL_HINTS (its limits)");
     } else if (atom == XCB_ATOM_WM_TRANSIENT_FOR) {
-        x_note(s, BC_X_LOGGED_TRANSIENT, "a window's WM_TRANSIENT_FOR (its parent)");
+        w->transient_for = XCB_WINDOW_NONE;
+        if (reply && reply->format == 32 && reply->type == XCB_ATOM_WINDOW &&
+            xcb_get_property_value_length(reply) >= 4)
+            w->transient_for = *(const xcb_window_t *)xcb_get_property_value(reply);
     } else if (atom == atoms[BC_ATOM_NET_WM_WINDOW_TYPE]) {
         x_note(s, BC_X_LOGGED_TYPE, "a window's _NET_WM_WINDOW_TYPE");
     }
@@ -4963,7 +5034,7 @@ static void x_read_properties(struct bc_server *s, struct bc_xwin *w)
     xcb_connection_t *c = s->x.conn;
     const xcb_atom_t props[] = { s->x.atoms[BC_ATOM_NET_WM_NAME], XCB_ATOM_WM_NAME, XCB_ATOM_WM_CLASS,
                                  s->x.atoms[BC_ATOM_WM_PROTOCOLS], XCB_ATOM_WM_HINTS,
-                                 s->x.atoms[BC_ATOM_MOTIF_WM_HINTS] };
+                                 s->x.atoms[BC_ATOM_MOTIF_WM_HINTS], XCB_ATOM_WM_TRANSIENT_FOR };
     xcb_get_property_cookie_t cookies[sizeof(props) / sizeof(props[0])];
     xcb_res_query_client_ids_cookie_t pid_cookie = { 0 };
     size_t i;
@@ -5027,7 +5098,10 @@ static void x_activate(struct bc_server *s, struct bc_xwin *w)
     xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, s->x.screen->root,
                         s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &window);
     if (w == NULL) {
-        xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, XCB_WINDOW_NONE, XCB_CURRENT_TIME);
+        /* PointerRoot, not None: None discards the keyboard, which a menu
+           that grabbed it (an X popup) still needs (wlroots does the same). */
+        xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, XCB_INPUT_FOCUS_POINTER_ROOT,
+                            XCB_CURRENT_TIME);
     } else {
         /* ICCCM 4.1.7: input from WM_HINTS is the window's own to take
            with SetInputFocus; WM_TAKE_FOCUS, when it asks for it, lets it
@@ -5115,19 +5189,49 @@ static void x_close(struct bc_xdg *x)
     xcb_flush(s->x.conn);
 }
 
-/* The window and its surface matched: shown as a picture, unless it is an
-   override-redirect window (a later milestone). */
+static int x_contains(const struct bc_xwin *w, int32_t px, int32_t py)
+{
+    return px >= w->x && py >= w->y && px < w->x + (int32_t)w->width && py < w->y + (int32_t)w->height;
+}
+
+/* The toplevel an override-redirect window (a menu, a dropdown, a
+   tooltip) is a popup of: the one its WM_TRANSIENT_FOR names (or the
+   toplevel of the menu it names); else the one under its origin in X
+   space -- a shown popup there first (a submenu over its menu), then the
+   topmost toplevel; else the X toplevel the pointer is in (a submenu or
+   tooltip that starts past its window's edge). NULL: none. */
+static struct bc_xdg *x_popup_parent(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_xwin *o, *top = NULL;
+    struct bc_xdg *p;
+    if (w->transient_for != XCB_WINDOW_NONE && (o = x_window(s, w->transient_for)) != NULL && o->pic)
+        return o->pic->xpopup ? o->pic->parent : o->pic;
+    wl_list_for_each(o, &s->x.windows, link)
+        if (o != w && o->pic && o->pic->xpopup && o->pic->parent && x_contains(o, w->x, w->y))
+            top = o;  /* the newest */
+    if (top) return top->pic->parent;
+    wl_list_for_each(o, &s->x.windows, link)
+        if (o->pic && !o->pic->xpopup && x_contains(o, w->x, w->y) && (top == NULL || o->stack > top->stack))
+            top = o;
+    if (top) return top->pic;
+    p = surface_window(s->ptr_focus);
+    return p && p->xwin ? p : NULL;
+}
+
+/* The window and its surface matched: shown as a picture -- a toplevel,
+   or for an override-redirect window a popup of the toplevel it belongs
+   to (x_popup_parent), at its offset from that toplevel in X space. */
 static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *sf)
 {
-    struct bc_xdg *x;
+    struct bc_xdg *x, *parent = NULL;
     struct wl_resource *held = sf->xwl_held;
     w->surface = sf;
     sf->xwl_matched = 1;
     x_set_held(sf, NULL);
-    if (w->override_redirect) {
+    if (w->override_redirect && (parent = x_popup_parent(s, w)) == NULL) {
         if (!w->or_logged)
-            logf_("X: window 0x%x is override-redirect (a menu or tooltip): not shown before "
-                  "milestone C of ADR 0228 phase 2", (unsigned)w->window);
+            logf_("X: override-redirect window 0x%x at %d,%d belongs to no shown X window: not shown",
+                  (unsigned)w->window, w->x, w->y);
         w->or_logged = 1;
         if (held) wl_buffer_send_release(held);
         return;
@@ -5144,25 +5248,39 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
     x->input_fd = -1;
     x->kept.fd = -1;
     x->initial = 1;
-    /* X programs leave their frame to the window manager, the desktop,
-       unless _MOTIF_WM_HINTS says no decorations (they draw their own). */
-    x->decor_mode = w->undecorated ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
-                                   : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
-    memcpy(x->title, w->title, sizeof(x->title));
-    memcpy(x->appid, w->appid, sizeof(x->appid));
     wl_list_init(&x->cached_frames);
     wl_list_init(&x->cached_feedback);
     wl_list_init(&x->cached_buffer_destroy.link);
     wl_list_insert(&s->windows, &x->link);
     sf->xdg = x;
     w->pic = x;
-    if (s->wire.window) {
-        announce_toplevel(x);
-        logf_("window %u: X window 0x%x %dx%d, its client's pid %u (0 unknown)", x->id,
-              (unsigned)w->window, w->width, w->height, w->pid);
+    if (parent) {
+        /* Its offset from its toplevel in X space, which is its place in
+           the toplevel's surface pixels: Xwayland turns a pointer on
+           either surface into X's root position by the window's own. */
+        x->xpopup = 1;
+        x->parent = parent;
+        x->px = w->x - parent->xwin->x;
+        x->py = w->y - parent->xwin->y;
+        if (s->wire.window) announce_popup(x);
+        if (x->id == 0)
+            logf_("X: override-redirect window 0x%x is not shown: its window %u is not", (unsigned)w->window,
+                  parent->id);
     } else {
-        logf_("X window 0x%x \"%s\" is not shown: the peer has no window=1", (unsigned)w->window,
-              w->title);
+        /* X programs leave their frame to the window manager, the desktop,
+           unless _MOTIF_WM_HINTS says no decorations (they draw their own). */
+        x->decor_mode = w->undecorated ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+                                       : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+        memcpy(x->title, w->title, sizeof(x->title));
+        memcpy(x->appid, w->appid, sizeof(x->appid));
+        if (s->wire.window) {
+            announce_toplevel(x);
+            logf_("window %u: X window 0x%x %dx%d, its client's pid %u (0 unknown)", x->id,
+                  (unsigned)w->window, w->width, w->height, w->pid);
+        } else {
+            logf_("X window 0x%x \"%s\" is not shown: the peer has no window=1", (unsigned)w->window,
+                  w->title);
+        }
     }
     if (held) {
         int sent = picture_frame(x, sf, held);
@@ -5172,16 +5290,17 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
        the desktop's size. */
 }
 
-/* The window's picture gone (unmapped, destroyed, its surface gone, or
-   Xwayland gone): `WINDOW gone`, and the surface's match ended. */
-static void x_unmatch(struct bc_server *s, struct bc_xwin *w)
+/* The window's picture gone, `WINDOW gone`: and with a toplevel's, its
+   popups' (an X menu shows only with its window). The surface stays
+   matched; its buffers go back to Xwayland unshown. */
+static void x_unshow(struct bc_server *s, struct bc_xwin *w)
 {
-    struct bc_xdg *x = w->pic, *other;
-    w->surface = NULL;
-    w->serial = 0;
+    struct bc_xdg *x = w->pic, *other, *next;
     if (x == NULL) return;
     x_measure_say(w, x);
     if (s->x.focus == w->window) x_activate(s, NULL);
+    wl_list_for_each_safe(other, next, &s->windows, link)
+        if (other->xpopup && other->parent == x && other->xwin) x_unshow(s, other->xwin);
     window_gone(x);
     if (x->surface) x->surface->xdg = NULL;
     wl_list_for_each(other, &s->windows, link)
@@ -5189,6 +5308,27 @@ static void x_unmatch(struct bc_server *s, struct bc_xwin *w)
     wl_list_remove(&x->link);
     free(x);
     w->pic = NULL;
+}
+
+/* The window's picture gone (unmapped, destroyed, its surface gone, or
+   Xwayland gone), and the surface's match ended. */
+static void x_unmatch(struct bc_server *s, struct bc_xwin *w)
+{
+    x_unshow(s, w);
+    w->surface = NULL;
+    w->serial = 0;
+}
+
+/* The desktop's `WINDOW close` for an X popup: the person went elsewhere.
+   X has no popup_done, and an override-redirect window is its program's,
+   not the window manager's, to unmap: an X menu closes itself, on the
+   click its grab gets (a press anywhere in its program's windows reaches
+   it through Xwayland) or when its window loses X's focus (the desktop's
+   `WINDOW size` without `activated`). */
+static void x_popup_close(struct bc_xdg *x)
+{
+    logf_("popup %u: WINDOW close for an X menu: it closes itself, on its grab's click or when its "
+          "window is deactivated", x->id);
 }
 
 /* An Xwayland surface destroyed: its window's picture goes with it. */
@@ -5271,6 +5411,8 @@ static struct bc_xwin *x_window_new(struct bc_server *s, xcb_window_t window, in
     w->width = width;
     w->height = height;
     w->input = 1;
+    /* X stacks a new window above its siblings. */
+    w->stack = ++s->x.stack_seq;
     wl_list_insert(s->x.windows.prev, &w->link);
     xcb_change_window_attributes(s->x.conn, w->window, XCB_CW_EVENT_MASK, &mask);
     return w;
@@ -5365,6 +5507,9 @@ static void x_configure_notify(struct bc_server *s, xcb_configure_notify_event_t
 {
     struct bc_xwin *w = x_window(s, ev->window);
     if (w == NULL || ev->event != s->x.screen->root) return;
+    if (w->pic && w->pic->xpopup && w->pic->parent && w->pic->parent->xwin &&
+        (ev->x != w->x || ev->y != w->y))
+        popup_moved(w->pic, ev->x - w->pic->parent->xwin->x, ev->y - w->pic->parent->xwin->y);
     w->x = ev->x;
     w->y = ev->y;
     w->width = ev->width;
@@ -5435,7 +5580,12 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
     case XCB_MAP_NOTIFY: {
         xcb_map_notify_event_t *m = (xcb_map_notify_event_t *)ev;
         struct bc_xwin *w = x_window(s, m->window);
-        if (w) w->override_redirect = m->override_redirect;
+        if (w == NULL) return;
+        w->override_redirect = m->override_redirect;
+        /* An override-redirect window has no MapRequest: its properties
+           (WM_TRANSIENT_FOR, its parent) are read at its MapNotify, which
+           comes before Xwayland's WL_SURFACE_SERIAL for it. */
+        if (w->override_redirect) x_read_properties(s, w);
         return;
     }
     case XCB_UNMAP_NOTIFY:
@@ -6193,9 +6343,8 @@ static void handle_line(struct bc_server *s, const char *line)
         if (window_is_toplevel(x)) {
             logf_("window %u: close", l.id);
             window_close(x);
-        } else if (x && x->popup) {
-            logf_("popup %u: done", l.id);
-            xdg_popup_send_popup_done(x->popup);
+        } else if (window_is_popup(x)) {
+            popup_close(x);
         } else {
             logf_("WINDOW close for %u, which is no window here", l.id);
         }
@@ -6444,7 +6593,7 @@ static void reannounce(struct bc_server *s)
     /* Popups, after their parents. */
     wl_list_for_each_reverse(x, &s->windows, link) {
         struct bc_xdg *p = x->parent;
-        if (x->popup == NULL || p == NULL || p->id == 0) continue;
+        if (!window_is_popup(x) || p == NULL || p->id == 0) continue;
         if (x->id == 0) {
             if (x->initial) announce_popup(x);
             continue;
