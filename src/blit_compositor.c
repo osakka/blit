@@ -311,13 +311,21 @@ struct bc_x {
     unsigned logged;                  /* BC_X_LOGGED_*: a later milestone's request, noted once */
 };
 
-/* The clipboard (ADR 0229): a program's selection source. */
+/* The clipboard (ADR 0229): a program's selection source -- a Wayland
+   program's wl_data_source or zwp_primary_selection_source_v1, or an X
+   program's selection (`x`, the X section: no resource; each type the X
+   target it is converted from, the owner's window and the time it took
+   the selection). */
 struct bc_source {
     struct wl_resource *resource;
     struct bc_server *server;
-    int primary;                      /* zwp_primary_selection_source_v1, else wl_data_source */
+    int primary;                      /* the primary selection, else the clipboard */
     char *types[BC_CLIP_TYPES];
     int ntypes;
+    int x;
+    xcb_atom_t xtargets[BC_CLIP_TYPES];
+    xcb_window_t xowner;
+    xcb_timestamp_t xtime;
 };
 
 /* One selection, the clipboard's or the primary: a program's source, or the
@@ -2055,16 +2063,36 @@ static const char *source_text_type(const struct bc_source *src)
     return NULL;
 }
 
+static void x_source_send(struct bc_source *src, const char *type, int fd);
+static void x_selection_follow(struct bc_server *s, int k);
+
+/* The source writes `type` into fd (the caller's to close). */
 static void source_send(struct bc_source *src, const char *type, int fd)
 {
-    if (src->primary) zwp_primary_selection_source_v1_send_send(src->resource, type, fd);
+    if (src->x) x_source_send(src, type, fd);
+    else if (src->primary) zwp_primary_selection_source_v1_send_send(src->resource, type, fd);
     else wl_data_source_send_send(src->resource, type, fd);
 }
 
+static void source_free_types(struct bc_source *src)
+{
+    int i;
+    for (i = 0; i < src->ntypes; ++i) free(src->types[i]);
+    src->ntypes = 0;
+}
+
+/* The source is no longer the selection: a Wayland program is told (its
+   resource goes when it destroys it); an X program's is ours, freed. */
 static void source_cancel(struct bc_source *src)
 {
-    if (src->primary) zwp_primary_selection_source_v1_send_cancelled(src->resource);
-    else wl_data_source_send_cancelled(src->resource);
+    if (src->x) {
+        source_free_types(src);
+        free(src);
+    } else if (src->primary) {
+        zwp_primary_selection_source_v1_send_cancelled(src->resource);
+    } else {
+        wl_data_source_send_cancelled(src->resource);
+    }
 }
 
 /* A program's source, offered to the desktop under a new seq. */
@@ -2080,21 +2108,36 @@ static void clip_offer_to_desktop(struct bc_server *s, int k)
                  secret);
 }
 
+/* Selection k's owner asked to write `type` into fd, which stays the
+   caller's to close: a source by that type, the desktop by its text type
+   for any text alias (and the secret hint). Returns -1 when nobody was
+   asked. */
+static int clip_read(struct bc_server *s, int k, const char *type, int fd)
+{
+    struct bc_selection *sel = &s->sel[k];
+    if (sel->source) {
+        if (!source_has(sel->source, type)) return -1;
+        source_send(sel->source, type, fd);
+        return 0;
+    }
+    if (sel->desk_seq) {
+        const char *want = is_text_type(type) && sel->desk_text ? BC_TEXT_TYPE
+                         : strcmp(type, BC_SECRET_TYPE) == 0 && sel->desk_secret ? BC_SECRET_TYPE
+                         : NULL;
+        if (want == NULL) return -1;
+        if (bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", sel->desk_seq, want) != 0) {
+            logf_("clipboard: a paste from the desktop not asked: %s", s->wire.last_error);
+            return -1;
+        }
+        return 0;
+    }
+    return -1;
+}
+
 static void offer_receive(struct bc_offer *o, const char *type, int fd)
 {
     struct bc_server *s = o->server;
-    struct bc_selection *sel = &s->sel[o->primary];
-    if (o->generation == sel->generation) {
-        if (sel->source) {
-            if (source_has(sel->source, type)) source_send(sel->source, type, fd);
-        } else if (sel->desk_seq) {
-            const char *want = is_text_type(type) && sel->desk_text ? BC_TEXT_TYPE
-                             : strcmp(type, BC_SECRET_TYPE) == 0 && sel->desk_secret ? BC_SECRET_TYPE
-                             : NULL;
-            if (want && bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", sel->desk_seq, want) != 0)
-                logf_("clipboard: a paste from the desktop not asked: %s", s->wire.last_error);
-        }
-    }
+    if (o->generation == s->sel[o->primary].generation) clip_read(s, o->primary, type, fd);
     close(fd);
 }
 
@@ -2200,6 +2243,18 @@ static void clip_changed(struct bc_server *s, int k)
 {
     ++s->sel[k].generation;
     if (s->kbd_focus) clip_send_to_client(s, k, wl_resource_get_client(s->kbd_focus->resource));
+    x_selection_follow(s, k);
+}
+
+/* Selection k's source went (its program's doing): the desktop told, and
+   the selection is nobody's. */
+static void clip_source_gone(struct bc_server *s, int k)
+{
+    struct bc_selection *sel = &s->sel[k];
+    if (sel->source_seq) bc_wire_line(&s->wire, "CLIP clear %u", sel->source_seq);
+    sel->source = NULL;
+    sel->source_seq = 0;
+    clip_changed(s, k);
 }
 
 /* The program with the keyboard set selection k to `src` (NULL: none). A
@@ -2231,14 +2286,8 @@ static void source_destroyed(struct wl_resource *resource)
 {
     struct bc_source *src = wl_resource_get_user_data(resource);
     struct bc_server *s = src->server;
-    int k = src->primary, i;
-    if (s->sel[k].source == src) {
-        if (s->sel[k].source_seq) bc_wire_line(&s->wire, "CLIP clear %u", s->sel[k].source_seq);
-        s->sel[k].source = NULL;
-        s->sel[k].source_seq = 0;
-        clip_changed(s, k);
-    }
-    for (i = 0; i < src->ntypes; ++i) free(src->types[i]);
+    if (s->sel[src->primary].source == src) clip_source_gone(s, src->primary);
+    source_free_types(src);
     free(src);
 }
 
@@ -6007,6 +6056,18 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
             x_cursor_notify(s, (xcb_xfixes_cursor_notify_event_t *)ev);
         return;
     }
+}
+
+/* No X selections yet (milestone D): an X source is never made, and the
+   window manager owns no selection. */
+static void x_source_send(struct bc_source *src, const char *type, int fd)
+{
+    (void)src; (void)type; (void)fd;
+}
+
+static void x_selection_follow(struct bc_server *s, int k)
+{
+    (void)s; (void)k;
 }
 
 static void x_wm_stop(struct bc_server *s);
