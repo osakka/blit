@@ -1710,7 +1710,9 @@ what Blit itself types with them -- the built-in US table under the device's
 and a code with a `modifiers` role is that modifier (`control` is
 `Control_L`, `altgr` is `ISO_Level3_Shift`, `none` is no key). Keycodes are
 evdev codes plus 8; Shift, Lock, Control, Mod1 (Alt), Mod2 (Num Lock), Mod4
-(Super) and Mod5 (AltGr) are the modifiers. A level of more than one
+(Super) and Mod5 (AltGr) are the modifiers, and the indicators are "Caps
+Lock" and "Num Lock", lit while Lock and Num Lock are locked (X programs
+read them; Xwayland 24.1 crashes under a keymap with none). A level of more than one
 character is its first character, since an xkb level is one keysym; the
 keypad is its Num Lock-on keysyms.
 
