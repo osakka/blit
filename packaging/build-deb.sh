@@ -375,6 +375,19 @@ output=$OUT/blit_${pkgver}_amd64.deb
 # records it and a commit-derived epoch would change under its own manifest.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-1577836800}
 export SOURCE_DATE_EPOCH
+# Every staged path's mode and time from the package's rule, not from the
+# checkout it was copied from: git keeps only the executable bit, so a file
+# written under another umask (0664) or dated before the epoch (which
+# dpkg-deb only clamps from above) made the same commit two packages in two
+# checkouts. Directories 0755, files 0755 when executable else 0644, all at
+# SOURCE_DATE_EPOCH. (The stage's own root, from mktemp, was 0700.)
+normalize_stage() {
+	find "$1" -type d -exec chmod 0755 {} +
+	find "$1" -type f -perm -u+x -exec chmod 0755 {} +
+	find "$1" -type f ! -perm -u+x -exec chmod 0644 {} +
+	find "$1" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
+}
+normalize_stage "$stage"
 dpkg-deb --build --root-owner-group "$stage" "$output" >/dev/null
 # Reject shell implementations and retired runtime launchers. The shared
 # policy distinguishes runtime entrypoints from non-executable font artwork;
@@ -433,6 +446,7 @@ Description: Source archive of GNU FreeMono, the origin of Blit Arabic Modern
  the blit package stays available without being installed with every Blit.
 EOF
 soutput=$OUT/blit-font-sources_${font_source_version}_all.deb
+normalize_stage "$sstage"
 dpkg-deb --build --root-owner-group "$sstage" "$soutput" >/dev/null
 echo "$soutput"
 
@@ -514,6 +528,7 @@ Description: Blit's Wayland compositor for programs in Hibr windows
  programs too, as their window manager.
 EOF
 coutput=$OUT/blit-compositor_${pkgver}_amd64.deb
+normalize_stage "$cstage/pkg"
 dpkg-deb --build --root-owner-group "$cstage/pkg" "$coutput" >/dev/null
 if dpkg-deb --contents "$coutput" | grep -E -f "$ROOT/tools/release/runtime-entrypoints.pattern" >/dev/null; then
 	rm -f "$coutput"
