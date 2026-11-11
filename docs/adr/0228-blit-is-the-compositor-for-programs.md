@@ -997,14 +997,18 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   - A FocusIn the window manager did not cause puts X's focus back on the
     activated window by the activation's own path (SetInputFocus /
     WM_TAKE_FOCUS; PointerRoot when none is activated) and the program asks
-    `x-focus` for its toplevel (a menu's: the toplevel it belongs to). The
-    window manager's own SetInputFocus and what X did before it are told
-    apart by sequence number: an event older than the newest
-    SetInputFocus is superseded by it. Grabs (mode Grab and Ungrab) and
+    `x-focus` for its toplevel (a menu's: the toplevel it belongs to; a
+    window not shown yet: with its `WINDOW new`). The window manager's own
+    SetInputFocus or WM_TAKE_FOCUS and what X did before it are told apart
+    by sequence number: an event older than the newest of them is
+    superseded by it. Grabs (mode Grab and Ungrab) and
     PointerRoot's pointer tracking are not focus changes; a focus taken
-    while a keyboard grab is active (WhileGrabbed) is. The activated
-    program moving the focus onto an override-redirect window of its own
-    (a menu that takes the focus in its grab) is its own; a program's
+    while a keyboard grab is active (WhileGrabbed) is. A program is one X
+    connection or one process (X-Resource's pid): programs hold several
+    connections (Wine, one per thread; milestone D dropped a per-connection
+    rule for that). The activated program moving the focus onto an
+    override-redirect window of its own, or onto a popup of the activated
+    window, (a menu that takes the focus in its grab) is its own; a program's
     answer to WM_TAKE_FOCUS within 1 s may put the focus on any of its
     windows (ICCCM 4.1.7; a dialog its window waits on) -- that window is
     asked for and the focus stays, where putting it back would only send
@@ -1021,7 +1025,8 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     rest), so a program that takes the focus at every loss costs at most
     20 rounds a second; a window's ask is said at most once per second,
     the quiet period ended by the desktop's grant, so it cannot flood the
-    channel.
+    channel; and the log says a focus taken, or one that left every window,
+    at most once a second each, counting the rest into its next line.
   - `_NET_ACTIVE_WINDOW` for a toplevel is `x-active` (one for a window not
     shown yet asks with its `WINDOW new`). Wayland programs get
     `xdg_activation_v1` 1 (staging, wayland-protocols 1.44 in the build

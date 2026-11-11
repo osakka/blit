@@ -2370,7 +2370,8 @@ It speaks the frame channel above as a producer, with these additions.
   top-level (a menu's: the top-level it belongs to). So keys arriving on
   a window's route always reach that window's program. Not taking the
   focus: the window manager's own focus changes, a keyboard grab (X
-  menus), the activated program putting the focus on a menu of its own,
+  menus), the activated program (one X connection or one process)
+  putting the focus on a menu of its own,
   and a program's answer to `WM_TAKE_FOCUS` (ICCCM lets it put the focus
   on any of its windows: that window is asked for, and the focus stays).
   A focus that leaves every window (a program set it to None, or its
