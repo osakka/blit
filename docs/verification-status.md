@@ -9,6 +9,30 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-11: 0.3.80 X windows that draw their own frame; releases built on this host
+
+- **Motif decorations:** the X window manager reads `_MOTIF_WM_HINTS`; no
+  decorations (Steam) is `WINDOW decor <id> client`, at announce and on
+  every change -- the line a Wayland program's client-side decoration
+  gives, one rule for every program. `xwayland_gate` toggles it both ways.
+- **Build environment:** `tools/build-env` (Debian 13, podman) and
+  `tools/release/build-release.sh`. This host's Debian 12 has not built
+  blit-compositor since 0.3.76 (wayland-protocols 1.31); 0.3.76-0.3.79
+  were built on the owner's desktop and copied back by the owner. With the
+  checkout mounted at `/blit` and every staged path's mode and time
+  normalized (one checkout's font file was 0664 and another dated 2018),
+  the same commit built in two checkouts gave byte-identical packages
+  (blit 5ca1aa4f..., blit-compositor 7b75c4c2...); before, the compositor
+  already matched the desktop's 0.3.79 bytes.
+- **Suites:** the environment, 5d23f3e: `compositor_gate`, `xwayland_gate`
+  (Motif both ways, `+accessx 1`, median 1.6 ms) with ASan/UBSan,
+  `package_artifact_gate`. This host, rebuilt: `all` 186 pass, 13 skip, 1
+  fail -- `graphics_memory_gate` hung (no output for 300 s; the second
+  such hang seen, nothing in this release touches it; three runs alone
+  pass in 11 s each; under investigation); `renderer` 82 pass, 1 skip;
+  `renderer-gles` 62 pass.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.79 the keymap's indicators (Xwayland crashed 120 s after a key)
 
 - **Fix:** Xwayland died (SIGSEGV at 0x8) about 120 s after the last key
