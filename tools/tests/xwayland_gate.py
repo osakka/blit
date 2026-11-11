@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """ADR 0228 phase 2, milestones A, C and D: X programs in Hibr windows, keys
-and mouse, menus, dialogs and states, and copy and paste, through Xwayland
+and mouse, menus, dialogs and states, copy and paste, and focus, through Xwayland
 with blit-compositor as its window manager.
 
     xwayland_gate.py <blit-compositor> <x_standin_client> [blit-server [wl_standin_client]]
@@ -69,6 +69,12 @@ order:
     stand-in (`--clip`), its CLIPBOARD and PRIMARY pasted by X and X's
     CLIPBOARD pasted by it; an X program giving its selection up is `CLIP
     clear`;
+  - focus (x_focus_part): another X client taking X's focus itself, again
+    at each loss, put back each time with one `WINDOW activate <id>
+    x-focus` and a key still window 1's; the desktop's grant giving it the
+    focus and the keys; a dialog's _NET_ACTIVE_WINDOW as `WINDOW activate
+    <id> x-active`; a menu that takes X's focus inside its grab asking for
+    nothing, and X's revert to the root when it goes put back;
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
   - Xwayland killed while an X program owns PRIMARY and the desktop
     CLIPBOARD (x_restart_part): its offer cleared with its window, and
@@ -1017,6 +1023,148 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work,
             'other X client=copy+paste+ends with it %s' % (','.join(sizes), stall_a, stall_b, IDLE_MS, cross))
 
 
+# ---- focus: `WINDOW activate` (X's focus follows the desktop's) ----
+
+KEY_K, KEY_Z = 37, 44
+
+
+def x_focus_part(desk, lines_to, printed, log, standin, xenv, work):
+    """X's focus follows the desktop's activated window, window 1: another X
+    client that takes X's focus itself (three times, at each loss) is put
+    back and asks once, `WINDOW activate <id> x-focus`, and a key reaches
+    window 1; the desktop's grant gives it the focus and the keys; a
+    dialog's _NET_ACTIVE_WINDOW is `WINDOW activate <id> x-active`; a menu
+    that takes X's focus inside its own grab asks for nothing, and when it
+    goes (X reverting the focus to the root) the focus is window 1's
+    again. Returns its summary."""
+    c = Clip(desk, printed, log, None)
+    why = c.why
+
+    def key(code):
+        lines_to('key %%d %d press' % code, 'key %%d %d release' % code)
+
+    def window_lines(pattern_new):
+        wid = int(c.match(pattern_new, 20).group(1))
+        return wid
+
+    desk.send('WINDOW size 1 400 300 activated')
+    m = c.mark()
+    key(KEY_A)
+    c.saw('key %d' % (KEY_A + 8), m)
+    desk.quiet(0.3)
+
+    # Another X program (Steam beside its game) takes X's focus a second
+    # after its window shows, and again at each of its next two losses.
+    thief_path = os.path.join(work, 'xstandin-thief.out')
+    thief = cg.start([standin, 'X thief'], dict(xenv, XSTANDIN_FOCUS_AT_START='take'), open(thief_path, 'w'))
+    tp = lambda: open(thief_path).read()
+    try:
+        m = c.mark()
+        tid = window_lines(r'WINDOW new (\d+) 0')
+        for _ in range(3):
+            c.match(r'WINDOW (title|appid|decor) %d .*' % tid)
+        c.match(r'WINDOW activate %d x-focus' % tid)
+        wait_for(lambda: 'XSTANDIN took-focus 3\n' in tp(), lambda: 'the thief did not take the focus thrice:\n'
+                 + tp() + why())
+        # Window 1 lost the focus and has it back.
+        c.saw('focus-out', m)
+        wait_for(lambda: printed()[m:].rstrip().endswith('XSTANDIN focus-in'),
+                 lambda: 'window 1 did not end with the focus:\n' + why())
+        # Asked once: the second and third takes are within the quiet period.
+        desk.quiet(1.2)
+        check('asks for the focus again (x-focus) within 1000 ms: not said again' in log(),
+              lambda: 'the repeated asks were not noted:\n' + log())
+        check(log().count('its program took X\'s focus itself: put back') >= 3,
+              lambda: 'the focus was not put back three times:\n' + log())
+        m = c.mark()
+        key(KEY_A)
+        c.saw('key %d' % (KEY_A + 8), m)
+        check('XSTANDIN key' not in tp(), lambda: 'a key went to the thief:\n' + tp())
+
+        # The desktop grants: the focus and the keys are the thief's.
+        wait_for(lambda: (desk.quiet(0.1), tid in desk.input_socks)[1],
+                 lambda: 'no INPUT sock for window %d' % tid)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[tid])
+        try:
+            tmark = len(tp())
+            m = c.mark()
+            left = log().count('the focus left every window')
+            desk.send('WINDOW size 1 400 300')
+            desk.send('WINDOW size %d 320 200 activated' % tid)
+            c.saw('focus-out', m)
+            wait_for(lambda: 'XSTANDIN focus-in\n' in tp()[tmark:], lambda: 'the grant gave no focus:\n' + tp())
+            route.sendall(('INPUT key %d %d press\nINPUT frame %d 1\nINPUT key %d %d release\nINPUT frame %d 2\n'
+                           % (BLIT_PICTURE, KEY_A, BLIT_PICTURE, BLIT_PICTURE, KEY_A, BLIT_PICTURE)).encode())
+            wait_for(lambda: 'XSTANDIN key %d\n' % (KEY_A + 8) in tp()[tmark:],
+                     lambda: 'the key did not reach the granted window:\n' + tp())
+            # The window manager's own focus changes are not put back.
+            check(log().count('the focus left every window') == left,
+                  lambda: 'the desktop\'s own activation was taken for a lost focus:\n' + log())
+        finally:
+            route.close()
+        # And back to window 1: the thief, done fighting, lets it go.
+        m = c.mark()
+        tmark = len(tp())
+        desk.send('WINDOW size %d 320 200' % tid)
+        desk.send('WINDOW size 1 400 300 activated')
+        c.saw('focus-in', m)
+        wait_for(lambda: 'XSTANDIN focus-out\n' in tp()[tmark:], lambda: 'the thief kept the focus:\n' + tp())
+        desk.quiet(0.5)
+        check('took-focus 4' not in tp(), 'the thief took the focus a fourth time')
+
+        # A dialog (T) asking to be active (K): `WINDOW activate <id> x-active`.
+        m = c.mark()
+        key(KEY_T)
+        did = window_lines(r'WINDOW new (\d+) 1')
+        for _ in range(4):
+            c.match(r'WINDOW (title|appid|limits|decor) %d .*' % did)
+        c.saw('dialog', m)
+        key(KEY_K)
+        c.saw('active-asked dialog', m)
+        c.match(r'WINDOW activate %d x-active' % did)
+        desk.send('WINDOW close %d' % did)
+        c.match(r'WINDOW gone %d' % did)
+        c.saw('dialog-delete', m)
+
+        # A menu that takes X's focus inside its grab (Z): no ask, its keys
+        # through the grab; when it goes X reverts the focus to the root,
+        # and the window manager puts it back on window 1.
+        menus = log().count('X menu 0x')
+        left = log().count('the focus left every window')
+        m = c.mark()
+        key(KEY_Z)
+        pid = int(c.match(r'WINDOW popup (\d+) 1 30 40').group(1))
+        c.saw('menu 30,40 120x90 grab 0 0', m)
+        c.saw('menu-focused', m)
+        desk.quiet(0.5)
+        check(log().count('X menu 0x') == menus, lambda: 'the menu\'s focus was taken for a steal:\n' + log())
+        key(KEY_A)
+        c.saw('menu-key %d' % (KEY_A + 8), m)
+        m = c.mark()
+        key(KEY_ESC)
+        c.saw('menu-dismissed escape', m)
+        c.match(r'WINDOW gone %d' % pid)
+        c.saw('focus-in', m)
+        check(log().count('the focus left every window') > left,
+              lambda: 'the focus reverted to the root was not put back:\n' + log())
+        m = c.mark()
+        key(KEY_A)
+        c.saw('key %d' % (KEY_A + 8), m)
+        desk.quiet(0.3)
+
+        desk.send('WINDOW close %d' % tid)
+        c.match(r'WINDOW gone %d' % tid)
+        check(thief.wait(5) == 0, 'the thief failed:\n' + tp())
+    finally:
+        if thief.poll() is None:
+            thief.kill()
+            thief.wait()
+    return ('focus: thief=window %d took X focus x3->one WINDOW activate x-focus, put back each time, key->window 1; '
+            'grant->focus+key to it; dialog %d _NET_ACTIVE_WINDOW->x-active; focused menu %d in its grab->no ask, '
+            'reverted to root->put back' % (tid, did, pid))
+
+
 def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
     """Xwayland killed while an X program owns PRIMARY and the desktop
     CLIPBOARD: its offer cleared with its window, and the next Xwayland's
@@ -1234,6 +1382,7 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         milestone_c = x_milestone_c(desk, lines_to, printed, lambda: open(log).read())
         milestone_d = x_milestone_d(desk, lines_to, printed, lambda: open(log).read(), clip_dir, wl_standin,
                                     env, work, standin, cenv)
+        focus = x_focus_part(desk, lines_to, printed, lambda: open(log).read(), standin, cenv, work)
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
@@ -1269,9 +1418,10 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
                 '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s %s '
-                'close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
+                '%s close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
-                                     measure.group(1), measure.group(2), frames, milestone_c, milestone_d, restart,
+                                     measure.group(1), measure.group(2), frames, milestone_c, milestone_d, focus,
+                                     restart,
                                      len(desk.cursors)))
     finally:
         for p in (client, comp):

@@ -220,6 +220,12 @@ struct bc_xdg {
     int fullscreen;                   /* the client's own request */
     int maximize;                     /* the client's own request */
     int minimize;                     /* asked before WINDOW new */
+    /* `WINDOW activate` (window_ask_activate): the reason of an ask made
+       before WINDOW new (said with it), and the time of the last one said,
+       for the quiet period after it (BC_ASK_QUIET_MS). */
+    const char *ask_reason;
+    uint32_t asked_ms;
+    int asked, ask_hushed;
     uint32_t decor_mode;              /* 0 none (client draws), else zxdg mode */
     int decor_dropped;                /* the decoration object went: the
                                          client draws from its next commit */
@@ -301,6 +307,14 @@ struct bc_x {
     int xres;                         /* X-Resource 1.2: a window's client pid */
     struct wl_list windows;           /* bc_xwin: the root's children */
     xcb_window_t focus;               /* the window given X focus, XCB_WINDOW_NONE none */
+    /* X's focus kept on `focus` (x_focus_in): the sequence of the window
+       manager's newest SetInputFocus (a focus event from before it is
+       superseded by it), and the putting back of a focus a program took,
+       at most one per BC_X_RESTORE_MS (the rest by `restore`, a timer). */
+    unsigned focus_seq;
+    uint32_t restored_ms;
+    int restored, restore_due;
+    struct wl_event_source *restore;
     uint32_t stack_seq;               /* the newest stacking count (bc_xwin.stack) */
     int32_t root_w, root_h;           /* the root's size: X's pointer is confined to it */
     /* X's cursor (XFixes): the name of the cursor X shows, as `WINDOW
@@ -491,6 +505,39 @@ static int xdg_parent_id(struct bc_xdg *x)
     return x->parent && x->parent->id ? (int)x->parent->id : 0;
 }
 
+/* `WINDOW activate <id> <reason>`: the window's program asks for it to
+   have the focus. The one sender for every kind of ask: `x-focus` (an X
+   program took X's focus itself), `x-active` (its _NET_ACTIVE_WINDOW),
+   `xdg-activation` (a Wayland program's activate with a token). Focus is
+   the desktop's: it grants with `WINDOW size ... activated` or says
+   nothing. A toplevel only, and not one the desktop has activated; one
+   not announced yet asks with its `WINDOW new`. A program that asks again
+   within BC_ASK_QUIET_MS of its last ask is not said again (logged once a
+   quiet period): one fighting for the focus cannot flood the channel. The
+   desktop's grant ends the quiet period (handle_line). */
+#define BC_ASK_QUIET_MS 1000u
+static void window_ask_activate(struct bc_xdg *x, const char *reason)
+{
+    uint32_t now = now_ms();
+    if (!window_is_toplevel(x) || x->size_activated) return;
+    if (x->id == 0) {
+        x->ask_reason = reason;
+        return;
+    }
+    if (x->asked && now - x->asked_ms < BC_ASK_QUIET_MS) {
+        if (!x->ask_hushed)
+            logf_("window %u: asks for the focus again (%s) within %u ms: not said again", x->id, reason,
+                  BC_ASK_QUIET_MS);
+        x->ask_hushed = 1;
+        return;
+    }
+    x->asked = 1;
+    x->ask_hushed = 0;
+    x->asked_ms = now;
+    bc_wire_line(&x->server->wire, "WINDOW activate %u %s", x->id, reason);
+    logf_("window %u: its program asks for the focus (%s)", x->id, reason);
+}
+
 static void send_limits(struct bc_xdg *x)
 {
     bc_wire_line(&x->server->wire, "WINDOW limits %u %d %d %d %d", x->id, x->min_w, x->min_h,
@@ -589,6 +636,12 @@ static void announce_toplevel(struct bc_xdg *x)
     x->minimize = 0;
     logf_("window %u: new parent %d title \"%s\" appid \"%s\"", x->id, xdg_parent_id(x),
           x->title, x->appid);
+    /* A focus asked for before the window was announced is asked for now. */
+    if (x->ask_reason) {
+        const char *reason = x->ask_reason;
+        x->ask_reason = NULL;
+        window_ask_activate(x, reason);
+    }
     /* On the first output until the desktop says which display it is on. */
     window_set_output(x, output_default(x->server));
     /* A lock asked for before the window was announced is asked for now. */
@@ -4858,7 +4911,10 @@ static void input_sockets_clear(struct bc_server *s)
    WM_TAKE_FOCUS when it asks for that (ICCCM 4.1.7), and
    _NET_ACTIVE_WINDOW; leaving it, the focus is PointerRoot. Keys and the
    pointer reach Xwayland as the wl_seat events any client gets on its
-   surface.
+   surface. X's focus stays there: a program that takes it itself gets it
+   put back and asks with `WINDOW activate <id> x-focus`; its
+   _NET_ACTIVE_WINDOW is `WINDOW activate <id> x-active` (x_focus_in,
+   window_ask_activate). The desktop grants or not.
 
    Milestone C: each X request onto the line its Wayland equivalent
    already produces, through the same setters. WM_TRANSIENT_FOR is the
@@ -4890,8 +4946,7 @@ static void input_sockets_clear(struct bc_server *s)
    Milestone D: CLIPBOARD and PRIMARY are the clipboard's selections (the
    X selections section, below).
 
-   Not acted on, noted once in the log: _NET_ACTIVE_WINDOW requests and
-   _NET_WM_WINDOW_TYPE.
+   Not acted on, noted once in the log: _NET_WM_WINDOW_TYPE.
 
    Measured: per X window, the time from a commit of its surface to its
    frame sent, the minimum and median over its first 60 frames, logged. */
@@ -4958,6 +5013,9 @@ struct bc_xwin {
     unsigned state;
     int state_set;
     int remapping;                    /* unmapped by the window manager to be mapped again */
+    const char *ask;                  /* a focus asked for before it is shown (window_ask_activate) */
+    uint32_t take_focus_ms;           /* when the window manager last sent it WM_TAKE_FOCUS */
+    int take_focus_sent;
     uint32_t measure[BC_X_MEASURE];   /* commit to frame sent, us, its first frames */
     int measured, measure_said;
 };
@@ -5301,7 +5359,35 @@ static void x_send_protocol(struct bc_server *s, struct bc_xwin *w, xcb_atom_t p
     xcb_send_event(s->x.conn, 0, w->window, XCB_EVENT_MASK_NO_EVENT, (const char *)&ev);
 }
 
-/* X's focus to window `w` (NULL: to none), and _NET_ACTIVE_WINDOW. */
+/* X's focus put on window `w` (NULL: PointerRoot), whatever X has now:
+   the one path for the desktop's activation and for putting the focus
+   back (x_focus_in). */
+static void x_give_focus(struct bc_server *s, struct bc_xwin *w)
+{
+    if (w == NULL) {
+        /* PointerRoot, not None: None discards the keyboard, which a menu
+           that grabbed it (an X popup) still needs (wlroots does the same). */
+        s->x.focus_seq = xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT,
+                                             XCB_INPUT_FOCUS_POINTER_ROOT, XCB_CURRENT_TIME).sequence;
+    } else {
+        /* ICCCM 4.1.7: input from WM_HINTS is the window's own to take
+           with SetInputFocus; WM_TAKE_FOCUS, when it asks for it, lets it
+           move the focus itself (a globally active window takes it only
+           so). */
+        if (w->input)
+            s->x.focus_seq = xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, w->window,
+                                                 XCB_CURRENT_TIME).sequence;
+        if (w->takes_focus) {
+            x_send_protocol(s, w, s->x.atoms[BC_ATOM_WM_TAKE_FOCUS]);
+            w->take_focus_ms = now_ms();
+            w->take_focus_sent = 1;
+        }
+    }
+    xcb_flush(s->x.conn);
+}
+
+/* X's focus to window `w` (NULL: to none), and _NET_ACTIVE_WINDOW, when
+   it changes. */
 static void x_activate(struct bc_server *s, struct bc_xwin *w)
 {
     xcb_window_t window = w ? w->window : XCB_WINDOW_NONE;
@@ -5309,24 +5395,38 @@ static void x_activate(struct bc_server *s, struct bc_xwin *w)
     s->x.focus = window;
     xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, s->x.screen->root,
                         s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &window);
-    if (w == NULL) {
-        /* PointerRoot, not None: None discards the keyboard, which a menu
-           that grabbed it (an X popup) still needs (wlroots does the same). */
-        xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, XCB_INPUT_FOCUS_POINTER_ROOT,
-                            XCB_CURRENT_TIME);
-    } else {
-        /* ICCCM 4.1.7: input from WM_HINTS is the window's own to take
-           with SetInputFocus; WM_TAKE_FOCUS, when it asks for it, lets it
-           move the focus itself (a globally active window takes it only
-           so). */
-        if (w->input)
-            xcb_set_input_focus(s->x.conn, XCB_INPUT_FOCUS_POINTER_ROOT, w->window, XCB_CURRENT_TIME);
-        if (w->takes_focus) x_send_protocol(s, w, s->x.atoms[BC_ATOM_WM_TAKE_FOCUS]);
-    }
-    xcb_flush(s->x.conn);
+    x_give_focus(s, w);
     if (w && w->pic)
         logf_("window %u: X focus (0x%x%s%s)", w->pic->id, (unsigned)w->window,
               w->input ? ", SetInputFocus" : "", w->takes_focus ? ", WM_TAKE_FOCUS" : "");
+}
+
+/* X's focus back where the desktop has it (x.focus), after a program took
+   it: at once, or when BC_X_RESTORE_MS have passed since the last time, so
+   a program that takes it again at every loss costs at most one round
+   each BC_X_RESTORE_MS. */
+#define BC_X_RESTORE_MS 50u
+static int on_x_restore(void *data)
+{
+    struct bc_server *s = data;
+    s->x.restore_due = 0;
+    if (s->x.conn == NULL) return 0;
+    s->x.restored = 1;
+    s->x.restored_ms = now_ms();
+    x_give_focus(s, s->x.focus != XCB_WINDOW_NONE ? x_window(s, s->x.focus) : NULL);
+    return 0;
+}
+
+static void x_restore_focus(struct bc_server *s)
+{
+    uint32_t since = now_ms() - s->x.restored_ms;
+    if (s->x.restore_due) return;
+    if (!s->x.restored || since >= BC_X_RESTORE_MS || s->x.restore == NULL) {
+        on_x_restore(s);
+        return;
+    }
+    s->x.restore_due = 1;
+    wl_event_source_timer_update(s->x.restore, (int)(BC_X_RESTORE_MS - since));
 }
 
 static void x_focus_follows(struct bc_server *s, struct bc_surface *surface)
@@ -5626,6 +5726,9 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
         x->max_w = w->max_w; x->max_h = w->max_h;
         x->fullscreen = (w->state & BC_XS_FULLSCREEN) != 0;
         x->maximize = (w->state & BC_XS_MAXIMIZED) == BC_XS_MAXIMIZED;
+        /* A focus it asked for before it was shown: with its WINDOW new. */
+        x->ask_reason = w->ask;
+        w->ask = NULL;
         if (s->wire.window) {
             struct bc_xwin *o;
             announce_toplevel(x);
@@ -6925,8 +7028,19 @@ static void x_client_message(struct bc_server *s, xcb_client_message_event_t *ev
     } else if (ev->type == atoms[BC_ATOM_NET_WM_MOVERESIZE] && ev->format == 32) {
         x_moveresize_request(s, ev);
     } else if (ev->type == atoms[BC_ATOM_NET_ACTIVE_WINDOW]) {
-        x_note(s, BC_X_LOGGED_ACTIVE, "_NET_ACTIVE_WINDOW requests (a program raising its window: the "
-                                      "draft has no line for it)");
+        /* EWMH: a program asks for its window to be the active one --
+           `WINDOW activate <id> x-active`, the desktop's to grant. One of
+           its menus names its toplevel; one not shown yet asks when it is. */
+        struct bc_xwin *w = x_window(s, ev->window);
+        if (w == NULL || w->override_redirect) {
+            if (!(s->x.logged & BC_X_LOGGED_ACTIVE))
+                logf_("X: _NET_ACTIVE_WINDOW for 0x%x, no toplevel: ignored (noted once)", (unsigned)ev->window);
+            s->x.logged |= BC_X_LOGGED_ACTIVE;
+        } else if (w->pic == NULL) {
+            w->ask = "x-active";
+        } else {
+            window_ask_activate(w->pic, "x-active");
+        }
     } else if (ev->type == atoms[BC_ATOM_WM_CHANGE_STATE] && ev->format == 32) {
         /* ICCCM 4.1.4: IconicState is the program minimizing its window
            (its own title bar's button), as xdg_toplevel.set_minimized. */
@@ -6952,14 +7066,103 @@ static void x_property_notify(struct bc_server *s, xcb_property_notify_event_t *
     free(reply);
 }
 
+/* The window of program `client` the window manager sent WM_TAKE_FOCUS
+   within BC_X_ANSWER_MS (the one with X's focus first), or NULL: a focus
+   that program moves now is its answer (ICCCM 4.1.7). */
+#define BC_X_ANSWER_MS 1000u
+static struct bc_xwin *x_answering(struct bc_server *s, uint32_t client)
+{
+    struct bc_xwin *o, *found = NULL;
+    uint32_t now = now_ms();
+    wl_list_for_each(o, &s->x.windows, link)
+        if (o->take_focus_sent && now - o->take_focus_ms < BC_X_ANSWER_MS && x_client_of(s, o->window) == client &&
+            (found == NULL || o->window == s->x.focus))
+            found = o;
+    return found;
+}
+
+/* X's focus follows the desktop's activated window, x.focus (ADR 0228):
+   a FocusIn the window manager did not cause puts it back, and when a
+   program moved it onto a window of its own, that program asks for its
+   window with `WINDOW activate <id> x-focus` (window_ask_activate). The
+   desktop answers with `WINDOW size ... activated` or not at all. Not a
+   program taking the focus:
+   - the window manager's own SetInputFocus and anything X did before it
+     (an event whose sequence is older than x.focus_seq is superseded);
+   - a keyboard grab (mode Grab and Ungrab: the keyboard's events go to
+     the grabbing window, the focus stays; X menus) and PointerRoot's
+     following of the pointer (detail Pointer);
+   - the program with the focus moving it onto an override-redirect
+     window of its own (a menu that takes the focus inside its grab, as
+     some toolkits do);
+   - a program's answer to WM_TAKE_FOCUS (x_answering): ICCCM lets it put
+     the focus on whichever window of its own it wants (a dialog its
+     window is waiting on); that window is asked for, and the focus stays.
+     An answer to an older WM_TAKE_FOCUS, for a window no longer
+     activated, is put back and asks for nothing.
+   A focus that left every window (the root has it: a program set it to
+   None or PointerRoot, or its focused menu went and X reverted it) is put
+   back too. A focus taken while another client grabs the keyboard (mode
+   WhileGrabbed) is a focus taken all the same. */
+static void x_focus_in(struct bc_server *s, xcb_focus_in_event_t *f)
+{
+    struct bc_xwin *w, *answered;
+    struct bc_xdg *ask = NULL;
+    uint32_t client;
+    if (f->mode != XCB_NOTIFY_MODE_NORMAL && f->mode != XCB_NOTIFY_MODE_WHILE_GRABBED) return;
+    if (f->detail == XCB_NOTIFY_DETAIL_POINTER) return;
+    if ((int32_t)(((xcb_generic_event_t *)f)->full_sequence - s->x.focus_seq) < 0) return;
+    if (f->event == s->x.screen->root) {
+        /* Virtual and NonlinearVirtual: the focus went to a window below
+           the root, which that window's own FocusIn says. */
+        if (s->x.focus == XCB_WINDOW_NONE || f->detail == XCB_NOTIFY_DETAIL_VIRTUAL ||
+            f->detail == XCB_NOTIFY_DETAIL_NONLINEAR_VIRTUAL)
+            return;
+        logf_("X: the focus left every window (a program set it so, or the window it was on went): put back");
+        x_restore_focus(s);
+        return;
+    }
+    w = x_window(s, f->event);
+    if (w == NULL || w->window == s->x.focus) return;
+    client = x_client_of(s, w->window);
+    answered = x_answering(s, client);
+    if (w->pic && !w->pic->xpopup) ask = w->pic;
+    else if (w->pic && w->pic->parent && w->pic->parent->xwin &&
+             x_client_of(s, w->pic->parent->xwin->window) == client)
+        ask = w->pic->parent;
+    if (answered && answered->window == s->x.focus) {
+        /* Its answer to WM_TAKE_FOCUS: the focus where it put it. */
+        if (ask && ask->xwin != answered) {
+            logf_("window %u: its program answered WM_TAKE_FOCUS with the focus on window %u",
+                  answered->pic ? answered->pic->id : 0, ask->id);
+            window_ask_activate(ask, "x-focus");
+        }
+        return;
+    }
+    if (!answered && w->override_redirect && s->x.focus != XCB_WINDOW_NONE &&
+        x_client_of(s, s->x.focus) == client)
+        return;  /* the focused program's own menu */
+    if (answered) {
+        logf_("X window 0x%x: a late answer to WM_TAKE_FOCUS: the focus put back", (unsigned)w->window);
+    } else {
+        logf_("%s 0x%x: its program took X's focus itself: put back%s", w->override_redirect ? "X menu" : "X window",
+              (unsigned)w->window, ask ? "" : " (no shown window of its own to ask for)");
+        if (ask) window_ask_activate(ask, "x-focus");
+    }
+    x_restore_focus(s);
+}
+
 static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
 {
     switch (ev->response_type & 0x7f) {
     case 0: {
         /* BadWindow is a window gone before our request about it (its
-           WM_STATE at its unmap, a focus): X's ordinary race, not said. */
+           WM_STATE at its unmap, a focus), and BadMatch on SetInputFocus
+           one unmapped before the focus reached it: X's ordinary races,
+           not said. */
         xcb_generic_error_t *e = (xcb_generic_error_t *)ev;
-        if (e->error_code != XCB_WINDOW)
+        if (e->error_code != XCB_WINDOW &&
+            !(e->error_code == XCB_MATCH && e->major_code == XCB_SET_INPUT_FOCUS))
             logf_("X: error %u on request %u.%u (sequence %u, resource 0x%x)", e->error_code,
                   e->major_code, e->minor_code, e->sequence, e->resource_id);
         return;
@@ -7008,15 +7211,9 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
     case XCB_CLIENT_MESSAGE:
         x_client_message(s, (xcb_client_message_event_t *)ev);
         return;
-    case XCB_FOCUS_IN: {
-        xcb_focus_in_event_t *f = (xcb_focus_in_event_t *)ev;
-        struct bc_xwin *w = x_window(s, f->event);
-        /* A program moving X's focus itself (milestone A only notes it). */
-        if (w && w->pic && f->event != s->x.focus && f->mode == XCB_NOTIFY_MODE_NORMAL &&
-            f->detail != XCB_NOTIFY_DETAIL_POINTER)
-            logf_("window %u: its program took X's focus itself", w->pic->id);
+    case XCB_FOCUS_IN:
+        x_focus_in(s, (xcb_focus_in_event_t *)ev);
         return;
-    }
     default:
         if (s->x.xfixes_event && (ev->response_type & 0x7f) == s->x.xfixes_event + XCB_XFIXES_CURSOR_NOTIFY)
             x_cursor_notify(s, (xcb_xfixes_cursor_notify_event_t *)ev);
@@ -7061,6 +7258,10 @@ static void x_wm_stop(struct bc_server *s)
     x_selections_stop(s);
     if (s->x.wm_source) wl_event_source_remove(s->x.wm_source);
     s->x.wm_source = NULL;
+    if (s->x.restore) wl_event_source_remove(s->x.restore);
+    s->x.restore = NULL;
+    s->x.restore_due = s->x.restored = 0;
+    s->x.focus_seq = 0;
     if (s->x.conn) xcb_disconnect(s->x.conn);
     s->x.conn = NULL;
     x_selections_gone(s);
@@ -7110,8 +7311,9 @@ static int x_wm_start(struct bc_server *s)
     }
     /* Composite first: every top-level's pixels are its surface's. */
     xcb_composite_redirect_subwindows(c, s->x.screen->root, XCB_COMPOSITE_REDIRECT_MANUAL);
+    /* FocusChange on the root: the focus leaving every window (x_focus_in). */
     mask = XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
-           XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_PROPERTY_CHANGE;
+           XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_PROPERTY_CHANGE | XCB_EVENT_MASK_FOCUS_CHANGE;
     s->x.root_w = s->x.screen->width_in_pixels;
     s->x.root_h = s->x.screen->height_in_pixels;
     error = xcb_request_check(c, xcb_change_window_attributes_checked(c, s->x.screen->root,
@@ -7186,6 +7388,7 @@ static int x_wm_start(struct bc_server *s)
     xcb_flush(c);
     s->x.wm_source = wl_event_loop_add_fd(s->loop, xcb_get_file_descriptor(c), WL_EVENT_READABLE,
                                           on_x_events, s);
+    s->x.restore = wl_event_loop_add_timer(s->loop, on_x_restore, s);
     /* Events xcb read while waiting for the replies above are in its
        queue, not the socket: checked after every dispatch. */
     if (s->x.wm_source) wl_event_source_check(s->x.wm_source);
@@ -7744,6 +7947,9 @@ static void handle_line(struct bc_server *s, const char *line)
         x->size_maximized = l.maximized;
         x->size_activated = l.activated;
         x->size_tiled = l.tiled;
+        /* Activated: a program's ask is answered, the next one is said
+           (window_ask_activate). */
+        if (l.activated) x->asked = 0;
         /* The desktop took the window's focus away: so does the keyboard. */
         if (!l.activated && x->surface && s->kbd_focus == x->surface) keyboard_focus(s, NULL);
         logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,

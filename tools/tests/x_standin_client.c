@@ -47,6 +47,17 @@
      C  the window's cursor: a glyph of the core cursor font, named "xterm"
         (XFixesSetCursorName, as libXcursor names the themed ones); U the
         same named "nosuchcursor", a name Blit has no pointer for
+     K  _NET_ACTIVE_WINDOW for the dialog (T), the program asking for it
+        to be the active window (EWMH, source 1, the key's time)
+     Z  M's menu, which then takes X's focus onto itself inside its grab
+        (SetInputFocus, revert to its parent), as some toolkits' menus do;
+        the top-level's FocusOut does not close it, and when it goes X
+        reverts the focus to the root
+
+   Focus (ADR 0228, `WINDOW activate`): with $XSTANDIN_FOCUS_AT_START
+   `take` it takes X's focus onto its window itself (SetInputFocus) a
+   second after the window is mapped, and again at each of its window's
+   next two FocusOuts: a program fighting for the focus, three times.
 
    The selections (milestone D), with $XSTANDIN_CLIP_DIR the gate's files:
    a copy owns the selection with the bytes of a file there, read at the
@@ -84,6 +95,9 @@
      XSTANDIN drew <w>x<h>
      XSTANDIN focus-in
      XSTANDIN focus-out
+     XSTANDIN took-focus <n>             $XSTANDIN_FOCUS_AT_START take: its n-th
+     XSTANDIN active-asked dialog        the K key
+     XSTANDIN menu-focused               the Z menu took X's focus
      XSTANDIN key <keycode>              a KeyPress
      XSTANDIN undecorated|decorated      the D key
      XSTANDIN button <n> <x>,<y>         a ButtonPress, in the window
@@ -170,6 +184,9 @@
 #define KEYCODE_W 25
 #define KEYCODE_E 26
 #define KEYCODE_Y 29
+#define KEYCODE_K 45
+#define KEYCODE_Z 52
+#define FOCUS_TAKES 3
 #define DELAY_MS 1000
 /* The stand-in's INCR chunk as an owner (the compositor's is 64 KiB). */
 #define CLIP_CHUNK 32768u
@@ -213,6 +230,10 @@ static struct sending {
     size_t len, off;
 } sending[CLIP_SENDS];
 static int delayed;  /* KEYCODE_E or KEYCODE_Y due at delayed_at, 0 none */
+static int menu_focused;  /* the Z menu has X's focus */
+static int takes;  /* $XSTANDIN_FOCUS_AT_START take: the times it took the focus */
+static uint64_t take_at;  /* the first take, 0 none due */
+static xcb_atom_t net_active;
 static uint64_t delayed_at;
 static struct {
     int on, k, incr, stall, targets;
@@ -297,7 +318,7 @@ static void origin(int16_t *x, int16_t *y)
 /* A menu as X toolkits make one: override-redirect, mapped, then the
    pointer and the keyboard grabbed (owner_events false: every press and
    key reaches the menu, in its coordinates). */
-static void menu_open(int16_t dx, int16_t dy, uint16_t mw, uint16_t mh, int transient)
+static void menu_open(int16_t dx, int16_t dy, uint16_t mw, uint16_t mh, int transient, int focus)
 {
     uint32_t values[3];
     int16_t ox, oy;
@@ -327,6 +348,12 @@ static void menu_open(int16_t dx, int16_t dy, uint16_t mw, uint16_t mh, int tran
     say("menu %d,%d %ux%u grab %d %d", dx, dy, mw, mh, gp ? gp->status : -1, gk ? gk->status : -1);
     free(gp);
     free(gk);
+    if (focus) {
+        menu_focused = 1;
+        xcb_set_input_focus(conn, XCB_INPUT_FOCUS_PARENT, menu, XCB_CURRENT_TIME);
+        xcb_flush(conn);
+        say("menu-focused");
+    }
 }
 
 /* A submenu of the open menu: override-redirect at 90,10 from the menu,
@@ -359,6 +386,7 @@ static void menu_close(void)
     xcb_destroy_window(conn, menu);
     xcb_flush(conn);
     menu = 0;
+    menu_focused = 0;
 }
 
 /* WM_NORMAL_HINTS (ICCCM 4.1.2.3): flags, then 17 values. */
@@ -426,14 +454,15 @@ static void panel_open(void)
     xcb_flush(conn);
 }
 
-/* An EWMH request: a client message about the main window, to the root. */
-static void ewmh(xcb_atom_t type, uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3, uint32_t d4)
+/* An EWMH request: a client message about window `about`, to the root. */
+static void ewmh_for(xcb_window_t about, xcb_atom_t type, uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3,
+                     uint32_t d4)
 {
     xcb_client_message_event_t ev;
     memset(&ev, 0, sizeof(ev));
     ev.response_type = XCB_CLIENT_MESSAGE;
     ev.format = 32;
-    ev.window = window;
+    ev.window = about;
     ev.type = type;
     ev.data.data32[0] = d0;
     ev.data.data32[1] = d1;
@@ -443,6 +472,20 @@ static void ewmh(xcb_atom_t type, uint32_t d0, uint32_t d1, uint32_t d2, uint32_
     xcb_send_event(conn, 0, screen->root,
                    XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY, (const char *)&ev);
     xcb_flush(conn);
+}
+
+/* One about the main window. */
+static void ewmh(xcb_atom_t type, uint32_t d0, uint32_t d1, uint32_t d2, uint32_t d3, uint32_t d4)
+{
+    ewmh_for(window, type, d0, d1, d2, d3, d4);
+}
+
+/* It takes X's focus onto its window itself. */
+static void take_focus(void)
+{
+    xcb_set_input_focus(conn, XCB_INPUT_FOCUS_POINTER_ROOT, window, XCB_CURRENT_TIME);
+    xcb_flush(conn);
+    say("took-focus %d", ++takes);
 }
 
 static void moveresize_send(int16_t root_x, int16_t root_y, uint32_t direction, uint32_t button)
@@ -864,6 +907,7 @@ int main(int argc, char **argv)
     state_max_horz = atom("_NET_WM_STATE_MAXIMIZED_HORZ");
     state_focused = atom("_NET_WM_STATE_FOCUSED");
     moveresize = atom("_NET_WM_MOVERESIZE");
+    net_active = atom("_NET_ACTIVE_WINDOW");
     change_state = atom("WM_CHANGE_STATE");
     clipboard_atom = atom("CLIPBOARD");
     targets_atom = atom("TARGETS");
@@ -956,6 +1000,8 @@ int main(int argc, char **argv)
                 if (m->window == window) {
                     const char *at_start = getenv("XSTANDIN_CLIP_AT_START");
                     say("mapped");
+                    if (getenv("XSTANDIN_FOCUS_AT_START") && strcmp(getenv("XSTANDIN_FOCUS_AT_START"), "take") == 0)
+                        take_at = now_ms() + DELAY_MS;
                     if (at_start && (strcmp(at_start, "copy") == 0 || strcmp(at_start, "paste") == 0)) {
                         delayed = strcmp(at_start, "copy") == 0 ? KEYCODE_E : KEYCODE_Y;
                         delayed_at = now_ms() + DELAY_MS;
@@ -981,7 +1027,8 @@ int main(int argc, char **argv)
                 if (o->detail == XCB_NOTIFY_DETAIL_POINTER || o->event != window) break;
                 if (o->mode != XCB_NOTIFY_MODE_GRAB && o->mode != XCB_NOTIFY_MODE_UNGRAB) {
                     say("focus-out");
-                    if (menu) {
+                    if (take_at == 0 && takes > 0 && takes < FOCUS_TAKES) take_focus();
+                    if (menu && !menu_focused) {
                         menu_close();
                         say("menu-dismissed focus-out");
                     }
@@ -1050,11 +1097,16 @@ int main(int argc, char **argv)
                     xcb_flush(conn);
                     say(undecorated ? "undecorated" : "decorated");
                 } else if (k->detail == KEYCODE_M) {
-                    menu_open(30, 40, 120, 90, 0);
+                    menu_open(30, 40, 120, 90, 0, 0);
+                } else if (k->detail == KEYCODE_Z) {
+                    menu_open(30, 40, 120, 90, 0, 1);
+                } else if (k->detail == KEYCODE_K && dialog) {
+                    ewmh_for(dialog, net_active, 1, k->time, window, 0, 0);
+                    say("active-asked dialog");
                 } else if (k->detail == KEYCODE_N) {
-                    menu_open(450, 320, 100, 60, 1);
+                    menu_open(450, 320, 100, 60, 1, 0);
                 } else if (k->detail == KEYCODE_O) {
-                    menu_open(330, 40, 120, 90, 0);
+                    menu_open(330, 40, 120, 90, 0, 0);
                 } else if (k->detail == KEYCODE_I) {
                     ewmh(change_state, 3, 0, 0, 0, 0);  /* IconicState */
                     say("iconify");
@@ -1163,6 +1215,11 @@ int main(int argc, char **argv)
             fprintf(stderr, "x_standin_client: the connection to the X server ended\n");
             return 1;
         }
+        if (take_at && now_ms() >= take_at) {
+            take_at = 0;
+            take_focus();
+            continue;
+        }
         if (delayed && now_ms() >= delayed_at) {
             if (delayed == KEYCODE_E) clip_copy(0, "copy", 0, 0, 0, XCB_CURRENT_TIME);
             else paste_start(0, utf8, 0, 0, XCB_CURRENT_TIME);
@@ -1176,6 +1233,11 @@ int main(int argc, char **argv)
         if (delayed) {
             uint64_t now = now_ms();
             int until = delayed_at > now ? (int)(delayed_at - now) : 0;
+            if (wait < 0 || until < wait) wait = until;
+        }
+        if (take_at) {
+            uint64_t now = now_ms();
+            int until = take_at > now ? (int)(take_at - now) : 0;
             if (wait < 0 || until < wait) wait = until;
         }
         p.fd = xcb_get_file_descriptor(conn);
