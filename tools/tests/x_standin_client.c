@@ -72,6 +72,10 @@
         CLIPBOARD as UTF8_STRING a second after the key (so the gate can
         take X's focus away first)
 
+   With $XSTANDIN_CLIP_AT_START `copy` or `paste` it does E's or Y's a
+   second after its window is mapped, with no key: another X client than
+   the one with X's focus (as xclip run from an xterm is).
+
    It prints one line per event, flushed:
 
      XSTANDIN mapped
@@ -949,7 +953,14 @@ int main(int argc, char **argv)
             }
             case XCB_MAP_NOTIFY: {
                 xcb_map_notify_event_t *m = (xcb_map_notify_event_t *)ev;
-                if (m->window == window) say("mapped");
+                if (m->window == window) {
+                    const char *at_start = getenv("XSTANDIN_CLIP_AT_START");
+                    say("mapped");
+                    if (at_start && (strcmp(at_start, "copy") == 0 || strcmp(at_start, "paste") == 0)) {
+                        delayed = strcmp(at_start, "copy") == 0 ? KEYCODE_E : KEYCODE_Y;
+                        delayed_at = now_ms() + DELAY_MS;
+                    }
+                }
                 else if (dialog && m->window == dialog) say("dialog");
                 else if (panel && m->window == panel) say("panel");
                 break;

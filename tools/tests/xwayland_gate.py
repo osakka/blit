@@ -59,10 +59,13 @@ order:
     both directions (the transfer finishes with the old owner's bytes); an
     X requestor that never takes its INCR chunks, a desktop reader that
     never reads, and an X owner that never answers -- each ended at the
-    compositor's deadline while it answers the desktop; two ownerships in
-    quick succession by one window at one time making one offer, the
-    newer's; a copy and a paste made after X's focus was taken away, the
-    one not the clipboard's and the other refused; with the Wayland
+    compositor's deadline while it answers the desktop; the desktop
+    silent before an X paste's answer (property None) and stalling
+    mid-INCR (what came, then the end); two ownerships in quick
+    succession by one window at one time making one offer, the newer's; a
+    copy and a paste made after X's focus was taken away, the one not the
+    clipboard's and the other refused; another X client than the focused
+    one copying and pasting (its selection ending with it); with the Wayland
     stand-in (`--clip`), its CLIPBOARD and PRIMARY pasted by X and X's
     CLIPBOARD pasted by it; an X program giving its selection up is `CLIP
     clear`;
@@ -649,7 +652,7 @@ class Clip:
               % (len(self.pasted()), len(data)))
 
 
-def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work):
+def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work, standin, xenv):
     """Milestone D on the stand-in's window 1 (400x300, X's focus): the X
     selections onto CLIP both ways, CLIPBOARD and PRIMARY, Latin-1, INCR,
     a secret, owners changing mid-transfer, stalled readers and owners,
@@ -836,6 +839,36 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work)
     check(got == b'' and took >= IDLE_MS / 1000.0 - 0.5 and 'gave nothing for %d ms; ended' % IDLE_MS in log(),
           lambda: 'a silent X owner: read %r after %.1f s:\n%s' % (got, took, c.why()))
 
+    # The desktop's pipe for an X paste, held: never written (before the
+    # answer, property None at the deadline), or 100000 bytes and then
+    # nothing (mid-INCR: what came, then the end).
+    def hold(seq, data):
+        c.match(r'CLIP read %d %s' % (seq, re.escape(TEXT)))
+        fd = desk.desk.clip_fds.pop(0)
+        thread = threading.Thread(target=lambda: os.write(fd, data) if data else None, daemon=True)
+        thread.start()
+        return fd, thread
+    count = log().count('its owner did not finish in %d ms; refused' % IDLE_MS)
+    c.desk_offers(118, 'clipboard')
+    m = c.mark()
+    key(KEY_4)
+    fd, _ = hold(118, b'')
+    c.saw('pasted clipboard UTF8_STRING none', m)
+    os.close(fd)
+    check(log().count('its owner did not finish in %d ms; refused' % IDLE_MS) > count,
+          lambda: 'a silent desktop was not refused at the deadline:\n' + c.why())
+    count = log().count('its owner gave nothing for %d ms; ended short' % IDLE_MS)
+    part = noise(100000, 19)
+    c.desk_offers(119, 'clipboard')
+    m = c.mark()
+    key(KEY_4)
+    fd, writer = hold(119, part)
+    c.pastes('clipboard', 'UTF8_STRING', part, m)
+    writer.join(5)
+    os.close(fd)
+    check(log().count('its owner gave nothing for %d ms; ended short' % IDLE_MS) > count,
+          lambda: 'a stalled desktop was not ended short:\n' + c.why())
+
     # Two ownerships at once by one window at one time (W, secret and then
     # not): one offer, the newer's -- the older's TARGETS answer dropped.
     c.put('copy', b'twice')
@@ -849,8 +882,8 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work)
     # The keyboard rule: a copy (E) and a paste (Y) the X program makes a
     # second after the desktop took X's focus from it -- its ownership is
     # not the clipboard's (no offer; logged), its read refused (None).
-    ignored = "whose program does not have the keyboard: not the clipboard's"
-    refused = 'whose program does not have the keyboard: refused'
+    ignored = "while no X window has the keyboard: not the clipboard's"
+    refused = 'while no X window has the keyboard: refused'
     c.desk_offers(115, 'clipboard')
     count = log().count(ignored)
     m = c.mark()
@@ -877,6 +910,38 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work)
     m = c.mark()
     desk.send('WINDOW size 1 400 300 activated')
     c.saw('focus-in', m)
+
+    # Another X client than the one with X's focus, while window 1 has it
+    # (as xclip run from an xterm, or Wine's clipboard thread): its copy is
+    # the clipboard's, its paste answered; its selection ends with it.
+    def other_client(name, mode):
+        out_path = os.path.join(work, name)
+        client = cg.start([standin, 'X other'], dict(xenv, XSTANDIN_CLIP_AT_START=mode), open(out_path, 'w'))
+        oc = Clip(desk, lambda: open(out_path).read(), log, clip_dir)
+        wid = int(oc.match(r'WINDOW new (\d+) 0', 20).group(1))
+        for _ in range(3):
+            oc.match(r'WINDOW (title|appid|decor) %d .*' % wid)
+        return client, oc, wid
+    c.put('copy', b'from another X client')
+    other, oc, wid = other_client('xstandin-other.out', 'copy')
+    try:
+        seq = c.offered('clipboard')
+        check(c.read(seq) == b'from another X client', 'another X client\'s copy read back differs')
+        desk.send('WINDOW close %d' % wid)
+        got = {c.match(r'CLIP clear %d|WINDOW gone %d' % (seq, wid)).group(0) for _ in range(2)}
+        check(len(got) == 2, lambda: 'its selection did not end with it: %r' % got)
+        check(other.wait(5) == 0, 'the other X client failed')
+        c.desk_offers(117, 'clipboard')
+        other, oc, wid = other_client('xstandin-other-2.out', 'paste')
+        c.answer(117, b'to another X client')
+        oc.pastes('clipboard', 'UTF8_STRING', b'to another X client', 0)
+        desk.send('WINDOW close %d' % wid)
+        c.match(r'WINDOW gone %d' % wid)
+        check(other.wait(5) == 0, 'the second other X client failed')
+    finally:
+        if other.poll() is None:
+            other.kill()
+            other.wait()
 
     # Wayland programs: the stand-in with --clip copies (C, P) and X
     # pastes them (4, 5); X copies (1) and it pastes (V).
@@ -947,8 +1012,9 @@ def x_milestone_d(desk, lines_to, printed, log, clip_dir, wl_standin, env, work)
     return ('selections: X->desk clipboard,primary,latin1->utf8 desk->X utf8,primary,STRING->latin1 '
             'incr X->desk 700001, desk->X %s secret=hint both ways,TARGETS,cleared->none '
             'owner-change-mid-transfer=finished both ways stalls=requestor %.2f s,reader %.2f s answered,'
-            'let go at %d ms; silent owner->empty two-quick-owners->one offer keyboard-rule=copy ignored,read refused '
-            '%s' % (','.join(sizes), stall_a, stall_b, IDLE_MS, cross))
+            'let go at %d ms; silent owner->empty; desktop silent->None, stalled mid-INCR->100000 then end '
+            'two-quick-owners->one offer keyboard-rule=copy ignored,read refused with no X window focused; '
+            'other X client=copy+paste+ends with it %s' % (','.join(sizes), stall_a, stall_b, IDLE_MS, cross))
 
 
 def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
@@ -1167,7 +1233,7 @@ def x_part(compositor, standin, server, work, wl_standin=None):
 
         milestone_c = x_milestone_c(desk, lines_to, printed, lambda: open(log).read())
         milestone_d = x_milestone_d(desk, lines_to, printed, lambda: open(log).read(), clip_dir, wl_standin,
-                                    env, work)
+                                    env, work, standin, cenv)
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
