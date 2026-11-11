@@ -5754,12 +5754,15 @@ static void x_window_free(struct bc_server *s, struct bc_xwin *w)
    at a time, from the owner's pipe or property to the reader's.
 
    - An X program takes a selection (XFixes' SelectionNotify, selected on
-     a window of the window manager's): honoured when its client is the
-     one with X's focus -- the X program with the keyboard, as only the
-     Wayland program with the keyboard may set a selection -- else logged
-     once and left to X: the clipboard stays what it was for everyone else
-     until it next changes, when the window manager takes X's selection
-     back. (Taking it back at once would loop with an X clipboard keeper
+     a window of the window manager's): honoured while an X window has X's
+     focus -- X, as a whole, is the program with the keyboard, as only the
+     Wayland program with the keyboard may set a selection. Not the one
+     X client with the focus: X programs copy and paste through other
+     connections (xclip run in an xterm, Wine's clipboard thread), and X
+     keeps no X client from another anyway. With no X window focused it
+     is logged once and left to X: the clipboard stays what it was for
+     everyone else until it next changes, when the window manager takes
+     X's selection back. (Taking it back at once would loop with an X clipboard keeper
      that takes the selection whenever it is lost.) Honoured, its TARGETS
      are asked -- ConvertSelection at its own selection time, into a
      window of the window manager's -- and it becomes the selection's
@@ -5780,19 +5783,20 @@ static void x_window_free(struct bc_server *s, struct bc_xwin *w)
    - Any other owner (a Wayland program's source, the desktop's offer):
      the window manager owns X's selection on a window of its own, again
      at every change, and gives it up (at its own selection time, from
-     XFixes) when the selection is nobody's. A SelectionRequest from the
-     client with X's focus is answered: TARGETS; TIMESTAMP; the text
+     XFixes) when the selection is nobody's. A SelectionRequest while an
+     X window has X's focus is answered: TARGETS; TIMESTAMP; the text
      targets UTF8_STRING, text/plain;charset=utf-8, TEXT (as UTF8_STRING)
      and STRING (Latin-1, '?' for what it has not); the secret hint; a
      Wayland source's other types. The data is read from the owner through
      a pipe by clip_read, as a Wayland program's paste is; from 64 KiB on
      it goes INCR in 64 KiB chunks, each after the requestor deleted the
      last. Anything else -- another client, MULTIPLE, a type nobody
-     offers -- is answered with property None.
+     offers, any request while no X window has the focus -- is answered
+     with property None.
    - Every transfer ends when it makes no progress for BC_XSEL_IDLE_MS: an
      answer not yet given is property None; during an INCR, a stalled
-     owner's is ended by a zero-length chunk (the paste is short) and a
-     requestor that stopped deleting is let go. A reader that stops taking
+     owner's is ended with what came and a zero-length chunk (the paste
+     is short) and a requestor that stopped deleting is let go. A reader that stops taking
      an X owner's INCR is let go, and the owner's further chunks taken and
      dropped so it finishes. A transfer outlives a change of the
      selection: it is the old owner's to finish, as a Wayland source's
@@ -5859,12 +5863,10 @@ static uint32_t x_client_of(struct bc_server *s, xcb_window_t window)
     return window & ~xcb_get_setup(s->x.conn)->resource_id_mask;
 }
 
-/* Whether the window's client has X's focus: the X program with the
-   keyboard (x_activate). */
-static int x_focused_client(struct bc_server *s, xcb_window_t window)
+/* Whether X has the keyboard: an X window has X's focus (x_activate). */
+static int x_has_keyboard(struct bc_server *s)
 {
-    return s->x.focus != XCB_WINDOW_NONE && window != XCB_WINDOW_NONE &&
-           x_client_of(s, window) == x_client_of(s, s->x.focus);
+    return s->x.focus != XCB_WINDOW_NONE;
 }
 
 static int x_own_window(struct bc_server *s, xcb_window_t window)
@@ -6335,10 +6337,11 @@ static void out_progress(struct bc_xfer *t)
     if (!t->incr) {
         if (pending >= BC_XSEL_CHUNK) {
             uint32_t size = (uint32_t)pending, mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
-            /* The requestor's deletes, seen: a window of the window
-               manager's (a program's top-level) has PropertyChange
-               already; any other is selected for it. */
-            if (x_window(s, t->req.requestor) == NULL)
+            /* The requestor's deletes, seen: the root and a program's
+               top-level have PropertyChange in the window manager's mask
+               already (which must not be replaced); any other window is
+               selected for it. */
+            if (t->req.requestor != s->x.screen->root && x_window(s, t->req.requestor) == NULL)
                 xcb_change_window_attributes(c, t->req.requestor, XCB_CW_EVENT_MASK, &mask);
             xcb_change_property(c, XCB_PROP_MODE_REPLACE, t->req.requestor, t->property,
                                 s->x.atoms[BC_ATOM_INCR], 32, 1, &size);
@@ -6475,12 +6478,12 @@ static void x_selection_request(struct bc_server *s, xcb_selection_request_event
         x_sel_notify(s, req, XCB_ATOM_NONE);
         return;
     }
-    if (!x_focused_client(s, req->requestor)) {
+    if (!x_has_keyboard(s)) {
         struct bc_xsel *x = &s->x.xsel[k];
         if (x->refused != x_client_of(s, req->requestor)) {
             x->refused = x_client_of(s, req->requestor);
-            logf_("X: a read of %s by 0x%x, whose program does not have the keyboard: refused",
-                  x_sel_name(k), (unsigned)req->requestor);
+            logf_("X: a read of %s by 0x%x while no X window has the keyboard: refused", x_sel_name(k),
+                  (unsigned)req->requestor);
         }
         x_sel_notify(s, req, XCB_ATOM_NONE);
         return;
@@ -6530,10 +6533,10 @@ static void x_selection_owner(struct bc_server *s, xcb_xfixes_selection_notify_e
         }
         return;
     }
-    if (!x_focused_client(s, owner)) {
+    if (!x_has_keyboard(s)) {
         if (x->ignored != x_client_of(s, owner)) {
             x->ignored = x_client_of(s, owner);
-            logf_("X: %s taken by 0x%x, whose program does not have the keyboard: not the clipboard's",
+            logf_("X: %s taken by 0x%x while no X window has the keyboard: not the clipboard's",
                   x_sel_name(k), (unsigned)owner);
         }
         if (sel->source && sel->source->x) {
@@ -6608,10 +6611,17 @@ static int xfer_deadline(void *data)
               (unsigned)t->req.requestor, BC_XSEL_IDLE_MS);
         xfer_free(t);
     } else {
+        /* The owner stalled mid-INCR: what came goes, then the end. */
         logf_("X: a paste of %s into 0x%x: its owner gave nothing for %d ms; ended short", name,
               (unsigned)t->req.requestor, BC_XSEL_IDLE_MS);
-        xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, t->req.requestor, t->property, t->type, 8, 0, NULL);
-        xfer_free(t);
+        if (t->fd_source) wl_event_source_remove(t->fd_source);
+        t->fd_source = NULL;
+        if (t->fd >= 0) close(t->fd);
+        t->fd = -1;
+        t->eof = 1;
+        t->need = 0;
+        xfer_moved(t);
+        out_progress(t);
     }
     return 0;
 }
