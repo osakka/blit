@@ -2371,12 +2371,15 @@ It speaks the frame channel above as a producer, with these additions.
     else the one under its origin in X space (a popup there first: a
     submenu over its menu); else the X top-level the pointer is in. Its
     offset is its place relative to that top-level in X space, where
-    every X top-level keeps its own position (the program's; the window
-    manager never moves it): X space is a virtual layout, and the desktop
-    places the pictures. A popup the program moves after it is shown keeps
-    its first place (logged; the draft has no line for a popup that moves,
-    for either kind). One whose origin is in no X window and that names
-    none is not shown (logged).
+    every X top-level keeps its own position (the program's, only kept
+    inside the X screen, the largest `WINDOW output`, since X confines its
+    pointer to it; never moved after that): X space is a virtual layout,
+    and the desktop places the pictures. A popup the program moves after
+    it is shown keeps its first place (logged; the draft has no line for a
+    popup that moves, for either kind). One whose origin is in no X
+    window and that names none is not shown (logged). The pointer over
+    the part of a top-level larger than the X screen reaches X at the
+    screen's edge.
   - X menus take their input as X programs expect: the keys and the
     pointer of their top-level's route reach the menu through its X
     grabs, and a press anywhere in the program's windows outside the menu

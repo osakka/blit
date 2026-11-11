@@ -319,12 +319,19 @@ section; `docs/api.md`, "X programs"):
   test: no `_NET_CLIENT_LIST(_STACKING)`, and a ConfigureRequest's
   sibling and stack mode are dropped. From milestone C X's order follows
   Blit's pointer: the toplevel under it is raised above the topmost other
-  shown toplevel before the pointer's event goes to Xwayland, never above
+  shown toplevel before the pointer's event goes to Xwayland, and again
+  when a new toplevel is shown under a pointer at rest, never above
   override-redirect windows (wlroots' restack rule); wlroots restacks on
   activation, because its compositor's screen positions are the X
   positions, which ours are not (below). A ConfigureRequest after the
   desktop's size is answered with that size and a synthetic
   ConfigureNotify (ICCCM 4.1.5); wlroots hands it to its compositor.
+- Toplevels keep the X position their program asks for, kept inside the
+  root (from milestone C): X confines its pointer to the root, the
+  largest output (the compositor's outputs all sit at 0,0), so a press
+  past its edge reached X at the edge (the gate measured 390,170 arrive
+  as 219,170). wlroots' compositors move X windows to their screen
+  positions, inside the outputs by construction.
 - Override-redirect windows (from milestone C) are popups of a toplevel,
   where wlroots shows them as unmanaged surfaces at their absolute X
   position: the wire has popups, not free-standing surfaces. The parent
@@ -811,20 +818,34 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     decides), hence X's stacking follows Blit's pointer; and a raise and
     a press sent in the same instant race inside Xwayland, which takes
     input before requests -- a person's press comes after the pointer got
-    there, and the gate waits for the raise as a person would.
+    there, and the gate waits for the raise as a person would. Then, on
+    the advice of a review, a dialog shown under a pointer at rest (the
+    raise moved to its showing too) and a window past the root's edge
+    (clamped, hence the window manager keeps toplevels inside the root).
   - Evidence: `xwayland_gate` (Xwayland 24.1 in the Debian 13 build
     environment) passes under tcc and ASan/UBSan with the stand-in's new
     keys -- menus as popups 2 and 3 at 30,40 (a key and a choice through
-    their grabs, dismissed by a press outside), popup 4 past the window's
-    edge by `WM_TRANSIENT_FOR` (`WINDOW close` logged, dismissed on
-    deactivation), dialog `WINDOW new 5 1` with limits 150x80-300x200, a
-    press under it reaching window 1, a base size as limits, full screen
-    and maximize on and off with the states written back, move and
-    bottom-right resize with a press held and refused without one, and
-    `WINDOW cursor 1 xterm`; `compositor_gate` passes, both builds.
+    their grabs, dismissed by a press outside); dialog `WINDOW new 4 1`
+    with limits 150x80-300x200, shown under a pointer at rest, a press
+    there with no move reaching window 1; popup 5 in the dialog by
+    `WM_TRANSIENT_FOR` window 1 (`WINDOW close` logged, dismissed on
+    deactivation); a submenu, popup 7, of window 1 by the menu under its
+    origin while the pointer was on the dialog; a base size as limits;
+    full screen and maximize on and off with the states written back;
+    move and bottom-right resize with a press held, refused without one;
+    `WINDOW minimize 1` from WM_CHANGE_STATE; a panel asking for
+    1800,1000 placed at 1720,980, a press at its far corner landing,
+    maximized before its map and given its parent after; `WINDOW cursor 1
+    xterm`, and `default` for an unknown name. Hibr's side read: its
+    focus loss sends `WINDOW size` without `activated` (`dt_natsize`),
+    which is what deactivates X. `compositor_gate` and `pointer_art_gate`
+    pass.
   - Pending: Steam's menus, dropdowns, title bar and cursors on the
     owner's machine. Open: a moving popup's line (the draft has none for
     either kind); an X program whose only window is override-redirect
-    (some games) is not shown; a menu whose toolkit closes only on its
-    own grab's click stays open after a click outside every X window; the
-    raise-and-press race above, for synthetic input.
+    (some games) is not shown, nor one whose origin is in no X window
+    while the pointer is in none (not gated: the gate cannot take the
+    pointer away); a menu whose toolkit closes only on its own grab's
+    click stays open after a click outside every X window; a toplevel
+    larger than the root takes its pointer clamped past the root's edge;
+    the raise-and-press race above, for synthetic input.

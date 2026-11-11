@@ -51,11 +51,12 @@ says so, and Hibr's frame stays off, as for Firefox.
 - **Menus, dropdowns and tooltips** show over their window, where the
   program puts them, and take the keys and the mouse as the program
   expects: choose with a click or the keys, and a click elsewhere in the
-  program's windows closes the menu. Switching to another window closes
-  it in programs that close their menus when they lose the focus (Steam,
-  Chromium and Qt programs do). A click on the desktop or in a Wayland
-  program does not reach X, so a program that waits for a click of its
-  own (some older toolkits) keeps its menu open until you come back to it.
+  program's windows closes the menu. Switching to another window takes
+  the focus from the program, which is how X programs that close their
+  menus on losing the focus are told (which programs do is still to be
+  checked on real hardware, Steam first). A click on the desktop or in a
+  Wayland program does not reach X, so a program that waits for a click
+  of its own keeps its menu open until you come back to it.
 - **Dialogs** belong to their window, as a Wayland program's do, and a
   window's minimum and maximum size hold when you resize it.
 - **The program's own buttons**: full screen, maximize, minimize, and
