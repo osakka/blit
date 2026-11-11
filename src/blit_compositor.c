@@ -266,6 +266,7 @@ enum {
     BC_ATOM_NET_WM_STATE_FULLSCREEN, BC_ATOM_NET_WM_STATE_MAXIMIZED_VERT,
     BC_ATOM_NET_WM_STATE_MAXIMIZED_HORZ, BC_ATOM_NET_WM_MOVERESIZE, BC_ATOM_NET_WM_WINDOW_TYPE,
     BC_ATOM_WM_NORMAL_HINTS, BC_ATOM_MOTIF_WM_HINTS, BC_ATOM_WM_S0, BC_ATOM_NET_WM_CM_S0,
+    BC_ATOM_NET_WM_STATE_FOCUSED,
     BC_ATOMS
 };
 
@@ -4774,6 +4775,19 @@ static void input_sockets_clear(struct bc_server *s)
 /* WM_STATE's states (ICCCM 4.1.3.1). */
 #define BC_WM_STATE_WITHDRAWN 0u
 #define BC_WM_STATE_NORMAL 1u
+#define BC_WM_STATE_ICONIC 3u
+/* _NET_WM_STATE's states the window manager keeps (bc_xwin.state). */
+#define BC_XS_FULLSCREEN 1u
+#define BC_XS_MAX_VERT 2u
+#define BC_XS_MAX_HORZ 4u
+#define BC_XS_FOCUSED 8u
+#define BC_XS_MAXIMIZED (BC_XS_MAX_VERT | BC_XS_MAX_HORZ)
+/* _NET_WM_STATE's actions and _NET_WM_MOVERESIZE's directions (EWMH). */
+#define BC_NET_STATE_REMOVE 0u
+#define BC_NET_STATE_ADD 1u
+#define BC_NET_STATE_TOGGLE 2u
+#define BC_MOVERESIZE_MOVE 8u
+#define BC_MOVERESIZE_CANCEL 11u
 
 enum {
     BC_X_LOGGED_ID = 1u << 0, BC_X_LOGGED_STATE = 1u << 1, BC_X_LOGGED_MOVERESIZE = 1u << 2,
@@ -4787,6 +4801,7 @@ static const char *const bc_atom_names[BC_ATOMS] = {
     "_NET_SUPPORTED", "_NET_ACTIVE_WINDOW", "_NET_WM_STATE", "_NET_WM_STATE_FULLSCREEN",
     "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", "_NET_WM_MOVERESIZE",
     "_NET_WM_WINDOW_TYPE", "WM_NORMAL_HINTS", "_MOTIF_WM_HINTS", "WM_S0", "_NET_WM_CM_S0",
+    "_NET_WM_STATE_FOCUSED",
 };
 
 /* One child of the root: an X top-level, from its CreateNotify to its
@@ -4809,6 +4824,13 @@ struct bc_xwin {
     int or_logged;                    /* an override-redirect window with no parent, noted once */
     xcb_window_t transient_for;       /* WM_TRANSIENT_FOR, XCB_WINDOW_NONE none */
     uint32_t stack;                   /* its place in X's stacking: higher is above */
+    int32_t min_w, min_h, max_w, max_h;   /* WM_NORMAL_HINTS, pixels, 0 none */
+    /* _NET_WM_STATE (BC_XS_*): `state` what the property says -- the
+       program's before it is shown, the window manager's from the
+       desktop's `WINDOW size` on, the base of a toggle -- and `state_set`
+       once the window manager has written it. */
+    unsigned state;
+    int state_set;
     int remapping;                    /* unmapped by the window manager to be mapped again */
     uint32_t measure[BC_X_MEASURE];   /* commit to frame sent, us, its first frames */
     int measured, measure_said;
@@ -4940,6 +4962,29 @@ static void x_text(struct bc_server *s, xcb_get_property_reply_t *reply, char *o
     out[n] = '\0';
 }
 
+/* An atom of _NET_WM_STATE as a BC_XS_* bit, 0 for one not kept. */
+static unsigned x_state_bit(struct bc_server *s, xcb_atom_t atom)
+{
+    const xcb_atom_t *atoms = s->x.atoms;
+    if (atom == XCB_ATOM_NONE) return 0;
+    if (atom == atoms[BC_ATOM_NET_WM_STATE_FULLSCREEN]) return BC_XS_FULLSCREEN;
+    if (atom == atoms[BC_ATOM_NET_WM_STATE_MAXIMIZED_VERT]) return BC_XS_MAX_VERT;
+    if (atom == atoms[BC_ATOM_NET_WM_STATE_MAXIMIZED_HORZ]) return BC_XS_MAX_HORZ;
+    if (atom == atoms[BC_ATOM_NET_WM_STATE_FOCUSED]) return BC_XS_FOCUSED;
+    return 0;
+}
+
+/* A toplevel's transient parent from its WM_TRANSIENT_FOR: the shown X
+   window it names (the toplevel of a menu it names); none for the root,
+   or a window not shown. */
+static struct bc_xdg *x_transient_parent(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_xwin *o;
+    if (w->transient_for == XCB_WINDOW_NONE || (o = x_window(s, w->transient_for)) == NULL || o->pic == NULL)
+        return NULL;
+    return o->pic->xpopup ? o->pic->parent : o->pic;
+}
+
 /* One of the window's properties, read (its reply) or changed. */
 static void x_property(struct bc_server *s, struct bc_xwin *w, xcb_atom_t atom,
                        xcb_get_property_reply_t *reply)
@@ -5017,12 +5062,52 @@ static void x_property(struct bc_server *s, struct bc_xwin *w, xcb_atom_t atom,
             if (w->pic->id) send_decor(w->pic);
         }
     } else if (atom == atoms[BC_ATOM_WM_NORMAL_HINTS]) {
-        x_note(s, BC_X_LOGGED_HINTS, "a window's WM_NORMAL_HINTS (its limits)");
+        /* WM_SIZE_HINTS (ICCCM 4.1.2.3): flags, x, y, width, height, the
+           minimum (PMinSize, 16), the maximum (PMaxSize, 32), increments,
+           aspects, the base size (PBaseSize, 256), gravity. Without a
+           minimum the base size is the minimum (ICCCM; as wlroots).
+           xdg_toplevel's set_min_size and set_max_size: `WINDOW limits`,
+           0 for none -- so a maximum past X's 32767 is none. */
+        const int32_t *v;
+        int n = reply && reply->format == 32 ? xcb_get_property_value_length(reply) / 4 : 0;
+        w->min_w = w->min_h = w->max_w = w->max_h = 0;
+        if (n >= 9) {
+            v = xcb_get_property_value(reply);
+            if (v[0] & 16) {
+                w->min_w = v[5];
+                w->min_h = v[6];
+            } else if ((v[0] & 256) && n >= 17) {
+                w->min_w = v[15];
+                w->min_h = v[16];
+            }
+            if (v[0] & 32) {
+                w->max_w = v[7];
+                w->max_h = v[8];
+            }
+        }
+        if (w->min_w < 0 || w->min_w > 32767) w->min_w = 0;
+        if (w->min_h < 0 || w->min_h > 32767) w->min_h = 0;
+        if (w->max_w < 0 || w->max_w > 32767) w->max_w = 0;
+        if (w->max_h < 0 || w->max_h > 32767) w->max_h = 0;
+        if (w->pic && !w->pic->xpopup) window_set_limits(w->pic, w->min_w, w->min_h, w->max_w, w->max_h);
+    } else if (atom == atoms[BC_ATOM_NET_WM_STATE]) {
+        /* The program's own, before the window is shown (EWMH: a mapped
+           window asks by a client message); from then on the property is
+           the window manager's to write. */
+        const xcb_atom_t *list;
+        int i, n;
+        if (w->pic || w->state_set) return;
+        w->state = 0;
+        if (reply == NULL || reply->type != XCB_ATOM_ATOM || reply->format != 32) return;
+        list = xcb_get_property_value(reply);
+        n = xcb_get_property_value_length(reply) / 4;
+        for (i = 0; i < n; ++i) w->state |= x_state_bit(s, list[i]);
     } else if (atom == XCB_ATOM_WM_TRANSIENT_FOR) {
         w->transient_for = XCB_WINDOW_NONE;
         if (reply && reply->format == 32 && reply->type == XCB_ATOM_WINDOW &&
             xcb_get_property_value_length(reply) >= 4)
             w->transient_for = *(const xcb_window_t *)xcb_get_property_value(reply);
+        if (w->pic && !w->pic->xpopup) window_set_parent(w->pic, x_transient_parent(s, w));
     } else if (atom == atoms[BC_ATOM_NET_WM_WINDOW_TYPE]) {
         x_note(s, BC_X_LOGGED_TYPE, "a window's _NET_WM_WINDOW_TYPE");
     }
@@ -5034,7 +5119,8 @@ static void x_read_properties(struct bc_server *s, struct bc_xwin *w)
     xcb_connection_t *c = s->x.conn;
     const xcb_atom_t props[] = { s->x.atoms[BC_ATOM_NET_WM_NAME], XCB_ATOM_WM_NAME, XCB_ATOM_WM_CLASS,
                                  s->x.atoms[BC_ATOM_WM_PROTOCOLS], XCB_ATOM_WM_HINTS,
-                                 s->x.atoms[BC_ATOM_MOTIF_WM_HINTS], XCB_ATOM_WM_TRANSIENT_FOR };
+                                 s->x.atoms[BC_ATOM_MOTIF_WM_HINTS], XCB_ATOM_WM_TRANSIENT_FOR,
+                                 s->x.atoms[BC_ATOM_WM_NORMAL_HINTS], s->x.atoms[BC_ATOM_NET_WM_STATE] };
     xcb_get_property_cookie_t cookies[sizeof(props) / sizeof(props[0])];
     xcb_res_query_client_ids_cookie_t pid_cookie = { 0 };
     size_t i;
@@ -5157,8 +5243,29 @@ static void x_resize(struct bc_server *s, struct bc_xwin *w, uint16_t width, uin
     }
 }
 
+/* The desktop's states for the window (`WINDOW size`, as xdg's configure
+   carries them) as its _NET_WM_STATE: full screen, maximized (vertical
+   and horizontal), focused (activated). Written when they change. */
+static void x_state_write(struct bc_server *s, struct bc_xwin *w, const struct bc_xdg *x)
+{
+    xcb_atom_t list[4];
+    uint32_t n = 0;
+    unsigned bits = (x->size_fullscreen ? BC_XS_FULLSCREEN : 0) | (x->size_maximized ? BC_XS_MAXIMIZED : 0) |
+                    (x->size_activated ? BC_XS_FOCUSED : 0);
+    if (w->state_set && bits == w->state) return;
+    w->state = bits;
+    w->state_set = 1;
+    if (bits & BC_XS_FULLSCREEN) list[n++] = s->x.atoms[BC_ATOM_NET_WM_STATE_FULLSCREEN];
+    if (bits & BC_XS_MAX_VERT) list[n++] = s->x.atoms[BC_ATOM_NET_WM_STATE_MAXIMIZED_VERT];
+    if (bits & BC_XS_MAX_HORZ) list[n++] = s->x.atoms[BC_ATOM_NET_WM_STATE_MAXIMIZED_HORZ];
+    if (bits & BC_XS_FOCUSED) list[n++] = s->x.atoms[BC_ATOM_NET_WM_STATE_FOCUSED];
+    xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, w->window, s->x.atoms[BC_ATOM_NET_WM_STATE],
+                        XCB_ATOM_ATOM, 32, n, list);
+}
+
 /* The desktop's `WINDOW size` for an X toplevel: its size (0 0 leaves it
-   to the program), and X's focus when it is activated. */
+   to the program), its states as _NET_WM_STATE, and X's focus when it is
+   activated. */
 static void x_configure(struct bc_xdg *x)
 {
     struct bc_server *s = x->server;
@@ -5166,8 +5273,7 @@ static void x_configure(struct bc_xdg *x)
     if (s->x.conn == NULL || w == NULL) return;
     if (x->size_w > 0 && x->size_h > 0 && x->size_w <= 32767 && x->size_h <= 32767)
         x_resize(s, w, (uint16_t)x->size_w, (uint16_t)x->size_h);
-    if (x->size_fullscreen || x->size_maximized)
-        x_note(s, BC_X_LOGGED_STATE, "the desktop's full screen or maximized state for an X window");
+    x_state_write(s, w, x);
     if (x->size_activated) x_activate(s, w);
     else if (s->x.focus == w->window) x_activate(s, NULL);
     xcb_flush(s->x.conn);
@@ -5204,8 +5310,7 @@ static struct bc_xdg *x_popup_parent(struct bc_server *s, struct bc_xwin *w)
 {
     struct bc_xwin *o, *top = NULL;
     struct bc_xdg *p;
-    if (w->transient_for != XCB_WINDOW_NONE && (o = x_window(s, w->transient_for)) != NULL && o->pic)
-        return o->pic->xpopup ? o->pic->parent : o->pic;
+    if ((p = x_transient_parent(s, w)) != NULL) return p;
     wl_list_for_each(o, &s->x.windows, link)
         if (o != w && o->pic && o->pic->xpopup && o->pic->parent && x_contains(o, w->x, w->y))
             top = o;  /* the newest */
@@ -5273,10 +5378,22 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
                                        : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
         memcpy(x->title, w->title, sizeof(x->title));
         memcpy(x->appid, w->appid, sizeof(x->appid));
+        /* Its hints as an xdg toplevel's before its first commit: said
+           with `WINDOW new` (announce_hints). */
+        x->parent = x_transient_parent(s, w);
+        x->min_w = w->min_w; x->min_h = w->min_h;
+        x->max_w = w->max_w; x->max_h = w->max_h;
+        x->fullscreen = (w->state & BC_XS_FULLSCREEN) != 0;
+        x->maximize = (w->state & BC_XS_MAXIMIZED) == BC_XS_MAXIMIZED;
         if (s->wire.window) {
+            struct bc_xwin *o;
             announce_toplevel(x);
             logf_("window %u: X window 0x%x %dx%d, its client's pid %u (0 unknown)", x->id,
                   (unsigned)w->window, w->width, w->height, w->pid);
+            /* Its transients shown before it name it now. */
+            wl_list_for_each(o, &s->x.windows, link)
+                if (o->transient_for == w->window && o->pic && !o->pic->xpopup && o->pic->parent == NULL)
+                    window_set_parent(o->pic, x);
         } else {
             logf_("X window 0x%x \"%s\" is not shown: the peer has no window=1", (unsigned)w->window,
                   w->title);
@@ -5477,8 +5594,16 @@ static void x_unmap_notify(struct bc_server *s, xcb_unmap_notify_event_t *ev)
     struct bc_xwin *w = x_window(s, ev->window);
     if (w == NULL) return;
     x_unmatch(s, w);
-    if (w->remapping) w->remapping = 0;  /* x_adopt's: mapped again already */
-    else if (!w->override_redirect) x_set_wm_state(s, w, BC_WM_STATE_WITHDRAWN);
+    if (w->remapping) {
+        w->remapping = 0;  /* x_adopt's: mapped again already */
+    } else if (!w->override_redirect) {
+        /* Withdrawn: no WM_STATE Normal, no _NET_WM_STATE (EWMH); mapped
+           again, its own property is read afresh. */
+        x_set_wm_state(s, w, BC_WM_STATE_WITHDRAWN);
+        if (w->state_set) xcb_delete_property(s->x.conn, w->window, s->x.atoms[BC_ATOM_NET_WM_STATE]);
+        w->state = 0;
+        w->state_set = 0;
+    }
 }
 
 static void x_configure_request(struct bc_server *s, xcb_configure_request_event_t *ev)
@@ -5517,6 +5642,68 @@ static void x_configure_notify(struct bc_server *s, xcb_configure_notify_event_t
     w->override_redirect = ev->override_redirect;
 }
 
+/* A program's _NET_WM_STATE request (EWMH: to the root, about its window):
+   its full screen and maximize as xdg_toplevel's set_fullscreen and
+   set_maximized -- `WINDOW fullscreen` and `WINDOW maximize`, which the
+   desktop answers with `WINDOW size`. Maximized is both directions (xdg
+   has no half); a toggle is from the state the property says. Before the
+   window is shown it is the state it is shown with. */
+static void x_state_request(struct bc_server *s, xcb_client_message_event_t *ev)
+{
+    struct bc_xwin *w = x_window(s, ev->window);
+    struct bc_xdg *x;
+    unsigned bits, named = 0, i;
+    if (w == NULL || w->override_redirect) return;
+    bits = w->state;
+    for (i = 1; i <= 2; ++i) {
+        unsigned bit = x_state_bit(s, ev->data.data32[i]);
+        if (bit == 0 || bit == BC_XS_FOCUSED) continue;
+        named |= bit;
+        if (ev->data.data32[0] == BC_NET_STATE_REMOVE) bits &= ~bit;
+        else if (ev->data.data32[0] == BC_NET_STATE_ADD) bits |= bit;
+        else if (ev->data.data32[0] == BC_NET_STATE_TOGGLE) bits ^= bit;
+        else return;
+    }
+    x = w->pic;
+    if (x == NULL) {
+        if (!w->state_set) w->state = bits;
+        return;
+    }
+    /* Only the states it names: the others stand as they are. */
+    if ((named & BC_XS_FULLSCREEN) && ((bits & BC_XS_FULLSCREEN) != 0) != (x->fullscreen != 0))
+        window_set_fullscreen(x, (bits & BC_XS_FULLSCREEN) != 0);
+    if (named & BC_XS_MAXIMIZED) toplevel_maximize(x, (bits & BC_XS_MAXIMIZED) == BC_XS_MAXIMIZED);
+}
+
+/* A program's _NET_WM_MOVERESIZE (EWMH; its own title bar or edge, as
+   Steam's): `WINDOW move` or `WINDOW resize <edges>`, as xdg_toplevel's
+   move and resize, under the same rule (window_grab_ok): a press the
+   compositor delivered to the window is down -- the button the message
+   names (1, 2, 3), or any when it names none (0). X has no serial; that
+   is the whole of the rule here. The keyboard's move and size (9, 10)
+   have no line, and a cancel (11) is the desktop's drag ending at the
+   release. */
+static void x_moveresize_request(struct bc_server *s, xcb_client_message_event_t *ev)
+{
+    static const char *const edges[8] = { "top-left", "top", "top-right", "right",
+                                           "bottom-right", "bottom", "bottom-left", "left" };
+    /* X buttons 1, 2, 3: BTN_LEFT, BTN_MIDDLE, BTN_RIGHT, bc_server.buttons_down's bits 0, 2, 1. */
+    static const uint32_t bits[4] = { 0, 1u << 0, 1u << 2, 1u << 1 };
+    struct bc_xwin *w = x_window(s, ev->window);
+    uint32_t direction = ev->data.data32[2], button = ev->data.data32[3];
+    int press_ok;
+    if (w == NULL || w->pic == NULL || w->pic->xpopup) return;
+    if (direction > BC_MOVERESIZE_MOVE) {
+        if (direction != BC_MOVERESIZE_CANCEL)
+            logf_("window %u: _NET_WM_MOVERESIZE %u (by keyboard) has no line; ignored", w->pic->id, direction);
+        return;
+    }
+    press_ok = button == 0 || (button <= 3 && (s->buttons_down & bits[button]));
+    if (!window_grab_ok(w->pic, press_ok)) return;
+    if (direction == BC_MOVERESIZE_MOVE) window_move(w->pic);
+    else window_resize(w->pic, edges[direction]);
+}
+
 static void x_client_message(struct bc_server *s, xcb_client_message_event_t *ev)
 {
     xcb_atom_t *atoms = s->x.atoms;
@@ -5527,14 +5714,19 @@ static void x_client_message(struct bc_server *s, xcb_client_message_event_t *ev
             logf_("X: Xwayland named a surface by WL_SURFACE_ID, not xwayland_shell_v1: it is "
                   "older than 23.1 or did not bind the shell; its windows are not shown");
         s->x.logged |= BC_X_LOGGED_ID;
-    } else if (ev->type == atoms[BC_ATOM_NET_WM_STATE]) {
-        x_note(s, BC_X_LOGGED_STATE, "_NET_WM_STATE requests (full screen, maximized)");
-    } else if (ev->type == atoms[BC_ATOM_NET_WM_MOVERESIZE]) {
-        x_note(s, BC_X_LOGGED_MOVERESIZE, "_NET_WM_MOVERESIZE (a program's own move and resize)");
+    } else if (ev->type == atoms[BC_ATOM_NET_WM_STATE] && ev->format == 32) {
+        x_state_request(s, ev);
+    } else if (ev->type == atoms[BC_ATOM_NET_WM_MOVERESIZE] && ev->format == 32) {
+        x_moveresize_request(s, ev);
     } else if (ev->type == atoms[BC_ATOM_NET_ACTIVE_WINDOW]) {
-        x_note(s, BC_X_LOGGED_ACTIVE, "_NET_ACTIVE_WINDOW requests (a program raising its window)");
-    } else if (ev->type == atoms[BC_ATOM_WM_CHANGE_STATE]) {
-        x_note(s, BC_X_LOGGED_ICONIFY, "WM_CHANGE_STATE (a program minimizing its window)");
+        x_note(s, BC_X_LOGGED_ACTIVE, "_NET_ACTIVE_WINDOW requests (a program raising its window: the "
+                                      "draft has no line for it)");
+    } else if (ev->type == atoms[BC_ATOM_WM_CHANGE_STATE] && ev->format == 32) {
+        /* ICCCM 4.1.4: IconicState is the program minimizing its window
+           (its own title bar's button), as xdg_toplevel.set_minimized. */
+        struct bc_xwin *w = x_window(s, ev->window);
+        if (w && w->pic && !w->pic->xpopup && ev->data.data32[0] == BC_WM_STATE_ICONIC)
+            window_minimize(w->pic);
     }
 }
 
@@ -5667,7 +5859,7 @@ static int x_wm_start(struct bc_server *s)
     const xcb_query_extension_reply_t *ext;
     xcb_generic_error_t *error;
     uint32_t mask;
-    xcb_atom_t supported[8];
+    xcb_atom_t supported[9];
     static const char name[] = "blit-compositor";
     int i;
     c = xcb_connect_to_fd(s->x.wm_fd, NULL);
@@ -5746,8 +5938,9 @@ static int x_wm_start(struct bc_server *s)
     supported[5] = s->x.atoms[BC_ATOM_NET_WM_MOVERESIZE];
     supported[6] = s->x.atoms[BC_ATOM_NET_WM_NAME];
     supported[7] = s->x.atoms[BC_ATOM_NET_SUPPORTING_WM_CHECK];
+    supported[8] = s->x.atoms[BC_ATOM_NET_WM_STATE_FOCUSED];
     xcb_change_property(c, XCB_PROP_MODE_REPLACE, s->x.screen->root, s->x.atoms[BC_ATOM_NET_SUPPORTED],
-                        XCB_ATOM_ATOM, 32, 8, supported);
+                        XCB_ATOM_ATOM, 32, 9, supported);
     xcb_set_selection_owner(c, s->x.wm_window, s->x.atoms[BC_ATOM_WM_S0], XCB_CURRENT_TIME);
     xcb_set_selection_owner(c, s->x.wm_window, s->x.atoms[BC_ATOM_NET_WM_CM_S0], XCB_CURRENT_TIME);
     s->x.focus = XCB_WINDOW_NONE;
