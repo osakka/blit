@@ -26,6 +26,10 @@ order:
     the X client as ButtonPress 1 at 10,12, a key (evdev 30) as KeyPress 38;
   - the space bar: 150 frames drawn, and the compositor's measure of its
     first 60 frames, commit to frame sent (printed);
+  - Xwayland alive after its AccessX timeout has expired since the last
+    key: run with `+accessx 1` (1 s instead of X's 120), the timeout updates
+    every keyboard's indicators, which crashed Xwayland 24.1 when Blit's
+    keymap had none (src/blit_xkb_keymap.h);
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
   - `WINDOW quit 0`: the compositor ends 0, Xwayland with it, the sockets
     and the lock removed.
@@ -199,7 +203,14 @@ def x_part(compositor, standin, server, work):
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind('\0' + name)
     listener.listen(2)
-    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    # Xwayland as the compositor runs it, with its AccessX timeout at one
+    # second (X's default is 120), so the gate sees it expire.
+    xwayland = os.path.join(work, 'Xwayland')
+    with open(xwayland, 'w') as f:
+        f.write('#!/bin/sh\nexec %s "$@" +accessx 1\n' % shutil.which('Xwayland'))
+    os.chmod(xwayland, 0o755)
+    env = gate_env.process_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime,
+                               BLIT_COMPOSITOR_XWAYLAND=xwayland)
     for k in ('WAYLAND_DISPLAY', 'DISPLAY', 'XAUTHORITY'):
         env.pop(k, None)
     log = os.path.join(work, 'compositor.log')
@@ -293,6 +304,21 @@ def x_part(compositor, standin, server, work):
               % (frames, printed(), open(log).read()))
         wait_for(lambda: 'XSTANDIN animated 150' in printed(), lambda: 'the X client did not draw 150:\n' + printed())
 
+        # Twice the AccessX timeout since the space bar's release, the last
+        # key: Xwayland has updated every keyboard's indicators, and lives.
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            got = desk.next(0.2)
+            if got and got[0] == 'frame':
+                os.close(got[2])
+            elif got:
+                check(not got[1].startswith('WINDOW gone'), lambda: 'the window went after the AccessX '
+                      'timeout:\n%s' % open(log).read())
+        text = open(log).read()
+        check(os.path.exists('/proc/%d' % xpid) and 'X: Xwayland was killed' not in text and
+              'X: Xwayland exited' not in text,
+              lambda: 'Xwayland did not outlive its AccessX timeout (the keymap\'s indicators):\n' + text)
+
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
         while True:
@@ -325,7 +351,7 @@ def x_part(compositor, standin, server, work):
               'the X socket or lock outlived the compositor')
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
-                '(%d frames) close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
+                '(%d frames) accessx=1s->Xwayland-lived close=WM_DELETE_WINDOW->exit 0->gone quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
                                      measure.group(1), measure.group(2), frames, len(desk.cursors)))
     finally:

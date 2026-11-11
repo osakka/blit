@@ -208,7 +208,7 @@ def main():
         status, _, pointer = get('/v1/input/keymap?device=%s' % pointer_id)
         check(status == 200 and pointer != remapped, 'the pointer\'s keymap: %d' % status)
         check(get('/v1/input/keymap?device=nope')[0] == 404, 'an unknown device is not 404')
-        print('KEYMAP_GATE_OK xkb_v1 compiles keys=%s us:a/A,1/!,caps,altgr remap:q->ä/Ä/@,'
+        print('KEYMAP_GATE_OK xkb_v1 compiles keys=%s leds=caps,num(lit-by-lock) us:a/A,1/!,caps,altgr remap:q->ä/Ä/@,'
               '102nd-></>,caps->control etag=changes,304 unknown=404 repeat=30/250,304-too,'
               'patch->20/400,pointer=0/0 default=first,last-key(second,first),disabled->first,enabled->last-key'
               % keys.split('=')[1])

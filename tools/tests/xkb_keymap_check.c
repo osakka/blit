@@ -9,7 +9,7 @@
    UTF-8 the key types then, or `mod:<modifier>` (an xkb modifier name:
    Shift, Lock, Control, Mod1 ... Mod5) for one that must be in effect once
    the key is down, or `sym:<keysym name>` for the key's keysym. Each check starts
-   from a fresh state. Prints XKB_KEYMAP_CHECK_OK <checks> <keys>, or a
+   from a fresh state. Prints XKB_KEYMAP_CHECK_OK <checks> <leds> <keys>, or a
    XKB_KEYMAP_CHECK_FAIL line per failure and exits 1. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +63,48 @@ int main(int argc, char **argv)
     }
     for (key = xkb_keymap_min_keycode(keymap); key <= xkb_keymap_max_keycode(keymap); ++key)
         if (xkb_keymap_num_layouts_for_key(keymap, key) > 0) ++keys;
+    /* The two locks' indicators: named, off at first, and lit by a press
+       and release of the key that carries the lock's keysym, when a key
+       does (a remap may take it away). A keymap without indicators crashes
+       Xwayland 24.1 (src/blit_xkb_keymap.h). */
+    {
+        static const struct { const char *name; xkb_keysym_t sym; } leds[] = {
+            { "Caps Lock", XKB_KEY_Caps_Lock }, { "Num Lock", XKB_KEY_Num_Lock }
+        };
+        unsigned k;
+        for (k = 0; k < sizeof(leds) / sizeof(leds[0]); ++k) {
+            struct xkb_state *state = xkb_state_new(keymap);
+            xkb_keycode_t lock = XKB_KEYCODE_INVALID, c;
+            ++checks;
+            if (xkb_keymap_led_get_index(keymap, leds[k].name) == XKB_LED_INVALID) {
+                fprintf(stderr, "XKB_KEYMAP_CHECK_FAIL no indicator \"%s\"\n", leds[k].name);
+                ++failures;
+                xkb_state_unref(state);
+                continue;
+            }
+            if (xkb_state_led_name_is_active(state, leds[k].name) != 0) {
+                fprintf(stderr, "XKB_KEYMAP_CHECK_FAIL indicator \"%s\" is lit with nothing locked\n",
+                        leds[k].name);
+                ++failures;
+            }
+            for (c = xkb_keymap_min_keycode(keymap); c <= xkb_keymap_max_keycode(keymap) &&
+                 lock == XKB_KEYCODE_INVALID; ++c) {
+                const xkb_keysym_t *syms;
+                if (xkb_keymap_key_get_syms_by_level(keymap, c, 0, 0, &syms) == 1 && syms[0] == leds[k].sym)
+                    lock = c;
+            }
+            if (lock != XKB_KEYCODE_INVALID) {
+                xkb_state_update_key(state, lock, XKB_KEY_DOWN);
+                xkb_state_update_key(state, lock, XKB_KEY_UP);
+                if (xkb_state_led_name_is_active(state, leds[k].name) != 1) {
+                    fprintf(stderr, "XKB_KEYMAP_CHECK_FAIL indicator \"%s\" is not lit after key %u\n",
+                            leds[k].name, (unsigned)lock - 8);
+                    ++failures;
+                }
+            }
+            xkb_state_unref(state);
+        }
+    }
     for (i = 2; i + 2 < argc; i += 3) {
         struct xkb_state *state = xkb_state_new(keymap);
         xkb_keycode_t code = (xkb_keycode_t)atoi(argv[i]) + 8;
@@ -106,6 +148,6 @@ int main(int argc, char **argv)
     xkb_context_unref(context);
     free(text);
     if (failures) return 1;
-    printf("XKB_KEYMAP_CHECK_OK checks=%d keys=%u\n", checks, (unsigned)keys);
+    printf("XKB_KEYMAP_CHECK_OK checks=%d leds=caps,num keys=%u\n", checks, (unsigned)keys);
     return 0;
 }

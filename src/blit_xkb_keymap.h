@@ -20,7 +20,12 @@
      evdev_key_character).
    - xkb_compatibility: the modifier keysyms set Shift, Control, Mod1 (Alt),
      Mod4 (Super), Mod5 (LevelThree); Caps_Lock and Num_Lock lock Lock and
-     Mod2.
+     Mod2; and the two locks' indicators, "Caps Lock" and "Num Lock" (named
+     in xkb_keycodes), lit while their modifier is locked. A keyboard's
+     keymap has its indicators: programs read them, and Xwayland (24.1)
+     given a keymap with none frees the indicator maps its keyboards' LED
+     state still points at and crashes at the next LED update (its
+     AccessX timeout, 120 s after a key).
    - xkb_symbols: each key's levels as keysyms -- ASCII by name, anything
      else as U<hex> -- and the modifier map by keysym.
 
@@ -238,7 +243,7 @@ static size_t xkb_keymap_text(const BlitInputDevice *device, char *out, size_t c
     for (code = 1; code <= BLIT_XKB_LAST_CODE; ++code)
         if (xkb_key_levels(device, code, levels, &alphabetic) > 0)
             xkb_put(&t, "    <K%u> = %u;\n", (unsigned)code, (unsigned)code + 8);
-    xkb_put(&t, "};\n");
+    xkb_put(&t, "    indicator 1 = \"Caps Lock\";\n    indicator 2 = \"Num Lock\";\n};\n");
     xkb_put(&t,
             "xkb_types \"blit\" {\n"
             "    virtual_modifiers NumLock,Alt,Super,LevelThree;\n"
@@ -274,6 +279,8 @@ static size_t xkb_keymap_text(const BlitInputDevice *device, char *out, size_t c
             "    interpret Num_Lock { virtualModifier = NumLock; action = LockMods(modifiers = Mod2); };\n"
             "    interpret Any + AnyOf(all) { action = SetMods(modifiers = modMapMods, clearLocks); };\n"
             "    interpret Any { repeat = True; };\n"
+            "    indicator \"Caps Lock\" { !allowExplicit; whichModState = Locked; modifiers = Lock; };\n"
+            "    indicator \"Num Lock\" { !allowExplicit; whichModState = Locked; modifiers = NumLock; };\n"
             "};\n");
     xkb_put(&t, "xkb_symbols \"blit\" {\n");
     for (code = 1; code <= BLIT_XKB_LAST_CODE; ++code) {
