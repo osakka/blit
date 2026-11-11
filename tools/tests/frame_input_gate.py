@@ -123,9 +123,27 @@ class Server:
                    BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'), BLIT_EXPECT_DESKTOP='0',
                    BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1')
         env.update(extra or {})
+        log = os.path.join(work, 'server.log')
         self.process = subprocess.Popen([BINARY, str(port)], env=env, stdout=subprocess.DEVNULL,
-                                        stderr=open(os.path.join(work, 'server.log'), 'w'))
-        wait_for(lambda: self.api('GET', '/v1/version'), 'the server on %d did not start' % port, 15)
+                                        stderr=open(log, 'w'))
+        # Ready is this process answering: while it is alive (one that exits
+        # at once, its port held by another program, fails here with its
+        # log rather than the gate talking to whatever holds the port), and
+        # with Blit's version. A start that fails stops the process, which
+        # no caller has yet to stop.
+        def ready():
+            if self.process.poll() is not None:
+                fail('the server on %d exited %d at start (its port in use?):\n%s'
+                     % (port, self.process.returncode, open(log).read()[-2000:]))
+            try:
+                return 'server_version' in self.api('GET', '/v1/version')
+            except ValueError:
+                return False
+        try:
+            wait_for(ready, 'the server on %d did not start' % port, 15)
+        except BaseException:
+            self.stop()
+            raise
 
     def api(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
