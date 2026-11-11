@@ -393,6 +393,7 @@ static void x_configure(struct bc_xdg *x);
 static void x_close(struct bc_xdg *x);
 static void x_popup_close(struct bc_xdg *x);
 static void x_focus_follows(struct bc_server *s, struct bc_surface *surface);
+static void x_pointer_over(struct bc_server *s, struct bc_surface *surface);
 
 static void logf_(const char *fmt, ...)
 {
@@ -4457,6 +4458,8 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         } else {
             target = pointer_target(s, x, in.x, in.y, &lx, &ly);
         }
+        /* X's stacking first, so X finds the window Blit's pointer is over. */
+        x_pointer_over(s, target);
         if (target != s->ptr_focus) {
             pointer_focus(s, target, lx, ly);
         } else {
@@ -5209,6 +5212,36 @@ static void x_focus_follows(struct bc_server *s, struct bc_surface *surface)
     if (s->x.conn == NULL) return;
     if (x && x->xwin) x_activate(s, x->xwin);
     else x_activate(s, NULL);
+}
+
+/* X's stacking follows Blit's pointer. Xwayland turns a pointer on a
+   surface into a root position by its window's place, then X finds the
+   window there by its own stacking; where two toplevels overlap in X
+   space (a dialog over its window) the one Blit's pointer is over must be
+   the topmost. So the toplevel under the pointer is raised above the
+   topmost other shown toplevel -- never above override-redirect windows,
+   which X programs expect to stay on top (wlroots' restack does the same)
+   -- before the pointer's event goes to Xwayland. Stacking is otherwise
+   the desktop's: it draws; X's order only decides X's hit test. */
+static void x_raise(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_xwin *o, *top = NULL;
+    uint32_t values[2];
+    wl_list_for_each(o, &s->x.windows, link)
+        if (o->pic && !o->pic->xpopup && (top == NULL || o->stack > top->stack)) top = o;
+    if (top == NULL || top == w) return;
+    values[0] = top->window;
+    values[1] = XCB_STACK_MODE_ABOVE;
+    xcb_configure_window(s->x.conn, w->window, XCB_CONFIG_WINDOW_SIBLING | XCB_CONFIG_WINDOW_STACK_MODE, values);
+    xcb_flush(s->x.conn);
+    w->stack = ++s->x.stack_seq;
+}
+
+static void x_pointer_over(struct bc_server *s, struct bc_surface *surface)
+{
+    struct bc_xdg *x = surface ? surface_window(surface) : NULL;
+    if (s->x.conn == NULL || x == NULL || x->xwin == NULL) return;
+    x_raise(s, x->xwin);
 }
 
 /* The window resized to w x h at its own X position, border 0; a
