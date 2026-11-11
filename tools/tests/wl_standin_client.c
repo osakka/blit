@@ -3,7 +3,7 @@
    for the real programs the gate cannot run).
 
      wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
-                       [--cursor] [--appmenu] [title]
+                       [--cursor] [--appmenu] [--activate] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -35,6 +35,14 @@
    With --appmenu it says where its menus are (org_kde_kwin_appmenu): at
    its first sized configure an address that is not D-Bus syntax ("a b"),
    then `:1.42` `/MenuBar/1`; at the next, it releases it.
+
+   With --activate it asks for its window's focus (xdg_activation_v1): at
+   its first sized configure with a token never issued ("nosuchtoken",
+   printed `STANDIN activation bad token`); at each key press with a token
+   it asks for then (set_serial with that press's serial and the seat,
+   set_surface, commit: `STANDIN activation token asked`), and at the
+   token's done activates its surface with it twice -- the second use of
+   a used token (`STANDIN activation used <length of the token>`).
 
    With --cursor it names its pointer shapes (wp_cursor_shape_v1): `text`
    when the pointer enters, `pointer` at a BTN_LEFT press, and at BTN_RIGHT
@@ -127,6 +135,7 @@
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "appmenu-client-protocol.h"
+#include "xdg-activation-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -185,6 +194,9 @@ struct standin {
     int appmenu_mode, appmenu_step;
     struct org_kde_kwin_appmenu_manager *appmenu_manager;
     struct org_kde_kwin_appmenu *appmenu;
+    /* --activate */
+    int activate_mode, activate_bad;
+    struct xdg_activation_v1 *activation;
     /* --cursor */
     int cursor;
     struct wp_cursor_shape_manager_v1 *shape_manager;
@@ -675,6 +687,12 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
         ++s->appmenu_step;
         fflush(stdout);
     }
+    if (s->activate_mode && s->activation && !s->activate_bad) {
+        s->activate_bad = 1;
+        xdg_activation_v1_activate(s->activation, "nosuchtoken", s->surface);
+        printf("STANDIN activation bad token\n");
+        fflush(stdout);
+    }
     if (s->sub_script) sub_next(s);
     if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
@@ -685,6 +703,19 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
 }
 
 static const struct xdg_surface_listener xdg_surface_listener = { xdg_surface_configure };
+
+/* --activate: the token is done; its surface activated with it twice. */
+static void token_done(void *data, struct xdg_activation_token_v1 *token, const char *text)
+{
+    struct standin *s = data;
+    xdg_activation_v1_activate(s->activation, text, s->surface);
+    xdg_activation_v1_activate(s->activation, text, s->surface);
+    xdg_activation_token_v1_destroy(token);
+    printf("STANDIN activation used %zu\n", strlen(text));
+    fflush(stdout);
+}
+
+static const struct xdg_activation_token_v1_listener token_listener = { token_done };
 
 static void decoration_configure(void *data, struct zxdg_toplevel_decoration_v1 *d, uint32_t mode)
 {
@@ -764,6 +795,14 @@ static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uin
         printf("STANDIN gone\n");
     }
     if (s->lock && key == 57 && state == WL_KEYBOARD_KEY_STATE_PRESSED) lock_next(s);
+    if (s->activate_mode && s->activation && s->surface && state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        struct xdg_activation_token_v1 *token = xdg_activation_v1_get_activation_token(s->activation);
+        xdg_activation_token_v1_add_listener(token, &token_listener, s);
+        xdg_activation_token_v1_set_serial(token, serial, s->seat);
+        xdg_activation_token_v1_set_surface(token, s->surface);
+        xdg_activation_token_v1_commit(token);
+        printf("STANDIN activation token asked\n");
+    }
     if (s->clip && state == WL_KEYBOARD_KEY_STATE_PRESSED) clip_key(s, key, serial);
     fflush(stdout);
 }
@@ -1240,6 +1279,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->ddm = wl_registry_bind(registry, name, &wl_data_device_manager_interface, version < 3 ? version : 3);
     else if (strcmp(interface, org_kde_kwin_appmenu_manager_interface.name) == 0)
         s->appmenu_manager = wl_registry_bind(registry, name, &org_kde_kwin_appmenu_manager_interface, 1);
+    else if (strcmp(interface, xdg_activation_v1_interface.name) == 0)
+        s->activation = wl_registry_bind(registry, name, &xdg_activation_v1_interface, 1);
     else if (strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0)
         s->shape_manager = wl_registry_bind(registry, name, &wp_cursor_shape_manager_v1_interface, 1);
     else if (strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) == 0)
@@ -1364,6 +1405,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
         else if (strcmp(argv[i], "--cursor") == 0) s.cursor = 1;
         else if (strcmp(argv[i], "--appmenu") == 0) s.appmenu_mode = 1;
+        else if (strcmp(argv[i], "--activate") == 0) s.activate_mode = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -1474,6 +1516,7 @@ int main(int argc, char **argv)
     if (s.sub_surface) wl_surface_destroy(s.sub_surface);
     if (s.appmenu) org_kde_kwin_appmenu_release(s.appmenu);
     if (s.appmenu_manager) org_kde_kwin_appmenu_manager_destroy(s.appmenu_manager);
+    if (s.activation) xdg_activation_v1_destroy(s.activation);
     if (s.shape_device) wp_cursor_shape_device_v1_destroy(s.shape_device);
     if (s.shape_manager) wp_cursor_shape_manager_v1_destroy(s.shape_manager);
     if (s.cursor_surface) wl_surface_destroy(s.cursor_surface);

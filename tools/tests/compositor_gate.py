@@ -329,6 +329,63 @@ def appmenu_part(desk, standin, env, display, work, log):
     return 'address=:1.42,/MenuBar/1 not-dbus=ignored release=- -'
 
 
+def activation_part(desk, standin, env, display, work, log):
+    """Activation (xdg_activation_v1, ADR 0229), with `--activate`, window
+    13: a token never issued asks for nothing; a token asked for with a key
+    press's serial and the surface, then used, is `WINDOW activate 13
+    xdg-activation`; used again, nothing; a window the desktop has
+    activated asks for nothing."""
+    out_path = os.path.join(work, 'standin-activate.out')
+    client = start([standin, '--activate', 'Activate'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    frame = [0]
+
+    def key(code):
+        text = b''
+        for state in ('press', 'release'):
+            frame[0] += 1
+            text += b'INPUT key %d %d %s\nINPUT frame %d %d\n' % (BLIT_PICTURE, code, state.encode(),
+                                                                   BLIT_PICTURE, frame[0])
+        route.sendall(text)
+
+    try:
+        for want in ('WINDOW new 13 0', 'WINDOW title 13 Activate', 'WINDOW appid 13 blit.standin',
+                     'WINDOW limits 13 64 48 0 0', 'WINDOW decor 13 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=13)
+        desk.send('WINDOW size 13 200 120')
+        desk.frame(200, 120, image_id=13)
+        wait_for(lambda: 'STANDIN activation bad token' in printed(), lambda: 'no bad token:\n' + printed())
+        desk.nothing(0.3)
+        wait_for(lambda: 'activation: a token not issued here, used, or replaced by newer ones: nothing asked'
+                 in open(log).read(), 'the bad token was not logged')
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[13])
+        key(30)
+        desk.line('WINDOW activate 13 xdg-activation')
+        wait_for(lambda: 'STANDIN activation used 32' in printed(), lambda: 'no token used:\n' + printed())
+        desk.nothing(0.3)
+        check('activation: a token issued (window 13, the serial of its newest press)' in open(log).read(),
+              'the token was not issued for the key press:\n' + open(log).read())
+        # Activated by the desktop, it has nothing to ask for.
+        desk.send('WINDOW size 13 200 120 activated')
+        desk.frame(200, 120, image_id=13)
+        used = printed().count('STANDIN activation used')
+        key(30)
+        wait_for(lambda: printed().count('STANDIN activation used') > used, lambda: 'no token used:\n' + printed())
+        desk.nothing(0.3)
+        desk.send('WINDOW close 13')
+        desk.line('WINDOW gone 13')
+        check(client.wait(5) == 0, 'the activation stand-in failed:\n' + printed())
+    finally:
+        if route: route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return 'bad-token=nothing(logged) key-press-token->WINDOW activate 13 xdg-activation reuse=nothing activated=nothing'
+
+
 def cursor_part(desk, standin, env, display, work, log):
     """The pointer's shape (ADR 0229), with `--cursor`, window 11: shapes the
     program names reach the desktop as `WINDOW cursor <id> <name>` in Blit's
@@ -1652,6 +1709,7 @@ def desktop_part(compositor, standin, work):
         clip = clip_part(desk, standin, env, display, work)
         cursor = cursor_part(desk, standin, env, display, work, log)
         appmenu = appmenu_part(desk, standin, env, display, work, log)
+        activation = activation_part(desk, standin, env, display, work, log)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1665,7 +1723,10 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        check('41 frames sent, 0 failed' in text, 'the log does not count 41 frames (40, and the popup again after its move):\n%s' % text)
+        # 44: 40, the popup again after its move, and the activation window's
+        # three (its own size, the desktop's, and again activated).
+        check('44 frames sent, 0 failed' in text, 'the log does not count 44 frames (40, the popup again after its '
+              'move, the activation window\'s 3):\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
@@ -1677,6 +1738,7 @@ def desktop_part(compositor, standin, work):
         print('COMPOSITOR_CLIP_OK %s' % clip)
         print('COMPOSITOR_CURSOR_OK %s' % cursor)
         print('COMPOSITOR_APPMENU_OK %s' % appmenu)
+        print('COMPOSITOR_ACTIVATION_OK %s' % activation)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

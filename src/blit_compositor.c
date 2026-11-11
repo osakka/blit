@@ -40,7 +40,8 @@
    client`), wl_seat (keyboard with Blit's xkb keymap, pointer),
    zwp_linux_dmabuf_v1 (only for a peer that imports: dmabuf=1),
    wp_presentation, zwp_relative_pointer_manager_v1 and
-   zwp_pointer_constraints_v1 (asked of the desktop, `WINDOW lock`). Each
+   zwp_pointer_constraints_v1 (asked of the desktop, `WINDOW lock`),
+   xdg_activation_v1 (`WINDOW activate`: the activation section). Each
    is offered at the version the task names or the one the build host's
    protocol XML carries, whichever is lower (BC_VERSION).
 
@@ -63,6 +64,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <sys/ioctl.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <linux/dma-buf.h>
@@ -85,6 +87,7 @@
 #include "cursor-shape-v1-server-protocol.h"
 #include "appmenu-server-protocol.h"
 #include "xwayland-shell-v1-server-protocol.h"
+#include "xdg-activation-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 #include "blit_pointer_names.h"
 
@@ -96,6 +99,7 @@
    interface (the build host's XML). */
 #define BC_VERSION(want, iface) ((want) < (iface).version ? (want) : (iface).version)
 #define BC_SOCKETS 32
+#define BC_TOKENS 16
 
 enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE, BC_ROLE_XWAYLAND };
 enum { BC_LINK_UP = 0, BC_LINK_DOWN };
@@ -422,6 +426,16 @@ struct bc_server {
     double ptr_x, ptr_y;
     uint32_t buttons_down;            /* BTN_LEFT + n */
     uint32_t button_serial;           /* the serial of the newest press, sent to every pointer */
+    uint32_t key_serial;              /* the serial of the newest key press, to the keyboard's client */
+    /* xdg_activation_v1's tokens (the activation section): a ring, the
+       oldest replaced by the newest */
+    struct bc_token {
+        char text[33];
+        uint32_t ms;                  /* when it was issued */
+        int on;                       /* issued and not used */
+    } tokens[BC_TOKENS];
+    unsigned token_next;
+    unsigned activation_logged;       /* BC_ACT_LOGGED_*: each kind of refusal logged once */
     int pointer_batch;                /* a pointer event since the last frame */
     struct bc_x x;                    /* Xwayland and its window manager (the X section) */
     FILE *log;
@@ -2084,6 +2098,186 @@ static void bind_appmenu_manager(struct wl_client *client, void *data, uint32_t 
         return;
     }
     wl_resource_set_implementation(r, &appmenu_manager_impl, data, NULL);
+}
+
+/* ---- activation (xdg_activation_v1, ADR 0229) ----
+
+   A program asks for one of its windows to have the focus with a token:
+   it gets one (get_activation_token, then set_serial, set_app_id,
+   set_surface, commit: the token is `done`), passes it on (to a program
+   it launches, in XDG_ACTIVATION_TOKEN) or keeps it, and activate(token,
+   surface) asks for that surface's toplevel: `WINDOW activate <id>
+   xdg-activation` (window_ask_activate), the desktop's to grant. A token
+   is 128 random bits, valid for BC_TOKEN_MS from its commit and once; the
+   store keeps the newest BC_TOKENS (a newer one replaces the oldest). An
+   unknown, used or expired token, or a surface that is no toplevel, asks
+   for nothing (each kind logged once). The serial and surface a token is
+   asked with are logged with it -- whether the serial is the newest press
+   the compositor gave that client -- and decide nothing: the line has no
+   word for them, and which asks to grant is the desktop's. */
+
+#define BC_TOKEN_MS 30000u
+enum { BC_ACT_LOGGED_UNKNOWN = 1u << 0, BC_ACT_LOGGED_EXPIRED = 1u << 1, BC_ACT_LOGGED_NOT_TOPLEVEL = 1u << 2 };
+
+struct bc_token_request {
+    struct bc_server *server;
+    int committed;
+    int has_serial;
+    uint32_t serial;
+    uint32_t window;                  /* set_surface's toplevel id, 0 none */
+};
+
+static void activation_refused(struct bc_server *s, unsigned kind, const char *why)
+{
+    if (s->activation_logged & kind) return;
+    s->activation_logged |= kind;
+    logf_("activation: %s: nothing asked (logged once)", why);
+}
+
+static int token_used_up(struct wl_resource *resource, struct bc_token_request *t)
+{
+    if (!t->committed) return 0;
+    wl_resource_post_error(resource, XDG_ACTIVATION_TOKEN_V1_ERROR_ALREADY_USED,
+                           "the token was already committed");
+    return 1;
+}
+
+static void token_set_serial(struct wl_client *client, struct wl_resource *resource, uint32_t serial,
+                             struct wl_resource *seat)
+{
+    struct bc_token_request *t = wl_resource_get_user_data(resource);
+    (void)client; (void)seat;  /* one seat */
+    if (token_used_up(resource, t)) return;
+    t->has_serial = 1;
+    t->serial = serial;
+}
+
+static void token_set_app_id(struct wl_client *client, struct wl_resource *resource, const char *app_id)
+{
+    struct bc_token_request *t = wl_resource_get_user_data(resource);
+    (void)client; (void)app_id;
+    token_used_up(resource, t);
+}
+
+static void token_set_surface(struct wl_client *client, struct wl_resource *resource,
+                              struct wl_resource *surface)
+{
+    struct bc_token_request *t = wl_resource_get_user_data(resource);
+    struct bc_xdg *x = surface_window(wl_resource_get_user_data(surface));
+    (void)client;
+    if (token_used_up(resource, t)) return;
+    t->window = x ? x->id : 0;
+}
+
+/* 128 bits from the kernel, as 32 hex digits. */
+static void token_text(char out[33])
+{
+    unsigned char bits[16];
+    unsigned i;
+    ssize_t got = getrandom(bits, sizeof(bits), 0);
+    if (got != (ssize_t)sizeof(bits)) {
+        /* Not expected; still a unique token, but a guessable one. */
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        memset(bits, 0, sizeof(bits));
+        memcpy(bits, &ts, sizeof(ts) < sizeof(bits) ? sizeof(ts) : sizeof(bits));
+        logf_("activation: no random bits from the kernel (%s): a token from the clock", strerror(errno));
+    }
+    for (i = 0; i < sizeof(bits); ++i) snprintf(out + 2 * i, 3, "%02x", bits[i]);
+}
+
+static void token_commit(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_token_request *t = wl_resource_get_user_data(resource);
+    struct bc_server *s = t->server;
+    struct bc_token *k = &s->tokens[s->token_next];
+    int pressed;
+    if (token_used_up(resource, t)) return;
+    t->committed = 1;
+    s->token_next = (s->token_next + 1) % BC_TOKENS;
+    token_text(k->text);
+    k->ms = now_ms();
+    k->on = 1;
+    pressed = t->has_serial &&
+              ((t->serial == s->key_serial && s->kbd_focus &&
+                wl_resource_get_client(s->kbd_focus->resource) == client) ||
+               (t->serial == s->button_serial && s->ptr_focus &&
+                wl_resource_get_client(s->ptr_focus->resource) == client));
+    logf_("activation: a token issued (window %u, %s)", t->window,
+          !t->has_serial ? "no serial" : pressed ? "the serial of its newest press" : "a serial of no press of it");
+    xdg_activation_token_v1_send_done(resource, k->text);
+}
+
+static void token_destroyed(struct wl_resource *resource)
+{
+    free(wl_resource_get_user_data(resource));
+}
+
+static const struct xdg_activation_token_v1_interface token_impl = {
+    .set_serial = token_set_serial,
+    .set_app_id = token_set_app_id,
+    .set_surface = token_set_surface,
+    .commit = token_commit,
+    .destroy = bc_destroy_request,
+};
+
+static void activation_get_token(struct wl_client *client, struct wl_resource *resource, uint32_t id)
+{
+    struct bc_token_request *t = calloc(1, sizeof(*t));
+    struct wl_resource *r = t ? wl_resource_create(client, &xdg_activation_token_v1_interface,
+                                                   wl_resource_get_version(resource), id)
+                              : NULL;
+    if (r == NULL) {
+        free(t);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    t->server = wl_resource_get_user_data(resource);
+    wl_resource_set_implementation(r, &token_impl, t, token_destroyed);
+}
+
+static void activation_activate(struct wl_client *client, struct wl_resource *resource, const char *token,
+                                struct wl_resource *surface)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_surface *sf = wl_resource_get_user_data(surface);
+    struct bc_token *k = NULL;
+    struct bc_xdg *x;
+    unsigned i;
+    (void)client;
+    for (i = 0; i < BC_TOKENS; ++i)
+        if (s->tokens[i].on && strcmp(s->tokens[i].text, token) == 0) k = &s->tokens[i];
+    if (k == NULL) {
+        activation_refused(s, BC_ACT_LOGGED_UNKNOWN, "a token not issued here, used, or replaced by newer ones");
+        return;
+    }
+    k->on = 0;
+    if (now_ms() - k->ms >= BC_TOKEN_MS) {
+        activation_refused(s, BC_ACT_LOGGED_EXPIRED, "an expired token");
+        return;
+    }
+    x = sf ? sf->xdg : NULL;
+    if (!window_is_toplevel(x)) {
+        activation_refused(s, BC_ACT_LOGGED_NOT_TOPLEVEL, "a token for a surface that is no toplevel");
+        return;
+    }
+    window_ask_activate(x, "xdg-activation");
+}
+
+static const struct xdg_activation_v1_interface activation_impl = {
+    .destroy = bc_destroy_request,
+    .get_activation_token = activation_get_token,
+    .activate = activation_activate,
+};
+
+static void bind_activation(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &xdg_activation_v1_interface, (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &activation_impl, data, NULL);
 }
 
 /* ---- the clipboard (ADR 0229) ----
@@ -4586,10 +4780,16 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         else s->keys_down[in.code / 8] &= (unsigned char)~bit;
         if (s->xkb_state)
             xkb_state_update_key(s->xkb_state, in.code + 8, in.pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
-        seat_for_client(r, &s->keyboards, x->surface)
-            wl_keyboard_send_key(r, wl_display_next_serial(s->display), now_ms(), in.code,
-                                 in.pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
-                                            : WL_KEYBOARD_KEY_STATE_RELEASED);
+        {
+            /* One serial for the event: a press's is what an activation
+               token may name (the activation section). */
+            uint32_t serial = wl_display_next_serial(s->display);
+            if (in.pressed) s->key_serial = serial;
+            seat_for_client(r, &s->keyboards, x->surface)
+                wl_keyboard_send_key(r, serial, now_ms(), in.code,
+                                     in.pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+                                                : WL_KEYBOARD_KEY_STATE_RELEASED);
+        }
         keyboard_send_modifiers(s, 0);
         return;
     }
@@ -8572,7 +8772,9 @@ int main(int argc, char **argv)
                           bind_shape_manager) ||
         !wl_global_create(server.display, &org_kde_kwin_appmenu_manager_interface,
                           BC_VERSION(1, org_kde_kwin_appmenu_manager_interface), &server,
-                          bind_appmenu_manager)) {
+                          bind_appmenu_manager) ||
+        !wl_global_create(server.display, &xdg_activation_v1_interface,
+                          BC_VERSION(1, xdg_activation_v1_interface), &server, bind_activation)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;
@@ -8596,7 +8798,7 @@ int main(int argc, char **argv)
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
           "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d, "
           "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d, "
-          "wp_cursor_shape_manager_v1 %d, org_kde_kwin_appmenu_manager %d",
+          "wp_cursor_shape_manager_v1 %d, org_kde_kwin_appmenu_manager %d, xdg_activation_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
           BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
@@ -8606,7 +8808,8 @@ int main(int argc, char **argv)
           BC_VERSION(3, wl_data_device_manager_interface),
           BC_VERSION(1, zwp_primary_selection_device_manager_v1_interface),
           BC_VERSION(2, wp_cursor_shape_manager_v1_interface),
-          BC_VERSION(1, org_kde_kwin_appmenu_manager_interface));
+          BC_VERSION(1, org_kde_kwin_appmenu_manager_interface),
+          BC_VERSION(1, xdg_activation_v1_interface));
     server.frame_source = wl_event_loop_add_fd(server.loop, server.wire.fd, WL_EVENT_READABLE,
                                                on_frame_socket, &server);
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);

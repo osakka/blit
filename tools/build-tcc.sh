@@ -94,7 +94,8 @@ case "$target" in
         # for every other build of it (the gate's client and sanitizer
         # builds). cursor-shape-v1 refers to the tablet tool, so the tablet
         # protocol's interfaces are generated with it. xwayland-shell-v1
-        # (staging since 1.31) is how Xwayland names each X window's surface.
+        # (staging since 1.31) is how Xwayland names each X window's surface;
+        # xdg-activation-v1 (staging) is a program asking for the focus.
         : > "$proto/sources"
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
@@ -106,6 +107,7 @@ case "$target" in
                    "$protocols/staging/cursor-shape/cursor-shape-v1.xml" \
                    "$protocols/unstable/tablet/tablet-unstable-v2.xml" \
                    "$protocols/staging/xwayland-shell/xwayland-shell-v1.xml" \
+                   "$protocols/staging/xdg-activation/xdg-activation-v1.xml" \
                    "$plasma/appmenu.xml"; do
             base=$(basename "$xml" .xml)
             "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"
