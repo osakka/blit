@@ -322,11 +322,11 @@ struct bc_x {
         xcb_window_t owner;           /* X's owner as XFixes last said, None none */
         xcb_timestamp_t owner_time;   /* its selection time */
         unsigned claims;              /* the window manager's SetSelectionOwner not yet seen */
-        xcb_window_t asked;           /* the ownership whose TARGETS are asked, None none */
-        xcb_timestamp_t asked_time;
+        uint32_t asked;               /* the TARGETS transfer whose answer counts (its serial), 0 none */
         uint32_t ignored, refused;    /* the X client last not honoured, as owner and reader (logged once) */
     } xsel[2];
     struct wl_list xfers;             /* bc_xfer */
+    uint32_t xfer_serial;
 };
 
 /* The clipboard (ADR 0229): a program's selection source -- a Wayland
@@ -5815,6 +5815,7 @@ struct bc_xfer {
     struct bc_server *server;
     int kind;                         /* BC_XFER_* */
     int k;                            /* 0 CLIPBOARD, 1 PRIMARY */
+    uint32_t serial;                  /* its own, never 0 */
     int fd;                           /* IN: the reader's pipe; OUT: the owner's; -1 none */
     struct wl_event_source *fd_source, *timer;
     unsigned char *buf;               /* the bytes on their way, buf[off..len) */
@@ -5917,6 +5918,8 @@ static struct bc_xfer *xfer_new(struct bc_server *s, int kind, int k)
     t->kind = kind;
     t->k = k;
     t->fd = -1;
+    if (++s->x.xfer_serial == 0) ++s->x.xfer_serial;
+    t->serial = s->x.xfer_serial;
     t->timer = wl_event_loop_add_timer(s->loop, xfer_deadline, t);
     if (t->timer == NULL) {
         free(t);
@@ -6041,15 +6044,16 @@ static void x_sel_notify(struct bc_server *s, const xcb_selection_request_event_
 /* ---- an X program's selection: X to everyone ---- */
 
 /* An X owner's selection k asked for: `target` converted into a window of
-   ours, TARGETS (fd -1) or data into the reader's fd, ours from here. */
-static void x_convert(struct bc_server *s, int k, int kind, xcb_atom_t target, xcb_window_t owner,
+   ours, TARGETS (fd -1) or data into the reader's fd, ours from here.
+   Returns the transfer's serial, 0 when none was made. */
+static uint32_t x_convert(struct bc_server *s, int k, int kind, xcb_atom_t target, xcb_window_t owner,
                       xcb_timestamp_t time, int fd)
 {
     struct bc_xfer *t = xfer_new(s, kind, k);
     uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
     if (t == NULL) {
         if (fd >= 0) close(fd);
-        return;
+        return 0;
     }
     t->fd = fd;
     t->owner = owner;
@@ -6062,6 +6066,7 @@ static void x_convert(struct bc_server *s, int k, int kind, xcb_atom_t target, x
     xcb_convert_selection(s->x.conn, t->window, x_sel_atom(s, k), target, s->x.atoms[BC_ATOM_BLIT_SELECTION],
                           time);
     xcb_flush(s->x.conn);
+    return t->serial;
 }
 
 /* source_send for an X source: its type's target, into a copy of fd. */
@@ -6136,14 +6141,16 @@ static struct bc_source *x_source_new(struct bc_server *s, int k, xcb_window_t o
 }
 
 /* TARGETS answered (reply NULL: refused, or none in time): the source of
-   the newest honoured ownership, or nothing for an older one. */
+   the newest honoured ownership, or nothing for an older one -- told by
+   the transfer, not by owner and time, which two quick ownerships of one
+   window can share. */
 static void x_targets_answered(struct bc_server *s, struct bc_xfer *t, xcb_get_property_reply_t *reply)
 {
     struct bc_xsel *x = &s->x.xsel[t->k];
     struct bc_source *src;
     int n = 0;
-    if (x->asked != t->owner || x->asked_time != t->time) return;
-    x->asked = XCB_WINDOW_NONE;
+    if (x->asked != t->serial) return;
+    x->asked = 0;
     if (reply && reply->type == XCB_ATOM_ATOM && reply->format == 32)
         n = xcb_get_property_value_length(reply) / 4;
     src = x_source_new(s, t->k, t->owner, t->time, n ? xcb_get_property_value(reply) : NULL, n);
@@ -6504,7 +6511,7 @@ static void x_selection_owner(struct bc_server *s, xcb_xfixes_selection_notify_e
     x->owner = owner;
     x->owner_time = ev->selection_timestamp;
     /* An older ownership's TARGETS no longer count. */
-    x->asked = XCB_WINDOW_NONE;
+    x->asked = 0;
     if (owner == s->x.sel_window) {
         /* The window manager's own: given up again when the selection
            became nobody's meanwhile. */
@@ -6536,9 +6543,8 @@ static void x_selection_owner(struct bc_server *s, xcb_xfixes_selection_notify_e
         }
         return;
     }
-    x->asked = owner;
-    x->asked_time = ev->selection_timestamp;
-    x_convert(s, k, BC_XFER_TARGETS, s->x.atoms[BC_ATOM_TARGETS], owner, ev->selection_timestamp, -1);
+    x->asked = x_convert(s, k, BC_XFER_TARGETS, s->x.atoms[BC_ATOM_TARGETS], owner, ev->selection_timestamp,
+                         -1);
 }
 
 /* PropertyNotify about a transfer: an IN owner's next chunk, an OUT
