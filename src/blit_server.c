@@ -14021,7 +14021,7 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         unsigned *flags = &session->terminal_keyboard_flags[screen];
         unsigned *depth = &session->terminal_keyboard_depth[screen];
         unsigned *stack = session->terminal_keyboard_stack[screen];
-        unsigned requested = (unsigned)first & 15u;
+        unsigned requested = (unsigned)first & 31u;
         if (prefix == '>') {
             if (*depth == 16) {
                 memmove(stack, stack + 1, 15 * sizeof(*stack));
@@ -30140,6 +30140,49 @@ static int evdev_super_held(const BlitInputDevice *keyboard)
 
 /* -1: preserve legacy encoding; 0: no bytes for this event; positive: length.
    Only advertise enhancements this physical-key path actually implements. */
+/* Flag 16's text: what the key types, as legacy input would have typed it.
+   A text key's is evdev_key_character's (the device keymap's level for
+   Shift, AltGr and CapsLock, else the US table), the same text the legacy
+   encoder sends. A keypad key types its operator always and its digit or
+   point only with NumLock on, when the keypad is not a cursor block.
+   Returns the length, 0 when the key types nothing. */
+static int kitty_key_text(const BlitInputDevice *keyboard, unsigned short code,
+                          int text_key, char *out, size_t capacity)
+{
+    const char *keypad;
+    int length;
+    if (capacity == 0) return 0;
+    out[0] = '\0';
+    if (text_key) return evdev_key_character(keyboard, code, out, capacity);
+    switch (code) {
+    case KEY_KPSLASH: keypad = "/"; break;
+    case KEY_KPASTERISK: keypad = "*"; break;
+    case KEY_KPMINUS: keypad = "-"; break;
+    case KEY_KPPLUS: keypad = "+"; break;
+    case KEY_KPEQUAL: keypad = "="; break;
+    case KEY_KP0: keypad = "0"; break;
+    case KEY_KP1: keypad = "1"; break;
+    case KEY_KP2: keypad = "2"; break;
+    case KEY_KP3: keypad = "3"; break;
+    case KEY_KP4: keypad = "4"; break;
+    case KEY_KP5: keypad = "5"; break;
+    case KEY_KP6: keypad = "6"; break;
+    case KEY_KP7: keypad = "7"; break;
+    case KEY_KP8: keypad = "8"; break;
+    case KEY_KP9: keypad = "9"; break;
+    case KEY_KPDOT: keypad = "."; break;
+    default: return 0;
+    }
+    if (!keyboard->num_lock && (code == KEY_KPDOT || (keypad[0] >= '0' && keypad[0] <= '9')))
+        return 0;
+    /* A device keymap may say what a keypad key types (a comma for the
+       point, say); it is consulted first, as for any key. */
+    length = evdev_key_character(keyboard, code, out, capacity);
+    if (length > 0) return length;
+    snprintf(out, capacity, "%s", keypad);
+    return (int)strlen(out);
+}
+
 static int encode_kitty_key(const BlitSession *session,
                              const BlitInputDevice *keyboard,
                              unsigned short code, int value,
@@ -30152,6 +30195,7 @@ static int encode_kitty_key(const BlitSession *session,
        table Blit has for that, since evdev codes name physical positions. */
     unsigned shifted_key = 0, base_key = 0;
     char alternates[32] = "";
+    char text_field[96] = "";
     int role = input_device_modifier_role(keyboard, code);
     int modifier_key = 0, number = 0, i, text_key = 0;
     char final = 'u';
@@ -30299,11 +30343,36 @@ static int encode_kitty_key(const BlitSession *session,
         else if (base_key)
             snprintf(alternates, sizeof(alternates), "::%u", base_key);
     }
+    /* Flag 16, report associated text (with flag 8; undefined without it):
+       a press or repeat that types text carries it as a third field, its
+       code points joined by colons -- the text a program reading flag 8
+       cannot work out from the key, such as AltGr's level on a non-US
+       layout. Ctrl, Alt or Super held means the key is a chord and types
+       nothing; a release types nothing; control characters are not text. */
+    if ((flags & 24) == 24 && value != 0 && final == 'u' &&
+        !keyboard->ctrl && !keyboard->alt && !super) {
+        char typed[32];
+        int typed_length = kitty_key_text(keyboard, code, text_key, typed, sizeof(typed));
+        size_t at = 0, used = 0;
+        while (typed_length > 0 && at < (size_t)typed_length) {
+            if (!utf8_decode((const unsigned char *)typed + at, (size_t)typed_length - at,
+                             &consumed, &scalar) || scalar < 32 || scalar == 127 ||
+                (scalar >= 128 && scalar < 160)) {
+                used = 0;
+                break;
+            }
+            used += (size_t)snprintf(text_field + used, sizeof(text_field) - used, "%s%u",
+                                     used ? ":" : ";", (unsigned)scalar);
+            if (used >= sizeof(text_field)) { used = 0; break; }
+            at += consumed;
+        }
+        text_field[used] = '\0';
+    }
     if ((flags & 2) && value != 1)
-        return snprintf(out, capacity, "\033[%u%s;%u:%d%c", key ? key : (unsigned)number,
-                        alternates, modifiers, value == 2 ? 2 : 3, final);
-    return snprintf(out, capacity, "\033[%u%s;%u%c", key ? key : (unsigned)number, alternates,
-                    modifiers, final);
+        return snprintf(out, capacity, "\033[%u%s;%u:%d%s%c", key ? key : (unsigned)number,
+                        alternates, modifiers, value == 2 ? 2 : 3, text_field, final);
+    return snprintf(out, capacity, "\033[%u%s;%u%s%c", key ? key : (unsigned)number, alternates,
+                    modifiers, text_field, final);
 }
 
 /* Returns 1 when the key was written to a session PTY and 0 when it was

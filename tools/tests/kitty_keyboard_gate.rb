@@ -69,7 +69,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('legacy Super silent','',[[125,1],[125,0]],'')
     check.call('legacy text','',[[30,1],[30,0]],'a')
     check.call('initial query',esc+'?u',[],esc+'?0u')
-    check.call('masked flags',esc+'>31u'+esc+'?u',[],esc+'?15u')
+    check.call('masked flags',esc+'>63u'+esc+'?u',[],esc+'?31u')
     check.call('pop restores zero',esc+'<u'+esc+'?u',[],esc+'?0u')
     check.call('lone left Super',esc+'>9u',[[125,1]],esc+'57444;9u')
     check.call('Super+a','',[[30,1],[30,0],[125,0]],esc+'97;9u')
@@ -113,6 +113,22 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('flag 4 alone stays legacy',esc+'=4u',[[30,1],[30,0],[29,1],[30,1],[30,0],[29,0]],"a\x01")
     check.call('flag 4 push/pop',esc+'=0u'+esc+'>4u'+esc+'?u'+esc+'>13u'+esc+'?u'+esc+'<u'+esc+'?u'+esc+'<u'+esc+'?u',[],
       esc+'?4u'+esc+'?13u'+esc+'?4u'+esc+'?0u')
+    # Flag 16, report associated text (with flag 8): a press or repeat that
+    # types text carries it as a third field; a chord, a release and a
+    # functional key carry none.
+    check.call('flag 16 query',esc+'=27u'+esc+'?u',[],esc+'?27u')
+    check.call('flag 16 text, repeat, release','',[[30,1],[30,2],[30,0]],esc+'97;1;97u'+esc+'97;1:2;97u'+esc+'97;1:3u')
+    check.call('flag 16 shifted text','',[[42,1],[2,1],[2,0],[42,0]],
+      esc+'57441;2u'+esc+'49;2;33u'+esc+'49;2:3u'+esc+'57441;1:3u')
+    check.call('flag 16 chords and a Super tap type nothing','',[[29,1],[30,1],[30,0],[29,0],[125,1],[125,0]],
+      esc+'57442;5u'+esc+'97;5u'+esc+'97;5:3u'+esc+'57442;1:3u'+esc+'57444;9u'+esc+'57444;1:3u')
+    check.call('flag 16 space, keypad, functional','',[[57,1],[57,0],[78,1],[78,0],[72,1],[72,0],[28,1],[28,0]],
+      esc+'32;1;32u'+esc+'32;1:3u'+esc+'57413;1;43u'+esc+'57413;1:3u'+esc+'57419;1u'+esc+'57419;1:3u'+esc+'13;1u'+esc+'13;1:3u')
+    check.call('flag 16 CapsLock text','',[[58,1],[58,0],[30,1],[30,0],[58,1],[58,0]],
+      esc+'57358;65u'+esc+'57358;65:3u'+esc+'97;65;65u'+esc+'97;65:3u'+esc+'57358;1u'+esc+'57358;1:3u')
+    check.call('flag 16 with flag 4',esc+'=31u',[[42,1],[2,1],[2,0],[42,0]],
+      esc+'57441;2u'+esc+'49:33;2;33u'+esc+'49:33;2:3u'+esc+'57441;1:3u')
+    check.call('flag 16 without flag 8 stays text',esc+'=17u',[[30,1],[30,0]],'a')
     check.call('parameterised replies do not loop',esc+'=9u'+esc+'?9u',[],'')
     fixture=nil
     Timeout.timeout(5){loop{fixture=req.call('GET','/v1/input/devices')['devices'].find{|d|d['name']=='Kitty fixture'};break if fixture;sleep 0.05}}
@@ -140,6 +156,8 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
       esc+'122::121;1u'+esc+'223::45;1u')
     check.call('flag 4 layout shifted and base','',[[42,1,source],[21,1,source],[21,0,source],[12,1,source],[12,0,source],[42,0,source]],
       esc+'57441;2u'+esc+'122:90:121;2u'+esc+'223:63:45;2u')
+    check.call('flag 16 layout AltGr text',esc+'=27u',[[100,1,source],[12,1,source],[12,0,source],[100,0,source],[12,1,source],[12,0,source]],
+      esc+'57453;1u'+esc+'223;1;92u'+esc+'223;1:3u'+esc+'57453;1:3u'+esc+'223;1;223u'+esc+'223;1:3u')
     check.call('flag 4 layout off',esc+'=9u',[[21,1,source],[21,0,source]],esc+'122;1u')
     revision=req.call('GET',"/v1/input/devices/#{source}")['revision']
     req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{modifiers:{'58'=>'meta','125'=>'none'}}},{'If-Match'=>revision.to_s})
@@ -155,7 +173,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     raise 'keyboard state leaked between sessions' unless other.dig('terminal_capabilities','keyboard','active_flags')==0 &&
       req.call('GET',path).dig('terminal_capabilities','keyboard','active_flags')==9
     req.call('DELETE',"/v1/terminal-sessions/#{other['id']}")
-    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 focus_handover=out_in legacy=preserved"
+    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 focus_handover=out_in legacy=preserved"
   ensure
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil
