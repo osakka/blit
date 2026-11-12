@@ -504,10 +504,11 @@ any later version. On Debian systems the licence text is in
 Its protocol code is generated at build time by wayland-scanner from the
 Wayland protocol descriptions of Debian's wayland-protocols (xdg-shell,
 xdg-decoration, linux-dmabuf, presentation-time, relative-pointer,
-pointer-constraints, xwayland-shell; Expat/MIT licence, see
+pointer-constraints, xwayland-shell, xdg-output; Expat/MIT licence, see
 /usr/share/doc/wayland-protocols/copyright on a system that has it). It
 links libwayland-server.so.0, libxkbcommon.so.0, libxcb.so.1,
-libxcb-composite.so.0, libxcb-xfixes.so.0 and libxcb-res.so.0 at run time
+libxcb-composite.so.0, libxcb-xfixes.so.0, libxcb-res.so.0 and
+libxcb-randr.so.0 at run time
 (MIT licences; their own copyright files are under /usr/share/doc/).
 EOF
 chmod 0644 "$cdoc/README" "$cdoc/copyright"
@@ -518,7 +519,7 @@ Section: x11
 Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
-Depends: blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0
+Depends: blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0, libxcb-randr0
 Recommends: xwayland
 Description: Blit's Wayland compositor for programs in Hibr windows
  blit-compositor is the Wayland compositor for the programs of one Blit
