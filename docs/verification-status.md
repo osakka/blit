@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.87 the system linker links; Blit's crash backtrace
+
+- **Hardening:** tcc compiles, the system linker links (`tools/tcc-link.sh`):
+  every program and the Hibr adapter declares a stack that is not
+  executable, the programs have RELRO. Before, `blit-server`'s thread
+  stacks were `rwxp` and a gcc-built process on glibc 2.41 could not load
+  `console-blit.so` (Hibr's shell is moving to a non-executable stack, ADR
+  0055 there). tcc's `-bt` backtraces are replaced by `src/blit_crash.h`:
+  frames to standard error and `addr2line` for function, file and line.
+- **An unchanged `WINDOW size`** no longer reconfigures the program.
+- **Gates:** `tcc_fault_trace_gate` (Blit's handler, built as Blit is: RW
+  stack, RELRO, SIGSEGV, addr2line naming a static function and its caller
+  with file and line); `package_artifact_gate` checks every shipped ELF
+  file; `compositor_gate`'s nudges are new sizes, and its count of the
+  popup's last frame callback accepts the race it lost about one run in six
+  (all six frames presented).
+- **Suites:** the build environment, 7f9ab08: `compositor_gate` (four
+  runs), `xwayland_gate`, ASan/UBSan, gcc `-Wall -Wextra` clean,
+  `package_artifact_gate`. This host, rebuilt: `all` 188 pass, 12 skip, 0
+  fail; `renderer` 82 pass, 1 skip; `renderer-gles` 62 pass;
+  `documentation_gate`. Two checkouts gave byte-identical packages (blit
+  6f6a8fa7..., blit-compositor 80c1e112...). An earlier full run's
+  `kms_frame_timing_gate` failed under the run's parallel load and passed
+  alone three times (60/60).
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-11: 0.3.86 programs ask the desktop for focus
 
 - **`WINDOW activate <id> x-focus|x-active|xdg-activation`:** a program's
