@@ -175,9 +175,7 @@ cases = [
   [KEY['f11'], [], '^[[23~', 'F11'],
   [KEY['f12'], [], '^[[24~', 'F12'],
   [KEY['f13'], [], '^[[25~', 'F13'],
-  [KEY['key102nd'], [], '\\', 'the ISO key beside left shift'],
-  # AltGr is not Alt: it must not prefix ESC the way the left Alt does.
-  [KEY['a'], %w[rightalt], 'a', 'altgr with a letter does not send ESC'],
+  # The ISO key and Right Alt are the keymap's (ADR 0231), below.
   [KEY['a'], %w[leftalt], '^[a', 'alt with a letter sends ESC']
 ]
 
@@ -267,73 +265,24 @@ failures << "keypad 8 with numlock off was not Up: #{cursor.inspect}" unless
 failures << "keypad . with numlock off was not Delete: #{delete.inspect}" unless
   delete == '^[[3~'
 
-# ADR 0064 stage 4. A keyboard's layout is its own.
-#
-# The fixture is the QWERTZ swap plus the key that carries a third level,
-# because those are the two things a US-only translator cannot express: Z and
-# Y exchanged, ß where the hyphen is, and AltGr on Q.
-QWERTZ = {
-  'base' => 'us',
-  'keys' => {
-    '21' => %w[z Z] + ['', ''],     # the Y key types z
-    '44' => %w[y Y] + ['', ''],     # the Z key types y
-    '12' => ['ß', '?', '\\', ''],   # where US has the hyphen
-    '16' => ['q', 'Q', '@', 'Ω']    # AltGr and shift+AltGr levels
-  }
-}.freeze
+# ADR 0231. What a key types is the system's xkb keymap, `us` until the
+# keyboard list (step 2), the same for every keyboard; the per-device
+# `keymap` override is gone, and asking for one is refused, not ignored.
+response = request('PATCH', "/v1/input/devices/#{DEVICE_A}",
+                   'configuration' => { 'keymap' => { 'base' => 'us', 'keys' => {} } })
+failures << "a keymap override was not refused: #{response.code} #{response.body}" unless
+  response.code == '400' && response.body.include?('invalid_device_property')
 
-def patch_device(device, configuration)
-  response = request('PATCH', "/v1/input/devices/#{device}",
-                     'configuration' => configuration)
-  abort("key-encoding gate: PATCH #{device} -> #{response.code} " \
-        "#{response.body}") unless response.code == '200'
-  JSON.parse(response.body)
-end
-
-patched = patch_device(DEVICE_A, 'keymap' => QWERTZ)
-failures << "the keymap was not recorded: #{patched['configuration'].inspect}" unless
-  patched.dig('configuration', 'keymap', 'override_count') == 4
-
-# Through the keyboard that carries the layout.
-[[KEY_Y_POSITION = 21, [], 'z'],
- [21, %w[leftshift], 'Z'],
- [44, [], 'y'],
- [12, [], 'ß'],
- [12, %w[leftshift], '?'],
- [16, [], 'q'],
- [16, %w[rightalt], '@'],
- [16, %w[rightalt leftshift], 'Ω']].each do |code, modifiers, expected|
+# xkb `us`: the key beside Left Shift on an ISO keyboard types < and >, and
+# Right Alt is Alt (its ESC prefix), where Blit's own table had nothing and
+# AltGr.
+[[86, [], '<'], [86, %w[leftshift], '>'], [KEY['a'], %w[rightalt], '^[a']].each do |code, modifiers, expected|
   got = press(surface, code, modifiers, device: DEVICE_A)
   next if got == expected
 
-  failures << "code #{code}#{modifiers.empty? ? '' : '+' + modifiers.join('+')} " \
-              "on the keyboard with the layout: expected #{expected.inspect}, " \
-              "got #{got.inspect}"
+  failures << "code #{code}#{modifiers.empty? ? '' : '+' + modifiers.join('+')} in xkb us: " \
+              "expected #{expected.inspect}, got #{got.inspect}"
 end
-
-# The other keyboard has no layout, so the same codes are US. This is the
-# assertion that the layout belongs to a device and not to the server.
-[[21, 'y'], [44, 'z'], [12, '-']].each do |code, expected|
-  got = press(surface, code, [], device: DEVICE_B)
-  next if got == expected
-
-  failures << "code #{code} on the keyboard without the layout: expected " \
-              "#{expected.inspect}, got #{got.inspect} -- a keymap set on one " \
-              'device reached another'
-end
-
-# AltGr on a key with no third level falls back to the unmodified one, which
-# is what AltGr does on a US keyboard where it selects nothing.
-altgr_without_level = press(surface, 44, %w[rightalt], device: DEVICE_A)
-# The choice this pins: AltGr on a key with no third level types the
-# unmodified character, which is US-keyboard behaviour where AltGr selects
-# nothing -- not X11's, where it types nothing at all. Both are defensible;
-# this is the one Blit made, and the built-in table behaves the same way
-# because it has no third level either, so there is one rule.
-failures << 'altgr on a key with no third level must fall back to the ' \
-            'unmodified character (US behaviour, where AltGr selects ' \
-            "nothing; not X11's, where it types nothing): " \
-            "#{altgr_without_level.inspect}" unless altgr_without_level == 'y'
 
 # ADR 0064 stage 4. Modifier state is a keyboard's own.
 #
@@ -387,5 +336,5 @@ unless failures.empty?
   exit 1
 end
 
-puts "KEY_ENCODING_PASS cases=#{cases.length} keymap=per_device modifiers=per_device both_shifts=held_set " \
+puts "KEY_ENCODING_PASS cases=#{cases.length} keymap=xkb_us modifiers=per_device both_shifts=held_set " \
      'capslock=toggles numlock=selects_keypad modifier_only_uncounted=yes'

@@ -64,6 +64,12 @@
    writes
 
        INPUT key <id> <evdev code> press|release
+                                       the code as the keymap reads it: a
+                                       device's role already applied (ADR 0231)
+       INPUT modifiers <id> <depressed> <latched> <locked> <group>
+                                       the keyboard's xkb modifiers, Blit's
+                                       own state's (after a key, a keymap,
+                                       a release of every key)
        INPUT ptr <id> <x> <y>          the toplevel's own pixels, decimals
                                        (negative over a popup past its left or top)
        INPUT rel <id> <dx> <dy>
@@ -725,7 +731,8 @@ enum {
     BC_INPUT_BTN,           /* code, pressed */
     BC_INPUT_WHEEL,         /* dx, dy (notches) */
     BC_INPUT_FRAME,         /* time_us */
-    BC_INPUT_KEYMAP         /* revision size rate delay, and a memfd: no frame follows */
+    BC_INPUT_KEYMAP,        /* revision size rate delay, and a memfd: no frame follows */
+    BC_INPUT_MODIFIERS      /* mods[4]: depressed latched locked group (ADR 0231) */
 };
 
 typedef struct {
@@ -738,6 +745,7 @@ typedef struct {
     uint64_t revision;      /* keymap */
     uint32_t size;          /* keymap: the memfd's bytes, text and NUL */
     int32_t rate, delay;    /* keymap: repeat per second, ms; 0 0 none */
+    uint32_t mods[4];       /* modifiers: depressed, latched, locked, group */
 } BcInput;
 
 /* A decimal number as Blit writes it: an optional '-', digits, and an
@@ -761,7 +769,7 @@ static int bc_parse_input(const char *line, BcInput *out)
     static const struct { const char *word; int kind; } kinds[] = {
         { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
         { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
-        { "keymap ", BC_INPUT_KEYMAP },
+        { "keymap ", BC_INPUT_KEYMAP }, { "modifiers ", BC_INPUT_MODIFIERS },
     };
     const char *p;
     size_t i;
@@ -782,6 +790,13 @@ static int bc_parse_input(const char *line, BcInput *out)
         else if (strncmp(p, "release", 7) == 0) p += 7;
         else return out->kind = BC_INPUT_UNKNOWN;
         break;
+    case BC_INPUT_MODIFIERS: {
+        int k;
+        for (k = 0; k < 4; ++k)
+            if ((k > 0 && *p++ != ' ') || bc_read_u32(&p, 0xffffffffUL, &out->mods[k]) != 0)
+                return out->kind = BC_INPUT_UNKNOWN;
+        break;
+    }
     case BC_INPUT_PTR:
     case BC_INPUT_REL:
     case BC_INPUT_WHEEL:

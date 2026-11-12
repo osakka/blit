@@ -30,7 +30,7 @@ order:
   - Xwayland alive after its AccessX timeout has expired since the last
     key: run with `+accessx 1` (1 s instead of X's 120), the timeout updates
     every keyboard's indicators, which crashed Xwayland 24.1 when Blit's
-    keymap had none (src/blit_xkb_keymap.h);
+    keymap had none (ADR 0228; xkeyboard-config's keymaps carry them);
   - _MOTIF_WM_HINTS with no decorations (the D key): `WINDOW decor 1
     client`, and taken away, `WINDOW decor 1 server`;
   - milestone C (x_milestone_c): override-redirect menus as `WINDOW

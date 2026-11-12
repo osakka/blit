@@ -213,6 +213,27 @@ static int frame_input_send_keymap(BlitRuntime *runtime, BlitSession *session, B
     return result;
 }
 
+/* A keyboard's modifiers as the route states them (ADR 0231): `INPUT
+   modifiers <id> <depressed> <latched> <locked> <group>`, from Blit's own
+   xkb state for that keyboard -- the compositor keeps none of its own, so
+   a lock set at start or held across a keymap change reaches its programs.
+   `device` NULL is the keyboard the keymap follows; `held` 0 states the
+   locks alone, every key released. */
+static void frame_input_modifiers_text(BlitRuntime *runtime, BlitInputDevice *device,
+                                       const BlitFrameInput *in, int held,
+                                       char *out, size_t capacity)
+{
+    unsigned int mods[4] = {0, 0, 0, 0};
+    if (device == NULL)
+        device = (BlitInputDevice *)input_keymap_device(runtime);
+    if (device != NULL)
+        input_device_xkb_serialize(device, mods);
+    if (!held)
+        mods[0] = mods[1] = 0;
+    snprintf(out, capacity, "INPUT modifiers %u %u %u %u %u\n", in->image_id,
+             mods[0], mods[1], mods[2], mods[3]);
+}
+
 /* One event on a route: its line and the frame after it, in one write.
    Returns 0 when written. */
 static int frame_input_line(BlitSession *session, BlitFrameInput *in, const char *fmt, ...)
@@ -324,6 +345,12 @@ static void frame_input_end_keys(BlitRuntime *runtime, const BlitFrameClient *cl
             frame_input_line(find_session_id(runtime, client->session_id), in,
                              "INPUT key %u %u release\n", in->image_id, code);
         }
+    {
+        /* State, not an event: no frame, not counted. */
+        char mods[96];
+        frame_input_modifiers_text(runtime, NULL, in, 0, mods, sizeof(mods));
+        frame_input_write(find_session_id(runtime, client->session_id), in, mods, strlen(mods), -1);
+    }
 }
 
 /* Every button pressed through the route released. */
@@ -380,9 +407,15 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
         return 0;
     }
     if (in->keymap_told != runtime->keymap_revision) {
+        char mods[96];
+        BlitSession *session = find_session_id(runtime, client->session_id);
         in->keymap_told = runtime->keymap_revision;
-        if (frame_input_send_keymap(runtime, find_session_id(runtime, client->session_id), in) != 0)
+        if (frame_input_send_keymap(runtime, session, in) != 0)
             return 0;
+        /* The modifiers on the new keymap, its locks above all: state, not
+           an event, so no frame and not counted. */
+        frame_input_modifiers_text(runtime, NULL, in, 1, mods, sizeof(mods));
+        frame_input_write(session, in, mods, strlen(mods), -1);
     }
     return 1;
 }
@@ -523,7 +556,8 @@ static void frame_input_service(BlitRuntime *runtime, const fd_set *readable)
    Every route is synced, so one that stopped being live releases what it
    held; the live one, at most one, gets the event. */
 
-static void frame_input_key(BlitRuntime *runtime, unsigned int code, int pressed)
+static void frame_input_key(BlitRuntime *runtime, BlitInputDevice *keyboard,
+                            unsigned int code, int pressed)
 {
     int i, k;
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
@@ -539,9 +573,14 @@ static void frame_input_key(BlitRuntime *runtime, unsigned int code, int pressed
             if (!pressed && !frame_input_key_held(in, code))
                 continue;
             frame_input_key_mark(in, code, pressed);
-            frame_input_line(find_session_id(runtime, client->session_id), in,
-                             "INPUT key %u %u %s\n", in->image_id, code,
-                             pressed ? "press" : "release");
+            {
+                /* The key and the keyboard's modifiers after it, one frame. */
+                char mods[96];
+                frame_input_modifiers_text(runtime, keyboard, in, 1, mods, sizeof(mods));
+                frame_input_line(find_session_id(runtime, client->session_id), in,
+                                 "INPUT key %u %u %s\n%s", in->image_id, code,
+                                 pressed ? "press" : "release", mods);
+            }
         }
     }
 }

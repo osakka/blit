@@ -66,7 +66,8 @@ int main(int argc, char **argv)
     /* The two locks' indicators: named, off at first, and lit by a press
        and release of the key that carries the lock's keysym, when a key
        does (a remap may take it away). A keymap without indicators crashes
-       Xwayland 24.1 (src/blit_xkb_keymap.h). */
+       Xwayland 24.1 (ADR 0228; xkeyboard-config's
+       keymaps carry them, ADR 0231). */
     {
         static const struct { const char *name; xkb_keysym_t sym; } leds[] = {
             { "Caps Lock", XKB_KEY_Caps_Lock }, { "Num Lock", XKB_KEY_Num_Lock }

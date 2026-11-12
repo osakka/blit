@@ -18,7 +18,8 @@
 #
 # Groups:
 #   server      blit-server: libdrm, FreeType, HarfBuzz (link only), zlib,
-#               the EGL/GLES/GBM headers, libutil
+#               xkbcommon (its keyboards, ADR 0231), the EGL/GLES/GBM
+#               headers, libutil
 #   drm         libdrm and the EGL/GLES/GBM headers (blit_kms.c includes
 #               blit_gles.c), for probes of the KMS path
 #   font        FreeType and HarfBuzz (link only), for raster probes
@@ -73,8 +74,8 @@ die() {
 # linker flags it takes, and linker flags of its own.
 group() {
     case $1 in
-    server) cmods='libdrm freetype2 zlib egl glesv2 gbm'
-            lmods='libdrm freetype2 harfbuzz zlib'; extra=-lutil ;;
+    server) cmods='libdrm freetype2 zlib xkbcommon egl glesv2 gbm'
+            lmods='libdrm freetype2 harfbuzz zlib xkbcommon'; extra=-lutil ;;
     drm) cmods='libdrm egl glesv2 gbm'; lmods=libdrm; extra= ;;
     font) cmods=freetype2; lmods='freetype2 harfbuzz'; extra= ;;
     zlib) cmods=zlib; lmods=zlib; extra= ;;

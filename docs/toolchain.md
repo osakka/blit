@@ -45,7 +45,7 @@ pass the same gates. Stated once, in `tools/build-flags.sh`.
 | `gbm` | any (headers only) | `libgbm-dev` | `mesa-libgbm-devel` | `mesa` | blit-server (GLES compositor) |
 | `wayland-server`, `wayland-client` | 1.21.0 | `libwayland-dev` | `wayland-devel` | `wayland` | blit-compositor; the stand-in client (gates) |
 | `wayland-scanner` | 1.21.0 | `libwayland-bin` | `wayland-devel` | `wayland` | blit-compositor (generates its protocol code) |
-| `xkbcommon` | 1.5.0 | `libxkbcommon-dev` | `libxkbcommon-devel` | `libxkbcommon` | blit-compositor |
+| `xkbcommon` | 1.5.0 | `libxkbcommon-dev` | `libxkbcommon-devel` | `libxkbcommon` | blit-server (its keyboards, ADR 0231), blit-compositor |
 | `wayland-protocols` | 1.32 (cursor-shape-v1) | `wayland-protocols` | `wayland-protocols-devel` | `wayland-protocols` | blit-compositor (protocol XML) |
 | plasma-wayland-protocols (no pkg-config file: found beside wayland-protocols, `build-flags.sh --plasma-protocols`) | any with `appmenu.xml` | `plasma-wayland-protocols` | `plasma-wayland-protocols-devel` | `plasma-wayland-protocols` | blit-compositor (the global menu, ADR 0229) |
 | `xcb`, `xcb-composite`, `xcb-xfixes`, `xcb-res`, `xcb-randr` | 1.15 | `libxcb1-dev`, `libxcb-composite0-dev`, `libxcb-xfixes0-dev`, `libxcb-res0-dev`, `libxcb-randr0-dev` | `libxcb-devel` | `libxcb` | blit-compositor (the X window manager, ADR 0228 phase 2; `xcb-randr` sets X's primary display); `xcb`, `xcb-xfixes` and `xcb-randr` the X stand-in client (gates) |

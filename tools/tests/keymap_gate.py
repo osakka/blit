@@ -6,11 +6,12 @@
 Blit, on the mock display with two fabricated input nodes (a keyboard and
 a pointer, BLIT_INPUT_ROOT sidecars), serves its keyboard as an xkb keymap.
 The text must compile with libxkbcommon (tools/tests/xkb_keymap_check.c)
-and type what Blit types: for the US default, KEY_A is 'a' and with Shift
-'A', and the main block, Return, the modifiers and CapsLock behave; after a
-PATCH of the keyboard's `keymap` and `modifiers` (docs/api.md, input
-devices) the overridden key and the remapped modifier appear, and the ETag
-changes. If-None-Match is answered 304; an unknown device 404.
+and type what Blit types: the system's xkb `us` (ADR 0231), KEY_A 'a' and
+with Shift 'A', the main block, Return, the modifiers (Right Alt is Alt),
+CapsLock, and the ISO key's '<' and '>'. The keymap is the same for every
+device: a role PATCH (`modifiers`) leaves it and its ETag as they were, and
+a `keymap` override is refused. If-None-Match is answered 304; an unknown
+device 404.
 
 Repeat (milestone C): every answer, 200 and 304, carries the keyboard's
 repeat as X-Blit-Repeat-Rate and X-Blit-Repeat-Delay (the fabricated
@@ -68,6 +69,17 @@ def patch(path, body):
                                      headers={'Content-Type': 'application/json'})
     with urllib.request.urlopen(request, timeout=10) as response:
         return json.loads(response.read())
+
+
+def refused(path, body):
+    """A PATCH's status, a refusal included."""
+    request = urllib.request.Request(BASE + path, method='PATCH', data=json.dumps(body).encode(),
+                                     headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
 
 
 def post(path, body):
@@ -143,14 +155,14 @@ def main():
             (KEY_SPACE, '-', ' '), (KEY_ENTER, '-', 'sym:Return'), (KEY_ESC, '-', 'sym:Escape'),
             (KEY_F1, '-', 'sym:F1'), (KEY_UP, '-', 'sym:Up'),
             (KEY_LEFTCTRL, '-', 'mod:Control'), (KEY_LEFTSHIFT, '-', 'mod:Shift'),
-            (KEY_RIGHTALT, '-', 'mod:Mod5'), (KEY_LEFTMETA, '-', 'mod:Mod4'),
+            # xkb `us` (ADR 0231): Right Alt is Alt.
+            (KEY_RIGHTALT, '-', 'mod:Mod1'), (KEY_LEFTMETA, '-', 'mod:Mod4'),
             # CapsLock inverts Shift for letters only, as in Blit.
             (KEY_A, str(KEY_CAPSLOCK), 'A'), (KEY_1, str(KEY_CAPSLOCK), '1'),
             (KEY_A, '%d,%d' % (KEY_CAPSLOCK, KEY_LEFTSHIFT), 'a'),
-            # The US table has no third level: AltGr types the plain key.
             (KEY_Q, str(KEY_RIGHTALT), 'q'),
-            # No character and no role in Blit: no key.
-            (KEY_102ND, '-', 'sym:NoSymbol'),
+            # The ISO key beside Left Shift, which Blit's own table lacked.
+            (KEY_102ND, '-', '<'), (KEY_102ND, str(KEY_LEFTSHIFT), '>'),
         ])
         status, h304, body = get('/v1/input/keymap', {'If-None-Match': etag})
         check(status == 304 and body == b'', 'If-None-Match -> %d' % status)
@@ -184,32 +196,22 @@ def main():
         post('/v1/input/inject', {'kind': 'key', 'code': KEY_A, 'value': 0, 'device_id': keyboard})
         check(default() == keyboard, 'the first keyboard again: %s' % default())
 
-        # The keyboard settings, Blit's own: Q types a-umlaut, A-umlaut with
-        # Shift, '@' with AltGr; CapsLock is Control; the 102nd key types
-        # '<' and '>'.
+        # ADR 0231: the keymap is the system's, the same for every keyboard.
+        # A device's roles are a translation of its codes on the way in, not
+        # a keymap of its own, so a role PATCH leaves the keymap as it was;
+        # a keymap override is refused (the property is gone).
         patch('/v1/input/devices/%s' % keyboard, {'configuration': {
-            'keymap': {'base': 'us', 'keys': {str(KEY_Q): ['ä', 'Ä', '@', ''],
-                                              str(KEY_102ND): ['<', '>', '', '']}},
             'modifiers': {str(KEY_CAPSLOCK): 'control'}}})
-        status, headers, remapped = get('/v1/input/keymap')
-        check(status == 200 and headers.get('ETag') != etag,
-              'the ETag did not change with the keymap: %r' % headers.get('ETag'))
-        compile_check(checker, remapped, work, [
-            (KEY_Q, '-', 'ä'), (KEY_Q, str(KEY_LEFTSHIFT), 'Ä'),
-            (KEY_Q, str(KEY_RIGHTALT), '@'),
-            # Blit: AltGr with Shift and no fourth level falls back to Shift.
-            (KEY_Q, '%d,%d' % (KEY_RIGHTALT, KEY_LEFTSHIFT), 'Ä'),
-            (KEY_102ND, '-', '<'), (KEY_102ND, str(KEY_LEFTSHIFT), '>'),
-            (KEY_CAPSLOCK, '-', 'mod:Control'), (KEY_CAPSLOCK, '-', 'sym:Control_L'),
-            (KEY_A, '-', 'a'), (KEY_A, str(KEY_LEFTSHIFT), 'A'),
-        ])
-        check(get('/v1/input/keymap?device=%s' % keyboard)[2] == remapped,
-              'the keyboard named is not the default')
+        status, headers, after_roles = get('/v1/input/keymap')
+        check(status == 200 and headers.get('ETag') == etag and after_roles == text,
+              'a role changed the keymap: %r' % headers.get('ETag'))
+        check(refused('/v1/input/devices/%s' % keyboard, {'configuration': {
+            'keymap': {'base': 'us', 'keys': {}}}}) == 400, 'a keymap override was not refused')
         status, _, pointer = get('/v1/input/keymap?device=%s' % pointer_id)
-        check(status == 200 and pointer != remapped, 'the pointer\'s keymap: %d' % status)
+        check(status == 200 and pointer == text, 'the pointer\'s keymap is another: %d' % status)
         check(get('/v1/input/keymap?device=nope')[0] == 404, 'an unknown device is not 404')
-        print('KEYMAP_GATE_OK xkb_v1 compiles keys=%s leds=caps,num(lit-by-lock) us:a/A,1/!,caps,altgr remap:q->ä/Ä/@,'
-              '102nd-></>,caps->control etag=changes,304 unknown=404 repeat=30/250,304-too,'
+        print('KEYMAP_GATE_OK xkb_v1 compiles keys=%s leds=caps,num(lit-by-lock) us(xkb):a/A,1/!,caps,ralt=alt,102nd-></> '
+              'roles=keymap-unchanged keymap-override=400 pointer=same etag=stable,304 unknown=404 repeat=30/250,304-too,'
               'patch->20/400,pointer=0/0 default=first,last-key(second,first),disabled->first,enabled->last-key'
               % keys.split('=')[1])
     finally:

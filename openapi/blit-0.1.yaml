@@ -1204,15 +1204,15 @@ paths:
       description: >-
         ADR 0228 phase 1: the keyboard as an xkb keymap in libxkbcommon's
         text format (`XKB_KEYMAP_FORMAT_TEXT_V1`), for blit-compositor to hand
-        to its Wayland clients. Generated from Blit's own keyboard tables --
-        each key's levels (plain, Shift, AltGr, Shift+AltGr) are what Blit
-        types with them, the device's `keymap` overrides on the built-in US
-        table, and a code with a `modifiers` role is that modifier -- so it
-        has no second source. Keycodes are evdev codes plus 8. The keyboard
-        is `device` when given, else the keyboard whose key came last while
-        it is there and enabled, else the first enabled device Blit reads as
-        a keyboard, else the built-in table alone; `X-Blit-Keymap-Device`
-        names it (`builtin` for none). The ETag is the SHA-256 of the text,
+        to its Wayland clients. It is the system's xkb keymap that Blit
+        itself types with (ADR 0231: xkeyboard-config's `us`, compiled by
+        libxkbcommon), the same for every keyboard -- a device's `modifiers`
+        roles are applied to its keys before the keymap, not written into
+        it -- so it has no second source. Keycodes are evdev codes plus 8.
+        The keyboard whose repeat the headers give is `device` when given,
+        else the keyboard whose key came last while it is there and enabled,
+        else the first enabled device Blit reads as a keyboard, else none;
+        `X-Blit-Keymap-Device` names it (`builtin` for none). The ETag is the SHA-256 of the text,
         so it changes exactly when the keymap does; `If-None-Match` is
         answered 304. Both answers carry the keyboard's repeat as the kernel
         holds it, `X-Blit-Repeat-Rate` (a second) and `X-Blit-Repeat-Delay`
@@ -1305,18 +1305,6 @@ paths:
                       minimum: 10
                       maximum: 1000
                     natural_scroll: {type: boolean}
-                    keymap:
-                      type: object
-                      properties:
-                        base: {type: string, enum: [us]}
-                        keys:
-                          type: object
-                          additionalProperties:
-                            type: array
-                            minItems: 4
-                            maxItems: 4
-                            items: {type: string, maxLength: 4}
-                      additionalProperties: false
                     buttons:
                       type: object
                       description: >-
@@ -4630,7 +4618,7 @@ components:
                 and for one of no known kind -- a device it probed and reads
                 under no kind at all, about which it has made no claim.
                 Refused with 422 on a device whose kinds contradict it, by the
-                same rule that governs `keymap` and that `POST
+                same rule that governs `modifiers` and that `POST
                 /v1/input/inject` applies to a `device_id`: a controller can
                 set exactly what it can see, and an injection can deliver
                 exactly what the device could have delivered.
@@ -4780,71 +4768,19 @@ components:
                        num_lock]
               description: >-
                 A sparse map from evdev code to the role that code plays, per
-                device. This is how Caps-Lock-as-Control is expressed, and it
-                is not expressible as a keymap: a keymap maps a code to the
-                *characters* it types, and a modifier is not a character.
-
-                The two compose in one order -- the remap decides what a code
-                *is*, the keymap decides what it *types* -- and a code with a
-                role never reaches the keymap. `none` swallows the key, which
-                is how "disable this key" is said.
+                device. This is how Caps-Lock-as-Control is expressed. What a
+                key types is the system's xkb keymap, one for every keyboard
+                (ADR 0231; the per-device `keymap` override is gone); a role
+                is applied before it, as the role's own key -- Control is Left
+                Control, AltGr the keymap's ISO_Level3_Shift, Meta Left Super
+                -- so the keymap, a compositor and its programs all see that
+                key. `none` swallows the key, which is how "disable this key"
+                is said.
 
                 A remapped code does not become the code it was mapped to:
                 the held set stays keyed by the physical code, so holding a
                 real Control and releasing a remapped Caps Lock leaves
                 Control held.
-            keymap:
-              type: object
-              description: >-
-                How this keyboard's keys translate to characters: a **sparse
-                override** on a built-in table, by evdev code, with four
-                levels. It is per device, so two keyboards on one server can
-                carry different layouts.
-                Sparse rather than complete because a request is bounded and a
-                complete table does not fit -- and a parser that accepted the
-                prefix of one that did not fit would hand a controller a
-                keyboard it believed it had configured. The whole of a layout
-                difference is a few dozen keys.
-                An item reports the base and which codes are overridden, not
-                the levels: a full table would dominate the item, and the
-                controller already holds the layout it sent.
-                Writable for a device Blit reads as a keyboard and for one of
-                no known kind; refused with 422 where the kinds contradict it,
-                by the same rule as the pointer properties.
-                Dead keys and compose sequences are **not** expressible: those
-                need a stateful translator, which is a different feature.
-              properties:
-                base:
-                  type: string
-                  enum: [us]
-                  description: >-
-                    The built-in table the overrides sit on. There is one; it
-                    is named so that adding a second does not change the shape.
-                keys:
-                  type: object
-                  description: >-
-                    Evdev code, as a decimal string, to the four levels:
-                    plain, shift, altgr, shift+altgr. Each level is a UTF-8
-                    string of at most one character, or `""` for a level this
-                    key does not define -- in which case AltGr falls back to
-                    the unmodified level, which is what AltGr does on a US
-                    keyboard where it selects nothing. CapsLock inverts Shift
-                    when the plain level is a single lower-case letter, and
-                    only then. At most 128 codes; more is a 400.
-                  additionalProperties:
-                    type: array
-                    minItems: 4
-                    maxItems: 4
-                    items: {type: string, maxLength: 4}
-                override_count:
-                  type: integer
-                  minimum: 0
-                  description: Read-only. How many codes this keymap overrides.
-                codes:
-                  type: array
-                  description: Read-only. The codes this keymap overrides.
-                  items: {type: integer, minimum: 1}
-              additionalProperties: false
             route:
               type: object
               description: >-
@@ -6129,8 +6065,9 @@ components:
               maxLength: 8
               description: >-
                 Keyboard press/repeat only, and omitted for a non-text key.
-                The printable UTF-8 text resolved by the source device's
-                keymap, Shift, CapsLock and AltGr state. Consumers use this
+                The printable UTF-8 text the key types: the system's xkb
+                keymap (ADR 0231) with the source device's Shift, CapsLock
+                and AltGr state. Consumers use this
                 instead of deriving a character from the physical evdev code;
                 code remains authoritative for named non-text keys.
           additionalProperties: true

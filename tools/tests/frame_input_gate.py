@@ -453,7 +453,9 @@ class LineReceiver:
     connection carries `INPUT <kind> <id> ...` lines, each event followed by
     `INPUT frame <id> <us>`, and `INPUT keymap <id> <revision> <size>
     <rate> <delay>`, which is no event and has no frame, with a sealed
-    memfd of the keymap passed with it."""
+    memfd of the keymap passed with it; and `INPUT modifiers <id>
+    <depressed> <latched> <locked> <group>` (ADR 0231), Blit's keyboard
+    state, after a key in that key's frame or on its own with none."""
 
     def __init__(self, work, name='input-0'):
         self.path = os.path.join(work, name)
@@ -466,6 +468,7 @@ class LineReceiver:
         self.stamps = []      # (event, the monotonic us of its frame), every one read
         self.notices = []     # `keymap <id> <revision>`
         self.keymaps = []     # (text, rate, delay) of each keymap line
+        self.modifiers = []   # (depressed, latched, locked, group) of each modifiers line
         self.fds = []         # passed and not yet matched to a line
         self.frames = 0
         self.total = 0        # every event line read
@@ -481,6 +484,7 @@ class LineReceiver:
         self.conn = None
         self.buffer = b''
         self.events, self.notices, self.keymaps, self.fds = [], [], [], []
+        self.modifiers = []
         self.frames = self.total = 0
         self.eof = False
         self.accept()
@@ -517,6 +521,10 @@ class LineReceiver:
                 check(len(words) == 4 and int(words[3]) > 0, 'a frame line %r' % line)
                 self.frames += 1
                 self.stamps[-1] = (self.stamps[-1][0], int(words[3]))
+            elif words[1] == 'modifiers':
+                check(len(words) == 7 and all(w.isdigit() for w in words[3:]),
+                      'a modifiers line %r' % line)
+                self.modifiers.append(tuple(int(w) for w in words[3:]))
             elif words[1] == 'keymap':
                 check(len(words) == 7 and int(words[3]) > 0 and self.total == self.frames,
                       'a keymap line %r' % line)
@@ -691,8 +699,21 @@ def multi(server, a, work, b):
         check(not rb.connected(), 'an EBUSY request connected')
         ch.line('INPUT on 20\n')
         live(20)
-        ra.read(0.3)
+        # Until quiet: a line passed with a descriptor (the keymap's) is
+        # read apart from the lines after it.
+        while ra.read(0.3):
+            pass
         check(len(ra.notices) == 1, 'route 20 live without its keymap: %s' % ra.notices)
+        # ADR 0231: Blit's modifiers with the keymap, and after each key in
+        # its frame -- Shift down is depressed bit 0, up is nothing held.
+        check(ra.modifiers, 'route 20 live without Blit\'s modifiers')
+        key(42, 1)
+        ra.expect(['key 20 42 press'], 'shift through route 20')
+        check(ra.modifiers[-1][0] & 1, 'shift down, modifiers %s' % (ra.modifiers[-1],))
+        key(42, 0)
+        ra.expect(['key 20 42 release'], 'shift up through route 20')
+        check(ra.modifiers[-1][0] == 0 and ra.modifiers[-1][1] == 0,
+              'shift up, modifiers %s' % (ra.modifiers[-1],))
         rb.nothing('route 21 while 20 is on')
         check(rb.notices == [], 'route 21 sent a keymap while off: %s' % rb.notices)
 

@@ -464,12 +464,12 @@ struct bc_server {
     int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
     struct xkb_keymap *keymap;
-    struct xkb_state *xkb_state;
     int keymap_fd;
     uint32_t keymap_size;
     int32_t repeat_rate, repeat_delay;    /* Blit's, from `INPUT keymap`; 0 0 none */
-    uint32_t mods[4];
+    uint32_t mods[4];                 /* what the focused client was last sent */
     int mods_sent;
+    uint32_t mods_blit[4];            /* Blit's `INPUT modifiers`: its own xkb state's (ADR 0231) */
     unsigned char keys_down[96];      /* evdev codes down, through KEY_MAX */
     struct bc_surface *kbd_focus, *ptr_focus;
     double ptr_x, ptr_y;
@@ -4672,10 +4672,8 @@ static void keymap_from_route(struct bc_server *s, const BcInput *in, int fd)
     munmap(text, in->size);
     fcntl(own, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE | F_SEAL_SEAL);
     if (s->keymap_fd >= 0) close(s->keymap_fd);
-    if (s->xkb_state) xkb_state_unref(s->xkb_state);
     if (s->keymap) xkb_keymap_unref(s->keymap);
     s->keymap = keymap;
-    s->xkb_state = xkb_state_new(keymap);
     s->keymap_fd = own;
     s->keymap_size = in->size;
     s->mods_sent = 0;
@@ -4684,14 +4682,9 @@ static void keymap_from_route(struct bc_server *s, const BcInput *in, int fd)
     wl_resource_for_each(r, &s->keyboards)
         keyboard_send_keymap(s, r);
     repeat_apply(s, in->rate, in->delay);
-    /* Keys down stay down in the new state (a modifier held across a
-       keyboard switch), and the focused client is told its modifiers. */
-    if (s->xkb_state) {
-        uint32_t code;
-        for (code = 0; code < sizeof(s->keys_down) * 8; ++code)
-            if (s->keys_down[code / 8] & (1u << (code % 8)))
-                xkb_state_update_key(s->xkb_state, code + 8, XKB_KEY_DOWN);
-    }
+    /* The modifiers on the new keymap come from Blit next (`INPUT
+       modifiers`): its state, not one made here, so a lock held across a
+       keyboard switch stays on. */
     keyboard_send_modifiers(s, 1);
 }
 
@@ -4703,11 +4696,11 @@ static void keyboard_send_modifiers(struct bc_server *s, int force)
 {
     struct wl_resource *r;
     uint32_t dep, lat, lock, group;
-    if (s->kbd_focus == NULL || s->xkb_state == NULL) return;
-    dep = xkb_state_serialize_mods(s->xkb_state, XKB_STATE_MODS_DEPRESSED);
-    lat = xkb_state_serialize_mods(s->xkb_state, XKB_STATE_MODS_LATCHED);
-    lock = xkb_state_serialize_mods(s->xkb_state, XKB_STATE_MODS_LOCKED);
-    group = xkb_state_serialize_layout(s->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
+    if (s->kbd_focus == NULL || s->keymap == NULL) return;
+    dep = s->mods_blit[0];
+    lat = s->mods_blit[1];
+    lock = s->mods_blit[2];
+    group = s->mods_blit[3];
     if (!force && s->mods_sent && dep == s->mods[0] && lat == s->mods[1] && lock == s->mods[2] &&
         group == s->mods[3])
         return;
@@ -4725,13 +4718,22 @@ static void keyboard_release_all(struct bc_server *s)
     for (code = 0; code < sizeof(s->keys_down) * 8; ++code) {
         if (!(s->keys_down[code / 8] & (1u << (code % 8)))) continue;
         s->keys_down[code / 8] &= (unsigned char)~(1u << (code % 8));
-        if (s->xkb_state) xkb_state_update_key(s->xkb_state, code + 8, XKB_KEY_UP);
         if (s->kbd_focus)
             seat_for_client(r, &s->keyboards, s->kbd_focus)
                 wl_keyboard_send_key(r, wl_display_next_serial(s->display), now_ms(), code,
                                      WL_KEYBOARD_KEY_STATE_RELEASED);
     }
-    keyboard_send_modifiers(s, 0);
+    /* Nothing is held for this client now: its modifiers are the locks
+       alone (Blit's state still has whatever is physically held, and the
+       next client to have the keyboard is told that). */
+    if (s->kbd_focus != NULL && s->keymap != NULL &&
+        (!s->mods_sent || s->mods[0] != 0 || s->mods[1] != 0 || s->mods[2] != s->mods_blit[2] ||
+         s->mods[3] != s->mods_blit[3])) {
+        s->mods[0] = 0; s->mods[1] = 0; s->mods[2] = s->mods_blit[2]; s->mods[3] = s->mods_blit[3];
+        s->mods_sent = 1;
+        seat_for_client(r, &s->keyboards, s->kbd_focus)
+            wl_keyboard_send_modifiers(r, wl_display_next_serial(s->display), 0, 0, s->mods[2], s->mods[3]);
+    }
 }
 
 static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
@@ -5151,6 +5153,13 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         keymap_from_route(s, &in, fd);
         return;
     }
+    if (in.kind == BC_INPUT_MODIFIERS) {
+        /* The seat's modifiers are Blit's (ADR 0231): whichever window's
+           route they came on, the focused client is told when they change. */
+        memcpy(s->mods_blit, in.mods, sizeof(s->mods_blit));
+        keyboard_send_modifiers(s, 0);
+        return;
+    }
     x = window_by_id(s, conn->id);
     if (!window_is_toplevel(x) || x->surface == NULL) return;  /* gone meanwhile */
     switch (in.kind) {
@@ -5161,8 +5170,6 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         if (in.pressed == down) return;  /* a release of a key never pressed here */
         if (in.pressed) s->keys_down[in.code / 8] |= (unsigned char)bit;
         else s->keys_down[in.code / 8] &= (unsigned char)~bit;
-        if (s->xkb_state)
-            xkb_state_update_key(s->xkb_state, in.code + 8, in.pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
         {
             /* One serial for the event: a press's is what an activation
                token may name (the activation section). */
@@ -5173,7 +5180,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
                                      in.pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
                                                 : WL_KEYBOARD_KEY_STATE_RELEASED);
         }
-        keyboard_send_modifiers(s, 0);
+        /* The modifiers follow on their own line from Blit. */
         return;
     }
     case BC_INPUT_PTR: {
@@ -9518,7 +9525,6 @@ int main(int argc, char **argv)
     }
     if (server.format_table_fd >= 0) close(server.format_table_fd);
     if (server.keymap_fd >= 0) close(server.keymap_fd);
-    if (server.xkb_state) xkb_state_unref(server.xkb_state);
     if (server.keymap) xkb_keymap_unref(server.keymap);
     if (server.xkb) xkb_context_unref(server.xkb);
     logf_("stopped: %lu frames sent, %lu failed, %lu WINDOW lines; dmabuf %lu sent, %lu released, "

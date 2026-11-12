@@ -2,8 +2,11 @@
 # frozen_string_literal: true
 
 # ADR 0068. The server, not each stream consumer, owns printable-key
-# resolution. Prove that a real input WebSocket frame carries per-device
-# keymap, Shift and AltGr results, and that releases carry no printable text.
+# resolution. Prove that a real input WebSocket frame carries what the
+# keymap types -- the system's xkb `us` (ADR 0231), with Shift, and the ISO
+# key beside Left Shift that Blit's own table never had -- and that releases
+# carry no printable text. Non-Latin text comes with the keyboard list
+# (ADR 0231 step 2).
 
 require 'json'
 require 'net/http'
@@ -100,14 +103,6 @@ def next_key(socket, code, pressed)
   end
 end
 
-keymap = {
-  'base' => 'us',
-  'keys' => {
-    '21' => ['z', 'Z', '', ''],
-    '16' => ['q', 'Q', '@', 'Ω']
-  }
-}
-
 Dir.mktmpdir('blit-stream-text') do |input_root|
   File.write(File.join(input_root, 'event0'), '')
   pid = gate_spawn({**gate_display_env,
@@ -127,8 +122,6 @@ Dir.mktmpdir('blit-stream-text') do |input_root|
       end
     end
     device = 'input-node-event0'
-    json('PATCH', "/v1/input/devices/#{device}",
-         'configuration' => {'keymap' => keymap})
     stream = open_input_stream
 
     inject(device, 21, 1)
@@ -145,18 +138,10 @@ Dir.mktmpdir('blit-stream-text') do |input_root|
     inject(device, 42, 0)
     next_key(stream, 42, false)
 
-    inject(device, 100, 1) # right Alt / AltGr
-    next_key(stream, 100, true)
-    inject(device, 42, 1)
-    next_key(stream, 42, true)
-    inject(device, 16, 1)
-    unicode = next_key(stream, 16, true)
-    inject(device, 16, 0)
-    next_key(stream, 16, false)
-    inject(device, 42, 0)
-    next_key(stream, 42, false)
-    inject(device, 100, 0)
-    next_key(stream, 100, false)
+    inject(device, 86, 1) # the ISO key beside left Shift
+    iso = next_key(stream, 86, true)
+    inject(device, 86, 0)
+    next_key(stream, 86, false)
 
     inject(device, 125, 1)
     super_down = next_key(stream, 125, true)
@@ -166,19 +151,19 @@ Dir.mktmpdir('blit-stream-text') do |input_root|
     failures = []
     failures << 'Super stream edges lack resolved modifier state' unless
       super_down['super'] == true && super_up['super'] == false
-    failures << "plain text=#{plain['text'].inspect}, wanted z" unless
-      plain['text'] == 'z'
-    failures << "shift text=#{shifted['text'].inspect}, wanted Z" unless
-      shifted['text'] == 'Z'
-    failures << "AltGr+Shift text=#{unicode['text'].inspect}, wanted Ω" unless
-      unicode['text'] == 'Ω'
+    failures << "plain text=#{plain['text'].inspect}, wanted y" unless
+      plain['text'] == 'y'
+    failures << "shift text=#{shifted['text'].inspect}, wanted Y" unless
+      shifted['text'] == 'Y'
+    failures << "ISO key text=#{iso['text'].inspect}, wanted <" unless
+      iso['text'] == '<'
     failures << "release carried text=#{release['text'].inspect}" if
       release.key?('text')
     unless failures.empty?
       failures.each { |failure| warn "input stream text gate: #{failure}" }
       exit 1
     end
-    puts 'INPUT_STREAM_TEXT_PASS plain=z shift=Z altgr_shift=Ω release_text=omitted'
+    puts 'INPUT_STREAM_TEXT_PASS keymap=xkb_us plain=y shift=Y iso=< release_text=omitted'
   ensure
     stream&.close
     Process.kill('TERM', pid) rescue nil

@@ -92,10 +92,13 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('disambiguation keeps text/recovery','',[[42,1],[30,1],[30,0],[42,0],[28,1],[28,0]],"A\r")
     check.call('keypad navigation distinct','',[[72,1],[72,0]],esc+'57419;1u')
     check.call('legacy restored',esc+'<u',[[30,1],[30,0]],'a')
+    # xkb's locks (ADR 0231): a lock goes on at its key's press and off at
+    # the release of the press that unlocks it, as X and Wayland programs
+    # see it, so that press still reports the lock on.
     check.call('NumLock events and numeric keypad',esc+'>8u',[[69,1],[69,0],[72,1],[72,0],[69,1],[69,0]],
-      esc+'57360;129u'+esc+'57407;129u'+esc+'57360;1u')
+      esc+'57360;129u'+esc+'57407;129u'+esc+'57360;129u')
     check.call('CapsLock state','',[[58,1],[58,0],[30,1],[30,0],[58,1],[58,0]],
-      esc+'57358;65u'+esc+'97;65u'+esc+'57358;1u')
+      esc+'57358;65u'+esc+'97;65u'+esc+'57358;65u')
     check.call('event types without all-key mode',esc+'=2u',[[103,1],[103,2],[103,0]],
       esc+'A'+esc+'1;1:2A'+esc+'1;1:3A')
     # Flag 4, report alternate keys: key:shifted:base, the shifted key only
@@ -125,7 +128,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('flag 16 space, keypad, functional','',[[57,1],[57,0],[78,1],[78,0],[72,1],[72,0],[28,1],[28,0]],
       esc+'32;1;32u'+esc+'32;1:3u'+esc+'57413;1;43u'+esc+'57413;1:3u'+esc+'57419;1u'+esc+'57419;1:3u'+esc+'13;1u'+esc+'13;1:3u')
     check.call('flag 16 CapsLock text','',[[58,1],[58,0],[30,1],[30,0],[58,1],[58,0]],
-      esc+'57358;65u'+esc+'57358;65:3u'+esc+'97;65;65u'+esc+'97;65:3u'+esc+'57358;1u'+esc+'57358;1:3u')
+      esc+'57358;65u'+esc+'57358;65:3u'+esc+'97;65;65u'+esc+'97;65:3u'+esc+'57358;65u'+esc+'57358;1:3u')
     check.call('flag 16 with flag 4',esc+'=31u',[[42,1],[2,1],[2,0],[42,0]],
       esc+'57441;2u'+esc+'49:33;2;33u'+esc+'49:33;2:3u'+esc+'57441;1:3u')
     check.call('flag 16 without flag 8 stays text',esc+'=17u',[[30,1],[30,0]],'a')
@@ -133,7 +136,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     fixture=nil
     Timeout.timeout(5){loop{fixture=req.call('GET','/v1/input/devices')['devices'].find{|d|d['name']=='Kitty fixture'};break if fixture;sleep 0.05}}
     source=fixture['id']
-    check.call('fixture NumLock baseline','',[[69,1,source],[69,0,source]],esc+'57360;1u')
+    check.call('fixture NumLock baseline','',[[69,1,source],[69,0,source]],esc+'57360;129u')  # unlocking: on until its release (xkb)
     check.call('modifier state isolated per keyboard','',[[125,1],[30,1,source],[30,0,source],[125,0]],
       esc+'57444;9u'+esc+'97;1u')
     # Focus on input hand-over: the console release path reports focus out
@@ -147,18 +150,17 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('focus in on acquire','',[[usr.call('USR2')]],esc+'I')
     check.call('no focus report without 1004',esc+'?1004l',[[usr.call('USR1')],[usr.call('USR2')]],'')
     check.call('restore flags 9',esc+'=9u',[],'')
-    # Flag 4 on a non-US layout: the key is the layout's, the base key the
-    # US key at the same position.
+    # The system's xkb `us` (ADR 0231): the key beside Left Shift on an ISO
+    # keyboard types < and >, Right Alt is Alt, and the altgr role is the
+    # keymap's ISO_Level3_Shift (kitty has no modifier bit for it). Other
+    # layouts come with the keyboard list (ADR 0231 step 2).
+    check.call('ISO key types < in us',esc+'=27u',[[86,1],[86,0],[42,1],[86,1],[86,0],[42,0]],
+      esc+'60;1;60u'+esc+'60;1:3u'+esc+'57441;2u'+esc+'60;2;62u'+esc+'60;2:3u'+esc+'57441;1:3u')
+    check.call('Right Alt is Alt in us',esc+'=9u',[[100,1],[30,1],[30,0],[100,0]],esc+'57449;3u'+esc+'97;3u')
     revision=req.call('GET',"/v1/input/devices/#{source}")['revision']
-    req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{keymap:{'base'=>'us','keys'=>{
-      '21'=>['z','Z','',''],'12'=>['ß','?','\\','']}}}},{'If-Match'=>revision.to_s})
-    check.call('flag 4 layout base key',esc+'=12u',[[21,1,source],[21,0,source],[12,1,source],[12,0,source]],
-      esc+'122::121;1u'+esc+'223::45;1u')
-    check.call('flag 4 layout shifted and base','',[[42,1,source],[21,1,source],[21,0,source],[12,1,source],[12,0,source],[42,0,source]],
-      esc+'57441;2u'+esc+'122:90:121;2u'+esc+'223:63:45;2u')
-    check.call('flag 16 layout AltGr text',esc+'=27u',[[100,1,source],[12,1,source],[12,0,source],[100,0,source],[12,1,source],[12,0,source]],
-      esc+'57453;1u'+esc+'223;1;92u'+esc+'223;1:3u'+esc+'57453;1:3u'+esc+'223;1;223u'+esc+'223;1:3u')
-    check.call('flag 4 layout off',esc+'=9u',[[21,1,source],[21,0,source]],esc+'122;1u')
+    req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{modifiers:{'100'=>'altgr'}}},{'If-Match'=>revision.to_s})
+    check.call('altgr role is ISO_Level3_Shift','',[[100,1,source],[30,1,source],[30,0,source],[100,0,source]],
+      esc+'57453;1u'+esc+'97;1u')
     revision=req.call('GET',"/v1/input/devices/#{source}")['revision']
     req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{modifiers:{'58'=>'meta','125'=>'none'}}},{'If-Match'=>revision.to_s})
     check.call('remapped Super and disabled physical Meta','',[[58,1,source],[30,1,source],[30,0,source],[58,0,source],
@@ -173,7 +175,7 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     raise 'keyboard state leaked between sessions' unless other.dig('terminal_capabilities','keyboard','active_flags')==0 &&
       req.call('GET',path).dig('terminal_capabilities','keyboard','active_flags')==9
     req.call('DELETE',"/v1/terminal-sessions/#{other['id']}")
-    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 focus_handover=out_in legacy=preserved"
+    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 xkb=us focus_handover=out_in legacy=preserved"
   ensure
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil

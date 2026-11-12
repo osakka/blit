@@ -387,6 +387,30 @@ verdict('a-refused-role-leaves-the-map-alone') do
         "#{device(KEYBOARD)['configuration']['modifiers'].inspect}")
 end
 
+# ADR 0231: the per-device keymap is gone. One stored by an earlier Blit is
+# taken out of the document as it is read -- not kept as an unknown
+# property, which would have every later save of the document refuse the
+# device's whole entry -- and the rest of the entry still applies.
+verdict('a-stored-keymap-is-removed-on-load') do
+  stop
+  document = JSON.parse(File.read(DOCUMENT))
+  document['input_devices'][KEYBOARD]['keymap'] = { 'base' => 'us', 'keys' => { '16' => ['q', 'Q', '@', ''] } }
+  File.write(DOCUMENT, JSON.generate(document))
+  start
+  code, settings = request('GET', '/v1/settings')
+  entry = settings.to_h.dig('document', 'input_devices', KEYBOARD).to_h
+  check(code == 200 && !entry.key?('keymap'),
+        "the stored keymap was removed, got #{entry.inspect}")
+  check(entry['repeat_delay_ms'] == 300 &&
+        device(KEYBOARD).to_h.dig('configuration', 'repeat_delay_ms') == 300,
+        "and the rest of the entry applied, got #{entry.inspect}")
+  code, saved = request('PUT', '/v1/settings', { 'document' => settings['document'] },
+                        { 'If-Match' => settings['revision'].to_s })
+  check(code == 200 && saved.to_h['refused'].to_i.zero?,
+        "the document saved back as read is refused nothing, got #{code} " \
+        "#{saved.to_h.slice('applied', 'refused', 'refusal').inspect}")
+end
+
 unless $failures.empty?
   warn "keyboard-settings gate: #{$failures.length} failure(s)"
   exit 1

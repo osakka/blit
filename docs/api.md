@@ -1456,8 +1456,9 @@ only a trace entry identifying an evdev source proves physical-device
 delivery. There must be one deliberate pointer owner for a
 display-attached session; competing routes are a configuration error.
 
-A streamed keyboard press or autorepeat carries optional `event.text` after
-Blit has applied that source device's keymap, Shift, CapsLock, and AltGr. A
+A streamed keyboard press or autorepeat carries optional `event.text`: what
+the key types in the system's xkb keymap (ADR 0231) with that source
+device's Shift, CapsLock and AltGr. A
 consumer must use it for printable input rather than reconstructing a US
 layout from `event.code`. The evdev code remains the source of truth for named
 non-text keys such as Escape, arrows, and function keys. Releases omit
@@ -1661,7 +1662,12 @@ survive a release):
 | `repeat_rate_hz` | how many repeats a second |
 | `caps_lock_boot`, `num_lock_boot` | the lock states to apply when the device opens |
 | `modifiers` | a sparse map from evdev code to the role that code plays |
-| `keymap` | a sparse map from evdev code to the characters it types |
+
+What a key types is not a device property: it is the system's xkb keymap,
+one for every keyboard (ADR 0231, "Keyboard map (xkb)" below). The
+per-device `keymap` override is gone in 0.3.91; a PATCH carrying it is
+refused (400 `invalid_device_property`), and one stored in a settings
+document is removed when Blit reads it, with a line on standard error.
 
 **Repeat is the kernel's.** Blit sets it with `EVIOCSREP` on the descriptor it
 already holds and reads it back with `EVIOCGREP`, so what is reported is what
@@ -1680,17 +1686,21 @@ is EV_REP. A device the kernel does not autorepeat for has no rate to set, so
 asking is a `422` rather than a stored number that changes nothing — hide the
 control for such a device rather than offering it.
 
-**`modifiers` is not `keymap`, and they compose in one order.** The remap
-decides what a code *is*; the keymap decides what it *types*. A code with a
-role never reaches the keymap, which is why Caps-Lock-as-Control is a remap
-and could not have been a keymap entry — a modifier is not a character. The
-roles are `none`, `shift`, `control`, `alt`, `altgr`, `meta`, `caps_lock` and
-`num_lock`; `none` swallows the key, which is how "disable this key" is said.
+**A role is applied before the keymap.** The remap decides what a code
+*is*; the keymap decides what it *types*. A key with a role reaches the
+keymap -- Blit's own, and a compositor's -- as the role's own key:
+`control` is Left Control, `shift` Left Shift, `alt` Left Alt, `meta` Left
+Super, `altgr` the keymap's ISO_Level3_Shift (`<LVL3>`, evdev 84; Right Alt
+is Alt in `us`), `caps_lock` Caps Lock, `num_lock` Num Lock; `none` swallows
+the key, which is how "disable this key" is said.
 
-A remapped code does not *become* the code it was mapped to. The held set
-stays keyed by the physical code, so holding a real Control and releasing a
-remapped Caps Lock leaves Control held — which it would not if the remap
-rewrote the code, since the two would then share one held bit.
+The held set stays keyed by the physical code, and a role's key goes down
+with the first physical key holding it and up with the last: holding a real
+Control and releasing a remapped Caps Lock leaves Control held.
+
+Modifiers and locks are each keyboard's own xkb state. A lock goes on at
+its key's press and off at the release of the press that unlocks it, as
+X and Wayland programs see it; so that press still reports the lock on.
 
 ```text
 PATCH /v1/input/devices/{device_id}
@@ -1702,36 +1712,37 @@ PATCH /v1/input/devices/{device_id}
 ```
 
 An empty `modifiers` object clears the map. Every property is per device: two
-keyboards on one server can carry different layouts, different repeat rates
-and different remaps, which is what makes per-device routing usable.
+keyboards on one server can carry different repeat rates and different
+remaps, and their modifiers and locks are their own.
 
 ### Keyboard map (xkb)
 
-`GET /v1/input/keymap` returns a keyboard as a complete xkb keymap, the text
-libxkbcommon compiles (`xkb_keymap_new_from_string`,
+`GET /v1/input/keymap` returns the keyboard as a complete xkb keymap, the
+text libxkbcommon compiles (`xkb_keymap_new_from_string`,
 `XKB_KEYMAP_FORMAT_TEXT_V1`), `Content-Type: text/plain`. It is how
-blit-compositor gives its Wayland programs Blit's keyboard (ADR 0228; "Program
-windows" below), and it is generated from Blit's own tables, not from a
-layout name: each key's four levels (plain, Shift, AltGr, Shift+AltGr) are
-what Blit itself types with them -- the built-in US table under the device's
-`keymap` overrides, CapsLock inverting Shift for a lower-case letter only --
-and a code with a `modifiers` role is that modifier (`control` is
-`Control_L`, `altgr` is `ISO_Level3_Shift`, `none` is no key). Keycodes are
-evdev codes plus 8; Shift, Lock, Control, Mod1 (Alt), Mod2 (Num Lock), Mod4
-(Super) and Mod5 (AltGr) are the modifiers, and the indicators are "Caps
-Lock" and "Num Lock", lit while Lock and Num Lock are locked (X programs
-read them; Xwayland 24.1 crashes under a keymap with none). A level of more than one
-character is its first character, since an xkb level is one keysym; the
-keypad is its Num Lock-on keysyms.
+blit-compositor gives its Wayland and X programs Blit's keyboard (ADR 0228;
+"Program windows" below), and it is the keymap Blit itself types with
+(ADR 0231): the system's xkeyboard-config data, compiled by libxkbcommon by
+name (rules `evdev`, model `pc105`, layout `us` until the keyboard list
+comes), so a terminal, a Wayland program and an X program agree on every
+key. It is the same for every keyboard: a device's `modifiers` roles are
+applied to its keys on the way in, not written into the keymap. Keycodes
+are evdev codes plus 8; Shift, Lock, Control, Mod1 (Alt), Mod2 (Num Lock),
+Mod4 (Super) and Mod5 (AltGr) are the modifiers, and the indicators
+include "Caps Lock" and "Num Lock" (X programs read them; Xwayland 24.1
+crashes under a keymap with none). Without the xkb data (Debian:
+`xkb-data`) Blit has no keymap, says so at start, and no key types
+anything.
 
 The keyboard is `?device=<id>` when given (404 `input_device_not_found` for
 none such), else the keyboard whose key came last -- the one whose keys
 reach the window -- while it is there and enabled, else the first enabled
-device Blit reads as a keyboard, else none, which is the built-in table
-alone; `X-Blit-Keymap-Device` names it (`builtin`). A key pressed on
-another keyboard makes it the default from that key on. The `ETag` is the
-SHA-256 of the text, quoted, so it changes exactly when the keymap does;
-`If-None-Match` with it is answered 304 with no body.
+device Blit reads as a keyboard, else none; `X-Blit-Keymap-Device` names
+it (`builtin` for none). That keyboard decides the repeat below; the text is
+the same for all. A key pressed on another keyboard makes it the default
+from that key on. The `ETag` is the SHA-256 of the text, quoted, so it
+changes exactly when the keymap does; `If-None-Match` with it is answered
+304 with no body.
 
 Both answers, 200 and 304, carry that keyboard's repeat, as the kernel
 holds it ("Keyboard settings": the read-back, one source):
@@ -1755,9 +1766,9 @@ GET /v1/input/keymap
   -> 200 text/plain  ETag: "<sha-256>"  X-Blit-Keymap-Device: <id>
      X-Blit-Repeat-Rate: 30  X-Blit-Repeat-Delay: 250
      xkb_keymap {
-     xkb_keycodes "blit" { minimum = 8; maximum = 255; <K1> = 9; ... };
+     xkb_keycodes "evdev+aliases(qwerty)" { minimum = 8; maximum = 255; <ESC> = 9; ... };
      ...
-     key <K30> { type = "ALPHABETIC", [ a, A ] };
+     key <AC01> { type = "ALPHABETIC", symbols[1] = [ a, A ] };
      ...
 ```
 
@@ -2542,9 +2553,18 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT frame <id> <monotonic-us>      ends one batch of events
   INPUT keymap <id> <revision> <size> <rate> <delay>
                                        the keymap (a memfd passed with it)
+  INPUT modifiers <id> <depressed> <latched> <locked> <group>
+                                       the keyboard's xkb modifiers
   ```
-  Keys are raw evdev codes; the compositor derives modifiers and characters
-  with the keymap below, so there is one source. `ptr` is in pixels of the
+  Keys are evdev codes as the keymap reads them: a device's `modifiers` role
+  already applied (Caps Lock as Control is Left Control), and a key held by
+  two physical keys sent once (ADR 0231). The modifiers are Blit's own xkb
+  state for that keyboard, so there is one source: after every key, in that
+  key's batch (before its `frame`); after the keymap, on its own; and after
+  a route releases everything it held, the locks alone. The compositor
+  sends its clients these, not modifiers of its own, so a lock set at start
+  (`num_lock_boot`) or held across a keymap change reaches its programs.
+  Characters the compositor's clients derive with the keymap below. `ptr` is in pixels of the
   picture's latest frame, a decimal with two fractional digits (over a
   member, the top-level's pixels, negative where a popup reaches past the
   top-level's left or top); `rel` the
@@ -2557,7 +2577,9 @@ It speaks the frame channel above as a producer, with these additions.
   ENOENT`, as when the compositor closes the socket itself
   (`last_error` `sock-disconnected`, or `sock-full`).
   `INPUT keymap` is no event: no `frame` follows it, it is not counted in
-  `events`, and it may come between batches. It carries the keymap of the
+  `events`, and it may come between batches; nor is an `INPUT modifiers`
+  on its own. A line passed with a descriptor (the keymap's) is read apart
+  from the lines after it, so a reader reads until the socket is quiet. It carries the keymap of the
   keyboard whose keys reach the window -- what `GET /v1/input/keymap`
   serves by default ("Keyboard map (xkb)"), the same bytes -- as a sealed
   memfd passed with the line (SCM_RIGHTS) of `size` bytes, the xkb text and

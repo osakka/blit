@@ -217,6 +217,14 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT keymap 3", &in) == BC_INPUT_UNKNOWN, "keymap, no revision");
     EXPECT(bc_parse_input("INPUT keymap 3 -1 9607 25 600", &in) == BC_INPUT_UNKNOWN, "keymap, negative");
     EXPECT(bc_parse_input("INPUT keymap 3 42 9607 1001 600", &in) == BC_INPUT_UNKNOWN, "keymap, rate");
+    /* ADR 0231: Blit's own modifiers, depressed latched locked group. */
+    EXPECT(bc_parse_input("INPUT modifiers 3 1 0 18 0\n", &in) == BC_INPUT_MODIFIERS && in.id == 3 &&
+           in.mods[0] == 1 && in.mods[1] == 0 && in.mods[2] == 18 && in.mods[3] == 0, "modifiers");
+    EXPECT(bc_parse_input("INPUT modifiers 3 0 0 4294967295 2", &in) == BC_INPUT_MODIFIERS &&
+           in.mods[2] == 4294967295u && in.mods[3] == 2, "modifiers, whole range");
+    EXPECT(bc_parse_input("INPUT modifiers 3 1 0 18", &in) == BC_INPUT_UNKNOWN, "modifiers, three");
+    EXPECT(bc_parse_input("INPUT modifiers 3 1 0 18 0 7", &in) == BC_INPUT_UNKNOWN, "modifiers, five");
+    EXPECT(bc_parse_input("INPUT modifiers 3 -1 0 0 0", &in) == BC_INPUT_UNKNOWN, "modifiers, negative");
     EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 60001", &in) == BC_INPUT_UNKNOWN, "keymap, delay");
     EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 600 1", &in) == BC_INPUT_UNKNOWN, "keymap, extra");
     EXPECT(bc_parse_input("INPUT on 3", &in) == BC_INPUT_UNKNOWN, "not an input line");
