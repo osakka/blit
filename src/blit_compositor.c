@@ -32,9 +32,13 @@
 
    Globals: wl_compositor, wl_subcompositor (each subsurface a picture of
    its own, `WINDOW sub`: the subsurface section), wl_shm (ARGB8888, XRGB8888, libwayland's own),
-   wl_output (one global per display mode the desktop names with `WINDOW
-   output`; a window is on the first, 1920x1080 at 60 Hz, until then, and
-   its surface enters and leaves them as the desktop moves it),
+   wl_output (one global per display of the desktop's layout, `WINDOW
+   layout`, named and placed as the desktop has them -- without a layout,
+   one per display mode the desktop names with `WINDOW output`: the
+   outputs section; a window is on the primary display, or the first
+   output, until the desktop says, and its surface enters and leaves them
+   as the desktop moves it), zxdg_output_manager_v1 (each display's place
+   and name, which Xwayland's RandR layout is made of),
    xdg_wm_base, zxdg_decoration_manager_v1 (server-side: the desktop draws
    frames; a client that insists on its own gets `WINDOW decor <id>
    client`), wl_seat (keyboard with Blit's xkb keymap, pointer),
@@ -51,7 +55,7 @@
 
    Built with tools/build-tcc.sh compositor, linked against
    libwayland-server.so.0, libxkbcommon.so.0 and libxcb.so.1 with its
-   composite, xfixes and res extensions. */
+   composite, xfixes, res and randr extensions. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <signal.h>
@@ -73,6 +77,7 @@
 #include <xcb/composite.h>
 #include <xcb/xfixes.h>
 #include <xcb/res.h>
+#include <xcb/randr.h>
 
 #include <wayland-server.h>
 #include <wayland-server-protocol.h>
@@ -88,6 +93,7 @@
 #include "appmenu-server-protocol.h"
 #include "xwayland-shell-v1-server-protocol.h"
 #include "xdg-activation-v1-server-protocol.h"
+#include "xdg-output-unstable-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 #include "blit_pointer_names.h"
 #include "blit_crash.h"
@@ -101,6 +107,12 @@
 #define BC_VERSION(want, iface) ((want) < (iface).version ? (want) : (iface).version)
 #define BC_SOCKETS 32
 #define BC_TOKENS 16
+/* The displays one layout names, at most. */
+#define BC_DISPLAYS 16
+/* A display gone: its wl_output global is removed at once and destroyed
+   this long after, so a client binding it meanwhile is no error (as
+   wlroots' wlr_global_destroy_safe). */
+#define BC_OUTPUT_LINGER_MS 5000
 
 enum { BC_ROLE_NONE = 0, BC_ROLE_XDG, BC_ROLE_SUBSURFACE, BC_ROLE_XWAYLAND };
 enum { BC_LINK_UP = 0, BC_LINK_DOWN };
@@ -110,18 +122,34 @@ struct bc_xdg;
 struct bc_constraint;
 struct bc_xwin;
 
-/* One wl_output global per display mode the desktop has named with
-   `WINDOW output` (the line carries the mode, not the display, so two
-   displays with one mode are one output). An output no window is on is
-   given the next new mode, so globals never come and go. */
+/* A wl_output global (the outputs section). With the desktop's layout
+   (`WINDOW layout`), one per display: its name, its place and its mode.
+   Without one, as before the layout: one per display mode the desktop has
+   named with `WINDOW output` (the line carries the mode, not the display,
+   so two displays with one mode are one output), each at 0,0; an output
+   no window is on is given the next new mode, so globals never come and
+   go. */
 struct bc_output {
-    struct wl_list link;              /* bc_server.outputs */
+    struct wl_list link;              /* bc_server.outputs, or .outputs_gone once removed */
     struct wl_global *global;
     struct wl_list resources;         /* wl_output resources */
+    struct wl_list xdg_resources;     /* zxdg_output_v1 resources */
+    int32_t x, y;                     /* its place in the desktop's layout; 0,0 without one */
     int32_t width, height;
-    uint32_t refresh_mhz;
+    uint32_t refresh_mhz;             /* 0: unknown (a layout's display may say so) */
     int windows;                      /* windows on it */
-    int number;                       /* its name, BLIT-<number>, from 1 */
+    int number;                       /* without a layout: BLIT-<number>, from 1 */
+    char name[BC_NAME_BYTES + 1];     /* wl_output's and xdg_output's name, so X's */
+    int laid;                         /* a display of the desktop's layout */
+    int named;                        /* named by the set being applied */
+    struct wl_event_source *destroy;  /* removed: its global destroyed after BC_OUTPUT_LINGER_MS */
+};
+
+/* One display of a layout the desktop is sending (`WINDOW layout`). */
+struct bc_display {
+    char name[BC_NAME_BYTES + 1];
+    int32_t x, y, width, height;
+    uint32_t refresh_mhz;
 };
 
 /* A wl_region: its add and subtract rectangles in order. A point is in it
@@ -326,6 +354,11 @@ struct bc_x {
     struct wl_event_source *restore;
     uint32_t stack_seq;               /* the newest stacking count (bc_xwin.stack) */
     int32_t root_w, root_h;           /* the root's size: X's pointer is confined to it */
+    /* RandR 1.3 (its primary output): its first event, 0 none; the
+       desktop's primary not yet an X output, said once. */
+    int randr;
+    uint8_t randr_first;
+    int primary_waiting_said;
     /* X's cursor (XFixes): the name of the cursor X shows, as `WINDOW
        cursor` says it ("" none known), whether Xwayland's last
        wl_pointer.set_cursor showed one, and the names of cursor atoms. */
@@ -404,7 +437,16 @@ struct bc_server {
     unsigned attempts;
     char dial_error[96];              /* the last attempt's failure, logged once a kind */
     struct wl_list windows;           /* bc_xdg */
-    struct wl_list outputs;           /* bc_output */
+    struct wl_list outputs;           /* bc_output: the displays, in the desktop's order */
+    struct wl_list outputs_gone;      /* bc_output removed, its global not yet destroyed */
+    /* The desktop's layout (the outputs section): whether one has been
+       applied, the set being sent, its extent (X's root), and X's primary
+       display by name ("" none said). */
+    int layout;
+    struct bc_display staged[BC_DISPLAYS];
+    int staged_n, staged_over;
+    int32_t layout_w, layout_h;
+    char primary[BC_NAME_BYTES + 1];
     struct wl_list holds;             /* bc_hold: FRM3 frames Blit holds */
     int format_table_fd;              /* linux-dmabuf v4's format table */
     dev_t main_device;
@@ -504,6 +546,7 @@ static void unlink_resource(struct wl_resource *resource)
 
 static void window_set_output(struct bc_xdg *x, struct bc_output *o);
 static struct bc_output *output_default(struct bc_server *s);
+static struct bc_output *x_output_of(struct bc_server *s, struct bc_xwin *w);
 static struct wl_resource *output_resource(struct bc_output *o, struct wl_client *client);
 
 /* A toplevel of either kind: an xdg toplevel or an X one. */
@@ -661,8 +704,10 @@ static void announce_toplevel(struct bc_xdg *x)
         x->ask_reason = NULL;
         window_ask_activate(x, reason);
     }
-    /* On the first output until the desktop says which display it is on. */
-    window_set_output(x, output_default(x->server));
+    /* On the primary display until the desktop says which display it is
+       on (without a layout, the first output); an X toplevel on the
+       display it is in, in X space (x_output_of). */
+    window_set_output(x, x->xwin ? x_output_of(x->server, x->xwin) : output_default(x->server));
     /* A lock asked for before the window was announced is asked for now. */
     if (x->surface) constraint_ask_surface(x->surface);
 }
@@ -1415,10 +1460,12 @@ static int subs_collect(struct bc_xdg *root, struct bc_sub_at *out)
     return n < BC_SUBS_MAX ? n : BC_SUBS_MAX;
 }
 
+/* The refresh a surface's frames are paced at: its display's, 60 Hz
+   until it is on one or when the display's is unknown (a layout's 0). */
 static uint32_t surface_refresh_mhz(struct bc_surface *surface)
 {
     struct bc_xdg *x = surface_pic(surface);
-    return x && x->output ? x->output->refresh_mhz : 60000u;
+    return x && x->output && x->output->refresh_mhz ? x->output->refresh_mhz : 60000u;
 }
 
 static void feedback_discard(struct wl_list *list)
@@ -3119,14 +3166,76 @@ static void bind_subcompositor(struct wl_client *client, void *data, uint32_t ve
     wl_resource_set_implementation(r, &subcompositor_impl, data, NULL);
 }
 
-/* ---- wl_output: one per display mode (WINDOW output) ---- */
+/* ---- the outputs: the desktop's displays (WINDOW layout, WINDOW output) ----
+
+   With the desktop's layout -- `WINDOW layout <name> <x> <y> <w> <h>
+   <mHz>` for each display, then `WINDOW layout end` -- each display is one
+   wl_output global: wl_output's name (version 4) is the desktop's name for
+   it, its geometry's x,y its place in the desktop's pixels, its mode its
+   size and refresh (0 when the desktop does not know it); and
+   zxdg_output_manager_v1 (version 3) gives the same place and size as the
+   logical position and size, and the name. Xwayland takes its RandR
+   outputs from these (xwayland-output.c, 24.1): an output's x,y and size
+   from xdg_output when it has one (else wl_output's geometry and mode),
+   applied at wl_output.done (xdg_output version 3); its name from
+   wl_output.name, else xdg_output.name, else XWAYLAND<n>, a name another
+   output has refused; X's root the extent of them all. So X's RandR
+   outputs and monitors are the desktop's displays, named as the desktop
+   names them, at their places (the X section's layout).
+
+   A set is applied at its end, compared by name with the last: the same
+   display unchanged is nothing (the desktop repeats the set at every
+   display change and on connect, so a repeat is harmless); a display whose
+   place or mode changed is told so (geometry and mode, the logical
+   position and size, done); a new one is a new global; a display not named
+   since the last end is gone -- its global removed (wl_global_remove) and
+   destroyed BC_OUTPUT_LINGER_MS later, as wlroots does, its windows moved
+   to the primary display first. Removals go out before additions, so a
+   name freed is free for the new display (Xwayland refuses a name an
+   output still has). The first set replaces the outputs of before it. A
+   set naming no display is refused: the layout stands.
+
+   `WINDOW primary <name>` is X's primary display (the X section), and the
+   display a window the desktop has not yet placed is on.
+
+   Without a layout -- a desktop older than 0.3.88 sends none -- the
+   outputs are as before it: one per display mode (bc_output). */
+
+static void output_send_geometry(struct bc_output *o, struct wl_resource *r)
+{
+    wl_output_send_geometry(r, o->x, o->y, 0, 0, WL_OUTPUT_SUBPIXEL_UNKNOWN, "Blit", "blit-compositor",
+                            WL_OUTPUT_TRANSFORM_NORMAL);
+}
 
 static void output_send_mode(struct bc_output *o, struct wl_resource *r)
 {
     wl_output_send_mode(r, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED, o->width,
                         o->height, (int32_t)o->refresh_mhz);
-    if (wl_resource_get_version(r) >= WL_OUTPUT_DONE_SINCE_VERSION)
-        wl_output_send_done(r);
+}
+
+static void xdg_output_send_place(struct bc_output *o, struct wl_resource *r)
+{
+    zxdg_output_v1_send_logical_position(r, o->x, o->y);
+    zxdg_output_v1_send_logical_size(r, o->width, o->height);
+}
+
+/* The output's place or mode changed: every client that bound it told,
+   wl_output's events and xdg_output's, then done (xdg_output's own done
+   only before its version 3, which ends with wl_output's). */
+static void output_changed(struct bc_output *o, int moved)
+{
+    struct wl_resource *r;
+    wl_resource_for_each(r, &o->resources) {
+        if (moved) output_send_geometry(o, r);
+        output_send_mode(o, r);
+    }
+    wl_resource_for_each(r, &o->xdg_resources) {
+        xdg_output_send_place(o, r);
+        if (wl_resource_get_version(r) < 3) zxdg_output_v1_send_done(r);
+    }
+    wl_resource_for_each(r, &o->resources)
+        if (wl_resource_get_version(r) >= WL_OUTPUT_DONE_SINCE_VERSION)
+            wl_output_send_done(r);
 }
 
 /* The client's resource for output `o`, or NULL if it has not bound it. */
@@ -3181,34 +3290,41 @@ static void bind_output(struct wl_client *client, void *data, uint32_t version, 
     }
     wl_resource_set_implementation(r, &output_impl, o, unlink_resource);
     wl_list_insert(&o->resources, wl_resource_get_link(r));
-    wl_output_send_geometry(r, 0, 0, 0, 0, WL_OUTPUT_SUBPIXEL_UNKNOWN, "Blit", "blit-compositor",
-                            WL_OUTPUT_TRANSFORM_NORMAL);
+    output_send_geometry(o, r);
     if (version >= WL_OUTPUT_SCALE_SINCE_VERSION)
         wl_output_send_scale(r, 1);
-    if (version >= WL_OUTPUT_NAME_SINCE_VERSION) {
-        char name[32];
-        snprintf(name, sizeof(name), "BLIT-%d", o->number);
-        wl_output_send_name(r, name);
-    }
+    if (version >= WL_OUTPUT_NAME_SINCE_VERSION)
+        wl_output_send_name(r, o->name);
     if (version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
         wl_output_send_description(r, "Blit desktop");
     output_send_mode(o, r);
+    if (version >= WL_OUTPUT_DONE_SINCE_VERSION)
+        wl_output_send_done(r);
     /* The client's windows already on this output enter it now. */
     wl_list_for_each(x, &g_server->windows, link)
         if (x->output == o && x->surface && wl_resource_get_client(x->surface->resource) == client)
             wl_surface_send_enter(x->surface->resource, r);
 }
 
-static struct bc_output *output_create(struct bc_server *s, int32_t w, int32_t h, uint32_t mhz)
+/* A new output and its global, at the tail of the list. `name` NULL: an
+   output of before the layout, BLIT-<n>. */
+static struct bc_output *output_create(struct bc_server *s, const char *name, int32_t x, int32_t y, int32_t w,
+                                       int32_t h, uint32_t mhz)
 {
     struct bc_output *o = calloc(1, sizeof(*o));
     if (o == NULL) return NULL;
     wl_list_init(&o->resources);
+    wl_list_init(&o->xdg_resources);
+    o->x = x;
+    o->y = y;
     o->width = w;
     o->height = h;
     o->refresh_mhz = mhz;
     o->number = wl_list_length(&s->outputs) + 1;
-    /* At the tail: the first is BLIT-1, the default output. */
+    if (name) snprintf(o->name, sizeof(o->name), "%s", name);
+    else snprintf(o->name, sizeof(o->name), "BLIT-%d", o->number);
+    o->laid = name != NULL;
+    /* At the tail: without a layout the first is BLIT-1, the default output. */
     wl_list_insert(s->outputs.prev, &o->link);
     o->global = wl_global_create(s->display, &wl_output_interface,
                                  BC_VERSION(4, wl_output_interface), o, bind_output);
@@ -3220,42 +3336,295 @@ static struct bc_output *output_create(struct bc_server *s, int32_t w, int32_t h
     return o;
 }
 
-/* The output of mode w x h at mhz: one that has it, else one no window is
-   on given it (its clients see the mode change), else a new global. */
+/* The resources still bound to a destroyed output: inert from here on
+   (their requests are destroy and release only; an xdg_output asked of
+   one says nothing). */
+static void output_detach(struct wl_list *list)
+{
+    while (!wl_list_empty(list)) {
+        struct wl_resource *r = wl_resource_from_link(list->next);
+        wl_list_remove(wl_resource_get_link(r));
+        wl_list_init(wl_resource_get_link(r));
+        wl_resource_set_user_data(r, NULL);
+    }
+}
+
+static void output_free(struct bc_output *o)
+{
+    if (o->destroy) wl_event_source_remove(o->destroy);
+    if (o->global) wl_global_destroy(o->global);
+    output_detach(&o->resources);
+    output_detach(&o->xdg_resources);
+    wl_list_remove(&o->link);
+    free(o);
+}
+
+static int output_destroy_due(void *data)
+{
+    output_free(data);
+    return 0;
+}
+
+/* The output of mode w x h at mhz, without a layout: one that has it, else
+   one no window is on given it (its clients see the mode change), else a
+   new global. */
 static struct bc_output *output_for_mode(struct bc_server *s, int32_t w, int32_t h, uint32_t mhz)
 {
     struct bc_output *o, *idle = NULL;
-    struct wl_resource *r;
     wl_list_for_each(o, &s->outputs, link) {
         if (o->width == w && o->height == h && o->refresh_mhz == mhz) return o;
         if (o->windows == 0 && idle == NULL) idle = o;
     }
-    if (idle == NULL) return output_create(s, w, h, mhz);
+    if (idle == NULL) return output_create(s, NULL, 0, 0, w, h, mhz);
     idle->width = w;
     idle->height = h;
     idle->refresh_mhz = mhz;
-    wl_resource_for_each(r, &idle->resources)
-        output_send_mode(idle, r);
+    output_changed(idle, 0);
     return idle;
 }
 
-/* The first output: a window the desktop has not yet placed on a display
-   is on it. */
+/* The display of the layout named `name`, NULL none. */
+static struct bc_output *output_named(struct bc_server *s, const char *name)
+{
+    struct bc_output *o;
+    wl_list_for_each(o, &s->outputs, link)
+        if (o->laid && strcmp(o->name, name) == 0) return o;
+    return NULL;
+}
+
+/* The output a window the desktop has not yet placed on a display is on:
+   the primary display, else the first (without a layout, BLIT-1). */
 static struct bc_output *output_default(struct bc_server *s)
 {
     struct bc_output *o;
+    if (s->layout && s->primary[0] && (o = output_named(s, s->primary)) != NULL) return o;
     wl_list_for_each(o, &s->outputs, link)
         return o;
     return NULL;
 }
 
-/* A window and the popups opened from it go to output `o`. */
+/* With a layout, `WINDOW output`'s mode as a display: the one display of
+   that size, the refresh telling two apart; when it still names more than
+   one (two displays of one mode: the line carries no name), the window
+   stays on the one of them it is on, else goes to the primary of them,
+   else the first, and *several says how many matched. NULL: no display
+   has that size. */
+static struct bc_output *output_for_display_mode(struct bc_server *s, struct bc_xdg *x, int32_t w, int32_t h,
+                                                 uint32_t mhz, int *several)
+{
+    struct bc_output *o, *first = NULL, *primary = NULL;
+    int sized = 0, timed = 0, here = 0;
+    wl_list_for_each(o, &s->outputs, link) {
+        if (o->width != w || o->height != h) continue;
+        ++sized;
+        if (o->refresh_mhz == mhz) ++timed;
+    }
+    *several = 0;
+    if (sized == 0) return NULL;
+    wl_list_for_each(o, &s->outputs, link) {
+        if (o->width != w || o->height != h || (timed && o->refresh_mhz != mhz)) continue;
+        if (first == NULL) first = o;
+        if (o == x->output) here = 1;
+        if (s->primary[0] && strcmp(o->name, s->primary) == 0) primary = o;
+    }
+    if ((timed ? timed : sized) == 1) return first;
+    *several = timed ? timed : sized;
+    return here ? x->output : primary ? primary : first;
+}
+
+static void x_follow(struct bc_xdg *x, int32_t from_x, int32_t from_y);
+static void x_layout_changed(struct bc_server *s);
+
+/* A window and the popups opened from it go to output `o`; an X toplevel
+   follows its display in X space (x_follow). */
 static void window_move_output(struct bc_server *s, struct bc_xdg *x, struct bc_output *o)
 {
     struct bc_xdg *other;
+    struct bc_output *was = x->output;
     window_set_output(x, o);
     wl_list_for_each(other, &s->windows, link)
         if (window_is_popup(other) && other->parent == x && other->id) window_set_output(other, o);
+    if (x->xwin && was != o) x_follow(x, was ? was->x : 0, was ? was->y : 0);
+}
+
+/* `WINDOW layout <name> ...`: one display of the set being sent. A name
+   said twice in one set is its last line. */
+static void layout_line(struct bc_server *s, const BcLine *l)
+{
+    int i;
+    for (i = 0; i < s->staged_n; ++i)
+        if (strcmp(s->staged[i].name, l->name) == 0) break;
+    if (i == s->staged_n) {
+        if (s->staged_n == BC_DISPLAYS) {
+            if (!s->staged_over) logf_("WINDOW layout: more than %d displays; %s and later ignored", BC_DISPLAYS,
+                                       l->name);
+            s->staged_over = 1;
+            return;
+        }
+        ++s->staged_n;
+    }
+    snprintf(s->staged[i].name, sizeof(s->staged[i].name), "%s", l->name);
+    s->staged[i].x = l->x;
+    s->staged[i].y = l->y;
+    s->staged[i].width = l->width;
+    s->staged[i].height = l->height;
+    s->staged[i].refresh_mhz = l->refresh_mhz;
+}
+
+/* `WINDOW layout end`: the set applied (the section's comment). */
+static void layout_end(struct bc_server *s)
+{
+    struct wl_list kept, leaving;
+    struct bc_output *o, *tmp, *dest;
+    struct bc_xdg *x;
+    int i, changed = 0;
+    if (s->staged_n == 0) {
+        logf_("WINDOW layout end with no display: refused, the layout stands");
+        return;
+    }
+    wl_list_init(&kept);
+    wl_list_init(&leaving);
+    wl_list_for_each(o, &s->outputs, link)
+        o->named = 0;
+    for (i = 0; i < s->staged_n; ++i)
+        if ((o = output_named(s, s->staged[i].name)) != NULL) o->named = 1;
+    /* The displays gone: removed first, announced before any new one. */
+    wl_list_for_each_safe(o, tmp, &s->outputs, link)
+        if (!o->named) {
+            wl_global_remove(o->global);
+            wl_list_remove(&o->link);
+            wl_list_insert(leaving.prev, &o->link);
+            logf_("display %s: gone", o->name);
+            changed = 1;
+        }
+    /* The set, in its order: changed in place or new. */
+    for (i = 0; i < s->staged_n; ++i) {
+        const struct bc_display *d = &s->staged[i];
+        o = output_named(s, d->name);
+        if (o == NULL) {
+            o = output_create(s, d->name, d->x, d->y, d->width, d->height, d->refresh_mhz);
+            if (o == NULL) {
+                logf_("display %s: no global (out of memory)", d->name);
+                continue;
+            }
+            logf_("display %s: %dx%d at %d,%d, %u mHz (new)", d->name, d->width, d->height, d->x, d->y,
+                  d->refresh_mhz);
+            changed = 1;
+        } else if (o->x != d->x || o->y != d->y || o->width != d->width || o->height != d->height ||
+                   o->refresh_mhz != d->refresh_mhz) {
+            int32_t from_x = o->x, from_y = o->y;
+            int moved = o->x != d->x || o->y != d->y;
+            o->x = d->x;
+            o->y = d->y;
+            o->width = d->width;
+            o->height = d->height;
+            o->refresh_mhz = d->refresh_mhz;
+            output_changed(o, moved);
+            logf_("display %s: %dx%d at %d,%d, %u mHz", d->name, d->width, d->height, d->x, d->y,
+                  d->refresh_mhz);
+            /* Its X windows with it. */
+            wl_list_for_each(x, &s->windows, link)
+                if (x->output == o && x->xwin && !x->xpopup) x_follow(x, from_x, from_y);
+            changed = 1;
+        }
+        wl_list_remove(&o->link);
+        wl_list_insert(kept.prev, &o->link);
+    }
+    /* Nothing is left in the list but what could not be moved: the kept
+       become the list, in the set's order. */
+    wl_list_insert_list(kept.prev, &s->outputs);
+    wl_list_init(&s->outputs);
+    wl_list_insert_list(&s->outputs, &kept);
+    s->staged_n = 0;
+    s->staged_over = 0;
+    if (!s->layout) {
+        logf_("the desktop's display layout: one output per display from here on");
+        s->layout = 1;
+        changed = 1;
+    }
+    s->layout_w = s->layout_h = 0;
+    wl_list_for_each(o, &s->outputs, link) {
+        if (o->x + o->width > s->layout_w) s->layout_w = o->x + o->width;
+        if (o->y + o->height > s->layout_h) s->layout_h = o->y + o->height;
+    }
+    /* The windows of the displays gone, to the primary; their globals are
+       destroyed a moment later. */
+    dest = output_default(s);
+    wl_list_for_each_safe(o, tmp, &leaving, link) {
+        wl_list_for_each(x, &s->windows, link)
+            if (x->output == o && window_is_toplevel(x)) window_move_output(s, x, dest);
+        wl_list_for_each(x, &s->windows, link)
+            if (x->output == o) window_set_output(x, dest);
+        wl_list_remove(&o->link);
+        wl_list_insert(&s->outputs_gone, &o->link);
+        o->destroy = wl_event_loop_add_timer(s->loop, output_destroy_due, o);
+        if (o->destroy == NULL) output_free(o);
+        else wl_event_source_timer_update(o->destroy, BC_OUTPUT_LINGER_MS);
+    }
+    if (changed) {
+        logf_("layout: %d displays, %dx%d", wl_list_length(&s->outputs), s->layout_w, s->layout_h);
+        x_layout_changed(s);
+    }
+}
+
+/* `WINDOW primary <name>`. */
+static void layout_primary(struct bc_server *s, const char *name)
+{
+    if (strcmp(s->primary, name) == 0) return;
+    snprintf(s->primary, sizeof(s->primary), "%s", name);
+    logf_("primary display: %s%s", name,
+          s->layout && output_named(s, name) == NULL ? " (not in the layout yet)" : "");
+    x_layout_changed(s);
+}
+
+/* ---- zxdg_output_manager_v1: each display's place and name ---- */
+
+static const struct zxdg_output_v1_interface xdg_output_impl = {
+    .destroy = bc_destroy_request,
+};
+
+static void xdg_output_get(struct wl_client *client, struct wl_resource *manager, uint32_t id,
+                           struct wl_resource *output)
+{
+    struct bc_output *o = wl_resource_get_user_data(output);
+    int version = wl_resource_get_version(manager);
+    struct wl_resource *r = wl_resource_create(client, &zxdg_output_v1_interface, version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &xdg_output_impl, o, unlink_resource);
+    if (o == NULL) {
+        /* Of an output destroyed already: nothing to say. */
+        wl_list_init(wl_resource_get_link(r));
+        return;
+    }
+    wl_list_insert(&o->xdg_resources, wl_resource_get_link(r));
+    xdg_output_send_place(o, r);
+    if (version >= ZXDG_OUTPUT_V1_NAME_SINCE_VERSION) zxdg_output_v1_send_name(r, o->name);
+    if (version >= ZXDG_OUTPUT_V1_DESCRIPTION_SINCE_VERSION) zxdg_output_v1_send_description(r, "Blit desktop");
+    /* Version 3 ends with wl_output's done (Xwayland applies an output's
+       place at it); before it, with xdg_output's own. */
+    if (version >= 3) {
+        if (wl_resource_get_version(output) >= WL_OUTPUT_DONE_SINCE_VERSION) wl_output_send_done(output);
+    } else {
+        zxdg_output_v1_send_done(r);
+    }
+}
+
+static const struct zxdg_output_manager_v1_interface xdg_output_manager_impl = {
+    .destroy = bc_destroy_request,
+    .get_xdg_output = xdg_output_get,
+};
+
+static void bind_xdg_output_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zxdg_output_manager_v1_interface, (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &xdg_output_manager_impl, data, NULL);
 }
 
 /* ---- wl_seat: keyboard and pointer (their events: the input section) ---- */
@@ -5135,9 +5504,15 @@ static void input_sockets_clear(struct bc_server *s)
    An override-redirect window (a menu, a dropdown, a tooltip) is a
    `WINDOW popup` of the toplevel it belongs to (x_popup_parent), at its
    offset from that toplevel in X space. Toplevels keep their X position
-   (the program's, only kept inside the root, x_fit, and never moved after
-   that): X space is a stable, virtual layout and Hibr places the
-   pictures. Xwayland turns a pointer on any of its surfaces into a root
+   (the program's, only kept inside the root, x_fit): X space is a stable
+   layout and Hibr places the pictures. With the desktop's display layout
+   (`WINDOW layout`) X space is that layout -- the root its extent, one
+   RandR output and monitor per display at its place, the desktop's
+   primary X's (the X primary section) -- and a toplevel is kept inside
+   the display it is on, the one the desktop says (`WINDOW output`), and
+   follows it to another; a full-screen one is at its display's origin at
+   the desktop's size (x_place, x_follow). Without a layout X space is a
+   virtual one: every output at 0,0, the root the largest. Xwayland turns a pointer on any of its surfaces into a root
    position by that surface's window's X position, so a popup's pointer
    (Blit maps it into its toplevel's pixels, INPUT member; pointer_target
    gives it to the popup's surface) lands where X has the menu. Menus'
@@ -5738,32 +6113,88 @@ static void x_pointer_entered(struct bc_server *s, struct bc_surface *surface)
         cursor_set(s, s->x.client, s->x.cursor);
 }
 
+/* A rectangle of width x height at *x,*y moved inside the area at ax,ay of
+   aw x ah, as far as its size allows (one larger than the area starts at
+   the area's left or top). */
+static void x_fit_area(int32_t ax, int32_t ay, int32_t aw, int32_t ah, int32_t width, int32_t height, int32_t *x,
+                       int32_t *y)
+{
+    if (*x + width > ax + aw) *x = ax + aw - width;
+    if (*y + height > ay + ah) *y = ay + ah - height;
+    if (*x < ax) *x = ax;
+    if (*y < ay) *y = ay;
+}
+
 /* A toplevel's place in X space kept inside the root. X confines its
-   pointer to the root (the largest output: the compositor's outputs all
-   sit at 0,0), so a press on the part of a window past the root's edge
-   would reach X at the edge (found by the X gate: a press at 390,170 of a
-   window at 1700,900 came as 219,170). So the window manager places a
+   pointer to the root, so a press on the part of a window past the root's
+   edge would reach X at the edge (found by the X gate: a press at 390,170
+   of a window at 1700,900 came as 219,170). So the window manager places a
    toplevel that would reach past the root back inside it, as far as its
    size allows -- at its map, at a ConfigureRequest and at the desktop's
    size; otherwise its position is the program's, never moved. A window
-   larger than the root still reaches past it. */
+   larger than the root still reaches past it. The root is the extent of
+   the desktop's displays with a layout (the one Xwayland makes of the
+   outputs, known here before Xwayland has taken a change), else Xwayland's
+   own: the largest output, all of them at 0,0. */
 static void x_fit(const struct bc_server *s, int32_t width, int32_t height, int32_t *x, int32_t *y)
 {
-    if (*x + width > s->x.root_w) *x = s->x.root_w - width;
-    if (*y + height > s->x.root_h) *y = s->x.root_h - height;
-    if (*x < 0) *x = 0;
-    if (*y < 0) *y = 0;
+    if (s->layout) x_fit_area(0, 0, s->layout_w, s->layout_h, width, height, x, y);
+    else x_fit_area(0, 0, s->x.root_w, s->x.root_h, width, height, x, y);
 }
 
-/* The window resized to w x h at its own X position (kept inside the
-   root), border 0; a synthetic ConfigureNotify when the geometry does not
-   change (ICCCM 4.1.5: the client is told either way). */
-static void x_resize(struct bc_server *s, struct bc_xwin *w, uint16_t width, uint16_t height)
+/* The display an X toplevel is on, with the desktop's layout: its
+   picture's, which the desktop says (`WINDOW output`); before that the
+   display its rectangle's centre is in (where the program put it), else
+   the primary. NULL without a layout. */
+static struct bc_output *x_display(struct bc_server *s, struct bc_xwin *w, int32_t x, int32_t y, int32_t width,
+                                   int32_t height)
+{
+    struct bc_output *o;
+    int32_t cx = x + width / 2, cy = y + height / 2;
+    if (!s->layout) return NULL;
+    if (w->pic && !w->pic->xpopup && w->pic->output && w->pic->output->laid) return w->pic->output;
+    wl_list_for_each(o, &s->outputs, link)
+        if (cx >= o->x && cy >= o->y && cx < o->x + o->width && cy < o->y + o->height) return o;
+    return output_default(s);
+}
+
+/* The output an X toplevel's picture starts on (announce_toplevel). */
+static struct bc_output *x_output_of(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_output *o = x_display(s, w, w->x, w->y, w->width, w->height);
+    return o ? o : output_default(s);
+}
+
+/* Where an X toplevel of width x height asking for *x,*y goes. X space is
+   a layout of the desktop's displays (ADR 0228, milestone C; the outputs
+   section): with the desktop's layout a toplevel is kept inside its
+   display (x_display), and a full-screen one is at its display's origin --
+   so a program finds its window on the RandR output of the display the
+   desktop shows it on. Then, with a layout or without, it is kept inside
+   the root (x_fit). */
+static void x_place(struct bc_server *s, struct bc_xwin *w, int32_t width, int32_t height, int fullscreen,
+                    int32_t *x, int32_t *y)
+{
+    struct bc_output *d = x_display(s, w, *x, *y, width, height);
+    if (d && fullscreen) {
+        *x = d->x;
+        *y = d->y;
+    } else if (d) {
+        x_fit_area(d->x, d->y, d->width, d->height, width, height, x, y);
+    }
+    x_fit(s, width, height, x, y);
+}
+
+/* The window at x,y (placed: x_place) and w x h, border 0; a synthetic
+   ConfigureNotify when the geometry does not change (ICCCM 4.1.5: the
+   client is told either way). */
+static void x_geometry(struct bc_server *s, struct bc_xwin *w, int32_t x, int32_t y, uint16_t width,
+                       uint16_t height)
 {
     uint32_t values[5];
-    int32_t nx = w->x, ny = w->y;
+    int32_t nx = x, ny = y;
     int same;
-    x_fit(s, width, height, &nx, &ny);
+    x_place(s, w, width, height, w->pic && w->pic->size_fullscreen, &nx, &ny);
     same = width == w->width && height == w->height && nx == w->x && ny == w->y;
     w->x = (int16_t)nx;
     w->y = (int16_t)ny;
@@ -5790,6 +6221,32 @@ static void x_resize(struct bc_server *s, struct bc_xwin *w, uint16_t width, uin
         ev.height = height;
         xcb_send_event(s->x.conn, 0, w->window, XCB_EVENT_MASK_STRUCTURE_NOTIFY, (const char *)&ev);
     }
+}
+
+/* The window resized to w x h at its own X position (x_geometry). */
+static void x_resize(struct bc_server *s, struct bc_xwin *w, uint16_t width, uint16_t height)
+{
+    x_geometry(s, w, w->x, w->y, width, height);
+}
+
+/* An X toplevel whose display changed -- the desktop moved it to another
+   (`WINDOW output`), its display moved in the layout or went -- follows
+   it in X space: its place in its old display (whose origin was
+   from_x,from_y) kept in its new one, inside it (x_place). Without a
+   layout X space does not move. */
+static void x_follow(struct bc_xdg *x, int32_t from_x, int32_t from_y)
+{
+    struct bc_server *s = x->server;
+    struct bc_xwin *w = x->xwin;
+    int32_t nx, ny;
+    if (!s->layout || s->x.conn == NULL || w == NULL || x->xpopup || x->output == NULL) return;
+    nx = w->x + x->output->x - from_x;
+    ny = w->y + x->output->y - from_y;
+    x_geometry(s, w, nx, ny, x->size_w > 0 && x->size_w <= 32767 ? (uint16_t)x->size_w : w->width,
+               x->size_h > 0 && x->size_h <= 32767 ? (uint16_t)x->size_h : w->height);
+    logf_("window %u: X window 0x%x on display %s at %d,%d", x->id, (unsigned)w->window, x->output->name, w->x,
+          w->y);
+    xcb_flush(s->x.conn);
 }
 
 /* The desktop's states for the window (`WINDOW size`, as xdg's configure
@@ -6992,6 +7449,70 @@ static void x_selections_gone(struct bc_server *s)
         }
 }
 
+/* ---- X's primary display (RandR) ----
+
+   The desktop's `WINDOW primary <name>` is X's RandR primary output: the
+   output Xwayland named after the display (the outputs section), set with
+   RRSetOutputPrimary on the root -- the window manager's, as KWin and
+   Mutter do for their Xwayland. Games that size themselves to the primary
+   (SDL's display 0 is X's primary) size themselves to it. Xwayland makes
+   an output only when it has taken the display's global, so the name is
+   looked for again at each RandR change (an output or CRTC changed, the
+   screen resized), at the line, at a layout's change and when the window
+   manager starts; RandR forgets a primary whose output goes. Without a
+   layout, or before a `WINDOW primary`, X has none set, as before. */
+static void x_primary_apply(struct bc_server *s)
+{
+    xcb_connection_t *c = s->x.conn;
+    xcb_randr_get_screen_resources_current_reply_t *res;
+    xcb_randr_get_output_info_cookie_t cookies[BC_DISPLAYS * 2];
+    xcb_randr_get_output_primary_reply_t *now;
+    xcb_randr_output_t *outputs, want = XCB_NONE;
+    size_t len = strlen(s->primary);
+    int i, n;
+    if (c == NULL || !s->x.randr || !s->layout || len == 0) return;
+    res = xcb_randr_get_screen_resources_current_reply(
+        c, xcb_randr_get_screen_resources_current(c, s->x.screen->root), NULL);
+    if (res == NULL) return;
+    outputs = xcb_randr_get_screen_resources_current_outputs(res);
+    n = xcb_randr_get_screen_resources_current_outputs_length(res);
+    if (n > BC_DISPLAYS * 2) n = BC_DISPLAYS * 2;
+    for (i = 0; i < n; ++i)
+        cookies[i] = xcb_randr_get_output_info(c, outputs[i], res->config_timestamp);
+    for (i = 0; i < n; ++i) {
+        xcb_randr_get_output_info_reply_t *info = xcb_randr_get_output_info_reply(c, cookies[i], NULL);
+        if (info && info->connection == XCB_RANDR_CONNECTION_CONNECTED &&
+            xcb_randr_get_output_info_name_length(info) == (int)len &&
+            memcmp(xcb_randr_get_output_info_name(info), s->primary, len) == 0)
+            want = outputs[i];
+        free(info);
+    }
+    free(res);
+    if (want == XCB_NONE) {
+        if (!s->x.primary_waiting_said)
+            logf_("X: no RandR output %s yet: X's primary waits for Xwayland to take the display", s->primary);
+        s->x.primary_waiting_said = 1;
+    } else {
+        s->x.primary_waiting_said = 0;
+        now = xcb_randr_get_output_primary_reply(c, xcb_randr_get_output_primary(c, s->x.screen->root), NULL);
+        if (now == NULL || now->output != want) {
+            xcb_randr_set_output_primary(c, s->x.screen->root, want);
+            xcb_flush(c);
+            logf_("X: RandR primary %s (output %u)", s->primary, (unsigned)want);
+        }
+        free(now);
+    }
+    /* Events read while waiting for the replies are in xcb's queue. */
+    if (s->x.wm_source) wl_event_source_check(s->x.wm_source);
+}
+
+/* The desktop's layout or primary changed (the outputs section). */
+static void x_layout_changed(struct bc_server *s)
+{
+    s->x.primary_waiting_said = 0;
+    x_primary_apply(s);
+}
+
 /* ---- the window manager's events ---- */
 
 /* A child of the root, known from here on; its focus and property changes
@@ -7071,14 +7592,20 @@ static void x_map_request(struct bc_server *s, xcb_map_request_event_t *ev)
     x_set_wm_state(s, w, BC_WM_STATE_NORMAL);
     {
         int32_t nx = w->x, ny = w->y;
-        x_fit(s, w->width, w->height, &nx, &ny);
+        int full = (w->state & BC_XS_FULLSCREEN) != 0;
+        struct bc_output *d = x_display(s, w, w->x, w->y, w->width, w->height);
+        x_place(s, w, w->width, w->height, full, &nx, &ny);
         if (nx != w->x || ny != w->y) {
             uint32_t values[2];
             values[0] = (uint32_t)nx;
             values[1] = (uint32_t)ny;
             xcb_configure_window(s->x.conn, w->window, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
-            logf_("X: window 0x%x placed at %d,%d, inside the root (it asked for %d,%d)", (unsigned)w->window,
-                  nx, ny, w->x, w->y);
+            if (d)
+                logf_("X: window 0x%x placed at %d,%d, %s display %s (it asked for %d,%d)", (unsigned)w->window,
+                      nx, ny, full ? "full screen at the origin of" : "inside", d->name, w->x, w->y);
+            else
+                logf_("X: window 0x%x placed at %d,%d, inside the root (it asked for %d,%d)", (unsigned)w->window,
+                      nx, ny, w->x, w->y);
             w->x = (int16_t)nx;
             w->y = (int16_t)ny;
         }
@@ -7116,14 +7643,15 @@ static void x_configure_request(struct bc_server *s, xcb_configure_request_event
         x_resize(s, w, (uint16_t)w->pic->size_w, (uint16_t)w->pic->size_h);
         return;
     }
-    /* Before the desktop's size: the geometry asked for, kept inside the
-       root (x_fit). Stacking is the desktop's: not passed on. */
+    /* Before the desktop's size: the geometry asked for, placed (x_place:
+       inside its display, or the root). Stacking is the desktop's: not
+       passed on. */
     {
         int32_t gx = ev->value_mask & XCB_CONFIG_WINDOW_X ? ev->x : w->x;
         int32_t gy = ev->value_mask & XCB_CONFIG_WINDOW_Y ? ev->y : w->y;
         int32_t gw = ev->value_mask & XCB_CONFIG_WINDOW_WIDTH ? ev->width : w->width;
         int32_t gh = ev->value_mask & XCB_CONFIG_WINDOW_HEIGHT ? ev->height : w->height;
-        x_fit(s, gw, gh, &gx, &gy);
+        x_place(s, w, gw, gh, (w->state & BC_XS_FULLSCREEN) != 0, &gx, &gy);
         if (ev->value_mask & (XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_WIDTH) || gx != w->x) {
             mask |= XCB_CONFIG_WINDOW_X;
             values[n++] = (uint32_t)gx;
@@ -7456,7 +7984,10 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
         x_focus_in(s, (xcb_focus_in_event_t *)ev);
         return;
     default:
-        if (s->x.xfixes_event && (ev->response_type & 0x7f) == s->x.xfixes_event + XCB_XFIXES_CURSOR_NOTIFY)
+        if (s->x.randr_first && ((ev->response_type & 0x7f) == s->x.randr_first + XCB_RANDR_SCREEN_CHANGE_NOTIFY ||
+                                 (ev->response_type & 0x7f) == s->x.randr_first + XCB_RANDR_NOTIFY))
+            x_primary_apply(s);
+        else if (s->x.xfixes_event && (ev->response_type & 0x7f) == s->x.xfixes_event + XCB_XFIXES_CURSOR_NOTIFY)
             x_cursor_notify(s, (xcb_xfixes_cursor_notify_event_t *)ev);
         else if (s->x.xfixes_first &&
                  (ev->response_type & 0x7f) == s->x.xfixes_first + XCB_XFIXES_SELECTION_NOTIFY)
@@ -7512,6 +8043,8 @@ static void x_wm_stop(struct bc_server *s)
     s->x.focus = XCB_WINDOW_NONE;
     /* Atoms are the X server's: a new one names them afresh. */
     s->x.xfixes_event = 0;
+    s->x.randr = 0;
+    s->x.randr_first = 0;
     s->x.cursor[0] = '\0';
     s->x.cursor_shown = 0;
     memset(s->x.cursor_names, 0, sizeof(s->x.cursor_names));
@@ -7544,6 +8077,7 @@ static int x_wm_start(struct bc_server *s)
     xcb_prefetch_extension_data(c, &xcb_composite_id);
     xcb_prefetch_extension_data(c, &xcb_xfixes_id);
     xcb_prefetch_extension_data(c, &xcb_res_id);
+    xcb_prefetch_extension_data(c, &xcb_randr_id);
     for (i = 0; i < BC_ATOMS; ++i)
         cookies[i] = xcb_intern_atom(c, 0, (uint16_t)strlen(bc_atom_names[i]), bc_atom_names[i]);
     ext = xcb_get_extension_data(c, &xcb_composite_id);
@@ -7597,6 +8131,23 @@ static int x_wm_start(struct bc_server *s)
         s->x.xres = v && (v->server_major > 1 || (v->server_major == 1 && v->server_minor >= 2));
         free(v);
     }
+    /* RandR 1.3: X's primary display (x_primary_apply), looked for again
+       at each change of the outputs. */
+    s->x.randr = 0;
+    s->x.randr_first = 0;
+    ext = xcb_get_extension_data(c, &xcb_randr_id);
+    if (ext && ext->present) {
+        xcb_randr_query_version_reply_t *v = xcb_randr_query_version_reply(c, xcb_randr_query_version(c, 1, 3), NULL);
+        if (v && (v->major_version > 1 || (v->major_version == 1 && v->minor_version >= 3))) {
+            s->x.randr = 1;
+            s->x.randr_first = ext->first_event;
+            xcb_randr_select_input(c, s->x.screen->root,
+                                   XCB_RANDR_NOTIFY_MASK_SCREEN_CHANGE | XCB_RANDR_NOTIFY_MASK_OUTPUT_CHANGE |
+                                       XCB_RANDR_NOTIFY_MASK_CRTC_CHANGE);
+        }
+        free(v);
+    }
+    if (!s->x.randr) logf_("X: Xwayland has no RandR 1.3: X's primary display is not set");
     /* A window of its own: _NET_SUPPORTING_WM_CHECK, the selections a
        window manager and a compositing manager own (ICCCM 2.8, EWMH). */
     s->x.wm_window = xcb_generate_id(c);
@@ -7628,6 +8179,8 @@ static int x_wm_start(struct bc_server *s)
                         s->x.atoms[BC_ATOM_NET_ACTIVE_WINDOW], XCB_ATOM_WINDOW, 32, 1, &s->x.focus);
     x_selections_start(s);
     x_adopt(s);
+    s->x.primary_waiting_said = 0;
+    x_primary_apply(s);
     xcb_flush(c);
     s->x.wm_source = wl_event_loop_add_fd(s->loop, xcb_get_file_descriptor(c), WL_EVENT_READABLE,
                                           on_x_events, s);
@@ -8215,7 +8768,22 @@ static void handle_line(struct bc_server *s, const char *line)
             logf_("WINDOW output for %u, which is no toplevel here", l.id);
             return;
         }
-        {
+        if (s->layout) {
+            /* A display of the layout, by its mode (output_for_display_mode). */
+            int several;
+            struct bc_output *o = output_for_display_mode(s, x, l.width, l.height, l.refresh_mhz, &several);
+            if (o == NULL) {
+                logf_("window %u: no display of %dx%d in the layout; it stays on %s", l.id, l.width, l.height,
+                      x->output ? x->output->name : "none");
+                return;
+            }
+            if (several)
+                logf_("window %u: %d displays are %dx%d at %u mHz (WINDOW output names a mode, not a display): "
+                      "on %s", l.id, several, l.width, l.height, l.refresh_mhz, o->name);
+            else
+                logf_("window %u: display %s", l.id, o->name);
+            window_move_output(s, x, o);
+        } else {
             struct bc_output *o = output_for_mode(s, l.width, l.height, l.refresh_mhz);
             if (o == NULL) {
                 logf_("window %u: no output for %dx%d at %u mHz", l.id, l.width, l.height,
@@ -8225,6 +8793,15 @@ static void handle_line(struct bc_server *s, const char *line)
             logf_("window %u: output %dx%d at %u mHz", l.id, l.width, l.height, l.refresh_mhz);
             window_move_output(s, x, o);
         }
+        return;
+    case BC_LINE_LAYOUT:
+        layout_line(s, &l);
+        return;
+    case BC_LINE_LAYOUT_END:
+        layout_end(s);
+        return;
+    case BC_LINE_PRIMARY:
+        layout_primary(s, l.name);
         return;
     case BC_LINE_CLOSE:
         x = window_by_id(s, l.id);
@@ -8703,6 +9280,7 @@ int main(int argc, char **argv)
     bc_wire_init(&server.wire);
     wl_list_init(&server.windows);
     wl_list_init(&server.outputs);
+    wl_list_init(&server.outputs_gone);
     wl_list_init(&server.holds);
     server.format_table_fd = -1;
     wl_list_init(&server.input_conns);
@@ -8801,7 +9379,12 @@ int main(int argc, char **argv)
                           BC_VERSION(6, wl_compositor_interface), &server, bind_compositor) ||
         !wl_global_create(server.display, &wl_subcompositor_interface,
                           BC_VERSION(1, wl_subcompositor_interface), &server, bind_subcompositor) ||
-        output_create(&server, 1920, 1080, 60000) == NULL ||
+        /* Before the outputs: Xwayland then asks each output's place of
+           xdg_output as it binds it (xwayland-output.c). */
+        !wl_global_create(server.display, &zxdg_output_manager_v1_interface,
+                          BC_VERSION(3, zxdg_output_manager_v1_interface), &server,
+                          bind_xdg_output_manager) ||
+        output_create(&server, NULL, 0, 0, 1920, 1080, 60000) == NULL ||
         !wl_global_create(server.display, &wl_seat_interface,
                           BC_VERSION(8, wl_seat_interface), &server, bind_seat) ||
         !wl_global_create(server.display, &xdg_wm_base_interface,
@@ -8850,13 +9433,14 @@ int main(int argc, char **argv)
     } else {
         logf_("no linux-dmabuf: the peer imports no dmabuf (no dmabuf=1 in its answer)");
     }
-    logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, wl_output %d, wl_seat %d, "
+    logf_("globals: wl_compositor %d, wl_subcompositor %d, wl_shm 1, zxdg_output_manager_v1 %d, "
+          "wl_output %d, wl_seat %d, "
           "xdg_wm_base %d, zxdg_decoration_manager_v1 %d, wp_presentation %d, "
           "zwp_relative_pointer_manager_v1 %d, zwp_pointer_constraints_v1 %d, "
           "wl_data_device_manager %d, zwp_primary_selection_device_manager_v1 %d, "
           "wp_cursor_shape_manager_v1 %d, org_kde_kwin_appmenu_manager %d, xdg_activation_v1 %d",
           BC_VERSION(6, wl_compositor_interface), BC_VERSION(1, wl_subcompositor_interface),
-          BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
+          BC_VERSION(3, zxdg_output_manager_v1_interface), BC_VERSION(4, wl_output_interface), BC_VERSION(8, wl_seat_interface),
           BC_VERSION(6, xdg_wm_base_interface), BC_VERSION(1, zxdg_decoration_manager_v1_interface),
           BC_VERSION(1, wp_presentation_interface),
           BC_VERSION(1, zwp_relative_pointer_manager_v1_interface),
@@ -8897,6 +9481,15 @@ int main(int argc, char **argv)
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
     if (server.redial) wl_event_source_remove(server.redial);
     dial_end(&server);
+    /* The outputs before the display: their globals and timers are its. */
+    while (!wl_list_empty(&server.outputs)) {
+        struct bc_output *o = wl_container_of(server.outputs.next, o, link);
+        output_free(o);
+    }
+    while (!wl_list_empty(&server.outputs_gone)) {
+        struct bc_output *o = wl_container_of(server.outputs_gone.next, o, link);
+        output_free(o);
+    }
     wl_display_destroy(server.display);
     while (!wl_list_empty(&server.holds)) {
         struct bc_hold *h = wl_container_of(server.holds.next, h, link);
@@ -8908,11 +9501,6 @@ int main(int argc, char **argv)
     if (server.xkb_state) xkb_state_unref(server.xkb_state);
     if (server.keymap) xkb_keymap_unref(server.keymap);
     if (server.xkb) xkb_context_unref(server.xkb);
-    while (!wl_list_empty(&server.outputs)) {
-        struct bc_output *o = output_default(&server);
-        wl_list_remove(&o->link);
-        free(o);
-    }
     logf_("stopped: %lu frames sent, %lu failed, %lu WINDOW lines; dmabuf %lu sent, %lu released, "
           "%lu refused, %lu copied", server.wire.frames_sent, server.wire.frames_failed,
           server.wire.lines_sent, server.wire.dmabuf_sent, server.wire.dmabuf_released,
