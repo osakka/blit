@@ -6,6 +6,7 @@
 #include "blit_font.h"
 #include "blit_raster.h"
 #include "blit_graphics.h"
+#include "blit_crash.h"
 #include "blit_graphics_scene.h"
 #include "blit_input_pointer.h"
 #include "blit_unicode_width.h"
@@ -31616,6 +31617,9 @@ int main(int argc, char **argv)
     struct sockaddr_in address;
     static BlitRuntime runtime;
 
+    /* A crash's backtrace to standard error, as tcc's -bt runtime gave
+       before the system linker (src/blit_crash.h). */
+    blit_crash_install();
     if (argc > 1 && (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-V") == 0)) {
         printf("blit %s\n", BLIT_BUILD_VERSION);
         return 0;

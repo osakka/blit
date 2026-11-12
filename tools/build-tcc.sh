@@ -21,6 +21,25 @@ case "$hibr_abi" in
 esac
 
 mkdir -p "$(dirname -- "$output")"
+# tcc compiles, each source to an object of its own here; the system linker
+# links them (tools/tcc-link.sh: a stack that is not executable, RELRO).
+objects=$(mktemp -d "${TMPDIR:-/tmp}/blit-objects.XXXXXX")
+trap 'rm -rf "$objects"' EXIT
+# compile FLAGS... -- SOURCE...: each source to $objects/<n>.o, listed in
+# $objects/list in order (the link's order, so the same bytes every build).
+compile() {
+    flags=
+    while [ "$1" != -- ]; do flags="$flags $1"; shift; done
+    shift
+    n=0
+    : > "$objects/list"
+    for source do
+        n=$((n + 1))
+        # shellcheck disable=SC2086
+        tcc $flags -c "$source" -o "$objects/$n.o"
+        echo "$objects/$n.o" >> "$objects/list"
+    done
+}
 case "$target" in
     server)
         # Dependencies from the system through pkg-config, minimums checked
@@ -28,19 +47,23 @@ case "$target" in
         # missing or too-old module stops the build here.
         cflags=$("$ROOT/tools/build-flags.sh" --cflags server)
         libs=$("$ROOT/tools/build-flags.sh" --libs server)
+        # -g: tcc's debug information, kept in the file for addr2line
+        # (the crash handler, src/blit_crash.h, runs it on a crash).
         # shellcheck disable=SC2086
-        tcc -O2 -g -bt8 -std=c99 \
+        compile -O2 -g -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             "-DBLIT_HIBR_VERSION=\"$hibr_version\"" \
             "-DBLIT_HIBR_ABI=$hibr_abi" \
-            $cflags \
+            $cflags -- \
             "$ROOT/src/blit_server.c" "$ROOT/src/blit_kms.c" "$ROOT/src/blit_vt.c" \
-            "$ROOT/src/blit_font.c" "$ROOT/src/blit_raster.c" \
-            $libs \
-            -o "$output"
+            "$ROOT/src/blit_font.c" "$ROOT/src/blit_raster.c"
+        # shellcheck disable=SC2046,SC2086
+        "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -ldl
         ;;
     helper)
-        tcc -O2 -std=c99 -o "$output" "$ROOT/src/blit_update_helper.c"
+        compile -O2 -std=c99 -- "$ROOT/src/blit_update_helper.c"
+        # shellcheck disable=SC2046
+        "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list")
         ;;
     adapter)
         hibr_root=${BLIT_HIBR_ROOT:-}
@@ -66,9 +89,10 @@ case "$target" in
             echo "blit: Hibr adapter ABI mismatch: expected $hibr_abi, found $actual_hibr_abi under $hibr_root" >&2
             exit 1
         fi
-        tcc -O2 -std=c99 -shared -fPIC \
-            -I"$hibr_root/include" -I"$hibr_root/mods" \
-            -o "$output" "$ROOT/hibr/console-blit.c"
+        compile -O2 -std=c99 -fPIC -I"$hibr_root/include" -I"$hibr_root/mods" -- \
+            "$ROOT/hibr/console-blit.c"
+        # shellcheck disable=SC2046
+        "$ROOT/tools/tcc-link.sh" shared "$output" $(cat "$objects/list")
         ;;
     compositor)
         # ADR 0228: blit-compositor, Blit's Wayland compositor for programs
@@ -121,13 +145,13 @@ case "$target" in
         # and has no -ffile-prefix-map (it accepts the flag and ignores it,
         # measured: the path stays in the binary). Without debug
         # information nothing records a path.
-        # shellcheck disable=SC2086
-        tcc -O2 -std=c99 \
+        # shellcheck disable=SC2046,SC2086
+        compile -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
-            -I"$ROOT/src" -I"$proto" $cflags \
-            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources") \
-            $libs \
-            -o "$output"
+            -I"$ROOT/src" -I"$proto" $cflags -- \
+            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources")
+        # shellcheck disable=SC2046,SC2086
+        "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -ldl
         ;;
     *)
         echo "blit: unknown TCC target '$target' (use server, helper, adapter, or compositor)" >&2

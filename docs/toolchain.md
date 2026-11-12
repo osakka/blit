@@ -58,9 +58,12 @@ compositor serves Wayland programs only and says so in its log; the
 `xwayland_gate` skips with the reason.
 
 Besides the modules: `pkg-config` itself (`pkgconf` or `pkg-config` on
-Debian and Ubuntu, `pkgconf-pkg-config` on Fedora, `pkgconf` on Arch) and
-`tcc` (`tcc` on each). The gates also use Ruby, Python 3 and, for the
-sanitized compositor build, the host's `cc`.
+Debian and Ubuntu, `pkgconf-pkg-config` on Fedora, `pkgconf` on Arch),
+`tcc` (`tcc` on each), and the system's C toolchain for linking: `cc`
+(gcc or clang) with binutils' `ld` and `objcopy` (`gcc`/`build-essential`
+and `binutils` on Debian and Ubuntu, `gcc` and `binutils` on Fedora and
+Arch). The gates also use Ruby, Python 3 and, for the sanitized compositor
+build, the same `cc`.
 
 The GLES compositor (ADR 0181) does not link EGL, GLES or GBM at build time:
 only their headers are used. Unless the CPU is chosen
@@ -83,10 +86,30 @@ The server links `src/blit_server.c`, `src/blit_kms.c`, `src/blit_vt.c`,
 `src/blit_font.c` and `src/blit_raster.c` against libdrm, FreeType,
 HarfBuzz, libutil and zlib.
 
+**tcc compiles, the system linker links** (from 0.3.87): each source is
+compiled by `tcc -c` and every output -- the programs and the Hibr adapter
+-- is linked by `tools/tcc-link.sh`, through `cc`, the one link step. tcc
+0.9.27 writes no `PT_GNU_STACK` (the kernel then gave a program's threads
+executable stacks, measured: `blit-server`'s two thread stacks were
+`rwxp`; and glibc 2.41 will not load such a shared object into a process
+whose stack is not executable, so a gcc-built Hibr could not load the
+adapter) and no RELRO; the system linker writes both (`-z noexecstack`,
+`-z relro -z now`). tcc 0.9.28rc does not write the header either, and
+patchelf 0.18 cannot rewrite tcc's programs. tcc's debug information
+(stabs, `-g`), which tcc allocates for its own `-bt` runtime and which the
+system linker cannot lay out that way, is made ordinary debug sections
+first, kept in the file. tcc's `-bt` crash backtraces are replaced by
+`src/blit_crash.h`: on a crash `blit-server` and `blit-compositor` write
+the frames to standard error and, where binutils is installed, run
+`addr2line` on them for function, file and line (`tcc_fault_trace_gate`
+checks it); `package_artifact_gate` checks every shipped ELF file's stack
+header and the programs' RELRO.
+
 | Component | Status |
 |---|---|
 | Compiler | `tcc` |
 | Version | `0.9.27` |
+| Linker | the system's `cc` and `ld` (`tools/tcc-link.sh`) |
 | Target | x86-64 Linux |
 | HarfBuzz headers | `vendor/harfbuzz`: pinned unmodified 6.0.0 public headers only |
 | KMS runtime | Not testable here: no `/dev/dri` device node exposed |

@@ -90,6 +90,7 @@
 #include "xdg-activation-v1-server-protocol.h"
 #include "blit_compositor_wire.h"
 #include "blit_pointer_names.h"
+#include "blit_crash.h"
 
 #ifndef BLIT_BUILD_VERSION
 #define BLIT_BUILD_VERSION "dev"
@@ -235,6 +236,7 @@ struct bc_xdg {
                                          client draws from its next commit */
     int32_t size_w, size_h;
     int size_fullscreen, size_maximized, size_activated;
+    int size_told;                    /* a WINDOW size has come for it (an unchanged one is skipped) */
     unsigned size_tiled;              /* BC_TILED_* */
     struct bc_output *output;         /* the display it is on */
     uint64_t last_copy;               /* the sequence of its newest FRM1 */
@@ -8182,6 +8184,15 @@ static void handle_line(struct bc_server *s, const char *line)
             logf_("WINDOW size for %u, which is no toplevel here", l.id);
             return;
         }
+        /* The same size and states as the desktop's last line for it: no
+           change, so no reconfigure -- each one made the program draw a
+           new frame (the desktop re-sent unchanged lines while a window
+           was moved). The first line for a window is always applied. */
+        if (x->size_told && x->size_w == l.width && x->size_h == l.height &&
+            x->size_fullscreen == l.fullscreen && x->size_maximized == l.maximized &&
+            x->size_activated == l.activated && x->size_tiled == l.tiled)
+            return;
+        x->size_told = 1;
         x->size_w = l.width;
         x->size_h = l.height;
         x->size_fullscreen = l.fullscreen;
@@ -8682,6 +8693,10 @@ int main(int argc, char **argv)
     const char *runtime = getenv("XDG_RUNTIME_DIR");
     const char *log_path = NULL, *display_name = NULL, *problem;
     int i, x11 = 1;
+
+    /* A crash's backtrace to standard error, which the desktop sends to
+       the compositor's log (src/blit_crash.h). */
+    blit_crash_install();
 
     memset(&server, 0, sizeof(server));
     g_server = &server;

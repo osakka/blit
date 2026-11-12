@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Every ELF file Blit ships is linked by tools/tcc-link.sh: a stack that is
+# not executable (PT_GNU_STACK read-write: tcc 0.9.27 writes none, and
+# glibc 2.41 will not load such a shared object into a process whose stack
+# is not; a program's threads' stacks were executable), and a program's
+# relocations read-only after start (PT_GNU_RELRO).
+elf_hardened() {
+    headers=$(readelf -lW "$1")
+    echo "$headers" | grep -Eq 'GNU_STACK( +0x[0-9a-f]+){5} +RW +' || {
+        echo "PACKAGE_ARTIFACT_FAIL $1 has no read-write PT_GNU_STACK" >&2
+        exit 1
+    }
+    case "$2" in
+        program) echo "$headers" | grep -q GNU_RELRO || {
+            echo "PACKAGE_ARTIFACT_FAIL $1 has no PT_GNU_RELRO" >&2
+            exit 1
+        } ;;
+    esac
+}
+
 package=${1:?usage: package_artifact_gate.sh PATH_TO_DEB}
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 command -v dpkg-deb >/dev/null 2>&1
@@ -58,6 +77,9 @@ manifest_hash_matches hibr_adapter_sha256 \
 
 test -x "$stage/usr/lib/blit/bin/blit-server"
 test -f "$stage/usr/lib/blit/hibr/console-blit.so"
+elf_hardened "$stage/usr/lib/blit/bin/blit-server" program
+elf_hardened "$stage/usr/lib/blit/bin/blit-update-helper" program
+elf_hardened "$stage/usr/lib/blit/hibr/console-blit.so" shared
 # ADR 0227: Spleen is one text font of five masters.
 for master in 6x12 8x16 12x24 16x32 32x64; do
     test -f "$stage/usr/lib/blit/fonts/text/spleen/spleen-$master.otf"
@@ -291,6 +313,7 @@ if [ -f "$compositor_package" ]; then
     }
     test -x "$cstage/usr/bin/blit-compositor"
     test "$(stat -c %a "$cstage/usr/bin/blit-compositor")" = 755
+    elf_hardened "$cstage/usr/bin/blit-compositor" program
     "$cstage/usr/bin/blit-compositor" --help | grep -q '^usage: blit-compositor ' || {
         echo "PACKAGE_ARTIFACT_FAIL /usr/bin/blit-compositor is not the compositor" >&2
         exit 1
@@ -380,5 +403,5 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     rm -rf "$rebuild"
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-gamescope,steamer\n' \
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-gamescope,steamer elf=stack-RW,relro\n' \
     "$version" "$actual_hash" "$reproducible" "$compositor" "$hibr_frame_v5"

@@ -2230,7 +2230,10 @@ It speaks the frame channel above as a producer, with these additions.
     their own size and the desktop sizes its window to the first frame.
     The state words are a set (any order, each at most once); the tiled ones say which edges
     the desktop has put the window against (xdg_toplevel's tiled states):
-    a program that draws its own frame drops its shadow there.
+    a program that draws its own frame drops its shadow there. A line
+    identical to the last for the window (size and states) changes nothing
+    and is not passed to the program (from 0.3.87; each one used to make it
+    draw a new frame).
     A program's initial commit is answered at once, as xdg-shell requires
     and as programs rely on (vkcube presents after one roundtrip): with the
     desktop's size if one has come, else 0,0. So the first frame of a new
