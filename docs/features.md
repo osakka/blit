@@ -52,6 +52,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Bracketed paste, focus events, synchronized output | 0.1 | 0029 | Tested |
 | Kitty keyboard protocol (flags 1, 2, 8), including Super | 0.1.585 | 0059, 0169 | Tested |
 | Kitty keyboard flag 4, report alternate keys: `CSI key:shifted:base ; mods u`, the shifted key while Shift is held and the base-layout key (the US PC-101 key at the same physical position, from the evdev code), each left out when it equals the key; with a device keymap the key is the layout's and the base the US key | 0.3.61 | 0225 | Tested (`kitty_keyboard_gate`) |
+| Kitty keyboard flag 16, report associated text (with flag 8): `CSI key ; mods ; text u`, the text the key types on the device's layout (Shift, AltGr, CapsLock; a keypad operator, or its digit with NumLock on) on a press or repeat; none on a release, a Ctrl/Alt/Super chord or a functional key. With flags 2 and 8 a desktop sees a lone Super tap and still every character typed | 0.3.89 | 0059 | Tested (`kitty_keyboard_gate`) |
 | Focus reports on input hand-over: the focused session (mode 1004) gets `CSI O` when Blit releases physical input for a VT switch, after the synthetic key and button releases, and `CSI I` when it takes input back | 0.3.61 | 0225 | Tested through the `BLIT_TEST_VT_SIGNALS` hook (`kitty_keyboard_gate`); the real VT path only in the QEMU gate |
 | Hyperlinks, notifications, window titles, clipboard writes | 0.1 | — | Tested |
 | Pointer shapes set by the program (OSC 22), or hidden | 0.2.8 | — | Tested |

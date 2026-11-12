@@ -5595,8 +5595,8 @@ components:
           required: [protocol, supported_flags, active_flags, stack_depth]
           properties:
             protocol: {type: string, const: kitty}
-            supported_flags: {type: integer, const: 15}
-            active_flags: {type: integer, minimum: 0, maximum: 15}
+            supported_flags: {type: integer, const: 31}
+            active_flags: {type: integer, minimum: 0, maximum: 31}
             stack_depth: {type: integer, minimum: 0, maximum: 16}
           additionalProperties: false
         term:

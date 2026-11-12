@@ -1399,13 +1399,17 @@ before a disconnect.
 ### Negotiated keyboard reporting
 
 `GET /v1/terminal-sessions/{id}` exposes `terminal_capabilities.keyboard`:
-`protocol: kitty`, `supported_flags: 11`, the current `active_flags` and the
+`protocol: kitty`, `supported_flags: 31`, the current `active_flags` and the
 saved `stack_depth` (0..16). These are observations, not a second API
 setting: the program owns negotiation through its PTY. `CSI ? u` queries;
 `CSI > flags u` pushes; `CSI < count u` pops; `CSI = flags ; mode u`
 replaces, sets or clears bits with modes 1, 2 and 3. The main and alternate
-buffers, and each session, keep independent state. Flags 4 and 16 are masked
-out; only 1, 2 and 8 are implemented.
+buffers, and each session, keep independent state. All five flags are
+implemented: 1 disambiguate, 2 event types, 4 alternate keys, 8 all keys as
+escape codes, 16 associated text (with 8). A desktop that reads its keys
+from its terminal and needs a lone Super tap pushes 1, 2, 8 and 16 (and 4
+for layout-independent shortcuts): 8 and 2 give the tap as a press and a
+release, 16 keeps the text every other key types.
 
 API key injection uses the physical keyboard dispatch. For example, send
 `{"kind":"key","code":125,"value":1}` then value 0 for left Super; right

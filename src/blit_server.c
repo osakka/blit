@@ -16589,7 +16589,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         "\"graphics\":[\"kitty\",\"sixel\"],"
-        "\"keyboard\":{\"protocol\":\"kitty\",\"supported_flags\":15,"
+        "\"keyboard\":{\"protocol\":\"kitty\",\"supported_flags\":31,"
         "\"active_flags\":%u,\"stack_depth\":%u}}",
         escaped_terminal_term, session->terminal_cell_width,
         session->terminal_cell_height,
