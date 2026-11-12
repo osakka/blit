@@ -343,8 +343,8 @@ section; `docs/api.md`, "X programs"):
   wlroots' `wlr_global_destroy_safe`; unlike wlroots its resources are
   then made inert rather than left to the global's owner, as the
   `bc_output` goes with it. X's RandR primary is set by the window
-  manager (`RRSetOutputPrimary`, as KWin and Mutter do for their
-  Xwayland); wlroots' xwm sets none.
+  manager (`RRSetOutputPrimary`, a request any X client may make); wlroots'
+  xwm sets none.
 - Override-redirect windows (from milestone C) are popups of a toplevel,
   where wlroots shows them as unmanaged surfaces at their absolute X
   position: the wire has popups, not free-standing surfaces. The parent

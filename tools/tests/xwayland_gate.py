@@ -1214,6 +1214,7 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
         pseq = c.offered('primary')
         c.desk_offers(120, 'clipboard')
         ready = log().count('X: Xwayland ready on')
+        primaries = log().count('X: RandR primary DP-1')
         os.kill(xpid, signal.SIGKILL)
         got = {c.match(r'CLIP clear \d+|WINDOW gone %d' % wid, 15).group(0) for _ in range(2)}
         check(got == {'CLIP clear %d' % pseq, 'WINDOW gone %d' % wid},
@@ -1227,6 +1228,10 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
     wait_for(lambda: log().count('X: Xwayland ready on') > ready, lambda: 'Xwayland did not start again:\n' + log(),
              30)
     xpid = int(re.findall(r'X: Xwayland \S+ started on \S+, pid (\d+)', log())[-1])
+    # The new Xwayland has the desktop's layout (x_layout_part's, DP-1
+    # alone) and its primary, set again by the new window manager.
+    wait_for(lambda: log().count('X: RandR primary DP-1') > primaries,
+             lambda: 'X\'s primary was not set again after the restart:\n' + log(), 15)
     client, c, wid, route, key = start('xstandin-3.out')
     try:
         m = c.mark()
@@ -1241,7 +1246,8 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
         if client.poll() is None:
             client.kill()
             client.wait()
-    return xpid, 'restart=X primary cleared+gone, desktop clipboard owned again and pasted'
+    return xpid, ('restart=X primary cleared+gone, desktop clipboard owned again and pasted, '
+                  'RandR primary DP-1 set again')
 
 
 # ---- the desktop's display layout: X space ----

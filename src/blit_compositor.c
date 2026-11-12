@@ -7462,9 +7462,9 @@ static void x_selections_gone(struct bc_server *s)
 
    The desktop's `WINDOW primary <name>` is X's RandR primary output: the
    output Xwayland named after the display (the outputs section), set with
-   RRSetOutputPrimary on the root -- the window manager's, as KWin and
-   Mutter do for their Xwayland. Games that size themselves to the primary
-   (SDL's display 0 is X's primary) size themselves to it. Xwayland makes
+   RRSetOutputPrimary on the root, by the window manager (any X client
+   may set it, randr/rroutput.c). Games that size themselves to the
+   primary size themselves to it. Xwayland makes
    an output only when it has taken the display's global, so the name is
    looked for again at each RandR change (an output or CRTC changed, the
    screen resized), at the line, at a layout's change and when the window
@@ -9182,6 +9182,10 @@ static void channel_lost(struct bc_server *s, const char *why)
     struct bc_constraint *c;
     if (s->link != BC_LINK_UP || s->quit) return;
     clip_channel(s, 0);
+    /* A layout set the desktop did not end is its, not the next one's: the
+       applied layout stands until the next desktop sends its own. */
+    s->staged_n = 0;
+    s->staged_over = 0;
     logf_("the frame channel %s: the desktop is gone; keeping %d windows and reconnecting to %s "
           "for at most %u ms", why, wl_list_length(&s->windows), s->frame_socket, s->bound_ms);
     wl_event_source_remove(s->frame_source);
