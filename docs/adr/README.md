@@ -247,6 +247,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0228 — Blit is the compositor for programs](0228-blit-is-the-compositor-for-programs.md) (proposed)
 - [0229 — Programs and the desktop: one owner per concern](0229-programs-and-the-desktop-one-owner-per-concern.md) (proposed)
 - [0230 — Dependencies from the system, through pkg-config](0230-dependencies-from-the-system-through-pkg-config.md)
+- [0231 — Keyboards from xkb: one list, one current keyboard](0231-keyboards-from-xkb-one-list-one-current.md) (proposed)
 
 ## Status
 
