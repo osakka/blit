@@ -24,7 +24,15 @@
        desktop to compositor
            WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated]
                        [tiled-left] [tiled-right] [tiled-top] [tiled-bottom]
-           WINDOW output <id> <w> <h> <mHz>
+           WINDOW output <id> <w> <h> <mHz>   the display the window is on, by its mode
+           WINDOW layout <name> <x> <y> <w> <h> <mHz>
+                                          one display: its place in the desktop's
+                                          pixels (origin the top left of the whole
+                                          desktop), its mode, 0 mHz unknown
+           WINDOW layout end              the set is complete: a display not named
+                                          since the last end is gone
+           WINDOW primary <name>          X's primary display, where an unplaced
+                                          full-screen surface goes
            WINDOW close <id>
            WINDOW lock <id> on|off
            WINDOW quit 0                  the person quit the desktop: end now
@@ -621,6 +629,9 @@ enum {
     BC_LINE_UNKNOWN = 0,
     BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] [tiled-*] */
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
+    BC_LINE_LAYOUT,         /* WINDOW layout <name> <x> <y> <w> <h> <mHz> */
+    BC_LINE_LAYOUT_END,     /* WINDOW layout end */
+    BC_LINE_PRIMARY,        /* WINDOW primary <name> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
     BC_LINE_LOCK,           /* WINDOW lock <id> on|off: the desktop's pointer hold */
     BC_LINE_QUIT,           /* WINDOW quit 0: end every program, exit, no reconnect */
@@ -634,6 +645,12 @@ enum {
     BC_LINE_CLIP_CLEAR      /* CLIP clear <seq> */
 };
 
+/* A display's name in the desktop's layout: one word of bytes above the
+   space (UTF-8 allowed, no control byte), at most BC_NAME_BYTES -- well
+   inside Xwayland's RandR output names (MAX_OUTPUT_NAME, 256). It is the
+   wl_output's name, and so X's output and monitor name. */
+#define BC_NAME_BYTES 63
+
 /* The clipboard's lines (ADR 0229): media types are printable ASCII words. */
 #define BC_CLIP_TYPE_BYTES 127
 #define BC_CLIP_TYPES 16
@@ -645,7 +662,9 @@ typedef struct {
     int fullscreen, maximized, activated;
     unsigned tiled;         /* BC_TILED_*: the edges the desktop put it against */
     int on;                 /* WINDOW lock */
-    uint32_t refresh_mhz;   /* WINDOW output */
+    uint32_t refresh_mhz;   /* WINDOW output, WINDOW layout (0 unknown) */
+    int32_t x, y;           /* WINDOW layout */
+    char name[BC_NAME_BYTES + 1];   /* WINDOW layout, WINDOW primary */
     uint64_t sequence;      /* FRAME release */
     char code[32];
     int primary;            /* CLIP offer: the primary selection, not the clipboard */
@@ -680,6 +699,18 @@ static int bc_read_u32(const char **p, unsigned long max, uint32_t *out)
     *out = (uint32_t)v;
     *p = s;
     return 0;
+}
+
+/* A display's name at *p into out (BC_NAME_BYTES + 1); advances. */
+static int bc_read_name(const char **p, char *out)
+{
+    size_t n = 0;
+    while ((unsigned char)**p > ' ' && (unsigned char)**p != 0x7f) {
+        if (n >= BC_NAME_BYTES) return -1;
+        out[n++] = *(*p)++;
+    }
+    out[n] = '\0';
+    return n ? 0 : -1;
 }
 
 /* One line from Blit on an input socket. */
@@ -869,6 +900,33 @@ static int bc_parse_line(const char *line, BcLine *out)
         out->width = (int32_t)a;
         out->height = (int32_t)b;
         return out->kind = BC_LINE_OUTPUT;
+    }
+    if (strncmp(line, "WINDOW layout ", 14) == 0) {
+        /* `end` alone ends the set; a display named "end" has its numbers.
+           The whole display inside X's coordinates (16 bits, like a size). */
+        uint32_t x, y;
+        p = line + 14;
+        if (strncmp(p, "end", 3) == 0 && (p[3] == '\0' || p[3] == '\n'))
+            return out->kind = BC_LINE_LAYOUT_END;
+        if (bc_read_name(&p, out->name) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, BC_SIZE_MAX, &x) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, BC_SIZE_MAX, &y) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, BC_SIZE_MAX, &a) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, BC_SIZE_MAX, &b) != 0 || *p++ != ' ' ||
+            bc_read_u32(&p, 1000000UL, &out->refresh_mhz) != 0 || a == 0 || b == 0 ||
+            x + a > BC_SIZE_MAX || y + b > BC_SIZE_MAX || (*p != '\0' && *p != '\n'))
+            return out->kind = BC_LINE_UNKNOWN;
+        out->x = (int32_t)x;
+        out->y = (int32_t)y;
+        out->width = (int32_t)a;
+        out->height = (int32_t)b;
+        return out->kind = BC_LINE_LAYOUT;
+    }
+    if (strncmp(line, "WINDOW primary ", 15) == 0) {
+        p = line + 15;
+        if (bc_read_name(&p, out->name) != 0 || (*p != '\0' && *p != '\n'))
+            return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = BC_LINE_PRIMARY;
     }
     if (strncmp(line, "WINDOW close ", 13) == 0) {
         p = line + 13;

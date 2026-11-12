@@ -204,7 +204,7 @@ compositor library (a foreign compositor under Blit again) were each worse.
   xwayland-shell-v1.xml) matched to the surface's `set_serial`. No
   `WL_SURFACE_ID` path; an older Xwayland is refused with the reason.
 - **The window manager** on libxcb (pkg-config `xcb`, `xcb-composite`,
-  `xcb-xfixes`, `xcb-res`, ADR 0230), built against wlroots' `xwm.c`
+  `xcb-xfixes`, `xcb-res`, `xcb-randr` from 0.3.88, ADR 0230), built against wlroots' `xwm.c`
   (MIT) as the reference: its order of `CompositeRedirectSubwindows(root,
   Manual)` first, `_NET_SUPPORTING_WM_CHECK` and `_NET_SUPPORTED`, focus
   by `SetInputFocus` honouring `WM_TAKE_FOCUS` when a window's route goes
@@ -215,8 +215,9 @@ compositor library (a foreign compositor under Blit again) were each worse.
   `_NET_WM_STATE` full screen and maximized, `WM_TRANSIENT_FOR` parent,
   `_NET_WM_MOVERESIZE` move and resize, `WM_DELETE_WINDOW` close, XFixes
   cursor names to `WINDOW cursor` (Blit's table knows the X names). Every
-  toplevel keeps a stable position in X space (a virtual layout; Hibr
-  still places the picture), so an override-redirect menu or tooltip is
+  toplevel keeps a stable position in X space (a virtual layout until
+  0.3.88, the desktop's displays from then: "The display layout" in
+  Evidence; Hibr still places the picture), so an override-redirect menu or tooltip is
   `WINDOW popup` at its offset from its parent toplevel (`WM_TRANSIENT_FOR`,
   else the toplevel under its origin).
 - **One wire addition:** `WINDOW display <wayland-name> <x-display>`, the
@@ -328,11 +329,22 @@ section; `docs/api.md`, "X programs"):
   desktop's size is answered with that size and a synthetic
   ConfigureNotify (ICCCM 4.1.5); wlroots hands it to its compositor.
 - Toplevels keep the X position their program asks for, kept inside the
-  root (from milestone C): X confines its pointer to the root, the
-  largest output (the compositor's outputs all sit at 0,0), so a press
+  root (from milestone C): X confines its pointer to the root, so a press
   past its edge reached X at the edge (the gate measured 390,170 arrive
-  as 219,170). wlroots' compositors move X windows to their screen
-  positions, inside the outputs by construction.
+  as 219,170). With the desktop's display layout (0.3.88) a toplevel is
+  kept inside its display, the one the desktop says, and follows it to
+  another keeping its place within it; a full-screen one is at its
+  display's origin. wlroots' compositors move X windows to their screen
+  positions, inside the outputs by construction; ours are the display,
+  not the place within it, since the desktop places the picture.
+- Outputs (0.3.88): one wl_output per display of the desktop's layout,
+  and `zxdg_output_manager_v1` for every client, as wlroots offers it. A
+  display gone is `wl_global_remove` and the global destroyed 5 s later,
+  wlroots' `wlr_global_destroy_safe`; unlike wlroots its resources are
+  then made inert rather than left to the global's owner, as the
+  `bc_output` goes with it. X's RandR primary is set by the window
+  manager (`RRSetOutputPrimary`, a request any X client may make); wlroots'
+  xwm sets none.
 - Override-redirect windows (from milestone C) are popups of a toplevel,
   where wlroots shows them as unmanaged surfaces at their absolute X
   position: the wire has popups, not free-standing surfaces. The parent
@@ -1068,3 +1080,98 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     desktop wants the compositor to vouch; a focus taken during another
     client's keyboard grab and put back moves it off the grabbing
     program's menu window, if that had the focus.
+
+- **The display layout (0.3.88, 2026-11-12).** On the owner's machine,
+  with two displays of 1920x1080 and 2560x1440, Steam games always went
+  full screen on the same display and sized themselves to X's RandR
+  primary, and Steam's Big Picture put an override-redirect overlay at
+  its root position 0,0, which became an offset of -331,-151 from its
+  window: the compositor made one wl_output per display *mode* the
+  desktop named with `WINDOW output`, every one at 0,0, so X saw one
+  virtual screen (the root the largest output) with no primary, and
+  toplevels were kept only inside that root. Agreed with Hibr (Gitea
+  #514), desktop to compositor: `WINDOW layout <name> <x> <y> <w> <h>
+  <mHz>` per display, `WINDOW layout end`, `WINDOW primary <name>`; the
+  desktop sends them only to a compositor of 0.3.88 or later
+  (`--version`), on connect and at any display change
+  (`src/blit_compositor.c`, the outputs section, x_place, x_follow, the X
+  primary section; `src/blit_compositor_wire.h`; `docs/api.md`):
+  - Decision: the desktop's layout is the one source; the compositor
+    derives everything else from it. Each display is a wl_output global
+    named as the desktop names it, its geometry at the display's place,
+    its mode the display's (0 mHz unknown: frames paced at 60 Hz), and
+    `zxdg_output_manager_v1` 3 gives the place, size and name. A set is
+    applied at its end by name: unchanged is nothing, a change is told in
+    place, a display gone is removed after its windows go to the primary,
+    removals before additions. X space is the layout: the root its
+    extent, each display one RandR output and monitor; an X toplevel is
+    kept inside its display (the desktop's `WINDOW output`, before that
+    the one its centre is in, else the primary), follows it to another,
+    and is at its display's origin when full screen; X's primary is the
+    desktop's. A full-screen X window takes the desktop's `WINDOW size`
+    (the size the compositor configures is always the desktop's; Hibr
+    sends the display's), at the origin of the display. A desktop that
+    sends no layout gets the outputs of before, exactly.
+  - `WINDOW output` names a mode, not a display. With a layout it is the
+    layout's display of that size, the refresh telling two apart; two
+    displays of one size and refresh cannot be told apart by the line,
+    and the window stays where it is (else the primary of them; logged).
+    Hibr also sends the line only when its text changes, so a move
+    between two such displays sends nothing. Telling them apart needs a
+    wire change -- a trailing `<name>` on `WINDOW output`, and Hibr's
+    "unchanged" test including it -- taken to Hibr, not made here.
+  - Xwayland 24.1 (`hw/xwayland/xwayland-output.c`, Debian 13's 24.1.6),
+    read for this: it binds wl_output at version 4 at most and asks an
+    xdg_output of each when the manager is offered; with one, an output's
+    x,y and size are xdg_output's logical position and size (wl_output's
+    geometry and mode are then ignored for them), applied at wl_output's
+    done for xdg_output 3 (at both dones before 3), so the compositor
+    sends wl_output.done after an xdg_output's events, also when one is
+    created; its RandR output's name is wl_output's name (version 4),
+    else xdg_output's, else `XWAYLAND<n>`, and a name another output has
+    is refused (hence removals first); the root is the extent of every
+    output's x+w and y+h; a global removed is the output removed. RandR's
+    monitors are made from the CRTCs (`randr/rrmonitor.c`): one per
+    output, named by it, the primary first; `RRSetOutputPrimary` is any
+    client's request, and an output destroyed stops being primary, so the
+    window manager looks for the primary's output again at each RandR
+    change. The manager is created before the first output, so Xwayland
+    has it when it binds the outputs.
+  - Evidence: `xwayland_gate` (Xwayland 24.1, Debian 13 build
+    environment) passes under tcc and ASan/UBSan. After milestones C, D
+    and focus run unchanged without a layout, the X stand-in reads X's
+    displays (RandR 1.5's monitors, the primary, the root): before the
+    layout `monitor BLIT-1 0,0 1920x1080`, `primary none`, `root
+    1920x1080`; after `WINDOW primary HDMI-A-1` and DP-1 0,0 1920x1080
+    (0 mHz) and HDMI-A-1 1920,0 2560x1440, `monitor HDMI-A-1 1920,0
+    2560x1440 primary`, `monitor DP-1 0,0 1920x1080`, `primary
+    HDMI-A-1`, `root 4480x1440`, window 1 following its display that went
+    from 0,0 to 1920,0; `WINDOW output` to DP-1 moving it back; `WINDOW
+    primary DP-1` making DP-1 X's primary and first monitor; the
+    program's own full screen, sized by the desktop to 2560x1440 and put
+    on HDMI-A-1, at 1920,0 2560x1440, and back inside HDMI-A-1 after; a
+    panel asking for 1800,1000 200x100 (past DP-1, where its centre is,
+    not past the 4480x1440 root) placed at 1720,980 inside DP-1, the
+    desktop's 300x150 kept inside again at 1620,930, a press at 290,140
+    landing there and at 3540,930 on HDMI-A-1; the two displays swapped
+    in place, window 1 moving with HDMI-A-1 to 0,0; HDMI-A-1 gone, window
+    1 at 0,0 on DP-1, the root 1920x1080. A first run found the compositor
+    spinning at the first layout: the window manager's event source put
+    on the loop's check list twice, a list made a loop; fixed. The
+    `compositor_gate` passes under tcc and ASan/UBSan with
+    `layout_part`, last (every part before runs without a layout): BLIT-1
+    at 0,0 through xdg_output before; the primary and a set removing
+    BLIT-1 and BLIT-2 and making DP-1 at 0,0 and HDMI-A-1 at 1920,0 (0
+    mHz), named, their geometry and logical position agreeing, the window
+    on the primary; `WINDOW output` to DP-1; the same set again changing
+    nothing (no event, no log line); both displays moved and re-timed in
+    place; HDMI-A-1 gone and DP-2 of DP-1's mode, where `WINDOW output`
+    leaves the window on DP-1; the removed globals destroyed while the
+    stand-in still held them and released them after. Its log counts 45
+    frames sent, not 44: the layout window's own first frame.
+  - Open: the owner's machine with Hibr's side (#514) -- Steam, Big
+    Picture's overlay and a game on the primary and on the other display;
+    the trailing `<name>` on `WINDOW output` for two displays of one mode;
+    a Wayland program's `set_fullscreen` naming an output is not passed
+    to the desktop (the desktop chooses the display); Xwayland's own
+    full-screen emulation of a mode change (its viewport) is untested.

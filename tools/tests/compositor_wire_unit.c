@@ -123,6 +123,29 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW output 3 0 1440 60000", &l) == BC_LINE_UNKNOWN, "output, 0 wide");
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440", &l) == BC_LINE_UNKNOWN, "output, no refresh");
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000 x", &l) == BC_LINE_UNKNOWN, "output, tail");
+    EXPECT(bc_parse_line("WINDOW layout DP-1 1920 0 2560 1440 143912\n", &l) == BC_LINE_LAYOUT &&
+           strcmp(l.name, "DP-1") == 0 && l.x == 1920 && l.y == 0 && l.width == 2560 &&
+           l.height == 1440 && l.refresh_mhz == 143912, "layout");
+    EXPECT(bc_parse_line("WINDOW layout HDMI-A-1 0 0 1920 1080 0", &l) == BC_LINE_LAYOUT &&
+           l.refresh_mhz == 0, "layout, 0 mHz (unknown)");
+    EXPECT(bc_parse_line("WINDOW layout end\n", &l) == BC_LINE_LAYOUT_END, "layout end");
+    EXPECT(bc_parse_line("WINDOW layout end 0 0 640 480 60000", &l) == BC_LINE_LAYOUT &&
+           strcmp(l.name, "end") == 0, "a display named end");
+    EXPECT(bc_parse_line("WINDOW layout end x", &l) == BC_LINE_UNKNOWN, "layout end with a tail");
+    EXPECT(bc_parse_line("WINDOW layout DP-1 -10 0 1920 1080 60000", &l) == BC_LINE_UNKNOWN,
+           "layout left of the desktop's origin");
+    EXPECT(bc_parse_line("WINDOW layout DP-1 0 0 0 1080 60000", &l) == BC_LINE_UNKNOWN, "layout, 0 wide");
+    EXPECT(bc_parse_line("WINDOW layout DP-1 30000 0 2800 1080 60000", &l) == BC_LINE_UNKNOWN,
+           "layout past X's coordinates");
+    EXPECT(bc_parse_line("WINDOW layout DP-1 0 0 1920 1080", &l) == BC_LINE_UNKNOWN, "layout, no refresh");
+    EXPECT(bc_parse_line("WINDOW layout DP-1 0 0 1920 1080 60000 x", &l) == BC_LINE_UNKNOWN, "layout, tail");
+    EXPECT(bc_parse_line("WINDOW layout  0 0 1920 1080 60000", &l) == BC_LINE_UNKNOWN, "layout, no name");
+    EXPECT(bc_parse_line("WINDOW layout 0123456789012345678901234567890123456789012345678901234567890123 "
+                         "0 0 1920 1080 60000", &l) == BC_LINE_UNKNOWN, "layout, a name too long");
+    EXPECT(bc_parse_line("WINDOW primary HDMI-A-1\n", &l) == BC_LINE_PRIMARY && strcmp(l.name, "HDMI-A-1") == 0,
+           "primary");
+    EXPECT(bc_parse_line("WINDOW primary", &l) == BC_LINE_UNKNOWN, "primary, no name");
+    EXPECT(bc_parse_line("WINDOW primary DP-1 DP-2", &l) == BC_LINE_UNKNOWN, "primary, two names");
     EXPECT(bc_parse_line("WINDOW size 2 10 10 activated fullscreen", &l) == BC_LINE_SIZE &&
            l.activated && l.fullscreen, "flags in any order");
     EXPECT(bc_parse_line("WINDOW close 9\n", &l) == BC_LINE_CLOSE && l.id == 9, "close");

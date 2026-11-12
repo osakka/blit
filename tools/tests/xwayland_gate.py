@@ -75,6 +75,16 @@ order:
     focus and the keys; a dialog's _NET_ACTIVE_WINDOW as `WINDOW activate
     <id> x-active`; a menu that takes X's focus inside its grab asking for
     nothing, and X's revert to the root when it goes put back;
+  - the desktop's display layout (x_layout_part), after everything above
+    ran without one as with a desktop older than 0.3.88: X's displays as
+    the X stand-in reads them (B: RandR 1.5's monitors, the primary, the
+    root, its windows' places) -- before, BLIT-1 at 0,0 and no primary;
+    after `WINDOW primary` and two displays, a monitor per display at its
+    place, named after it, the desktop's primary X's and changed by
+    `WINDOW primary`, the root their extent; window 1 following its
+    display; full screen at its display's origin; a toplevel kept inside
+    its display (not only the root) with a press at its far corner
+    landing; a display gone, its window to the primary;
   - `WINDOW close 1`: WM_DELETE_WINDOW, the client exits 0, `WINDOW gone 1`;
   - Xwayland killed while an X program owns PRIMARY and the desktop
     CLIPBOARD (x_restart_part): its offer cleared with its window, and
@@ -1204,6 +1214,7 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
         pseq = c.offered('primary')
         c.desk_offers(120, 'clipboard')
         ready = log().count('X: Xwayland ready on')
+        primaries = log().count('X: RandR primary DP-1')
         os.kill(xpid, signal.SIGKILL)
         got = {c.match(r'CLIP clear \d+|WINDOW gone %d' % wid, 15).group(0) for _ in range(2)}
         check(got == {'CLIP clear %d' % pseq, 'WINDOW gone %d' % wid},
@@ -1217,6 +1228,10 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
     wait_for(lambda: log().count('X: Xwayland ready on') > ready, lambda: 'Xwayland did not start again:\n' + log(),
              30)
     xpid = int(re.findall(r'X: Xwayland \S+ started on \S+, pid (\d+)', log())[-1])
+    # The new Xwayland has the desktop's layout (x_layout_part's, DP-1
+    # alone) and its primary, set again by the new window manager.
+    wait_for(lambda: log().count('X: RandR primary DP-1') > primaries,
+             lambda: 'X\'s primary was not set again after the restart:\n' + log(), 15)
     client, c, wid, route, key = start('xstandin-3.out')
     try:
         m = c.mark()
@@ -1231,7 +1246,164 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
         if client.poll() is None:
             client.kill()
             client.wait()
-    return xpid, 'restart=X primary cleared+gone, desktop clipboard owned again and pasted'
+    return xpid, ('restart=X primary cleared+gone, desktop clipboard owned again and pasted, '
+                  'RandR primary DP-1 set again')
+
+
+# ---- the desktop's display layout: X space ----
+
+KEY_B = 48
+
+
+def x_layout_part(desk, lines_to, printed, log):
+    """The desktop's display layout in X (docs/api.md, "Program windows"),
+    after milestones C and D and focus ran without one, on window 1: X's
+    displays (RandR 1.5's monitors, its primary, the root) before the
+    layout, one output (BLIT-1 at 0,0, no primary); `WINDOW primary` and a
+    set of two displays (one of unknown refresh) -- both monitors at their
+    places, named after them, the primary X's, the root their extent, and
+    window 1 following its display that went to the primary; `WINDOW
+    output` moving it to the other; `WINDOW primary` changing X's; the
+    program's own full screen at its display's origin and the desktop's
+    size, then back inside its display; a panel asking for a place past its
+    display (not past the root) kept inside it, sized past its edge kept
+    inside again, a press at its far corner landing, and moved to the other
+    display with it; the displays swapped in place, window 1 moving with
+    its display; a display gone, its window moving to the primary.
+    Returns its summary."""
+    c = Clip(desk, printed, log, None)
+
+    def key(code):
+        lines_to('key %%d %d press' % code, 'key %%d %d release' % code)
+
+    def displays(want, wait=10):
+        """The B key until the X program sees `want` (Xwayland takes a new
+        layout a moment after the compositor): its monitor, primary, root
+        and where lines, in order."""
+        deadline = time.time() + wait
+        while True:
+            m = c.mark()
+            key(KEY_B)
+            c.saw('displays-said', m)
+            got = [l[len('XSTANDIN '):] for l in printed()[m:].splitlines()
+                   if l.startswith(('XSTANDIN monitor ', 'XSTANDIN primary ', 'XSTANDIN root ', 'XSTANDIN where '))]
+            if want is None or got == want:
+                return got
+            check(time.time() < deadline, lambda: 'X\'s displays are %r, not %r:\n%s' % (got, want, c.why()))
+            time.sleep(0.2)
+
+    def send_set(*displays_):
+        for line in displays_:
+            desk.send('WINDOW layout %s' % line)
+        desk.send('WINDOW layout end')
+
+    # Before any layout: the outputs of before it, X's root the largest.
+    before = displays(None)
+    main = [l for l in before if l.startswith('where main ')]
+    check(before[:3] == ['monitor BLIT-1 0,0 1920x1080', 'primary none', 'root 1920x1080'] and len(main) == 1 and
+          main[0].endswith(' 400x300'), lambda: 'X\'s displays before the layout: %r\n%s' % (before, c.why()))
+    mx, my = (int(v) for v in main[0].split()[2].split(','))
+
+    # The primary and a set of two displays (DP-1's refresh unknown, 0):
+    # window 1 was on BLIT-1, which goes; it follows to the primary.
+    desk.send('WINDOW primary HDMI-A-1')
+    send_set('DP-1 0 0 1920 1080 0', 'HDMI-A-1 1920 0 2560 1440 144000')
+    wait_for(lambda: 'X: RandR primary HDMI-A-1' in log(), lambda: 'X\'s primary was not set:\n' + c.why(), 15)
+    displays(['monitor HDMI-A-1 1920,0 2560x1440 primary', 'monitor DP-1 0,0 1920x1080', 'primary HDMI-A-1',
+              'root 4480x1440', 'where main %d,%d 400x300' % (mx + 1920, my)])
+    check('window 1: X window 0x' in log() and 'on display HDMI-A-1 at %d,%d' % (mx + 1920, my) in log(),
+          lambda: 'window 1 did not follow its display to HDMI-A-1:\n' + log())
+
+    # The desktop shows it on DP-1 (by its mode; DP-1's refresh unknown).
+    desk.send('WINDOW output 1 1920 1080 60000')
+    displays(['monitor HDMI-A-1 1920,0 2560x1440 primary', 'monitor DP-1 0,0 1920x1080', 'primary HDMI-A-1',
+              'root 4480x1440', 'where main %d,%d 400x300' % (mx, my)])
+    # X's primary is the desktop's.
+    desk.send('WINDOW primary DP-1')
+    wait_for(lambda: 'X: RandR primary DP-1' in log(), lambda: 'X\'s primary did not change:\n' + c.why())
+    displays(['monitor DP-1 0,0 1920x1080 primary', 'monitor HDMI-A-1 1920,0 2560x1440', 'primary DP-1',
+              'root 4480x1440', 'where main %d,%d 400x300' % (mx, my)])
+
+    # The program's full screen (F), which the desktop puts on HDMI-A-1:
+    # its size, then the display (Hibr's order). At HDMI-A-1's origin at
+    # its size; back from full screen, inside HDMI-A-1.
+    m = c.mark()
+    key(KEY_F)
+    c.match(r'WINDOW fullscreen 1 on')
+    desk.send('WINDOW size 1 2560 1440 fullscreen activated')
+    desk.send('WINDOW output 1 2560 1440 144000')
+    c.saw('configure 2560x1440', m)
+    c.saw('state fullscreen focused', m)
+    displays(['monitor DP-1 0,0 1920x1080 primary', 'monitor HDMI-A-1 1920,0 2560x1440', 'primary DP-1',
+              'root 4480x1440', 'where main 1920,0 2560x1440'])
+    m = c.mark()
+    key(KEY_F)
+    c.match(r'WINDOW fullscreen 1 off')
+    desk.send('WINDOW size 1 400 300 activated')
+    c.saw('configure 400x300', m)
+    displays(['monitor DP-1 0,0 1920x1080 primary', 'monitor HDMI-A-1 1920,0 2560x1440', 'primary DP-1',
+              'root 4480x1440', 'where main 1920,0 400x300'])
+
+    # A panel (P) asking for 1800,1000 with its 200x100: past DP-1, where
+    # its centre is, but not past the root (4480x1440) -- kept inside DP-1
+    # at 1720,980. The desktop's 300x150 reaches past DP-1 again: 1620,930.
+    # A press at its far corner lands; on HDMI-A-1 it keeps its place in
+    # its display, and a press there lands too.
+    m = c.mark()
+    key(KEY_P)
+    pid = int(c.match(r'WINDOW new (\d+) 0', 20).group(1))
+    for _ in range(4):
+        c.match(r'WINDOW (title|appid|decor|maximize) %d .*' % pid)
+    c.saw('panel', m)
+    check('placed at 1720,980, inside display DP-1 (it asked for 1800,1000)' in log(),
+          lambda: 'the panel was not kept inside DP-1:\n' + log())
+    desk.send('WINDOW size %d 300 150' % pid)
+    displays(['monitor DP-1 0,0 1920x1080 primary', 'monitor HDMI-A-1 1920,0 2560x1440', 'primary DP-1',
+              'root 4480x1440', 'where main 1920,0 400x300', 'where panel 1620,930 300x150'])
+    wait_for(lambda: (desk.quiet(0.1), pid in desk.input_socks)[1],
+             lambda: 'no INPUT sock for the panel (%s)' % desk.input_socks)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(desk.input_socks[pid])
+    try:
+        count = [0]
+
+        def press(x, y):
+            text = ''
+            for line in ('ptr %d %d.00 %d.00' % (BLIT_PICTURE, x, y), 'btn %d %d press' % (BLIT_PICTURE, BTN_LEFT),
+                         'btn %d %d release' % (BLIT_PICTURE, BTN_LEFT)):
+                count[0] += 1
+                text += 'INPUT %s\nINPUT frame %d %d\n' % (line, BLIT_PICTURE, count[0])
+            sock.sendall(text.encode())
+
+        m = c.mark()
+        press(290, 140)
+        c.saw('panel-button 1 290,140', m)
+        desk.send('WINDOW output %d 2560 1440 144000' % pid)
+        displays(['monitor DP-1 0,0 1920x1080 primary', 'monitor HDMI-A-1 1920,0 2560x1440', 'primary DP-1',
+                  'root 4480x1440', 'where main 1920,0 400x300', 'where panel 3540,930 300x150'])
+        m = c.mark()
+        press(290, 140)
+        c.saw('panel-button 1 290,140', m)
+    finally:
+        sock.close()
+    m = c.mark()
+    desk.send('WINDOW close %d' % pid)
+    c.match(r'WINDOW gone %d' % pid)
+    c.saw('panel-delete', m)
+
+    # The displays swapped in place: window 1 moves with HDMI-A-1, keeping
+    # its place in it.
+    send_set('DP-1 2560 0 1920 1080 0', 'HDMI-A-1 0 0 2560 1440 144000')
+    displays(['monitor DP-1 2560,0 1920x1080 primary', 'monitor HDMI-A-1 0,0 2560x1440', 'primary DP-1',
+              'root 4480x1440', 'where main 0,0 400x300'])
+    # HDMI-A-1 gone: window 1, on it, goes to the primary, DP-1, at its
+    # place there; X has one display.
+    send_set('DP-1 0 0 1920 1080 0')
+    displays(['monitor DP-1 0,0 1920x1080 primary', 'primary DP-1', 'root 1920x1080', 'where main 0,0 400x300'])
+    return ('layout: before=BLIT-1@0,0,no primary set=DP-1@0,0(0 mHz)+HDMI-A-1@1920,0 primary=HDMI-A-1->DP-1 '
+            'root=4480x1440 window 1 followed->%d,%d output->DP-1 fullscreen->HDMI-A-1 origin 2560x1440 '
+            'panel %d 1800,1000->1720,980 inside DP-1, 300x150->1620,930, ->HDMI-A-1 3540,930, far corner presses '
+            'swapped=window 1 with HDMI-A-1->0,0 gone=HDMI-A-1->window 1 to DP-1' % (mx + 1920, my, pid))
 
 
 def x_part(compositor, standin, server, work, wl_standin=None):
@@ -1386,6 +1558,7 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         milestone_d = x_milestone_d(desk, lines_to, printed, lambda: open(log).read(), clip_dir, wl_standin,
                                     env, work, standin, cenv)
         focus = x_focus_part(desk, lines_to, printed, lambda: open(log).read(), standin, cenv, work)
+        layout = x_layout_part(desk, lines_to, printed, lambda: open(log).read())
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
@@ -1421,10 +1594,10 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
                 '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s %s '
-                '%s close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
+                '%s %s close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
                                      measure.group(1), measure.group(2), frames, milestone_c, milestone_d, focus,
-                                     restart,
+                                     layout, restart,
                                      len(desk.cursors)))
     finally:
         for p in (client, comp):

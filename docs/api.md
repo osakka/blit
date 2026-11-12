@@ -2019,7 +2019,8 @@ milestone B, the window states, `WINDOW output`, dmabuf as FRM3, pacing,
 the keymap and input; milestone C, 0.3.72, pointer lock and confinement,
 Blit's key repeat and the keymap re-read on Blit's notice; and, from
 0.3.73, `--display`, programs that survive a desktop restart and `WINDOW
-quit 0`), and Blit its
+quit 0`; from 0.3.88, the desktop's display layout, `WINDOW layout` and
+`WINDOW primary`), and Blit its
 `window=0` answer, `GET /v1/input/keymap`, `INPUT sock`, `INPUT member`
 and `INPUT keymap`; Hibr implements the desktop's side. `blit-compositor`
 is Blit's Wayland compositor for programs and, from phase 2 (milestone A
@@ -2242,10 +2243,38 @@ It speaks the frame channel above as a producer, with these additions.
     while no desktop is connected.
   - `WINDOW output <id> <w> <h> <mHz>`: the display the window is on (its
     mode, from `/v1/displays`), sent when the window opens and whenever it
-    moves to another display; the compositor presents it to the program as
-    its `wl_output`: one `wl_output` per distinct mode, which the window's
-    surface enters (and leaves the one before). Until the first, a window
-    is on a 1920x1080 60 Hz output.
+    moves to another display; the window's surface enters that display's
+    `wl_output` (and leaves the one before). With a display layout (below)
+    the line names the layout's display of that size -- the refresh tells
+    two apart; when two displays have one mode the line cannot say which,
+    and the window stays on the one of them it is on (else the primary of
+    them, else the first; logged). An X window follows its display in X
+    space ("X programs", below). Without a layout, as before 0.3.88: one
+    `wl_output` per distinct mode, all at 0,0; until the first, a window is
+    on a 1920x1080 60 Hz output.
+  - `WINDOW layout <name> <x> <y> <w> <h> <mHz>` (0.3.88), one per display,
+    then `WINDOW layout end`: the desktop's displays. `<name>` is the
+    desktop's own name for the display (one word, at most 63 bytes),
+    `<x> <y>` its place in the desktop's pixels with the origin at the top
+    left of the whole desktop (not negative, the display inside 32767),
+    `<w> <h>` its size, `<mHz>` its refresh, 0 when unknown (its windows'
+    frames are then paced at 60 Hz). The set is applied at `end`, by name:
+    a display unchanged is nothing (the desktop sends the set on connect
+    and again at any display change; a repeat is harmless), one whose
+    place or mode changed is told to programs in place, a new one is new,
+    and a display not named since the last `end` is gone -- its windows
+    go to the primary display. Each display is one `wl_output` named
+    `<name>`, its geometry at `<x>,<y>`, and `zxdg_output_v1` (version 3)
+    gives the same place, size and name; Xwayland makes X's RandR outputs
+    and monitors of them. A set naming no display is refused, and the
+    layout stands. The first set replaces the outputs of before it, for the
+    compositor's life. A desktop that sends no layout -- the desktop sends
+    none to a compositor older than 0.3.88 (`blit-compositor --version`) --
+    gets the outputs of before.
+  - `WINDOW primary <name>` (0.3.88): X's RandR primary display, and the
+    display where a window the desktop has not yet placed (and so an
+    unplaced full-screen surface) goes. It may come before or after the
+    layout naming it; X's primary is set once Xwayland has the display.
   - `WINDOW close <id>`: `xdg_toplevel.close` (in phase 2,
     `WM_DELETE_WINDOW`); what to do if the program lingers is the desktop's.
     For a popup it is `xdg_popup.popup_done` -- the desktop sends it for a
@@ -2418,9 +2447,20 @@ It speaks the frame channel above as a producer, with these additions.
     submenu over its menu); else the X top-level the pointer is in. Its
     offset is its place relative to that top-level in X space, where
     every X top-level keeps its own position (the program's, only kept
-    inside the X screen, the largest `WINDOW output`, since X confines its
-    pointer to it; never moved after that): X space is a virtual layout,
-    and the desktop places the pictures. A popup the program moves after
+    inside the X screen, since X confines its pointer to it), and the
+    desktop places the pictures. With a display layout (0.3.88) X space is
+    the desktop's displays: the X screen is their extent, each display one
+    RandR output and monitor named `<name>` at its place, `WINDOW primary`
+    X's primary output, so a program (a game) that sizes itself to the
+    primary or to its monitor sees the desktop's displays. An X top-level
+    is kept inside its display -- the one `WINDOW output` says, before that
+    the one its centre is in, else the primary -- and follows the desktop's
+    `WINDOW output` to another display, keeping its place within it (and
+    as its display moves or goes); a full-screen one, by its own
+    `_NET_WM_STATE` or by the desktop's `WINDOW size ... fullscreen`, is at
+    its display's origin, at the desktop's size. Without a layout X space
+    is virtual: every output at 0,0, the X screen the largest `WINDOW
+    output`. A popup the program moves after
     it is shown is `WINDOW popup` again at its new offset, as a Wayland
     popup's reposition is (0.3.82). One whose origin is in no X
     window and that names none is not shown (logged). The pointer over

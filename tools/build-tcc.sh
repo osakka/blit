@@ -98,7 +98,7 @@ case "$target" in
         # ADR 0228: blit-compositor, Blit's Wayland compositor for programs
         # and the X window manager of its Xwayland, its own program linked
         # against libwayland-server, libxkbcommon and libxcb (with its
-        # composite, xfixes and res extensions).
+        # composite, xfixes, res and randr extensions).
         # Its protocol code is generated here by the system's wayland-scanner
         # from the system's wayland-protocols XML, both found through
         # pkg-config (tools/build-flags.sh), never committed: server code
@@ -119,7 +119,9 @@ case "$target" in
         # builds). cursor-shape-v1 refers to the tablet tool, so the tablet
         # protocol's interfaces are generated with it. xwayland-shell-v1
         # (staging since 1.31) is how Xwayland names each X window's surface;
-        # xdg-activation-v1 (staging) is a program asking for the focus.
+        # xdg-activation-v1 (staging) is a program asking for the focus;
+        # xdg-output-unstable-v1 gives each display its place in the
+        # desktop's layout, from which Xwayland builds X's RandR outputs.
         : > "$proto/sources"
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
@@ -132,6 +134,7 @@ case "$target" in
                    "$protocols/unstable/tablet/tablet-unstable-v2.xml" \
                    "$protocols/staging/xwayland-shell/xwayland-shell-v1.xml" \
                    "$protocols/staging/xdg-activation/xdg-activation-v1.xml" \
+                   "$protocols/unstable/xdg-output/xdg-output-unstable-v1.xml" \
                    "$plasma/appmenu.xml"; do
             base=$(basename "$xml" .xml)
             "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"

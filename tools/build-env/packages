@@ -28,6 +28,7 @@ libxcb1-dev
 libxcb-composite0-dev
 libxcb-xfixes0-dev
 libxcb-res0-dev
+libxcb-randr0-dev
 
 # Gates and packaging
 xwayland

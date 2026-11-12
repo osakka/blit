@@ -99,6 +99,24 @@ says so, and Hibr's frame stays off, as for Firefox.
   the program it started). A program that keeps asking is heard once a
   second at most.
 
+*Since Blit 0.3.88, with a Hibr that sends its display layout:*
+
+- **Programs see your displays as they are.** Each display is one output
+  for programs, named as Hibr names it and at its place in Hibr's
+  arrangement; X programs see the same displays (RandR) with Hibr's
+  primary display as X's primary, so a game that sizes itself to the
+  primary display, or to the display it is on, gets that display's size.
+- **Full screen goes to the display the desktop chooses.** A program
+  that asks for full screen fills the display Hibr puts it on -- for X
+  programs, at that display's corner and size -- not always the same one.
+  Which display full-screen programs open on is Hibr's setting (**Control
+  Panel > Displays > Full-screen programs open on**). An X program's
+  window stays inside the display it is shown on, and moves with it to
+  another.
+- Two displays of exactly the same size and refresh cannot yet be told
+  apart when a window moves between them: the program keeps the one it
+  was on.
+
 ## Using the window
 
 | What | What happens |

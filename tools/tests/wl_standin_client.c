@@ -3,7 +3,7 @@
    for the real programs the gate cannot run).
 
      wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
-                       [--cursor] [--appmenu] [--activate] [title]
+                       [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -43,6 +43,13 @@
    set_surface, commit: `STANDIN activation token asked`), and at the
    token's done activates its surface with it twice -- the second use of
    a used token (`STANDIN activation used <length of the token>`).
+
+   With --xdg-output it binds zxdg_output_manager_v1 (version 3 at most)
+   and takes each output's xdg_output: at each wl_output.done it prints
+   `STANDIN layout <name> at <x>,<y> mode <w>x<h>@<mHz> logical <x>,<y>
+   <w>x<h> <xdg name>` (wl_output's geometry position and mode, xdg_output's
+   logical position, size and name), and `STANDIN output removed <name>`
+   when an output's global goes.
 
    With --cursor it names its pointer shapes (wp_cursor_shape_v1): `text`
    when the pointer enters, `pointer` at a BTN_LEFT press, and at BTN_RIGHT
@@ -136,6 +143,7 @@
 #include "cursor-shape-v1-client-protocol.h"
 #include "appmenu-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
+#include "xdg-output-unstable-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -172,10 +180,17 @@ struct standin {
     struct wl_pointer *pointer;
     struct standin_output {
         struct wl_output *output;
-        char name[32];
+        char name[64];
         int32_t mode_w, mode_h, refresh;
+        /* --xdg-output */
+        uint32_t global;
+        int32_t x, y, lx, ly, lw, lh;
+        char xdg_name[64];
+        struct zxdg_output_v1 *xdg;
     } outputs[8];
     int output_count;
+    int xdg_mode;
+    struct zxdg_output_manager_v1 *xdg_manager;
     struct wl_surface *surface;
     struct xdg_surface *xdg_surface;
     struct xdg_toplevel *toplevel;
@@ -1193,7 +1208,10 @@ static void output_geometry(void *data, struct wl_output *o, int32_t x, int32_t 
                             int32_t ph, int32_t subpixel, const char *make, const char *model,
                             int32_t transform)
 {
-    (void)data; (void)o; (void)x; (void)y; (void)pw; (void)ph; (void)subpixel; (void)transform;
+    struct standin_output *out = data;
+    (void)o; (void)pw; (void)ph; (void)subpixel; (void)transform;
+    out->x = x;
+    out->y = y;
     printf("STANDIN output geometry %s %s\n", make, model);
 }
 
@@ -1213,6 +1231,10 @@ static void output_done(void *data, struct wl_output *o)
     (void)o;
     printf("STANDIN output mode %dx%d\n", out->mode_w, out->mode_h);
     printf("STANDIN output %s mode %dx%d@%d\n", out->name, out->mode_w, out->mode_h, out->refresh);
+    if (out->xdg)
+        printf("STANDIN layout %s at %d,%d mode %dx%d@%d logical %d,%d %dx%d %s\n", out->name, out->x, out->y,
+               out->mode_w, out->mode_h, out->refresh, out->lx, out->ly, out->lw, out->lh,
+               out->xdg_name[0] ? out->xdg_name : "-");
 }
 
 static void output_scale(void *data, struct wl_output *o, int32_t factor)
@@ -1237,6 +1259,50 @@ static void output_description(void *data, struct wl_output *o, const char *desc
 static const struct wl_output_listener output_listener = {
     output_geometry, output_mode, output_done, output_scale, output_name, output_description,
 };
+
+static void xdg_position(void *data, struct zxdg_output_v1 *x, int32_t lx, int32_t ly)
+{
+    struct standin_output *out = data;
+    (void)x;
+    out->lx = lx;
+    out->ly = ly;
+}
+
+static void xdg_size(void *data, struct zxdg_output_v1 *x, int32_t lw, int32_t lh)
+{
+    struct standin_output *out = data;
+    (void)x;
+    out->lw = lw;
+    out->lh = lh;
+}
+
+static void xdg_done(void *data, struct zxdg_output_v1 *x)
+{
+    (void)data; (void)x;  /* version 3: wl_output.done ends the set */
+}
+
+static void xdg_name(void *data, struct zxdg_output_v1 *x, const char *name)
+{
+    struct standin_output *out = data;
+    (void)x;
+    snprintf(out->xdg_name, sizeof(out->xdg_name), "%s", name);
+}
+
+static void xdg_description(void *data, struct zxdg_output_v1 *x, const char *description)
+{
+    (void)data; (void)x; (void)description;
+}
+
+static const struct zxdg_output_v1_listener xdg_output_listener = {
+    xdg_position, xdg_size, xdg_done, xdg_name, xdg_description,
+};
+
+static void output_take_xdg(struct standin *s, struct standin_output *out)
+{
+    if (s->xdg_manager == NULL || out->xdg) return;
+    out->xdg = zxdg_output_manager_v1_get_xdg_output(s->xdg_manager, out->output);
+    zxdg_output_v1_add_listener(out->xdg, &xdg_output_listener, out);
+}
 
 static struct standin_output *find_output(struct standin *s, struct wl_output *o)
 {
@@ -1298,7 +1364,14 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         struct standin_output *out = &s->outputs[s->output_count++];
         out->output = wl_registry_bind(registry, name, &wl_output_interface,
                                        version < 4 ? version : 4);
+        out->global = name;
         wl_output_add_listener(out->output, &output_listener, out);
+        output_take_xdg(s, out);
+    } else if (s->xdg_mode && strcmp(interface, zxdg_output_manager_v1_interface.name) == 0) {
+        int i;
+        s->xdg_manager = wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface,
+                                          version < 3 ? version : 3);
+        for (i = 0; i < s->output_count; ++i) output_take_xdg(s, &s->outputs[i]);
     } else if (strcmp(interface, zwp_relative_pointer_manager_v1_interface.name) == 0) {
         s->relative_manager = wl_registry_bind(registry, name,
                                                &zwp_relative_pointer_manager_v1_interface, 1);
@@ -1383,7 +1456,12 @@ static const struct zwp_linux_dmabuf_feedback_v1_listener feedback_listener = {
 
 static void global_remove(void *data, struct wl_registry *registry, uint32_t name)
 {
-    (void)data; (void)registry; (void)name;
+    struct standin *s = data;
+    int i;
+    (void)registry;
+    for (i = 0; i < s->output_count; ++i)
+        if (s->outputs[i].global == name && s->outputs[i].output)
+            printf("STANDIN output removed %s\n", s->outputs[i].name);
 }
 
 static const struct wl_registry_listener registry_listener = { global, global_remove };
@@ -1407,6 +1485,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--appmenu") == 0) s.appmenu_mode = 1;
         else if (strcmp(argv[i], "--activate") == 0) s.activate_mode = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
+        else if (strcmp(argv[i], "--xdg-output") == 0) s.xdg_mode = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--animate") == 0 && i + 1 < argc) s.animate = atoi(argv[++i]);
@@ -1500,7 +1579,11 @@ int main(int argc, char **argv)
     if (s.keyboard) wl_keyboard_release(s.keyboard);
     if (s.pointer) wl_pointer_release(s.pointer);
     if (s.seat) wl_seat_release(s.seat);
-    for (i = 0; i < s.output_count; ++i) wl_output_release(s.outputs[i].output);
+    for (i = 0; i < s.output_count; ++i) {
+        if (s.outputs[i].xdg) zxdg_output_v1_destroy(s.outputs[i].xdg);
+        wl_output_release(s.outputs[i].output);
+    }
+    if (s.xdg_manager) zxdg_output_manager_v1_destroy(s.xdg_manager);
     if (s.decoration_manager) zxdg_decoration_manager_v1_destroy(s.decoration_manager);
     if (s.feedback) zwp_linux_dmabuf_feedback_v1_destroy(s.feedback);
     if (s.dmabuf) zwp_linux_dmabuf_v1_destroy(s.dmabuf);

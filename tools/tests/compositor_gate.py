@@ -13,6 +13,13 @@ asked for (1:1, the stand-in's pattern pixel for pixel), `0 0` leaving the
 size to the program, `WINDOW gone` after close, and the compositor ending
 when the desktop's channel closes and no desktop comes back.
 
+Last in part one, the desktop's display layout (layout_part): every part
+before it runs without one, as a desktop older than 0.3.88 does (the
+outputs of before: one per mode, at 0,0); then `WINDOW layout` and
+`WINDOW primary` make one named wl_output per display at its place
+(wl_output's geometry, xdg_output's logical position and name), a
+repeated set changes nothing, and a display not in a set is removed.
+
 The restart part ("Programs survive a desktop restart"): the channel lost
 with programs running, which keep running and drawing; the same socket
 served again; every window announced again with its newest frame; the
@@ -329,6 +336,95 @@ def appmenu_part(desk, standin, env, display, work, log):
             client.kill()
             client.wait()
     return 'address=:1.42,/MenuBar/1 not-dbus=ignored release=- -'
+
+
+def layout_part(desk, standin, env, display, work, log):
+    """The desktop's display layout (docs/api.md, "Program windows"), last:
+    a layout is for the rest of the compositor's life. With `--xdg-output`,
+    window 14: before any layout the outputs of before it (BLIT-1 at 0,0,
+    as xdg_output says too); `WINDOW primary` and a set of two displays --
+    the outputs of before removed, one named wl_output per display at its
+    place (wl_output's geometry and xdg_output's logical position), the
+    window on the primary; `WINDOW output` its display by mode; the same
+    set again changing nothing; the displays moved and re-timed in place;
+    a display gone removed (and destroyed later, its resource kept by the
+    stand-in past that); two displays of one mode, where `WINDOW output`
+    leaves the window where it is."""
+    out_path = os.path.join(work, 'standin-layout.out')
+    client = start([standin, '--xdg-output', 'Layout'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    why = lambda: '%s\n%s' % (printed(), open(log).read())
+
+    def send_set(*displays):
+        for line in displays:
+            desk.send('WINDOW layout %s' % line)
+        desk.send('WINDOW layout end')
+
+    try:
+        for want in ('WINDOW new 14 0', 'WINDOW title 14 Layout', 'WINDOW appid 14 blit.standin',
+                     'WINDOW limits 14 64 48 0 0', 'WINDOW decor 14 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=14)
+        # No layout yet: the outputs of before it, at 0,0.
+        wait_for(lambda: 'STANDIN layout BLIT-1 at 0,0 mode 1920x1080@60000 logical 0,0 1920x1080 BLIT-1\n'
+                 in printed() and 'STANDIN enter BLIT-1 1920x1080@60000' in printed(),
+                 lambda: 'BLIT-1 at 0,0 before the layout:\n' + why())
+        # The primary, then the set (one display's refresh unknown, 0).
+        removed_at = time.time()
+        desk.send('WINDOW primary HDMI-A-1')
+        send_set('DP-1 0 0 1920 1080 60000', 'HDMI-A-1 1920 0 2560 1440 0')
+        for want in ('STANDIN output removed BLIT-1', 'STANDIN output removed BLIT-2',
+                     'STANDIN layout DP-1 at 0,0 mode 1920x1080@60000 logical 0,0 1920x1080 DP-1\n',
+                     'STANDIN layout HDMI-A-1 at 1920,0 mode 2560x1440@0 logical 1920,0 2560x1440 HDMI-A-1\n',
+                     'STANDIN enter HDMI-A-1 2560x1440@0'):
+            wait_for(lambda: want in printed(), lambda: 'no %r:\n%s' % (want, why()))
+        # The desktop's display for the window, by its mode.
+        desk.send('WINDOW output 14 1920 1080 60000')
+        wait_for(lambda: 'STANDIN enter DP-1 1920x1080@60000' in printed(),
+                 lambda: 'the window did not enter DP-1:\n' + why())
+        # The same set again (the desktop repeats it): nothing.
+        said = len(printed())
+        logged = len(open(log).read())
+        desk.send('WINDOW primary HDMI-A-1')
+        send_set('DP-1 0 0 1920 1080 60000', 'HDMI-A-1 1920 0 2560 1440 0')
+        desk.nothing(0.5)
+        check(printed()[said:] == '', lambda: 'a repeated layout changed something:\n' + printed()[said:])
+        check('display ' not in open(log).read()[logged:] and 'layout:' not in open(log).read()[logged:],
+              lambda: 'a repeated layout was applied:\n' + open(log).read()[logged:])
+        # Moved and re-timed: told in place, no output added or removed.
+        send_set('DP-1 2560 0 1920 1080 75000', 'HDMI-A-1 0 0 2560 1440 144000')
+        for want in ('STANDIN layout DP-1 at 2560,0 mode 1920x1080@75000 logical 2560,0 1920x1080 DP-1\n',
+                     'STANDIN layout HDMI-A-1 at 0,0 mode 2560x1440@144000 logical 0,0 2560x1440 HDMI-A-1\n'):
+            wait_for(lambda: want in printed(), lambda: 'no %r:\n%s' % (want, why()))
+        # HDMI-A-1 gone, DP-2 of DP-1's mode: `WINDOW output` of that mode
+        # names two displays; the window stays on DP-1, where it is.
+        send_set('DP-1 2560 0 1920 1080 75000', 'DP-2 4480 0 1920 1080 75000')
+        for want in ('STANDIN output removed HDMI-A-1',
+                     'STANDIN layout DP-2 at 4480,0 mode 1920x1080@75000 logical 4480,0 1920x1080 DP-2\n'):
+            wait_for(lambda: want in printed(), lambda: 'no %r:\n%s' % (want, why()))
+        desk.send('WINDOW output 14 1920 1080 75000')
+        wait_for(lambda: 'window 14: 2 displays are 1920x1080 at 75000 mHz (WINDOW output names a mode, not a '
+                 'display): on DP-1' in open(log).read(), lambda: 'the two displays of one mode:\n' + why())
+        for want in ('display BLIT-1: gone', 'display HDMI-A-1: gone',
+                     'display HDMI-A-1: 2560x1440 at 1920,0, 0 mHz (new)', 'layout: 2 displays, 6400x1080'):
+            check(want in open(log).read(), lambda: 'the log does not say %r:\n%s' % (want, open(log).read()))
+        # The removed globals destroyed (BC_OUTPUT_LINGER_MS) while the
+        # stand-in still holds them: its release at exit is no error.
+        time.sleep(max(0.0, removed_at + 5.5 - time.time()))
+        desk.send('WINDOW close 14')
+        desk.line('WINDOW gone 14')
+        check(client.wait(5) == 0, lambda: 'the layout stand-in failed:\n' + why())
+        moves = [l for l in printed().splitlines() if l.startswith(('STANDIN enter', 'STANDIN leave'))]
+        check(moves == ['STANDIN enter BLIT-1 1920x1080@60000', 'STANDIN leave BLIT-1',
+                        'STANDIN enter HDMI-A-1 2560x1440@0', 'STANDIN leave HDMI-A-1',
+                        'STANDIN enter DP-1 1920x1080@60000'],
+              lambda: 'the window entered and left:\n%s' % '\n'.join(moves))
+    finally:
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+    return ('before=BLIT-1@0,0 primary+set->BLIT-1,2 removed DP-1@0,0 HDMI-A-1@1920,0(0 mHz) window->HDMI-A-1 '
+            'output->DP-1 repeat=nothing moved+retimed=in place gone=HDMI-A-1 same-mode=stays on DP-1')
 
 
 def activation_part(desk, standin, env, display, work, log):
@@ -1721,6 +1817,7 @@ def desktop_part(compositor, standin, work):
         cursor = cursor_part(desk, standin, env, display, work, log)
         appmenu = appmenu_part(desk, standin, env, display, work, log)
         activation = activation_part(desk, standin, env, display, work, log)
+        layout = layout_part(desk, standin, env, display, work, log)
 
         # The desktop goes and does not come back: the compositor ends after
         # the reconnect bound, status 1, and says why.
@@ -1734,10 +1831,11 @@ def desktop_part(compositor, standin, work):
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
-        # 44: 40, the popup again after its move, and the activation window's
-        # three (its own size, the desktop's, and again activated).
-        check('44 frames sent, 0 failed' in text, 'the log does not count 44 frames (40, the popup again after its '
-              'move, the activation window\'s 3):\n%s' % text)
+        # 45: 40, the popup again after its move, the activation window's
+        # three (its own size, the desktop's, and again activated), and the
+        # layout window's one (its own size: the layout part sends no size).
+        check('45 frames sent, 0 failed' in text, 'the log does not count 45 frames (40, the popup again after its '
+              'move, the activation window\'s 3, the layout window\'s 1):\n%s' % text)
         print('COMPOSITOR_DESKTOP_OK display=%s new+title+appid+limits+decor frames=0x0->256x160,320x200,500x300,'
               '0x0->256x160 popup=2@12,63+80x60+done->gone killed=3->gone seat+output pattern=exact close->gone standin=%s globals=%s'
               % (display, output.strip().splitlines()[-1].split(' ', 2)[2],
@@ -1750,6 +1848,7 @@ def desktop_part(compositor, standin, work):
         print('COMPOSITOR_CURSOR_OK %s' % cursor)
         print('COMPOSITOR_APPMENU_OK %s' % appmenu)
         print('COMPOSITOR_ACTIVATION_OK %s' % activation)
+        print('COMPOSITOR_LAYOUT_OK %s' % layout)
     finally:
         for p in (client, comp):
             if p and p.poll() is None:

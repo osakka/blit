@@ -49,6 +49,8 @@
         same named "nosuchcursor", a name Blit has no pointer for
      K  _NET_ACTIVE_WINDOW for the dialog (T), the program asking for it
         to be the active window (EWMH, source 1, the key's time)
+     B  X's displays as a program sees them (RandR 1.5): each monitor,
+        the primary output, the root's size, and where its windows are
      Z  M's menu, which then takes X's focus onto itself inside its grab
         (SetInputFocus, revert to its parent), as some toolkits' menus do;
         the top-level's FocusOut does not close it, and when it goes X
@@ -130,11 +132,17 @@
      XSTANDIN pasted <sel> <target> none|stalled   refused, or INCR left untaken
      XSTANDIN targets <sel> <name>,...|none
      XSTANDIN delete                     WM_DELETE_WINDOW: it exits 0
+     XSTANDIN monitor <name> <x>,<y> <w>x<h>[ primary]   the B key: RandR's
+                                         monitors, in RandR's order
+     XSTANDIN primary <name>|none        RandR's primary output
+     XSTANDIN root <w>x<h>
+     XSTANDIN where main|dialog|panel <x>,<y> <w>x<h>   each window it has
+     XSTANDIN displays-said              the B key's last line
 
    and exits 1 when its connection fails or ends otherwise.
 
-   Built by tools/tests/xwayland_gate.sh with tcc against libxcb and
-   xcb-xfixes (pkg-config, tools/build-flags.sh xcb). */
+   Built by tools/tests/xwayland_gate.sh with tcc against libxcb,
+   xcb-xfixes and xcb-randr (pkg-config, tools/build-flags.sh xcb). */
 #define _GNU_SOURCE
 #include <fcntl.h>
 #include <poll.h>
@@ -147,6 +155,7 @@
 #include <unistd.h>
 #include <xcb/xcb.h>
 #include <xcb/xfixes.h>
+#include <xcb/randr.h>
 
 #define ANIMATE_FRAMES 150
 #define ANIMATE_MS 16
@@ -186,6 +195,7 @@
 #define KEYCODE_Y 29
 #define KEYCODE_K 45
 #define KEYCODE_Z 52
+#define KEYCODE_B 56
 #define FOCUS_TAKES 3
 #define DELAY_MS 1000
 /* The stand-in's INCR chunk as an owner (the compositor's is 64 KiB). */
@@ -313,6 +323,62 @@ static void origin(int16_t *x, int16_t *y)
     *x = t ? t->dst_x : 0;
     *y = t ? t->dst_y : 0;
     free(t);
+}
+
+/* An atom's name into out. */
+static void atom_name(xcb_atom_t a, char *out, size_t size)
+{
+    xcb_get_atom_name_reply_t *r = xcb_get_atom_name_reply(conn, xcb_get_atom_name(conn, a), NULL);
+    snprintf(out, size, "%.*s", r ? xcb_get_atom_name_name_length(r) : 1, r ? xcb_get_atom_name_name(r) : "?");
+    free(r);
+}
+
+/* The B key: X's displays as a program sees them -- RandR 1.5's monitors
+   (what SDL and toolkits read), its primary output, the root -- and
+   where this program's windows are in X space. */
+static void displays_say(void)
+{
+    xcb_window_t windows[3] = { window, dialog, panel };
+    static const char *const names[3] = { "main", "dialog", "panel" };
+    xcb_randr_query_version_reply_t *v =
+        xcb_randr_query_version_reply(conn, xcb_randr_query_version(conn, 1, 5), NULL);
+    xcb_randr_get_monitors_reply_t *m = xcb_randr_get_monitors_reply(conn, xcb_randr_get_monitors(conn, screen->root, 1),
+                                                                     NULL);
+    xcb_randr_get_output_primary_reply_t *p =
+        xcb_randr_get_output_primary_reply(conn, xcb_randr_get_output_primary(conn, screen->root), NULL);
+    xcb_get_geometry_reply_t *g = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, screen->root), NULL);
+    char name[128];
+    int i;
+    free(v);
+    if (m) {
+        xcb_randr_monitor_info_iterator_t it = xcb_randr_get_monitors_monitors_iterator(m);
+        for (; it.rem; xcb_randr_monitor_info_next(&it)) {
+            atom_name(it.data->name, name, sizeof(name));
+            say("monitor %s %d,%d %ux%u%s", name, it.data->x, it.data->y, it.data->width, it.data->height,
+                it.data->primary ? " primary" : "");
+        }
+        free(m);
+    }
+    if (p && p->output != XCB_NONE) {
+        xcb_randr_get_output_info_reply_t *info =
+            xcb_randr_get_output_info_reply(conn, xcb_randr_get_output_info(conn, p->output, XCB_CURRENT_TIME), NULL);
+        if (info)
+            say("primary %.*s", xcb_randr_get_output_info_name_length(info), xcb_randr_get_output_info_name(info));
+        free(info);
+    } else {
+        say("primary none");
+    }
+    free(p);
+    if (g) say("root %ux%u", g->width, g->height);
+    free(g);
+    for (i = 0; i < 3; ++i) {
+        xcb_get_geometry_reply_t *w;
+        if (windows[i] == 0) continue;
+        w = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, windows[i]), NULL);
+        if (w) say("where %s %d,%d %ux%u", names[i], w->x, w->y, w->width, w->height);
+        free(w);
+    }
+    say("displays-said");
 }
 
 /* A menu as X toolkits make one: override-redirect, mapped, then the
@@ -1112,6 +1178,8 @@ int main(int argc, char **argv)
                     say("iconify");
                 } else if (k->detail == KEYCODE_P) {
                     panel_open();
+                } else if (k->detail == KEYCODE_B) {
+                    displays_say();
                 } else if (k->detail == KEYCODE_J && panel) {
                     xcb_change_property(conn, XCB_PROP_MODE_REPLACE, panel, transient_atom, XCB_ATOM_WINDOW, 32, 1,
                                         &window);
