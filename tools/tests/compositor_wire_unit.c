@@ -122,7 +122,11 @@ static void lines(void)
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440 0", &l) == BC_LINE_UNKNOWN, "output, 0 mHz");
     EXPECT(bc_parse_line("WINDOW output 3 0 1440 60000", &l) == BC_LINE_UNKNOWN, "output, 0 wide");
     EXPECT(bc_parse_line("WINDOW output 3 2560 1440", &l) == BC_LINE_UNKNOWN, "output, no refresh");
-    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000 x", &l) == BC_LINE_UNKNOWN, "output, tail");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000 HDMI-A-1", &l) == BC_LINE_OUTPUT &&
+           strcmp(l.name, "HDMI-A-1") == 0, "output, a display's name (0.3.88)");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000\n", &l) == BC_LINE_OUTPUT && l.name[0] == '\0',
+           "output, no name");
+    EXPECT(bc_parse_line("WINDOW output 3 2560 1440 60000 a b", &l) == BC_LINE_UNKNOWN, "output, two names");
     EXPECT(bc_parse_line("WINDOW layout DP-1 1920 0 2560 1440 143912\n", &l) == BC_LINE_LAYOUT &&
            strcmp(l.name, "DP-1") == 0 && l.x == 1920 && l.y == 0 && l.width == 2560 &&
            l.height == 1440 && l.refresh_mhz == 143912, "layout");

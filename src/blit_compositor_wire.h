@@ -628,7 +628,7 @@ static uint64_t bc_wire_send_dmabuf(BcWire *w, uint32_t id, uint32_t width, uint
 enum {
     BC_LINE_UNKNOWN = 0,
     BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] [tiled-*] */
-    BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> */
+    BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> [<name>] */
     BC_LINE_LAYOUT,         /* WINDOW layout <name> <x> <y> <w> <h> <mHz> */
     BC_LINE_LAYOUT_END,     /* WINDOW layout end */
     BC_LINE_PRIMARY,        /* WINDOW primary <name> */
@@ -889,13 +889,22 @@ static int bc_parse_line(const char *line, BcLine *out)
         return out->kind = BC_LINE_SIZE;
     }
     if (strncmp(line, "WINDOW output ", 14) == 0) {
-        /* A display's mode: at least 1x1, a refresh of 1 mHz to 1000 Hz. */
+        /* A display's mode: at least 1x1, a refresh of 1 mHz to 1000 Hz;
+           and, from 0.3.88, the display's name from WINDOW layout, which
+           tells apart two displays of one mode (empty when not given). */
         p = line + 14;
+        out->name[0] = '\0';
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || *p++ != ' ' ||
             bc_read_u32(&p, BC_SIZE_MAX, &a) != 0 || *p++ != ' ' ||
             bc_read_u32(&p, BC_SIZE_MAX, &b) != 0 || *p++ != ' ' ||
             bc_read_u32(&p, 1000000UL, &out->refresh_mhz) != 0 || out->id == 0 || a == 0 ||
-            b == 0 || out->refresh_mhz == 0 || (*p != '\0' && *p != '\n'))
+            b == 0 || out->refresh_mhz == 0)
+            return out->kind = BC_LINE_UNKNOWN;
+        if (*p == ' ') {
+            ++p;
+            if (bc_read_name(&p, out->name) != 0) return out->kind = BC_LINE_UNKNOWN;
+        }
+        if (*p != '\0' && *p != '\n')
             return out->kind = BC_LINE_UNKNOWN;
         out->width = (int32_t)a;
         out->height = (int32_t)b;

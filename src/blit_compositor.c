@@ -8778,8 +8778,14 @@ static void handle_line(struct bc_server *s, const char *line)
             logf_("WINDOW output for %u, which is no toplevel here", l.id);
             return;
         }
-        if (s->layout) {
-            /* A display of the layout, by its mode (output_for_display_mode). */
+        if (s->layout && l.name[0] != '\0' && output_named(s, l.name) != NULL) {
+            /* The display by its name (0.3.88): two of one mode told apart. */
+            struct bc_output *o = output_named(s, l.name);
+            logf_("window %u: display %s", l.id, o->name);
+            window_move_output(s, x, o);
+        } else if (s->layout) {
+            /* A display of the layout, by its mode (output_for_display_mode):
+               a desktop that names no display, or one not in the layout. */
             int several;
             struct bc_output *o = output_for_display_mode(s, x, l.width, l.height, l.refresh_mhz, &several);
             if (o == NULL) {

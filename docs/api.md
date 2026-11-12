@@ -2241,14 +2241,16 @@ It speaks the frame channel above as a producer, with these additions.
     window is often the program's own size, and the desktop's first `WINDOW
     size` is an ordinary reconfigure. The same holds for a program started
     while no desktop is connected.
-  - `WINDOW output <id> <w> <h> <mHz>`: the display the window is on (its
-    mode, from `/v1/displays`), sent when the window opens and whenever it
-    moves to another display; the window's surface enters that display's
-    `wl_output` (and leaves the one before). With a display layout (below)
-    the line names the layout's display of that size -- the refresh tells
-    two apart; when two displays have one mode the line cannot say which,
-    and the window stays on the one of them it is on (else the primary of
-    them, else the first; logged). An X window follows its display in X
+  - `WINDOW output <id> <w> <h> <mHz> [<name>]`: the display the window is
+    on (its mode, from `/v1/displays`, and from 0.3.88 its name from
+    `WINDOW layout`), sent when the window opens and whenever it moves to
+    another display; the window's surface enters that display's `wl_output`
+    (and leaves the one before). With a display layout (below) the name
+    says which display; without one -- a desktop that sends none, or a name
+    not in the layout -- the line names the layout's display of that size,
+    the refresh telling two apart, and when two displays have one mode the
+    window stays on the one of them it is on (else the primary of them,
+    else the first; logged). An X window follows its display in X
     space ("X programs", below). Without a layout, as before 0.3.88: one
     `wl_output` per distinct mode, all at 0,0; until the first, a window is
     on a 1920x1080 60 Hz output.

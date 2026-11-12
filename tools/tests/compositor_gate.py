@@ -405,6 +405,11 @@ def layout_part(desk, standin, env, display, work, log):
         desk.send('WINDOW output 14 1920 1080 75000')
         wait_for(lambda: 'window 14: 2 displays are 1920x1080 at 75000 mHz (WINDOW output names a mode, not a '
                  'display): on DP-1' in open(log).read(), lambda: 'the two displays of one mode:\n' + why())
+        # Named (0.3.88's trailing <name>): the display of that name, of the
+        # two of one mode.
+        desk.send('WINDOW output 14 1920 1080 75000 DP-2')
+        wait_for(lambda: 'window 14: display DP-2' in open(log).read(), lambda: 'the named display:\n' + why())
+        wait_for(lambda: 'STANDIN enter DP-2 1920x1080@75000' in printed(), lambda: 'not on DP-2:\n' + why())
         for want in ('display BLIT-1: gone', 'display HDMI-A-1: gone',
                      'display HDMI-A-1: 2560x1440 at 1920,0, 0 mHz (new)', 'layout: 2 displays, 6400x1080'):
             check(want in open(log).read(), lambda: 'the log does not say %r:\n%s' % (want, open(log).read()))
@@ -417,14 +422,16 @@ def layout_part(desk, standin, env, display, work, log):
         moves = [l for l in printed().splitlines() if l.startswith(('STANDIN enter', 'STANDIN leave'))]
         check(moves == ['STANDIN enter BLIT-1 1920x1080@60000', 'STANDIN leave BLIT-1',
                         'STANDIN enter HDMI-A-1 2560x1440@0', 'STANDIN leave HDMI-A-1',
-                        'STANDIN enter DP-1 1920x1080@60000'],
+                        'STANDIN enter DP-1 1920x1080@60000', 'STANDIN leave DP-1',
+                        'STANDIN enter DP-2 1920x1080@75000'],
               lambda: 'the window entered and left:\n%s' % '\n'.join(moves))
     finally:
         if client.poll() is None:
             client.kill()
             client.wait()
     return ('before=BLIT-1@0,0 primary+set->BLIT-1,2 removed DP-1@0,0 HDMI-A-1@1920,0(0 mHz) window->HDMI-A-1 '
-            'output->DP-1 repeat=nothing moved+retimed=in place gone=HDMI-A-1 same-mode=stays on DP-1')
+            'output->DP-1 repeat=nothing moved+retimed=in place gone=HDMI-A-1 same-mode=stays on DP-1 '
+            'named=DP-2')
 
 
 def activation_part(desk, standin, env, display, work, log):
