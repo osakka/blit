@@ -9,6 +9,26 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.89 kitty keyboard flag 16, the text a key types
+
+- **Keyboard:** kitty flag 16, report associated text (with flag 8): a
+  press or repeat that types text carries it as a third field of code
+  points (`CSI 223;1;92u`, AltGr on a layout keymap typing a backslash),
+  the text `evdev_key_character` gives the legacy encoder, and a keypad
+  key's operator, or its digit with NumLock on. A release, a chord with
+  Ctrl, Alt or Super, a functional key and control characters carry none.
+  `supported_flags` is 31 in the API and the schema. The desktop needs
+  flags 8 and 2 to see a lone Super tap for the start menu (Hibr #516);
+  with 16 it still reads every character typed.
+- **Suites:** the build environment, the tagged commit: `compositor_gate`,
+  `xwayland_gate`, both with ASan/UBSan; `package_artifact_gate`. This
+  host: `kitty_keyboard_gate` 58 cases (9 new); gcc `-Wall -Wextra` no new
+  warnings; `all` 187 pass, 12 skip, `terminal_conformance` failed on its
+  old expectation that 16 is masked, then passed (275 cases) after its
+  query test was updated (test file only, no `src` change); `renderer` 82
+  pass, `renderer-gles` 62 pass; `api_schema_gate`, `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.88 the desktop's displays, X's layout and primary (Hibr #514)
 
 - **Displays:** `WINDOW layout <name> <x> <y> <w> <h> <mHz>` and `WINDOW
