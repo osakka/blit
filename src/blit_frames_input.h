@@ -127,6 +127,176 @@ static int frame_input_key_held(const BlitFrameInput *in, unsigned int code)
     return code <= KEY_MAX && (in->keys[code / 8] >> (code % 8)) & 1;
 }
 
+static void frame_input_refuse(BlitRuntime *runtime, BlitFrameClient *client,
+                               unsigned int image_id, const char *code);
+
+/* ---- INPUT keep (ADR 0231): the desktop's chords, kept from programs ----
+
+   A chord is `[ctrl-][alt-][shift-][super-]<key>`, the modifiers in that
+   order, the key named by the US base key at its position (a letter, a
+   digit, US punctuation) or by name. `super` alone (the tap) is accepted
+   and keeps nothing: a lone Super reaching a program is harmless, and the
+   desktop sees every key anyway. */
+#define BLIT_KEEP_CTRL 1u
+#define BLIT_KEEP_ALT 2u
+#define BLIT_KEEP_SHIFT 4u
+#define BLIT_KEEP_SUPER 8u
+#define BLIT_KEEP_ALTGR 16u   /* never in a chord: AltGr held is typing */
+
+static const struct { const char *name; unsigned short code; } frame_key_names[] = {
+    {"up", KEY_UP}, {"down", KEY_DOWN}, {"left", KEY_LEFT}, {"right", KEY_RIGHT},
+    {"home", KEY_HOME}, {"end", KEY_END}, {"pageup", KEY_PAGEUP}, {"pagedown", KEY_PAGEDOWN},
+    {"insert", KEY_INSERT}, {"delete", KEY_DELETE}, {"tab", KEY_TAB}, {"enter", KEY_ENTER},
+    {"space", KEY_SPACE}, {"escape", KEY_ESC}, {"backspace", KEY_BACKSPACE},
+    {"print", KEY_SYSRQ}, {"menu", KEY_COMPOSE},
+};
+
+/* A key's name to its evdev code, or -1. */
+static int frame_key_code(const char *name)
+{
+    size_t i;
+    if (name[0] != '\0' && name[1] == '\0') {
+        unsigned short c;
+        for (c = BLIT_KEY_TABLE_FIRST; c <= BLIT_KEY_TABLE_LAST; ++c)
+            if (evdev_us_unshifted[c - BLIT_KEY_TABLE_FIRST] == name[0])
+                return c;
+        return -1;
+    }
+    if (name[0] == 'f' && name[1] >= '1' && name[1] <= '9') {
+        char *end;
+        long n = strtol(name + 1, &end, 10);
+        if (*end != '\0' || n < 1 || n > 24) return -1;
+        if (n <= 10) return KEY_F1 + (int)n - 1;
+        if (n == 11) return KEY_F11;
+        if (n == 12) return KEY_F12;
+        return KEY_F13 + (int)n - 13;
+    }
+    for (i = 0; i < sizeof(frame_key_names) / sizeof(frame_key_names[0]); ++i)
+        if (strcmp(name, frame_key_names[i].name) == 0)
+            return frame_key_names[i].code;
+    return -1;
+}
+
+/* An evdev code's name in the grammar, into `out` ("" for none). */
+static void frame_key_name(unsigned short code, char *out, size_t capacity)
+{
+    size_t i;
+    out[0] = '\0';
+    if (code >= BLIT_KEY_TABLE_FIRST && code <= BLIT_KEY_TABLE_LAST &&
+        evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST]) {
+        snprintf(out, capacity, "%c", evdev_us_unshifted[code - BLIT_KEY_TABLE_FIRST]);
+        return;
+    }
+    if (code >= KEY_F1 && code <= KEY_F10) { snprintf(out, capacity, "f%d", code - KEY_F1 + 1); return; }
+    if (code == KEY_F11 || code == KEY_F12) { snprintf(out, capacity, "f%d", code == KEY_F11 ? 11 : 12); return; }
+    if (code >= KEY_F13 && code <= KEY_F24) { snprintf(out, capacity, "f%d", code - KEY_F13 + 13); return; }
+    for (i = 0; i < sizeof(frame_key_names) / sizeof(frame_key_names[0]); ++i)
+        if (frame_key_names[i].code == code) { snprintf(out, capacity, "%s", frame_key_names[i].name); return; }
+}
+
+/* One chord: its key and modifiers, or the Super tap (`*tap` 1). Returns
+   0 for one that is not in the grammar. */
+static int frame_keep_parse(const char *chord, unsigned short *code, unsigned char *mods, int *tap)
+{
+    static const char *const prefixes[] = { "ctrl-", "alt-", "shift-", "super-" };
+    const char *p = chord;
+    int i, c;
+    *mods = 0;
+    *tap = 0;
+    for (i = 0; i < 4; ++i) {
+        size_t n = strlen(prefixes[i]);
+        if (strncmp(p, prefixes[i], n) == 0 && p[n] != '\0') {
+            *mods |= (unsigned char)(1u << i);
+            p += n;
+        }
+    }
+    if (strcmp(p, "super") == 0 && *mods == 0) {
+        *tap = 1;
+        return 1;
+    }
+    c = frame_key_code(p);
+    if (c < 0) return 0;
+    *code = (unsigned short)c;
+    return 1;
+}
+
+/* Whether this session keeps the key with these modifiers. */
+static int frame_input_kept(const BlitSession *session, unsigned short code, unsigned mods)
+{
+    int i;
+    if (session == NULL || (mods & BLIT_KEEP_ALTGR)) return 0;
+    if (code == KEY_MENU) code = KEY_COMPOSE;
+    for (i = 0; i < session->keep_count; ++i)
+        if (session->keep_codes[i] == code && session->keep_mods[i] == mods)
+            return 1;
+    return 0;
+}
+
+/* `INPUT keep <chord>...`: the session's whole set replaced; an empty one
+   clears it. One chord not in the grammar refuses the line (`INPUT error
+   0 EINVAL`) and leaves the set as it was. Not answered otherwise. */
+static void frame_input_keep(BlitRuntime *runtime, BlitFrameClient *client,
+                             const unsigned char *message, ssize_t length)
+{
+    static char line[4096];
+    unsigned short codes[BLIT_KEEP_MAX];
+    unsigned char mods[BLIT_KEEP_MAX];
+    BlitSession *session = find_session_id(runtime, client->session_id);
+    char *word, *save = NULL;
+    int n = 0;
+    ssize_t i;
+    if (length > 0 && message[length - 1] == '\n')
+        --length;
+    for (i = 0; i < length; ++i)
+        if (message[i] < 0x20 || message[i] == 0x7f)
+            break;
+    if (session == NULL || i != length || length >= (ssize_t)sizeof(line)) {
+        frame_input_refuse(runtime, client, 0, "EINVAL");
+        return;
+    }
+    memcpy(line, message, (size_t)length);
+    line[length] = '\0';
+    for (word = strtok_r(line + 10, " ", &save); word; word = strtok_r(NULL, " ", &save)) {
+        unsigned short code;
+        unsigned char m;
+        int tap;
+        if (!frame_keep_parse(word, &code, &m, &tap) || (!tap && n >= BLIT_KEEP_MAX)) {
+            frame_input_refuse(runtime, client, 0, "EINVAL");
+            return;
+        }
+        if (tap) continue;
+        codes[n] = code;
+        mods[n] = m;
+        ++n;
+    }
+    memcpy(session->keep_codes, codes, sizeof(codes[0]) * (size_t)n);
+    memcpy(session->keep_mods, mods, sizeof(mods[0]) * (size_t)n);
+    session->keep_count = n;
+}
+
+/* Blit's own chords, which no shortcut can have, in the grammar: the
+   console switch, Ctrl+Alt+F1 to F12, and the stop chord as configured
+   (none when it is switched off). */
+static void frame_input_reserved(BlitRuntime *runtime, char *out, size_t capacity)
+{
+    size_t used = 0;
+    int i;
+    out[0] = '\0';
+    for (i = 1; i <= 12; ++i)
+        json_appendf(out, capacity, &used, "%sctrl-alt-f%d", i == 1 ? "" : " ", i);
+    if (runtime->shutdown_key_enabled && runtime->shutdown_key_code > 0) {
+        char key[32];
+        unsigned m = runtime->shutdown_key_modifiers;
+        frame_key_name((unsigned short)runtime->shutdown_key_code, key, sizeof(key));
+        if (key[0])
+            json_appendf(out, capacity, &used, " %s%s%s%s%s",
+                         (m & (1u << BLIT_MODIFIER_CTRL)) ? "ctrl-" : "",
+                         (m & (1u << BLIT_MODIFIER_ALT)) ? "alt-" : "",
+                         (m & (1u << BLIT_MODIFIER_SHIFT)) ? "shift-" : "",
+                         (m & (1u << BLIT_MODIFIER_META)) ? "super-" : "", key);
+    }
+}
+
 static void frame_input_key_mark(BlitFrameInput *in, unsigned int code, int held)
 {
     if (code > KEY_MAX)
@@ -557,8 +727,12 @@ static void frame_input_service(BlitRuntime *runtime, const fd_set *readable)
    held; the live one, at most one, gets the event. */
 
 static void frame_input_key(BlitRuntime *runtime, BlitInputDevice *keyboard,
-                            unsigned int code, int pressed)
+                            unsigned short physical, unsigned int code, int pressed)
 {
+    /* The keyboard's modifiers at a press, for the desktop's kept chords. */
+    unsigned mods = (keyboard->ctrl ? BLIT_KEEP_CTRL : 0u) | (keyboard->alt ? BLIT_KEEP_ALT : 0u) |
+        (keyboard->shift ? BLIT_KEEP_SHIFT : 0u) | (evdev_super_held(keyboard) ? BLIT_KEEP_SUPER : 0u) |
+        (keyboard->altgr ? BLIT_KEEP_ALTGR : 0u);
     int i, k;
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         BlitFrameClient *client = &runtime->frame_clients[i];
@@ -569,8 +743,11 @@ static void frame_input_key(BlitRuntime *runtime, BlitInputDevice *keyboard,
             if (in == NULL || !frame_input_sync(runtime, client, in))
                 continue;
             /* A release only for a key pressed here: one pressed before the
-               route went live was never the compositor's. */
+               route went live was never the compositor's -- nor one the
+               desktop keeps (INPUT keep), whose press went to it alone. */
             if (!pressed && !frame_input_key_held(in, code))
+                continue;
+            if (pressed && frame_input_kept(find_session_id(runtime, client->session_id), physical, mods))
                 continue;
             frame_input_key_mark(in, code, pressed);
             {
@@ -1127,6 +1304,11 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     int member_x = 0, member_y = 0, member_ok = 0;
     ssize_t i;
 
+    if (length >= 10 && memcmp(message, "INPUT keep", 10) == 0 &&
+        (length == 10 || message[10] == ' ' || message[10] == '\n')) {
+        frame_input_keep(runtime, client, message, length);
+        return;
+    }
     if (length > 0 && message[length - 1] == '\n')
         --length;
     for (i = 0; i < length; ++i)

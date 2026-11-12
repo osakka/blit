@@ -985,6 +985,8 @@ typedef struct {
 #define BLIT_FRAME_DELETED 64
 #define BLIT_FRAME_PENDING 8
 #define BLIT_HUD_STATUS_LINES 8
+/* The most chords one `INPUT keep` names. */
+#define BLIT_KEEP_MAX 256
 #define BLIT_HUD_STATUS_BYTES 64
 #define BLIT_HUD_STATUS_US 5000000ULL
 #define BLIT_HUD_LINES (14 + 1 + BLIT_HUD_STATUS_LINES)
@@ -1128,6 +1130,12 @@ typedef struct {
     /* ADR 0228: events this session's input routes sent, and the last
        thing that went wrong with one (kept after the route ends). */
     unsigned long frame_input_events;
+    /* `INPUT keep` (ADR 0231): the desktop's reserved chords, each a key
+       (evdev code, by the US base key) and an exact modifier set (1 ctrl,
+       2 alt, 4 shift, 8 super), withheld from this session's routes. */
+    int keep_count;
+    unsigned short keep_codes[BLIT_KEEP_MAX];
+    unsigned char keep_mods[BLIT_KEEP_MAX];
     unsigned long frame_input_dropped;  /* lines an INPUT sock route could not write */
     char frame_input_error[32];
     int frame_connections;
@@ -2053,7 +2061,7 @@ static void frame_hud_notify(BlitRuntime *runtime);
 /* ADR 0228: physical input to blit-compositor's input sockets (blit_frames_input.h). */
 static int frame_input_routes;
 static void frame_input_key(BlitRuntime *runtime, BlitInputDevice *keyboard,
-                            unsigned int code, int pressed);
+                            unsigned short physical, unsigned int code, int pressed);
 static void frame_input_button(BlitRuntime *runtime, int button, int pressed);
 static void frame_input_scroll(BlitRuntime *runtime, int horizontal, int direction);
 static void frame_input_pointer(BlitRuntime *runtime);
@@ -30754,7 +30762,7 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
        logical key, with this keyboard's modifiers after it (ADR 0231). The
        session still gets it. */
     if (frame_input_routes && logical >= 0)
-        frame_input_key(runtime, keyboard, (unsigned int)logical, event->value != 0);
+        frame_input_key(runtime, keyboard, event->code, (unsigned int)logical, event->value != 0);
     /* Issue #66. The remap decides what this code *is*, and takes precedence
        over what the code would otherwise mean: a CapsLock remapped to Control
        must not also toggle CapsLock. A code with a role never reaches the

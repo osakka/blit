@@ -74,7 +74,9 @@ order:
     x-focus` and a key still window 1's; the desktop's grant giving it the
     focus and the keys; a dialog's _NET_ACTIVE_WINDOW as `WINDOW activate
     <id> x-active`; a menu that takes X's focus inside its grab asking for
-    nothing, and X's revert to the root when it goes put back;
+    nothing, and X's revert to the root when it goes put back; with no X
+    window activated, a program that takes X's focus keeps it (it routes
+    no keys) and asks once, with no fight;
   - the desktop's display layout (x_layout_part), after everything above
     ran without one as with a desktop older than 0.3.88: X's displays as
     the X stand-in reads them (B: RandR 1.5's monitors, the primary, the
@@ -1173,9 +1175,38 @@ def x_focus_part(desk, lines_to, printed, log, standin, xenv, work):
         if thief.poll() is None:
             thief.kill()
             thief.wait()
+
+    # No X window is the desktop's (window 1 no longer activated: a Wayland
+    # window has the keyboard): X's focus routes no keys, so a program that
+    # takes it keeps it and asks once -- not put back to be taken again,
+    # which made Steam fight the compositor twenty times a second.
+    desk.send('WINDOW size 1 400 300')
+    desk.quiet(0.5)
+    left_before = log().count("took X's focus while no X window is the desktop's: left")
+    put_before = log().count("its program took X's focus itself: put back")
+    keeper_path = os.path.join(work, 'xstandin-keeper.out')
+    keeper = cg.start([standin, 'X keeper'], dict(xenv, XSTANDIN_FOCUS_AT_START='take'), open(keeper_path, 'w'))
+    kp = lambda: open(keeper_path).read()
+    try:
+        kid = window_lines(r'WINDOW new (\d+) 0')
+        c.match(r'WINDOW activate %d x-focus' % kid)
+        wait_for(lambda: 'XSTANDIN took-focus 1\n' in kp(), lambda: 'the keeper did not take the focus:\n' + kp())
+        desk.quiet(1.5)
+        check('XSTANDIN took-focus 2' not in kp(), lambda: 'the keeper lost the focus and fought:\n' + kp())
+        check(log().count("took X's focus while no X window is the desktop's: left") == left_before + 1 and
+              log().count("its program took X's focus itself: put back") == put_before,
+              lambda: 'the focus was put back with no X window activated:\n' + log())
+        desk.send('WINDOW close %d' % kid)
+        c.match(r'WINDOW gone %d' % kid)
+        check(keeper.wait(5) == 0, 'the keeper failed:\n' + kp())
+    finally:
+        if keeper.poll() is None:
+            keeper.kill()
+            keeper.wait()
     return ('focus: thief=window %d took X focus x3->one WINDOW activate x-focus, put back each time, key->window 1; '
             'grant->focus+key to it; dialog %d _NET_ACTIVE_WINDOW->x-active; focused menu %d in its grab->no ask, '
-            'reverted to root->put back' % (tid, did, pid))
+            'reverted to root->put back; no X window activated->keeper %d keeps it, asks once, no fight'
+            % (tid, did, pid, kid))
 
 
 def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):

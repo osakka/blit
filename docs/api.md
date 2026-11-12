@@ -1763,7 +1763,12 @@ sends `KEYBOARD list` is answered `KEYBOARD item <n> <layout> <variant|->
 the end of the line) and `KEYBOARD current <n>` last, which ends a list,
 and is sent the list again on every change of the list or the current
 keyboard, whoever made it (its own switch, the API, the Blit control
-panel). `KEYBOARD current <n>` switches; an `<n>` that is not one of them,
+panel). Each list carries, before `KEYBOARD current`, `KEYBOARD reserved
+<chord>...` (0.3.95): Blit's own chords in `INPUT keep`'s grammar, which
+no shortcut can have -- `ctrl-alt-f1` to `ctrl-alt-f12` (the console
+switch) and the stop chord as configured (`ctrl-alt-backspace` by
+default; absent when it is switched off). `KEYBOARD current <n>` switches;
+an `<n>` that is not one of them,
 or another line, is answered `KEYBOARD error EINVAL`. A channel that never
 sent `KEYBOARD list` is told nothing (a channel that only draws need not
 read lines it did not ask for). A desktop with a channel per display hears
@@ -2151,15 +2156,36 @@ It speaks the frame channel above as a producer, with these additions.
     <code>`, `INPUT ok <id>`, `INPUT error <id> <code>`;
   - a producer to Blit: `INPUT sock <id> <path>`,
     `INPUT on|off <id>`, `INPUT hold <id> relative|confine`, `INPUT member
-    <id> <toplevel-id> <x> <y>`;
+    <id> <toplevel-id> <x> <y>`, `INPUT keep <chord>...` (no id: the
+    session's whole set, below);
   - on an input route's socket: `INPUT key|ptr|rel|btn|wheel|frame|keymap
     <id> ...`;
   - between the compositor and the desktop: every `WINDOW <verb> <id> ...`
     line above and below, and `WINDOW ok <id>`, `WINDOW error <id> <code>`;
   - the keyboards (ADR 0231, from Blit 0.3.94), concerning no picture: a
     producer's `KEYBOARD list` and `KEYBOARD current <n>`, and Blit's
-    `KEYBOARD item <n> <layout> <variant|-> <name...>`, `KEYBOARD current
-    <n>` and `KEYBOARD error EINVAL` ("Keyboards (layouts)").
+    `KEYBOARD item <n> <layout> <variant|-> <name...>`, `KEYBOARD reserved
+    <chord>...`, `KEYBOARD current <n>` and `KEYBOARD error EINVAL`
+    ("Keyboards (layouts)").
+  - **`INPUT keep <chord> <chord> ...`** (0.3.95): the desktop's own
+    shortcuts, kept from programs. It replaces the sending session's whole
+    set (an empty `INPUT keep` clears it) and is not answered; one chord
+    not in the grammar refuses the line, `INPUT error 0 EINVAL`, and keeps
+    the set. A chord is `[ctrl-][alt-][shift-][super-]<key>`, the
+    modifiers in that order, the key named by the US key at its position
+    (a-z, 0-9, `` ` - = [ ] \ ; ' , . / ``, so `alt-w` is the W key in any
+    layout and `shift-1` is Shift+1) or by name (f1-f24, up, down, left,
+    right, home, end, pageup, pagedown, insert, delete, tab, enter, space,
+    escape, backspace, print, menu); `super` alone, the tap, is accepted
+    and keeps nothing (a lone Super reaching a program is harmless, and
+    the desktop sees every key). A key pressed with exactly a kept chord's
+    modifiers on its keyboard (Caps Lock and Num Lock aside; AltGr held
+    never matches) goes to none of the session's routes -- its press, its
+    repeats and its release -- and every other key as before. A line is at
+    most 4095 bytes. With Alt as the desktop's shortcut key a program
+    still sees Alt go down and up alone around a kept Alt chord, and some
+    (Firefox) show their menu bar on that; Super as the shortcut key does
+    not.
   Further ids (a popup's parent, a member's top-level) are arguments after
   it. A line that concerns no one picture says 0 there: `FRAME error 0
   EINVAL` (a malformed STA1, or a message too short to name its picture),
@@ -2491,8 +2517,8 @@ It speaks the frame channel above as a producer, with these additions.
   follows the desktop's activated window (0.3.86): an X program that takes
   X's input focus itself (its own `SetInputFocus`) onto another window
   gets it put back on the activated one, by the same `SetInputFocus` /
-  `WM_TAKE_FOCUS` as the desktop's activation (PointerRoot when none is
-  activated), and asks with `WINDOW activate <id> x-focus` for its
+  `WM_TAKE_FOCUS` as the desktop's activation, and asks with `WINDOW
+  activate <id> x-focus` for its
   top-level (a menu's: the top-level it belongs to). So keys arriving on
   a window's route always reach that window's program. Not taking the
   focus: the window manager's own focus changes, a keyboard grab (X
@@ -2500,6 +2526,11 @@ It speaks the frame channel above as a producer, with these additions.
   putting the focus on a menu of its own,
   and a program's answer to `WM_TAKE_FOCUS` (ICCCM lets it put the focus
   on any of its windows: that window is asked for, and the focus stays).
+  With no X window activated (a Wayland window has the keyboard, or none)
+  nothing is put back: Xwayland has the keyboard only when an X surface
+  does, so X's focus routes no keys, and a program that takes it keeps it
+  and asks once (0.3.95; before, Steam, which takes it back at once,
+  fought the compositor some twenty times a second).
   A focus that leaves every window (a program set it to None, or its
   focused menu went) is put back too. Putting back is at most once per
   50 ms, so a program that takes the focus at every loss costs little.

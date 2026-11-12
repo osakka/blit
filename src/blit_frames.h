@@ -55,6 +55,8 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
                                 const unsigned char *message, ssize_t length);
 static void frame_input_select(const BlitRuntime *runtime, fd_set *readable, int *max_fd);
 static void frame_input_service(BlitRuntime *runtime, const fd_set *readable);
+/* Blit's own chords in INPUT keep's grammar (blit_frames_input.h). */
+static void frame_input_reserved(BlitRuntime *runtime, char *out, size_t capacity);
 
 /* One line on the client's socket; nothing for an accepted frame. */
 static void frame_reply(int fd, const char *line)
@@ -73,9 +75,9 @@ static void frame_reply(int fd, const char *line)
    every change, whoever made it; `KEYBOARD current <n>` switches. A bad
    one is `KEYBOARD error EINVAL`. Opt-in: a channel that only draws is
    told nothing it did not ask for. */
-static void frame_keyboards_send(int fd)
+static void frame_keyboards_send(BlitRuntime *runtime, int fd)
 {
-    char line[512], name[256];
+    char line[512], name[256], reserved[512];
     int i;
     for (i = 0; i < blit_keyboard_count; ++i) {
         blit_keyboard_description(blit_keyboards[i].layout, blit_keyboards[i].variant, name,
@@ -84,6 +86,11 @@ static void frame_keyboards_send(int fd)
                  blit_keyboards[i].variant[0] ? blit_keyboards[i].variant : "-", name);
         frame_reply(fd, line);
     }
+    /* Blit's own chords, which no shortcut can have: the console switch
+       and the stop chord as configured. */
+    frame_input_reserved(runtime, reserved, sizeof(reserved));
+    snprintf(line, sizeof(line), "KEYBOARD reserved %s\n", reserved);
+    frame_reply(fd, line);
     snprintf(line, sizeof(line), "KEYBOARD current %d\n", blit_keyboard_current);
     frame_reply(fd, line);
 }
@@ -95,7 +102,7 @@ static void frame_keyboards_changed(BlitRuntime *runtime)
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (client->used && client->authenticated && client->keyboards_wanted)
-            frame_keyboards_send(client->fd);
+            frame_keyboards_send(runtime, client->fd);
     }
 }
 
@@ -116,14 +123,14 @@ static void frame_keyboards_request(BlitRuntime *runtime, BlitFrameClient *clien
         line[length - 1] = '\0';
     if (strcmp(line, "KEYBOARD list") == 0) {
         client->keyboards_wanted = 1;
-        frame_keyboards_send(client->fd);
+        frame_keyboards_send(runtime, client->fd);
     } else if (sscanf(line, "KEYBOARD current %d%c", &n, &extra) == 1 && n >= 0 &&
                n < blit_keyboard_count && strspn(line + 17, "0123456789") == strlen(line + 17)) {
         if (n != blit_keyboard_current) {
             blit_keyboards_use(n);
             keyboards_changed(runtime);
         } else if (client->keyboards_wanted) {
-            frame_keyboards_send(client->fd);
+            frame_keyboards_send(runtime, client->fd);
         }
     } else {
         frame_reply(client->fd, "KEYBOARD error EINVAL\n");
@@ -921,7 +928,9 @@ static void frame_client_service(BlitRuntime *runtime, int index)
     BlitSession *session = NULL;
 
     for (;;) {
-        unsigned char message[BLIT_FRAME_STATUS_BYTES];
+        /* A STA1 or a line: the longest line is an `INPUT keep` of the
+           desktop's whole shortcut set (ADR 0231). */
+        unsigned char message[BLIT_FRAME_STATUS_BYTES > 4096 ? BLIT_FRAME_STATUS_BYTES : 4096];
         union { struct cmsghdr header; char space[CMSG_SPACE(sizeof(int) * BLIT_FRAME_FDS)]; } control;
         struct iovec vector;
         struct msghdr header;

@@ -7950,7 +7950,9 @@ static int x_focus_log_due(struct bc_server *s, int k, unsigned *hushed)
      and asks for nothing.
    A focus that left every window (the root has it: a program set it to
    None or PointerRoot, or its focused menu went and X reverted it) is put
-   back too. A focus taken while another client grabs the keyboard (mode
+   back too. With no X window activated (a Wayland window has the
+   keyboard, or none) nothing is put back: X's focus routes no keys then,
+   so a program that takes it keeps it and asks once. A focus taken while another client grabs the keyboard (mode
    WhileGrabbed) is a focus taken all the same. */
 static void x_focus_in(struct bc_server *s, xcb_focus_in_event_t *f)
 {
@@ -7974,7 +7976,21 @@ static void x_focus_in(struct bc_server *s, xcb_focus_in_event_t *f)
     }
     w = x_window(s, f->event);
     if (w == NULL || w->window == s->x.focus) return;
-    focused = s->x.focus != XCB_WINDOW_NONE ? x_window(s, s->x.focus) : NULL;
+    /* No X window is the desktop's (it activated a Wayland window, or
+       none): X's focus routes no keys -- Xwayland has the keyboard only
+       when an X surface does -- so a program that takes it keeps it, and
+       asks once. Putting it back made Steam, which takes it again at once,
+       fight the compositor some twenty times a second, for nothing. */
+    if (s->x.focus == XCB_WINDOW_NONE) {
+        if (x_focus_log_due(s, 0, &hushed))
+            logf_("%s 0x%x: its program took X's focus while no X window is the desktop's: left "
+                  "(%u more times within the second before)",
+                  w->override_redirect ? "X menu" : "X window", (unsigned)w->window, hushed);
+        if (w->pic && !w->pic->xpopup) window_ask_activate(w->pic, "x-focus");
+        else if (!w->override_redirect && w->pic == NULL) w->ask = "x-focus";
+        return;
+    }
+    focused = x_window(s, s->x.focus);
     answered = x_answering(s, w);
     if (w->pic && !w->pic->xpopup) ask = w->pic;
     else if (w->pic && w->pic->parent && w->pic->parent->xwin && x_same_program(s, w->pic->parent->xwin, w))

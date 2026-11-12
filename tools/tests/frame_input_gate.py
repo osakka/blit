@@ -293,6 +293,10 @@ def state(server, session, image):
     return r['state'] if r else 'none'
 
 
+# Blit's own chords in each list: the console switch and the stop chord.
+RESERVED = 'KEYBOARD reserved ' + ' '.join('ctrl-alt-f%d' % n for n in range(1, 13)) + ' ctrl-alt-backspace'
+
+
 def keyboards_part(server, a):
     """ADR 0231: the keyboards on the frame channel, for a desktop without
     the API token (one the login manager started). `KEYBOARD list` is
@@ -313,13 +317,14 @@ def keyboards_part(server, a):
 
     try:
         ch.line('KEYBOARD list\n')
-        check(listing() == ['KEYBOARD item 0 us - English (US)', 'KEYBOARD current 0'],
+        check(listing() == ['KEYBOARD item 0 us - English (US)', RESERVED, 'KEYBOARD current 0'],
               'the first list')
         server.api('PUT', '/v1/input/keyboards',
                    {'keyboards': [{'layout': 'us'}, {'layout': 'ara', 'variant': 'mac-phonetic'}]})
         got = listing()
         check(got == ['KEYBOARD item 0 us - English (US)',
-                      'KEYBOARD item 1 ara mac-phonetic Arabic (Macintosh, phonetic)', 'KEYBOARD current 0'],
+                      'KEYBOARD item 1 ara mac-phonetic Arabic (Macintosh, phonetic)', RESERVED,
+                      'KEYBOARD current 0'],
               'a list changed through the API: %s' % got)
         ch.line('KEYBOARD current 1\n')
         check(listing()[-1] == 'KEYBOARD current 1', 'the switch was not told back')
@@ -328,11 +333,11 @@ def keyboards_part(server, a):
             check(ch.ask(bad + '\n') == b'KEYBOARD error EINVAL\n', '%r was not EINVAL' % bad)
         check(quiet.reply(0.3) == b'', 'a channel that did not ask was told the keyboards')
         server.api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'}]})
-        check(listing() == ['KEYBOARD item 0 us - English (US)', 'KEYBOARD current 0'], 'the list back')
+        check(listing() == ['KEYBOARD item 0 us - English (US)', RESERVED, 'KEYBOARD current 0'], 'the list back')
     finally:
         ch.close()
         quiet.close()
-    return 'keyboards=list,api-change,switch,einval,opt-in'
+    return 'keyboards=list,api-change,switch,einval,opt-in,reserved'
 
 
 def local():
@@ -757,6 +762,31 @@ def multi(server, a, work, b):
         ra.expect(['key 20 42 release'], 'shift up through route 20')
         check(ra.modifiers[-1][0] == 0 and ra.modifiers[-1][1] == 0,
               'shift up, modifiers %s' % (ra.modifiers[-1],))
+        # INPUT keep (ADR 0231): the desktop's chords withheld from programs.
+        # Alt+W goes to the desktop alone (the route still sees Alt itself);
+        # W alone and Alt+Q reach the program; a chord not in the grammar
+        # refuses the line and keeps the set; an empty keep clears it.
+        ch.line('INPUT keep alt-w ctrl-alt-l super\n')
+        key(56, 1)
+        key(17, 1, 0)
+        key(16, 1, 0)
+        key(56, 0)
+        ra.expect(['key 20 56 press', 'key 20 16 press', 'key 20 16 release', 'key 20 56 release'],
+                  'alt-w kept, alt-q not')
+        key(17, 1, 0)
+        ra.expect(['key 20 17 press', 'key 20 17 release'], 'w alone is the program\'s')
+        check(ch.ask('INPUT keep alt-w alt-nope\n') == b'INPUT error 0 EINVAL\n', 'an unknown key was not EINVAL')
+        check(ch.ask('INPUT keep alt-ctrl-w\n') == b'INPUT error 0 EINVAL\n', 'modifiers out of order were not EINVAL')
+        key(56, 1)
+        key(17, 1, 0)
+        key(56, 0)
+        ra.expect(['key 20 56 press', 'key 20 56 release'], 'the refused line kept the set')
+        ch.line('INPUT keep\n')
+        key(56, 1)
+        key(17, 1, 0)
+        key(56, 0)
+        ra.expect(['key 20 56 press', 'key 20 17 press', 'key 20 17 release', 'key 20 56 release'],
+                  'an empty keep cleared it')
         rb.nothing('route 21 while 20 is on')
         check(rb.notices == [], 'route 21 sent a keymap while off: %s' % rb.notices)
 
