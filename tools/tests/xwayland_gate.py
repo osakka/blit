@@ -1189,6 +1189,8 @@ def x_focus_part(desk, lines_to, printed, log, standin, xenv, work):
     kp = lambda: open(keeper_path).read()
     try:
         kid = window_lines(r'WINDOW new (\d+) 0')
+        for _ in range(3):
+            c.match(r'WINDOW (title|appid|decor) %d .*' % kid)
         c.match(r'WINDOW activate %d x-focus' % kid)
         wait_for(lambda: 'XSTANDIN took-focus 1\n' in kp(), lambda: 'the keeper did not take the focus:\n' + kp())
         desk.quiet(1.5)
