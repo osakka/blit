@@ -69,7 +69,10 @@ def check(ok, why)
   raise "UNDER_TEXT_PICTURE_FAIL #{why}" unless ok
 end
 
-def wait_until(why, seconds = 5)
+# A wait for a state, not a measurement: most of them poll a whole-display
+# screenshot, which a loaded host takes seconds to make, so the bound is
+# generous (it was 5 s, and a run beside other gates ran out).
+def wait_until(why, seconds = 30)
   Timeout.timeout(seconds) { sleep 0.05 until yield }
 rescue Timeout::Error
   check(false, why)

@@ -1369,11 +1369,76 @@ def displays():
         server.stop()
 
 
+def scans():
+    """Dragging a program window grew clunky when 0.3.83 asked which session
+    is under the pointer once per route on every mouse motion (0.3.85 asked
+    once an event, with nothing to say if it came back). Counted, not
+    timed: Blit's `pointer_session_scans` per injected motion over a live
+    route's picture, with that one route and then with 24 more on the same
+    channel: it does not grow with the routes. Returns what the PASS line
+    says of it."""
+    work = tempfile.mkdtemp(prefix='blit-input-scans-gate-')
+    server = Server(19849 + OFFSET, work)
+    receivers = []
+
+    def counted():
+        return server.api('GET', '/v1/diagnostics/runtime')['performance']['pointer_session_scans']
+
+    try:
+        a = Session(server, work, 'a')
+        server.focus(a.id)
+        ch = Channel(a)
+        ch.frame(7, 1)
+        wait_for(lambda: a.graphics(7), 'image 7 did not land')
+        place(a, 7, 3, 5, 20, 5)
+        live = LineReceiver(work, 'input-live')
+        receivers.append(live)
+        check(ch.ask('INPUT sock 7 %s\n' % live.path) == b'INPUT ok 7\n', 'route 7 refused')
+        live.accept()
+        ch.line('INPUT on 7\n')
+        wait_for(lambda: state(server, a.id, 7) == 'live', 'route 7 is not live')
+
+        def per_motion(n=200):
+            before = counted()
+            for i in range(n):
+                server.inject({'kind': 'pointer_motion', 'x': 40 + (i % 50), 'y': 60 + (i % 20)})
+                if i % 50 == 49:
+                    live.drain()
+            live.drain()
+            return (counted() - before) / n
+
+        one = per_motion()
+        for k in range(24):
+            image = 100 + k
+            ch.frame(image, 1)
+            wait_for(lambda: a.graphics(image), 'image %d did not land' % image)
+            place(a, image, 9 + (k % 4), 5 + (k // 4), 4, 2)
+            r = LineReceiver(work, 'input-%d' % image)
+            receivers.append(r)
+            check(ch.ask('INPUT sock %d %s\n' % (image, r.path)) == ('INPUT ok %d\n' % image).encode(),
+                  'route %d refused' % image)
+            r.accept()
+        many = per_motion()
+        # The motion's own ask and the main loop's reconcile passes around
+        # its request: a few, none of them per route.
+        check(one <= 6, 'a pointer motion asked for the session under it %.1f times with one route' % one)
+        check(many <= one + 0.5, 'a pointer motion asked for the session under it %.1f times with 25 routes '
+              'against %.1f with one: once per route, as 0.3.83 did' % (many, one))
+        return 'pointer_session_scans_per_motion=%.2f(1 route),%.2f(25 routes)' % (one, many)
+    finally:
+        server.stop()
+        for r in receivers:
+            r.close()
+
+
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else 'local'
     if mode == 'sock':
         TAG = 'FRAME_INPUT_SOCK'
         sock()
+    elif mode == 'scans':
+        TAG = 'FRAME_INPUT_SCANS'
+        print('FRAME_INPUT_SCANS_PASS %s' % scans())
     elif mode == 'displays':
         TAG = 'FRAME_INPUT_DISPLAYS'
         print('FRAME_INPUT_DISPLAYS_PASS %s' % displays())

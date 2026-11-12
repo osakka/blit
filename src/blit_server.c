@@ -1760,6 +1760,10 @@ typedef struct {
     unsigned long long diagnostic_evdev_keyboard_key_presses;
     unsigned long long diagnostic_evdev_keyboard_keys_delivered;
     unsigned long long diagnostic_evdev_keyboard_keys_undelivered;
+    /* How many times the input routes asked which session is under the
+       pointer: once a pointer event however many routes there are (0.3.85;
+       0.3.83 asked once a route, and dragging grew clunky). */
+    unsigned long long diagnostic_pointer_session_scans;
     /* Physical input the PTY would not take. The master is nonblocking, so a
        full input queue returns EAGAIN and the bytes are gone; these say so
        instead of letting the loss be invisible. */
@@ -3870,6 +3874,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"evdev_keyboard_key_presses\":%llu,"
         "\"evdev_keyboard_keys_delivered\":%llu,"
         "\"evdev_keyboard_keys_undelivered\":%llu,"
+        "\"pointer_session_scans\":%llu,"
         "\"input_keys_dropped\":%llu,"
         "\"input_reports_dropped\":%llu,"
         "\"pointer_lock_reports\":%llu,\"pointer_lock_releases\":%llu,"
@@ -3968,6 +3973,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         runtime->diagnostic_evdev_keyboard_key_presses,
         runtime->diagnostic_evdev_keyboard_keys_delivered,
         runtime->diagnostic_evdev_keyboard_keys_undelivered,
+        runtime->diagnostic_pointer_session_scans,
         runtime->diagnostic_input_keys_dropped,
         runtime->diagnostic_input_reports_dropped,
         runtime->diagnostic_pointer_lock_reports,

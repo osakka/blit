@@ -469,6 +469,7 @@ static BlitSession *frame_input_under_pointer(BlitRuntime *runtime)
 {
     int column, row, px, py, i;
     BlitSession *under = NULL;
+    ++runtime->diagnostic_pointer_session_scans;
     if (runtime->pointer_valid)
         under = mouse_target_px(runtime, runtime->pointer_output, runtime->pointer_x,
                                 runtime->pointer_y, &column, &row, &px, &py);

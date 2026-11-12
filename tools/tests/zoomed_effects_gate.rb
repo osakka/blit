@@ -366,11 +366,15 @@ Dir.mktmpdir('blit-zoomed-effects') do |root|
           "the colour controls did not change the picture: #{reference[HL / 2][WL / 2]}")
     save_effects(connectors[0] => { '1' => { 'static_noise' => { 'amount' => 100 } } })
     sleep 0.5
+    # Each next screenshot after the noise has drawn again (its animation
+    # frames counted), not after a sleep: on a loaded host 0.15 s could
+    # pass with no new frame, and two shots of one frame differ in nothing.
     grains = Array.new(3) do
       rows = rows_of(screenshot_bytes('display-1'))
       bad = blocks(rows)
       check(bad.empty?, "#{ZOOM}%, static noise: #{bad.length} 2x2 blocks are not one colour, first #{bad.first(4)}")
-      sleep 0.15
+      drawn = output('display-1').dig('effects', 'animation_frames')
+      Timeout.timeout(10) { sleep 0.02 until output('display-1').dig('effects', 'animation_frames') >= drawn + 2 }
       rows
     end
     grained = (0...H).step(2).sum { |y| (0...W).step(2).count { |x| grains[0][y][x] != grains[1][y][x] } }

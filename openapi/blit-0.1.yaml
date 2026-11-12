@@ -3913,6 +3913,13 @@ components:
             evdev_keyboard_key_presses: {type: integer, minimum: 0}
             evdev_keyboard_keys_delivered: {type: integer, minimum: 0}
             evdev_keyboard_keys_undelivered: {type: integer, minimum: 0}
+            pointer_session_scans:
+              type: integer
+              minimum: 0
+              description: >-
+                How many times the input routes asked which session is under
+                the pointer: once a pointer event, however many routes there
+                are (a gate holds it so; 0.3.83 asked once a route).
             last_evdev_keyboard_event_age_ms: {type: integer, minimum: 0}
             last_evdev_keyboard_path: {type: string}
             last_evdev_keyboard_device_id: {type: string}
