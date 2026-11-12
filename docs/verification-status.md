@@ -9,6 +9,25 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.94 keyboards on the frame channel; dead keys and compose (ADR 0231 step 3)
+
+- **Keyboards for a desktop without the API token:** `KEYBOARD list`
+  and `KEYBOARD current <n>` on the frame channel; Blit answers with the
+  list (`KEYBOARD item ...`, `KEYBOARD current <n>`) and sends it again
+  on every change; opt-in. For Hibr's switcher (#529).
+- **Dead keys and compose** in terminals: a compose state per keyboard
+  on the locale's table (libx11-data, now a dependency; the mini PC has
+  it, checked before the deploy).
+- **Suites:** the build environment, the tagged commit: `compositor_gate`,
+  `xwayland_gate` (ASan/UBSan), `package_artifact_gate`. This host:
+  `frame_input_gate` (its keyboards part), `kitty_keyboard_gate` 63
+  cases (us(intl) dead acute), `keyboard_settings_gate` (six keyboards);
+  gcc no new warnings; `all` 188 pass, 12 skip; `renderer` 82 pass;
+  `renderer-gles` 61 pass and `burn_in_gate` counted 26 animation frames
+  for its 1.6 s fade once (the Blit pane's gates ran alongside it, adding
+  load), then passed 3 of 3 alone.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.93 keyboards: the system's layouts in a list, switched live (ADR 0231 step 2)
 
 - **Keyboards:** `GET/PUT /v1/input/keyboards` (an ordered list of xkb
