@@ -7502,8 +7502,9 @@ static void x_primary_apply(struct bc_server *s)
         }
         free(now);
     }
-    /* Events read while waiting for the replies are in xcb's queue. */
-    if (s->x.wm_source) wl_event_source_check(s->x.wm_source);
+    /* Events xcb read while waiting for the replies are in its queue:
+       the window manager's source is checked after every dispatch
+       (x_wm_start), so they are taken then. */
 }
 
 /* The desktop's layout or primary changed (the outputs section). */
