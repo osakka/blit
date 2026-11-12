@@ -411,6 +411,35 @@ verdict('a-stored-keymap-is-removed-on-load') do
         "#{saved.to_h.slice('applied', 'refused', 'refusal').inspect}")
 end
 
+# ADR 0231 step 2: the keyboards and the current one are kept in the
+# settings document and in force again after a restart; a list Blit cannot
+# compile is refused (422) and changes nothing.
+verdict('the-keyboards-survive-a-restart') do
+  code, = request('PUT', '/v1/input/keyboards',
+                  { 'keyboards' => [{ 'layout' => 'us' }, { 'layout' => 'ara', 'variant' => 'mac-phonetic' }],
+                    'current' => 1 })
+  check(code == 200, "PUT keyboards -> #{code}")
+  code, refused = request('PUT', '/v1/input/keyboards', { 'keyboards' => [{ 'layout' => 'nosuch' }] })
+  check(code == 422 && refused.to_h['code'] == 'keyboard_not_available',
+        "an unknown layout is refused, got #{code} #{refused.inspect}")
+  begin
+    Timeout.timeout(10) do
+      sleep 0.1 until JSON.parse(File.read(DOCUMENT)).dig('keyboards', 'current') == 1
+    end
+  rescue Timeout::Error, Errno::ENOENT
+    check(false, 'the keyboards reached the document')
+  end
+  stop
+  start
+  _, listed = request('GET', '/v1/input/keyboards')
+  check(listed.to_h['current'] == 1 &&
+        listed.to_h.fetch('keyboards', []).map { |k| [k['layout'], k['variant']] } ==
+          [['us', ''], ['ara', 'mac-phonetic']] &&
+        listed['keyboards'][1]['name'] == 'Arabic (Macintosh, phonetic)',
+        "and in force after a restart, got #{listed.inspect}")
+  request('PUT', '/v1/input/keyboards', { 'current' => 0 })
+end
+
 unless $failures.empty?
   warn "keyboard-settings gate: #{$failures.length} failure(s)"
   exit 1

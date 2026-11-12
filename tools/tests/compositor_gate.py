@@ -1001,11 +1001,12 @@ def input_part(server, compositor, standin, work):
         quit_compositor(desk, comp)
         text = open(log).read()
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not installed:\n' + text)
-        # Installed once, for the gate's route: the keymap is the system's,
-        # one for every keyboard (ADR 0231), so the real route's, the repeat
-        # PATCH's and each keyboard switch's change only the repeat.
+        # Installed for the gate's route, then for the switch to Arabic and
+        # back (ADR 0231 step 2): the keymap is the current keyboard's, one
+        # for every device, so the real route's first, the repeat PATCH's
+        # and each device's turn change only the repeat.
         installs, same = text.count('bytes from Blit, revision'), text.count(', unchanged')
-        check(installs == 1 and same >= 4,
+        check(installs == 3 and same >= 4,
               '%d keymaps installed, %d unchanged:\n%s' % (installs, same, text))
         return ('keymap=%dB from Blit keys+shift modifiers ptr=enter/motion/popup/grab wheel=120 '
                 'relative=7,-3+-2,5 focus=line,!activated,route-end,gone-with-keys-down->released %s'
@@ -1316,13 +1317,27 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
         check([l for l in printed().splitlines() if l == 'STANDIN modifiers 0 0 16 0'],
               'Blit\'s Num Lock did not reach the client:\n' + printed())
         order.append('%dB' % len(text))
+    # ADR 0231 step 2: another keyboard made current reaches the client as
+    # its keymap, and the first again as the first's.
+    before = len(printed().splitlines())
+    api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'}, {'layout': 'ara', 'variant': 'mac-phonetic'}],
+                                       'current': 1})
+    arabic = urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10).read()
+    check(arabic != texts[0], 'the Arabic keyboard has the US keymap')
+    wait_for(lambda: 'STANDIN keymap format=1 size=%d xkb=1' % (len(arabic) + 1) in printed().splitlines()[before:],
+             lambda: 'the switch to Arabic did not reach the client:\n' + printed())
+    before = len(printed().splitlines())
+    api('PUT', '/v1/input/keyboards', {'current': 0})
+    wait_for(lambda: 'STANDIN keymap format=1 size=%d xkb=1' % (len(texts[0]) + 1) in printed().splitlines()[before:],
+             lambda: 'the switch back to US did not reach the client:\n' + printed())
+    order.append('switch=ara:%dB,us' % len(arabic))
     mark[0] = len(printed().splitlines())
     ch.line('INPUT off 41\n')
     ch.close()
     api('DELETE', '/v1/terminal-sessions/%s' % session.id)
     return ('blit-member-e2e=popup@%.2f,%.2f repeat=blit:30/250,patch->20/400 '
-            'keyboard-switch=B:%s+20/500,A:%s+20/400 before-the-key one-keymap numlock=blit'
-            % (x, y, order[0], order[1]))
+            'keyboard-switch=B:%s+20/500,A:%s+20/400 before-the-key one-keymap numlock=blit %s'
+            % (x, y, order[0], order[1], order[2]))
 
 
 def dmabuf_part(compositor, standin, work):

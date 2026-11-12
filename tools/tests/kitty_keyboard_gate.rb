@@ -10,7 +10,7 @@ require_relative 'gate_port'
 require_relative 'test_profile'
 base=URI("http://127.0.0.1:#{gate_port(19573)}")
 req=lambda do |method,path,body=nil,headers={}|
-  q={'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'DELETE'=>Net::HTTP::Delete,'PATCH'=>Net::HTTP::Patch}.fetch(method).new(base+path)
+  q={'GET'=>Net::HTTP::Get,'POST'=>Net::HTTP::Post,'DELETE'=>Net::HTTP::Delete,'PATCH'=>Net::HTTP::Patch,'PUT'=>Net::HTTP::Put}.fetch(method).new(base+path)
   q['Content-Type']='application/json';q.body=JSON.generate(body) if body
   headers.each{|k,v|q[k]=v}
   r=Net::HTTP.start(base.host,base.port,read_timeout:5){|h|h.request(q)}
@@ -170,12 +170,22 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     req.call('PATCH',"/v1/input/devices/#{source}",{configuration:{modifiers:{'30'=>'none','31'=>'control'}}},{'If-Match'=>revision.to_s})
     check.call('legacy printable modifier remaps stay silent',esc+'=0u',
       [[30,1,source],[30,0,source],[31,1,source],[31,0,source]],'')
+    # ADR 0231 step 2: a second keyboard, phonetic Arabic, made current. The
+    # S key types seen, its kitty key the layout's own with the US base key
+    # beside it, so Ctrl+C is the C key in any layout -- 0x03 in legacy.
+    req.call('PUT','/v1/input/keyboards',{keyboards:[{layout:'us'},{layout:'ara',variant:'mac-phonetic'}],current:1})
+    check.call('ara phonetic text and base key',esc+'=31u',[[31,1],[31,0]],esc+'1587::115;1;1587u'+esc+'1587::115;1:3u')
+    check.call('ara Ctrl+C by its base key','',[[29,1],[46,1],[46,0],[29,0]],
+      esc+'57442;5u'+esc+'1589::99;5u'+esc+'1589::99;5:3u'+esc+'57442;1:3u')
+    check.call('ara legacy text and Ctrl+C',esc+'=0u',[[31,1],[31,0],[29,1],[46,1],[46,0],[29,0]],"\u0633\x03")
+    req.call('PUT','/v1/input/keyboards',{current:0})
+    check.call('us again','',[[31,1],[31,0]],'s')
     check.call('restore negotiated state',esc+'=9u'+esc+'?u',[],esc+'?9u')
     other=req.call('POST','/v1/terminal-sessions',{command:'/bin/cat',surface:{width:1,height:1}})
     raise 'keyboard state leaked between sessions' unless other.dig('terminal_capabilities','keyboard','active_flags')==0 &&
       req.call('GET',path).dig('terminal_capabilities','keyboard','active_flags')==9
     req.call('DELETE',"/v1/terminal-sessions/#{other['id']}")
-    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 xkb=us focus_handover=out_in legacy=preserved"
+    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 xkb=us,ara-phonetic focus_handover=out_in legacy=preserved"
   ensure
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil

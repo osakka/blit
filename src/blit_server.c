@@ -2002,6 +2002,9 @@ static void settings_apply_input_device(BlitRuntime *runtime,
 static void settings_apply_audio_device(BlitRuntime *runtime,
                                         BlitAudioDevice *audio);
 static void settings_mark_dirty(BlitRuntime *runtime);
+/* The keyboards in the settings document (ADR 0231 step 2). */
+static void settings_apply_keyboards(BlitRuntime *runtime, int news);
+static size_t keyboards_settings_json(char *out, size_t capacity);
 
 static int display_index_for_output(const BlitRuntime *runtime,
                                     int output_index);
@@ -4055,6 +4058,7 @@ static void server_json(const BlitRuntime *runtime, char *body, size_t capacity)
              "\"audio_cards\":\"/v1/audio/cards\","
              "\"input_devices\":\"/v1/input/devices\","
              "\"input_keymap\":\"/v1/input/keymap\","
+             "\"input_keyboards\":\"/v1/input/keyboards\","
              "\"input_routes\":\"/v1/input/routes\",\"topology\":\"/v1/topology\","
              "\"fonts\":\"/v1/fonts\",\"login\":\"/v1/login\","
              "\"auxiliary_displays\":\"/v1/auxiliary-displays\","
@@ -22599,7 +22603,7 @@ static void settings_copy_extensions(BlitRuntime *runtime, char *out,
 {
     const char *cursor = runtime->settings_document;
     static const char *const owned[] = {"version", "revision", "input_devices",
-        "audio_devices", "displays", "font", "server", "login"};
+        "audio_devices", "displays", "font", "server", "login", "keyboards"};
     static char value[BLIT_SETTINGS_CAPACITY];
     char key[128];
     int i;
@@ -22810,6 +22814,12 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
             login_policy_json(&policy, login, sizeof(login));
             json_appendf(out, capacity, &used, ",\"login\":%s", login);
         }
+    }
+    /* ADR 0231: the keyboards, when other than `us` alone. */
+    {
+        static char keyboards[4096];
+        if (keyboards_settings_json(keyboards, sizeof(keyboards)) > 0)
+            json_appendf(out, capacity, &used, ",\"keyboards\":%s", keyboards);
     }
     settings_copy_extensions(runtime, out, capacity, &used);
     json_appendf(out, capacity, &used, "}");
@@ -23897,6 +23907,7 @@ static int settings_reset(BlitRuntime *runtime, int remove_file)
     settings_apply_pointer(runtime);
     settings_apply_effects(runtime);
     settings_apply_hud(runtime);
+    settings_apply_keyboards(runtime, 1);
     if (remove_file) {
         runtime->settings_saved_revision = runtime->settings_revision;
         runtime->settings_write_reported = 0;
@@ -23960,6 +23971,9 @@ static void settings_complete_requests(BlitRuntime *runtime, int kind, int ok,
 }
 
 
+/* /v1/input/keyboards (ADR 0231 step 2), defined with the keyboards. */
+static void keyboards_response(int fd, BlitRuntime *runtime, const char *method, const char *path,
+                               const char *payload, char *body, size_t capacity);
 /* GET /v1/input/keymap, defined after Blit's key tables. */
 static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
                                   const char *path, char *body, size_t capacity);
@@ -24279,6 +24293,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
         return;
     }
 
+    if (strcmp(path, "/v1/input/keyboards") == 0 && strcmp(method, "PUT") == 0) {
+        keyboards_response(fd, runtime, method, path, payload, body, sizeof(body));
+        return;
+    }
     if (strcmp(path, "/v1/fonts") == 0 && strcmp(method, "PUT") == 0) {
         char font_id[128];
         char font_path[256];
@@ -25340,6 +25358,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             settings_apply_pointer(runtime);
             settings_apply_effects(runtime);
             settings_apply_hud(runtime);
+            settings_apply_keyboards(runtime, 1);
             display_layouts_materialize(runtime, 0);
             settings_apply_pane_layout(runtime, old_columns, old_rows);
             reset_render_schedule(runtime, monotonic_us());
@@ -26262,6 +26281,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
     } else if (strcmp(path, "/v1/audio") == 0) {
         audio_devices_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
+    } else if (strcmp(path, "/v1/input/keyboards") == 0 ||
+               (strncmp(path, "/v1/input/keyboards/available", 29) == 0 &&
+                (path[29] == '\0' || path[29] == '?'))) {
+        keyboards_response(fd, runtime, "GET", path, NULL, body, sizeof(body));
     } else if (strncmp(path, "/v1/input/keymap", 16) == 0 &&
                (path[16] == '\0' || path[16] == '?')) {
         input_keymap_response(fd, runtime, request, path, body, sizeof(body));
@@ -29904,6 +29927,268 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
     send_http_with(fd, 200, "OK", "text/plain; charset=utf-8", "no-cache", extra, body);
 }
 
+/* ---- the keyboards (ADR 0231 step 2): the list, the current one ---- */
+
+/* The list as `{"keyboards":[{"layout","variant","name"},...],"current":n}`. */
+static size_t keyboards_json(char *out, size_t capacity)
+{
+    size_t used = 0;
+    int i;
+    out[0] = '\0';
+    json_appendf(out, capacity, &used, "{\"keyboards\":[");
+    for (i = 0; i < blit_keyboard_count; ++i) {
+        char name[256], escaped[512];
+        blit_keyboard_description(blit_keyboards[i].layout, blit_keyboards[i].variant, name,
+                                  sizeof(name));
+        json_escape(name, escaped, sizeof(escaped));
+        json_appendf(out, capacity, &used, "%s{\"layout\":\"%s\",\"variant\":\"%s\",\"name\":\"%s\"}",
+                     i ? "," : "", blit_keyboards[i].layout, blit_keyboards[i].variant, escaped);
+    }
+    json_appendf(out, capacity, &used, "],\"current\":%d}", blit_keyboard_current);
+    return used;
+}
+
+/* The settings document's `keyboards`, `{"list":[{"layout","variant"}],
+   "current":n}`, when the list is other than `us` alone or another than
+   the first is current; 0 (nothing to keep) otherwise. */
+static size_t keyboards_settings_json(char *out, size_t capacity)
+{
+    size_t used = 0;
+    int i;
+    out[0] = '\0';
+    if (!blit_keyboards_configured && blit_keyboard_current == 0)
+        return 0;
+    json_appendf(out, capacity, &used, "{\"list\":[");
+    for (i = 0; i < blit_keyboard_count; ++i)
+        json_appendf(out, capacity, &used, "%s{\"layout\":\"%s\",\"variant\":\"%s\"}", i ? "," : "",
+                     blit_keyboards[i].layout, blit_keyboards[i].variant);
+    json_appendf(out, capacity, &used, "],\"current\":%d}", blit_keyboard_current);
+    return used;
+}
+
+/* `object`'s list under `list_key` (each {"layout","variant"[,"name"]})
+   and its "current". Returns 0 with `problem` for a malformed one. */
+static int keyboards_parse(const char *object, const char *list_key,
+                           char layouts[][BLIT_KEYBOARD_NAME], char variants[][BLIT_KEYBOARD_NAME],
+                           int *n, int *current, int *has_list, int *has_current,
+                           char *problem, size_t capacity)
+{
+    static const char *const writable[] = { "layout", "variant", "name" };
+    static char entry[1024];
+    const char *p = json_key_cursor(object, list_key);
+    *n = 0;
+    *has_list = p != NULL;
+    *has_current = json_key_cursor(object, "current") != NULL;
+    if (*has_current && !json_int(object, "current", current)) {
+        snprintf(problem, capacity, "current must be an integer");
+        return 0;
+    }
+    if (p == NULL)
+        return 1;
+    while (*p && *p != '[') {
+        if (*p == '{' || *p == '"' ) {
+            if (*p == '{') break;
+        }
+        ++p;
+    }
+    if (*p != '[') {
+        snprintf(problem, capacity, "%s must be an array of keyboards", list_key);
+        return 0;
+    }
+    ++p;
+    for (;;) {
+        const char *rejected;
+        while (*p == ' ' || *p == ',' || *p == '\n' || *p == '\r' || *p == '\t') ++p;
+        if (*p == ']') break;
+        if (*p != '{' || *n >= BLIT_KEYBOARDS_MAX || !json_object_slice(p, entry, sizeof(entry))) {
+            snprintf(problem, capacity, "%s must be an array of at most %d objects",
+                     list_key, BLIT_KEYBOARDS_MAX);
+            return 0;
+        }
+        p += strlen(entry);
+        rejected = json_rejected_property(entry, writable, 3);
+        if (rejected != NULL) {
+            snprintf(problem, capacity, "a keyboard carries \"%s\"; it has layout and variant",
+                     rejected);
+            return 0;
+        }
+        if (!json_string(entry, "layout", layouts[*n], BLIT_KEYBOARD_NAME)) {
+            snprintf(problem, capacity, "keyboard %d has no layout", *n);
+            return 0;
+        }
+        if (!json_string(entry, "variant", variants[*n], BLIT_KEYBOARD_NAME))
+            variants[*n][0] = '\0';
+        ++*n;
+    }
+    if (*n == 0) {
+        snprintf(problem, capacity, "%s must name at least one keyboard", list_key);
+        return 0;
+    }
+    return 1;
+}
+
+/* The current keyboard or the list changed: blit-compositor's routes told
+   the new keymap (and Blit's modifiers on it), the input stream told which
+   keyboard is current, the settings kept. */
+static void keyboards_changed(BlitRuntime *runtime)
+{
+    char event[512], name[256], escaped[512];
+    BlitKeyboard *k = &blit_keyboards[blit_keyboard_current];
+    frame_input_keymap_changed(runtime);
+    blit_keyboard_description(k->layout, k->variant, name, sizeof(name));
+    json_escape(name, escaped, sizeof(escaped));
+    snprintf(event, sizeof(event),
+             "{\"type\":\"keyboard\",\"current\":%d,\"layout\":\"%s\",\"variant\":\"%s\","
+             "\"name\":\"%s\"}", blit_keyboard_current, k->layout, k->variant, escaped);
+    broadcast_stream(runtime, event, BLIT_STREAM_INPUT);
+    settings_mark_dirty(runtime);
+}
+
+/* The settings document's `keyboards` applied (at start, and when a
+   document replaces it): none is `us` alone. A list that does not compile
+   is said and the list in use kept. `news` tells routes and the stream
+   when it changed (not at start: nothing is listening). */
+static void settings_apply_keyboards(BlitRuntime *runtime, int news)
+{
+    static char object[4096];
+    static char layouts[BLIT_KEYBOARDS_MAX][BLIT_KEYBOARD_NAME], variants[BLIT_KEYBOARDS_MAX][BLIT_KEYBOARD_NAME];
+    char problem[256];
+    const char *cursor = runtime->settings_document[0] ?
+        json_key_cursor(runtime->settings_document, "keyboards") : NULL;
+    int n = 0, current = 0, has_list = 0, has_current = 0, ok;
+    int before_count = blit_keyboard_count, before_current = blit_keyboard_current;
+    char before[BLIT_KEYBOARD_NAME * 2 + 1];
+    snprintf(before, sizeof(before), "%s %s", blit_keyboards[before_current].layout,
+             blit_keyboards[before_current].variant);
+    if (cursor == NULL || !json_object_slice(cursor, object, sizeof(object))) {
+        if (!blit_keyboards_configured && blit_keyboard_current == 0)
+            return;
+        ok = blit_keyboards_default(problem, sizeof(problem));
+    } else if (!keyboards_parse(object, "list", layouts, variants, &n, &current, &has_list,
+                                &has_current, problem, sizeof(problem)) || !has_list) {
+        if (!has_list) snprintf(problem, sizeof(problem), "keyboards: no list");
+        ok = 0;
+    } else {
+        ok = blit_keyboards_set(layouts, variants, n, has_current ? current : 0, problem,
+                                sizeof(problem));
+    }
+    if (!ok) {
+        fprintf(stderr, "blit: stored keyboards not applied: %s\n", problem);
+        diagnostic_log(runtime, "warning", "keyboards_not_applied", problem);
+        return;
+    }
+    if (news) {
+        char after[BLIT_KEYBOARD_NAME * 2 + 1];
+        snprintf(after, sizeof(after), "%s %s", blit_keyboards[blit_keyboard_current].layout,
+                 blit_keyboards[blit_keyboard_current].variant);
+        if (before_count != blit_keyboard_count || before_current != blit_keyboard_current ||
+            strcmp(before, after) != 0)
+            keyboards_changed(runtime);
+        else
+            frame_input_keymap_changed(runtime);
+    }
+}
+
+/* The system's keyboards (rules/evdev.lst): the layouts, or with
+   ?layout=<name> that layout's variants. */
+static void keyboards_available_json(const char *layout, char *out, size_t capacity)
+{
+    char line[512], *name, *text, *ignored;
+    int section = 0, first = 1;
+    size_t used = 0;
+    size_t n = layout ? strlen(layout) : 0;
+    FILE *file = blit_xkb_rules_list();
+    out[0] = '\0';
+    json_appendf(out, capacity, &used, layout ? "{\"layout\":\"%s\",\"variants\":[" : "{\"layouts\":[",
+                 layout ? layout : "");
+    while (file && fgets(line, sizeof(line), file)) {
+        char escaped[512];
+        if (line[0] == '!') {
+            section = strncmp(line, "! layout", 8) == 0 ? 1 : strncmp(line, "! variant", 9) == 0 ? 2 : 0;
+            continue;
+        }
+        if (!blit_xkb_list_line(line, &name, &ignored, &text))
+            continue;
+        if (layout == NULL && section == 1) {
+            json_escape(text, escaped, sizeof(escaped));
+            json_appendf(out, capacity, &used, "%s{\"layout\":\"%s\",\"name\":\"%s\"}",
+                         first ? "" : ",", name, escaped);
+            first = 0;
+        } else if (layout != NULL && section == 2 && strncmp(text, layout, n) == 0 &&
+                   text[n] == ':' && text[n + 1] == ' ') {
+            json_escape(text + n + 2, escaped, sizeof(escaped));
+            json_appendf(out, capacity, &used, "%s{\"variant\":\"%s\",\"name\":\"%s\"}",
+                         first ? "" : ",", name, escaped);
+            first = 0;
+        }
+    }
+    if (file) fclose(file);
+    json_appendf(out, capacity, &used, "]}");
+}
+
+/* GET /v1/input/keyboards: the list and the current one. PUT: a new list
+   (`keyboards`, each compiled first), a new current one (`current`), or
+   both; 400 for a malformed body, 422 for a keyboard the system does not
+   have. GET /v1/input/keyboards/available[?layout=]: what the system has. */
+static void keyboards_response(int fd, BlitRuntime *runtime, const char *method, const char *path,
+                               const char *payload, char *body, size_t capacity)
+{
+    static char layouts[BLIT_KEYBOARDS_MAX][BLIT_KEYBOARD_NAME], variants[BLIT_KEYBOARDS_MAX][BLIT_KEYBOARD_NAME];
+    char problem[256];
+    int n = 0, current = 0, has_list = 0, has_current = 0;
+    if (strncmp(path, "/v1/input/keyboards/available", 29) == 0) {
+        const char *q = strstr(path, "layout=");
+        char layout[BLIT_KEYBOARD_NAME] = "";
+        if (q != NULL) {
+            size_t k = 0;
+            q += 7;
+            while (*q && *q != '&' && k + 1 < sizeof(layout)) layout[k++] = *q++;
+            layout[k] = '\0';
+            if (!blit_keyboard_name_ok(layout, 0)) {
+                send_problem(fd, 400, "Bad Request", "invalid_keyboard", "layout is an xkb name.");
+                return;
+            }
+        }
+        keyboards_available_json(q != NULL ? layout : NULL, body, capacity);
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strcmp(method, "PUT") == 0) {
+        int before = blit_keyboard_current;
+        if (payload == NULL || !keyboards_parse(payload, "keyboards", layouts, variants, &n, &current,
+                                                &has_list, &has_current, problem, sizeof(problem))) {
+            send_problem(fd, 400, "Bad Request", "invalid_keyboards",
+                         payload == NULL ? "A JSON body is required." : problem);
+            return;
+        }
+        if (!has_list && !has_current) {
+            send_problem(fd, 400, "Bad Request", "invalid_keyboards", "keyboards or current is required.");
+            return;
+        }
+        if (has_list) {
+            if (!blit_keyboards_set(layouts, variants, n, has_current ? current : 0, problem,
+                                    sizeof(problem))) {
+                send_problem(fd, 422, "Unprocessable Entity", "keyboard_not_available", problem);
+                return;
+            }
+            keyboards_changed(runtime);
+        } else {
+            if (current < 0 || current >= blit_keyboard_count) {
+                snprintf(problem, sizeof(problem), "current: %d is not one of the %d keyboards",
+                         current, blit_keyboard_count);
+                send_problem(fd, 422, "Unprocessable Entity", "keyboard_not_available", problem);
+                return;
+            }
+            if (current != before) {
+                blit_keyboards_use(current);
+                keyboards_changed(runtime);
+            }
+        }
+    }
+    keyboards_json(body, capacity);
+    send_http(fd, 200, "OK", "application/json", body);
+}
+
 
 /* -1: preserve legacy encoding; 0: no bytes for this event; positive: length.
    Only advertise enhancements this physical-key path actually implements. */
@@ -31548,7 +31833,7 @@ int main(int argc, char **argv)
        otherwise; without the xkb data no key types anything, so say so. */
     {
         char problem[256];
-        if (!blit_xkb_load("us", "", "", problem, sizeof(problem))) {
+        if (!blit_keyboards_default(problem, sizeof(problem))) {
             fprintf(stderr, "blit: keyboard: %s; keys will type nothing\n", problem);
             diagnostic_log(&runtime, "error", "keyboard_keymap_failed", problem);
         }
@@ -31703,6 +31988,7 @@ int main(int argc, char **argv)
         settings_apply_effects(&runtime);
         settings_apply_hud(&runtime);
         settings_apply_login_at_boot(&runtime);
+        settings_apply_keyboards(&runtime, 0);
         if (runtime.kms_async_pageflip)
             setenv("BLIT_KMS_ASYNC_PAGEFLIP", "1", 1);
         else

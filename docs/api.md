@@ -1715,6 +1715,47 @@ An empty `modifiers` object clears the map. Every property is per device: two
 keyboards on one server can carry different repeat rates and different
 remaps, and their modifiers and locks are their own.
 
+### Keyboards (layouts)
+
+Blit types with an ordered list of keyboards, each a layout and variant
+as the system's xkb data names them (ADR 0231), and one of them current
+for every device. It starts as `us` alone.
+
+```text
+GET /v1/input/keyboards
+  -> {"keyboards":[{"layout":"us","variant":"","name":"English (US)"},
+                   {"layout":"ara","variant":"mac-phonetic",
+                    "name":"Arabic (Macintosh, phonetic)"}],
+      "current":0}
+PUT /v1/input/keyboards {"keyboards":[{"layout":"us"},
+                                      {"layout":"ara","variant":"mac-phonetic"}],
+                         "current":1}
+PUT /v1/input/keyboards {"current":0}          switch
+GET /v1/input/keyboards/available              every layout and its name
+GET /v1/input/keyboards/available?layout=ara   that layout's variants
+```
+
+`keyboards` replaces the list: 1 to 16, each compiled before any is used,
+so one the system does not have is a `422 keyboard_not_available` and the
+list in use stays as it was; a malformed body is `400 invalid_keyboards`.
+`current` alone switches. `name` is the system's description
+(xkeyboard-config's `rules/evdev.lst`) and is ignored when sent back; the
+available lists come from the same file, so a new language is the
+system's data, not a Blit release. The list and the current one are kept
+in the settings document as `"keyboards":{"list":[{"layout","variant"}],
+"current":n}` (when other than `us` alone), and a document without it is
+`us` alone.
+
+Switching swaps the keymap every keyboard types with (a key, its kitty
+code and its text are the new layout's; a chord's control byte and kitty's
+base key stay the US key at that position, so Ctrl+C is 0x03 in any
+layout). Each keyboard's state is made again on it with its locks kept;
+blit-compositor's routes are sent the new keymap and Blit's modifiers on it
+(`INPUT keymap`, `INPUT modifiers`); and the input stream carries
+`{"type":"keyboard","current":n,"layout":"...","variant":"...","name":"..."}`,
+so a desktop's switcher (a menu bar item, a shortcut) shows the one in use
+whoever changed it.
+
 ### Keyboard map (xkb)
 
 `GET /v1/input/keymap` returns the keyboard as a complete xkb keymap, the

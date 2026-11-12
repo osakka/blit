@@ -46,7 +46,13 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 51
+raise "unexpected path count #{paths.length}" unless paths.length == 53
+# ADR 0231 step 2: the keyboards, their current one, what the system has.
+raise 'input keyboards contract missing' unless
+  paths.dig('/v1/input/keyboards','get','operationId') == 'getInputKeyboards' &&
+  paths.dig('/v1/input/keyboards','put','operationId') == 'putInputKeyboards' &&
+  paths.dig('/v1/input/keyboards/available','get','operationId') == 'getAvailableKeyboards' &&
+  schema.dig('components','schemas','Keyboards','required') == %w[keyboards current]
 # ADR 0228: the keyboard as an xkb keymap, text, with its ETag.
 raise 'input keymap contract missing' unless
   paths.dig('/v1/input/keymap','get','operationId') == 'getInputKeymap' &&

@@ -44,22 +44,47 @@ static char *blit_xkb_text;
 static size_t blit_xkb_text_length;
 static xkb_mod_index_t blit_xkb_mod[BLIT_XKB_MODS];
 
-/* Compile the keyboard `layout` (with `variant` and `options`, "" for none)
-   and make it the one every keyboard's state is on. A keyboard's state is
-   made again on the new keymap the next time it is used. Returns 1, or 0
-   with `problem` saying why, the keymap in use unchanged. */
-static int blit_xkb_load(const char *layout, const char *variant, const char *options,
-                         char *problem, size_t capacity)
-{
-    static const char *const names[BLIT_XKB_MODS] = {
-        XKB_MOD_NAME_SHIFT, XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT, "Mod5",
-        XKB_MOD_NAME_LOGO, XKB_MOD_NAME_CAPS, XKB_MOD_NAME_NUM
-    };
-    struct xkb_rule_names rules;
+/* The keyboards (ADR 0231 step 2): an ordered list, each compiled once, and
+   the current one, whose keymap every keyboard's state is on. Switching
+   swaps the keymap; each keyboard's state is made again on it the next
+   time it is used, its locks kept. */
+#define BLIT_KEYBOARDS_MAX 16
+#define BLIT_KEYBOARD_NAME 48
+
+typedef struct {
+    char layout[BLIT_KEYBOARD_NAME];
+    char variant[BLIT_KEYBOARD_NAME];
     struct xkb_keymap *keymap;
     char *text;
-    int i;
+    size_t length;
+} BlitKeyboard;
 
+static BlitKeyboard blit_keyboards[BLIT_KEYBOARDS_MAX];
+static int blit_keyboard_count;
+static int blit_keyboard_current;
+/* Set by a list other than the built-in `us` alone: what the settings
+   document then keeps. */
+static int blit_keyboards_configured;
+
+/* A layout or variant name as xkb spells them: lower-case letters, digits,
+   '_' and '-', at most BLIT_KEYBOARD_NAME - 1 ("" for no variant). */
+static int blit_keyboard_name_ok(const char *name, int empty_ok)
+{
+    size_t i, n = strlen(name);
+    if (n == 0) return empty_ok;
+    if (n >= BLIT_KEYBOARD_NAME) return 0;
+    for (i = 0; i < n; ++i)
+        if (!((name[i] >= 'a' && name[i] <= 'z') || (name[i] >= '0' && name[i] <= '9') ||
+              name[i] == '_' || name[i] == '-'))
+            return 0;
+    return 1;
+}
+
+/* One keyboard compiled from the system's data: its keymap and its text. */
+static int blit_xkb_compile(const char *layout, const char *variant, struct xkb_keymap **keymap,
+                            char **text, char *problem, size_t capacity)
+{
+    struct xkb_rule_names rules;
     if (blit_xkb_context == NULL)
         blit_xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (blit_xkb_context == NULL) {
@@ -71,29 +96,170 @@ static int blit_xkb_load(const char *layout, const char *variant, const char *op
     rules.model = "pc105";
     rules.layout = layout;
     rules.variant = variant;
-    rules.options = options;
-    keymap = xkb_keymap_new_from_names(blit_xkb_context, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
-    if (keymap == NULL) {
+    rules.options = "";
+    *keymap = xkb_keymap_new_from_names(blit_xkb_context, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (*keymap == NULL) {
         snprintf(problem, capacity,
                  "no xkb keymap for layout \"%s\" variant \"%s\" (is xkb-data installed?)",
                  layout, variant);
         return 0;
     }
-    text = xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
-    if (text == NULL) {
-        xkb_keymap_unref(keymap);
+    *text = xkb_keymap_get_as_string(*keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
+    if (*text == NULL) {
+        xkb_keymap_unref(*keymap);
+        *keymap = NULL;
         snprintf(problem, capacity, "the xkb keymap could not be written as text");
         return 0;
     }
-    if (blit_xkb_keymap != NULL)
-        xkb_keymap_unref(blit_xkb_keymap);
-    free(blit_xkb_text);
-    blit_xkb_keymap = keymap;
-    blit_xkb_text = text;
-    blit_xkb_text_length = strlen(text);
-    for (i = 0; i < BLIT_XKB_MODS; ++i)
-        blit_xkb_mod[i] = xkb_keymap_mod_get_index(keymap, names[i]);
     return 1;
+}
+
+/* Keyboard `index` the one keys are read with: its keymap, its text, the
+   modifier indices on it. */
+static void blit_keyboards_use(int index)
+{
+    static const char *const names[BLIT_XKB_MODS] = {
+        XKB_MOD_NAME_SHIFT, XKB_MOD_NAME_CTRL, XKB_MOD_NAME_ALT, "Mod5",
+        XKB_MOD_NAME_LOGO, XKB_MOD_NAME_CAPS, XKB_MOD_NAME_NUM
+    };
+    int i;
+    blit_keyboard_current = index;
+    blit_xkb_keymap = blit_keyboards[index].keymap;
+    blit_xkb_text = blit_keyboards[index].text;
+    blit_xkb_text_length = blit_keyboards[index].length;
+    for (i = 0; i < BLIT_XKB_MODS; ++i)
+        blit_xkb_mod[i] = xkb_keymap_mod_get_index(blit_xkb_keymap, names[i]);
+}
+
+/* The list replaced: `n` keyboards by `layouts` and `variants`, `current`
+   the one in use. Each is compiled first; any that does not compile (or a
+   name xkb does not spell) leaves the list in use as it was and says which
+   in `problem`. Returns 1 when replaced. */
+static int blit_keyboards_set(char layouts[][BLIT_KEYBOARD_NAME], char variants[][BLIT_KEYBOARD_NAME],
+                              int n, int current, char *problem, size_t capacity)
+{
+    static BlitKeyboard fresh[BLIT_KEYBOARDS_MAX];
+    int i, k;
+    if (n < 1 || n > BLIT_KEYBOARDS_MAX) {
+        snprintf(problem, capacity, "keyboards: from 1 to %d, not %d", BLIT_KEYBOARDS_MAX, n);
+        return 0;
+    }
+    if (current < 0 || current >= n) {
+        snprintf(problem, capacity, "current: %d is not one of the %d keyboards", current, n);
+        return 0;
+    }
+    memset(fresh, 0, sizeof(fresh));
+    for (i = 0; i < n; ++i) {
+        if (!blit_keyboard_name_ok(layouts[i], 0) || !blit_keyboard_name_ok(variants[i], 1)) {
+            snprintf(problem, capacity, "keyboard %d: layout and variant are xkb names "
+                     "(a-z, 0-9, _ and -)", i);
+            for (k = 0; k < i; ++k) {
+                xkb_keymap_unref(fresh[k].keymap);
+                free(fresh[k].text);
+            }
+            return 0;
+        }
+        snprintf(fresh[i].layout, sizeof(fresh[i].layout), "%s", layouts[i]);
+        snprintf(fresh[i].variant, sizeof(fresh[i].variant), "%s", variants[i]);
+        if (!blit_xkb_compile(layouts[i], variants[i], &fresh[i].keymap, &fresh[i].text,
+                              problem, capacity)) {
+            for (k = 0; k < i; ++k) {
+                xkb_keymap_unref(fresh[k].keymap);
+                free(fresh[k].text);
+            }
+            return 0;
+        }
+        fresh[i].length = strlen(fresh[i].text);
+    }
+    for (i = 0; i < blit_keyboard_count; ++i) {
+        xkb_keymap_unref(blit_keyboards[i].keymap);
+        free(blit_keyboards[i].text);
+    }
+    memcpy(blit_keyboards, fresh, sizeof(fresh));
+    blit_keyboard_count = n;
+    blit_keyboards_configured = !(n == 1 && strcmp(layouts[0], "us") == 0 && variants[0][0] == '\0');
+    blit_keyboards_use(current);
+    return 1;
+}
+
+/* The built-in list, `us` alone: what Blit starts with. */
+static int blit_keyboards_default(char *problem, size_t capacity)
+{
+    char layouts[1][BLIT_KEYBOARD_NAME] = { "us" }, variants[1][BLIT_KEYBOARD_NAME] = { "" };
+    return blit_keyboards_set(layouts, variants, 1, 0, problem, capacity);
+}
+
+/* The system's list of keyboards, xkeyboard-config's rules/evdev.lst, in
+   the first of libxkbcommon's include paths that has one; NULL without. */
+static FILE *blit_xkb_rules_list(void)
+{
+    char path[1024];
+    unsigned i, n;
+    if (blit_xkb_context == NULL)
+        blit_xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (blit_xkb_context == NULL)
+        return NULL;
+    n = xkb_context_num_include_paths(blit_xkb_context);
+    for (i = 0; i < n; ++i) {
+        FILE *file;
+        snprintf(path, sizeof(path), "%s/rules/evdev.lst",
+                 xkb_context_include_path_get(blit_xkb_context, i));
+        if ((file = fopen(path, "r")) != NULL)
+            return file;
+    }
+    return NULL;
+}
+
+/* One line of a rules list's section: its name and its description (a
+   variant's after its "layout: "). Returns 0 for a blank or other line. */
+static int blit_xkb_list_line(char *line, char **name, char **layout, char **text)
+{
+    char *p = line, *end;
+    *layout = NULL;
+    if (line[0] != ' ') return 0;
+    while (*p == ' ') ++p;
+    *name = p;
+    while (*p && *p != ' ' && *p != '\n') ++p;
+    if (*p == '\0' || *p == '\n') return 0;
+    *p++ = '\0';
+    while (*p == ' ') ++p;
+    end = p + strlen(p);
+    while (end > p && (end[-1] == '\n' || end[-1] == '\r')) *--end = '\0';
+    *text = p;
+    return **name != '\0';
+}
+
+/* The system's description of a keyboard ("Arabic (Macintosh,
+   phonetic)"), or its own names when the list has none. */
+static void blit_keyboard_description(const char *layout, const char *variant, char *out,
+                                      size_t capacity)
+{
+    char line[512], *name, *text, *ignored;
+    int section = 0;
+    FILE *file = blit_xkb_rules_list();
+    snprintf(out, capacity, "%s%s%s", layout, variant[0] ? " " : "", variant);
+    if (file == NULL)
+        return;
+    while (fgets(line, sizeof(line), file)) {
+        if (line[0] == '!') {
+            section = strncmp(line, "! layout", 8) == 0 ? 1 : strncmp(line, "! variant", 9) == 0 ? 2 : 0;
+            continue;
+        }
+        if (!blit_xkb_list_line(line, &name, &ignored, &text))
+            continue;
+        if (section == 1 && variant[0] == '\0' && strcmp(name, layout) == 0) {
+            snprintf(out, capacity, "%s", text);
+            break;
+        }
+        if (section == 2 && variant[0] != '\0' && strcmp(name, variant) == 0) {
+            size_t n = strlen(layout);
+            if (strncmp(text, layout, n) == 0 && text[n] == ':' && text[n + 1] == ' ') {
+                snprintf(out, capacity, "%s", text + n + 2);
+                break;
+            }
+        }
+    }
+    fclose(file);
 }
 
 /* The code a role makes a key: the key the state is told about. -1 for

@@ -140,7 +140,18 @@ Option 3.
 
 ## Evidence
 
-Deferred until implemented. The gates will be:
+- Step 1, 0.3.91: `kitty_keyboard_gate` (xkb `us`, its locks, the ISO
+  key, Right Alt, the altgr role), `key_encoding_gate`, `keymap_gate`,
+  `input_stream_text_gate`, `keyboard_settings_gate` (a stored keymap
+  removed on load), `compositor_gate` and `frame_input_gate` (Blit's
+  modifiers on the route, Num Lock reaching a client).
+- Step 2, 0.3.93: `kitty_keyboard_gate` (`ara(mac-phonetic)`: S types
+  س with the base key s, Ctrl+C 0x03 and its base key c, back to `us`),
+  `keyboard_settings_gate` (the list and the current one after a
+  restart, an unknown layout 422), `compositor_gate` (a switch to Arabic
+  and back reaching a client as its keymap), `api_schema_gate`.
+
+Still to come with step 3 (dead keys and compose), and for the list:
 
 - `kitty_keyboard_gate`: flag 16's text under `us` and `ara(mac-phonetic)`,
   and Ctrl+C's base key under Arabic.
