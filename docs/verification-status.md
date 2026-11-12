@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.96 a counted guard on the pointer's cost; timing gates that wait
+
+- **Guard:** `pointer_session_scans` (runtime diagnostics) counts how
+  often the input routes ask which session is under the pointer;
+  frame_input_gate's `scans` mode holds it level from one route to 25
+  (3.12 against 3.03 per motion) and fails with 0.3.83's per-route ask
+  put back. Dragging grew clunky twice; this side cannot regress
+  silently now, and Hibr gates its own drag (0.99.505).
+- **Gates:** zoomed_effects waits for the display's animation frames, not
+  0.15 s; under_text_picture's screenshot waits have a 30 s bound.
+- **Suites:** the build environment, the tagged commit: `compositor_gate`,
+  `xwayland_gate` (ASan/UBSan), `package_artifact_gate`. This host, run
+  with nothing beside it: `all` 187 pass, 12 skip, and
+  `network_auth_gate` failed on my schema change (the new counter emitted
+  but not in the schema's required list); fixed and passed, with
+  `api_schema_gate`; `renderer` 82 pass; `renderer-gles` 61 pass and
+  `presentation_effects_gate` counted 21 animation frames a second
+  against its 30 once (the host's load average was 2.4 from other work),
+  then passed 3 of 3 alone.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.95 the desktop's shortcuts kept from programs; no X focus fight
 
 - **INPUT keep:** the desktop names its shortcuts on its channel and Blit
