@@ -293,6 +293,48 @@ def state(server, session, image):
     return r['state'] if r else 'none'
 
 
+def keyboards_part(server, a):
+    """ADR 0231: the keyboards on the frame channel, for a desktop without
+    the API token (one the login manager started). `KEYBOARD list` is
+    answered with `KEYBOARD item <n> <layout> <variant|-> <name...>` each and
+    `KEYBOARD current <n>` last, and every change follows, whoever made it;
+    `KEYBOARD current <n>` switches; a bad one is EINVAL. A channel that did
+    not ask is told nothing."""
+    ch, quiet = Channel(a), Channel(a)
+
+    def listing():
+        got = []
+        while True:
+            line = ch.reply(2.0).decode()
+            check(line.startswith('KEYBOARD '), 'not a keyboard line: %r (after %s)' % (line, got))
+            got.append(line.rstrip('\n'))
+            if line.startswith('KEYBOARD current '):
+                return got
+
+    try:
+        ch.line('KEYBOARD list\n')
+        check(listing() == ['KEYBOARD item 0 us - English (US)', 'KEYBOARD current 0'],
+              'the first list')
+        server.api('PUT', '/v1/input/keyboards',
+                   {'keyboards': [{'layout': 'us'}, {'layout': 'ara', 'variant': 'mac-phonetic'}]})
+        got = listing()
+        check(got == ['KEYBOARD item 0 us - English (US)',
+                      'KEYBOARD item 1 ara mac-phonetic Arabic (Macintosh, phonetic)', 'KEYBOARD current 0'],
+              'a list changed through the API: %s' % got)
+        ch.line('KEYBOARD current 1\n')
+        check(listing()[-1] == 'KEYBOARD current 1', 'the switch was not told back')
+        check(server.api('GET', '/v1/input/keyboards')['current'] == 1, 'the channel did not switch')
+        for bad in ('KEYBOARD current 2', 'KEYBOARD current -1', 'KEYBOARD current 1x', 'KEYBOARD what'):
+            check(ch.ask(bad + '\n') == b'KEYBOARD error EINVAL\n', '%r was not EINVAL' % bad)
+        check(quiet.reply(0.3) == b'', 'a channel that did not ask was told the keyboards')
+        server.api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'}]})
+        check(listing() == ['KEYBOARD item 0 us - English (US)', 'KEYBOARD current 0'], 'the list back')
+    finally:
+        ch.close()
+        quiet.close()
+    return 'keyboards=list,api-change,switch,einval,opt-in'
+
+
 def local():
     work = tempfile.mkdtemp(prefix='blit-input-gate-')
     results = []
@@ -441,6 +483,7 @@ def local():
         wait_for(lambda: server.input(a.id)['routes'] == [], 'the routes outlived their channel')
         results.append('ok=OK ebusy=same_image two_images=two_routes states=off,on,live,off,live,none '
                        'one_on=channel+session hold=%s' % ','.join(holds))
+        results.append(keyboards_part(server, a))
     finally:
         server.stop()
         for s in keep:

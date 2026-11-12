@@ -27,6 +27,7 @@
 #define BLIT_KEYBOARD_XKB_H
 
 #include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-compose.h>
 
 /* The keymap's <LVL3>, ISO_Level3_Shift in every pc-based layout: what the
    `altgr` role becomes, since Right Alt is Alt in a layout without a third
@@ -362,6 +363,9 @@ static void input_device_xkb_rebuild(BlitInputDevice *device)
     unsigned int code;
     if (device->xkb_state != NULL)
         xkb_state_unref(device->xkb_state);
+    if (device->compose != NULL)
+        xkb_compose_state_reset(device->compose);
+    device->compose_status = XKB_COMPOSE_NOTHING;
     device->xkb_state = blit_xkb_keymap != NULL ? xkb_state_new(blit_xkb_keymap) : NULL;
     device->xkb_keymap = blit_xkb_keymap;
     if (device->xkb_state == NULL) {
@@ -430,6 +434,66 @@ static void input_device_xkb_serialize(BlitInputDevice *device, unsigned int out
     out[3] = xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
 }
 
+/* ---- dead keys and compose (ADR 0231 step 3) ----
+
+   The compose table is the locale's (Blit runs with LANG C.UTF-8 or none,
+   which libxkbcommon reads as en_US.UTF-8's table, from libx11-data),
+   loaded once. Each keyboard has its own state on it, fed the keysym of
+   each press once, in dispatch, before anything asks what the key types:
+   a dead key or a sequence under way types nothing, the key that
+   completes one types the composed text, one that cancels it types
+   nothing. A Wayland or X program composes for itself, with the keymap. */
+static struct xkb_compose_table *blit_compose_table;
+static int blit_compose_tried;
+
+static struct xkb_compose_table *blit_compose(void)
+{
+    const char *locale;
+    if (blit_compose_tried) return blit_compose_table;
+    blit_compose_tried = 1;
+    if (blit_xkb_context == NULL) return NULL;
+    locale = getenv("LC_ALL");
+    if (locale == NULL || !*locale) locale = getenv("LC_CTYPE");
+    if (locale == NULL || !*locale) locale = getenv("LANG");
+    if (locale == NULL || !*locale) locale = "C";
+    blit_compose_table = xkb_compose_table_new_from_locale(blit_xkb_context, locale,
+                                                           XKB_COMPOSE_COMPILE_NO_FLAGS);
+    if (blit_compose_table == NULL)
+        fprintf(stderr, "blit: keyboard: no compose table for locale \"%s\" (is libx11-data "
+                "installed?); dead keys type nothing\n", locale);
+    return blit_compose_table;
+}
+
+/* A press (or repeat) fed to this keyboard's compose state: its result
+   kept for the readers of what the key types (evdev_key_character). */
+static void input_device_compose_feed(BlitInputDevice *device, unsigned short code)
+{
+    struct xkb_compose_table *table;
+    xkb_keysym_t sym;
+    int logical;
+    device->compose_status = XKB_COMPOSE_NOTHING;
+    device->compose_text[0] = '\0';
+    if (device->xkb_state == NULL || (table = blit_compose()) == NULL)
+        return;
+    if (device->compose == NULL &&
+        (device->compose = xkb_compose_state_new(table, XKB_COMPOSE_STATE_NO_FLAGS)) == NULL)
+        return;
+    logical = input_logical_code(device, code);
+    if (logical < 0)
+        return;
+    sym = xkb_state_key_get_one_sym(device->xkb_state, (xkb_keycode_t)logical + 8);
+    if (xkb_compose_state_feed(device->compose, sym) != XKB_COMPOSE_FEED_ACCEPTED)
+        return;  /* a modifier: no part of a sequence */
+    device->compose_status = xkb_compose_state_get_status(device->compose);
+    if (device->compose_status == XKB_COMPOSE_COMPOSED) {
+        xkb_compose_state_get_utf8(device->compose, device->compose_text,
+                                   sizeof(device->compose_text));
+        xkb_compose_state_reset(device->compose);
+    } else if (device->compose_status == XKB_COMPOSE_CANCELLED) {
+        xkb_compose_state_reset(device->compose);
+    }
+}
+
 static int evdev_super_held(const BlitInputDevice *keyboard)
 {
     return blit_xkb_active(keyboard->xkb_state, BLIT_XKB_SUPER,
@@ -469,6 +533,15 @@ static int evdev_key_character(const BlitInputDevice *device,
     out[0] = '\0';
     if (device->xkb_state == NULL || blit_key_is_keypad(code))
         return 0;
+    /* A dead key, a sequence under way or cancelled types nothing; the key
+       that completes one types what it composed. */
+    if (device->compose_status == XKB_COMPOSE_COMPOSING ||
+        device->compose_status == XKB_COMPOSE_CANCELLED)
+        return 0;
+    if (device->compose_status == XKB_COMPOSE_COMPOSED) {
+        snprintf(out, capacity, "%s", device->compose_text);
+        return (int)strlen(out);
+    }
     logical = input_logical_code(device, code);
     if (logical < 0)
         return 0;

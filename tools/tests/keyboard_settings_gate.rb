@@ -437,7 +437,13 @@ verdict('the-keyboards-survive-a-restart') do
           [['us', ''], ['ara', 'mac-phonetic']] &&
         listed['keyboards'][1]['name'] == 'Arabic (Macintosh, phonetic)',
         "and in force after a restart, got #{listed.inspect}")
-  request('PUT', '/v1/input/keyboards', { 'current' => 0 })
+  # More than libxkbcommon's four groups: Blit swaps whole keymaps, so the
+  # list has no such cap; the sixth is current, then the first again.
+  six = %w[us de fr ara gr ru].map { |l| { 'layout' => l } }
+  code, listed = request('PUT', '/v1/input/keyboards', { 'keyboards' => six, 'current' => 5 })
+  check(code == 200 && listed.to_h['current'] == 5 && listed['keyboards'].length == 6,
+        "six keyboards, the sixth current, got #{code} #{listed.inspect}")
+  request('PUT', '/v1/input/keyboards', { 'keyboards' => [{ 'layout' => 'us' }], 'current' => 0 })
 end
 
 unless $failures.empty?

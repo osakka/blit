@@ -64,6 +64,72 @@ static void frame_reply(int fd, const char *line)
     }
 }
 
+/* ---- ADR 0231: the keyboards on the frame channel ----
+
+   A desktop started by the login manager has no API token, so its keyboard
+   switcher speaks here. A channel that sends `KEYBOARD list` is told the
+   keyboards, `KEYBOARD item <n> <layout> <variant|-> <name...>` each and
+   `KEYBOARD current <n>` last (the end of a list), at once and again on
+   every change, whoever made it; `KEYBOARD current <n>` switches. A bad
+   one is `KEYBOARD error EINVAL`. Opt-in: a channel that only draws is
+   told nothing it did not ask for. */
+static void frame_keyboards_send(int fd)
+{
+    char line[512], name[256];
+    int i;
+    for (i = 0; i < blit_keyboard_count; ++i) {
+        blit_keyboard_description(blit_keyboards[i].layout, blit_keyboards[i].variant, name,
+                                  sizeof(name));
+        snprintf(line, sizeof(line), "KEYBOARD item %d %s %s %s\n", i, blit_keyboards[i].layout,
+                 blit_keyboards[i].variant[0] ? blit_keyboards[i].variant : "-", name);
+        frame_reply(fd, line);
+    }
+    snprintf(line, sizeof(line), "KEYBOARD current %d\n", blit_keyboard_current);
+    frame_reply(fd, line);
+}
+
+/* Every channel that asked, told the keyboards as they are now. */
+static void frame_keyboards_changed(BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        if (client->used && client->authenticated && client->keyboards_wanted)
+            frame_keyboards_send(client->fd);
+    }
+}
+
+/* `KEYBOARD list` or `KEYBOARD current <n>` from a channel. */
+static void frame_keyboards_request(BlitRuntime *runtime, BlitFrameClient *client,
+                                    const unsigned char *message, size_t length)
+{
+    char line[64];
+    int n;
+    char extra;
+    if (length >= sizeof(line)) {
+        frame_reply(client->fd, "KEYBOARD error EINVAL\n");
+        return;
+    }
+    memcpy(line, message, length);
+    line[length] = '\0';
+    if (length > 0 && line[length - 1] == '\n')
+        line[length - 1] = '\0';
+    if (strcmp(line, "KEYBOARD list") == 0) {
+        client->keyboards_wanted = 1;
+        frame_keyboards_send(client->fd);
+    } else if (sscanf(line, "KEYBOARD current %d%c", &n, &extra) == 1 && n >= 0 &&
+               n < blit_keyboard_count && strspn(line + 17, "0123456789") == strlen(line + 17)) {
+        if (n != blit_keyboard_current) {
+            blit_keyboards_use(n);
+            keyboards_changed(runtime);
+        } else if (client->keyboards_wanted) {
+            frame_keyboards_send(client->fd);
+        }
+    } else {
+        frame_reply(client->fd, "KEYBOARD error EINVAL\n");
+    }
+}
+
 static void frame_client_close(BlitRuntime *runtime, int index)
 {
     if (runtime->frame_clients[index].used) {
@@ -927,6 +993,15 @@ static void frame_client_service(BlitRuntime *runtime, int index)
                 frame_input_request(runtime, client, (const unsigned char *)"", 0);
             else
                 frame_input_request(runtime, client, message, got);
+            continue;
+        }
+        if (got >= 9 && memcmp(message, "KEYBOARD ", 9) == 0) {
+            /* ADR 0231: a line, no descriptor. */
+            for (j = 0; j < fd_count; ++j) close(fds[j]);
+            if (fd_count != 0 || (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC)))
+                frame_reply(client->fd, "KEYBOARD error EINVAL\n");
+            else
+                frame_keyboards_request(runtime, client, message, (size_t)got);
             continue;
         }
         if (got >= 7 && memcmp(message, "WINDOW ", 7) == 0) {

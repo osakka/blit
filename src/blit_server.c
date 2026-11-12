@@ -59,6 +59,7 @@
 #include <xf86drmMode.h>
 #include <zlib.h>
 #include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-compose.h>
 
 extern char **environ;
 
@@ -779,6 +780,12 @@ typedef struct {
        (blit_keyboard_xkb.h); its flags above are read from it. */
     struct xkb_state *xkb_state;
     struct xkb_keymap *xkb_keymap;
+    /* ADR 0231 step 3: this keyboard's dead keys and compose sequences,
+       fed once a press; the press's result (a XKB_COMPOSE_* status) and,
+       composed, its text. */
+    struct xkb_compose_state *compose;
+    int compose_status;
+    char compose_text[32];
     unsigned short console_switch_key;
     int shift;
     int ctrl;
@@ -970,6 +977,9 @@ typedef struct {
        `input_capacity` slots that grows on demand, freed with the channel. */
     struct BlitFrameInput **inputs;
     int input_capacity;
+    /* ADR 0231: sent `KEYBOARD list`, so told the keyboards and every
+       change of them (blit_frames.h, frame_keyboards). */
+    int keyboards_wanted;
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64
@@ -2004,6 +2014,7 @@ static void settings_apply_audio_device(BlitRuntime *runtime,
 static void settings_mark_dirty(BlitRuntime *runtime);
 /* The keyboards in the settings document (ADR 0231 step 2). */
 static void settings_apply_keyboards(BlitRuntime *runtime, int news);
+static void frame_keyboards_changed(BlitRuntime *runtime);
 static size_t keyboards_settings_json(char *out, size_t capacity);
 
 static int display_index_for_output(const BlitRuntime *runtime,
@@ -6283,6 +6294,8 @@ static BlitInputDevice *record_input_device(BlitRuntime *runtime,
         /* A reused record's xkb state is the old keyboard's (ADR 0231). */
         if (device->xkb_state != NULL)
             xkb_state_unref(device->xkb_state);
+        if (device->compose != NULL)
+            xkb_compose_state_unref(device->compose);
         memset(device, 0, sizeof(*device));
         device->used = 1;
         device->enabled = 1;
@@ -6480,6 +6493,8 @@ static BlitInputDevice *record_opened_device(BlitRuntime *runtime,
         /* A reused record's xkb state is the old keyboard's (ADR 0231). */
         if (device->xkb_state != NULL)
             xkb_state_unref(device->xkb_state);
+        if (device->compose != NULL)
+            xkb_compose_state_unref(device->compose);
         memset(device, 0, sizeof(*device));
         device->used = 1;
         device->enabled = 1;
@@ -27370,6 +27385,8 @@ static void retire_absent_input_devices(BlitRuntime *runtime, int announce)
         /* A reused record's xkb state is the old keyboard's (ADR 0231). */
         if (device->xkb_state != NULL)
             xkb_state_unref(device->xkb_state);
+        if (device->compose != NULL)
+            xkb_compose_state_unref(device->compose);
         memset(device, 0, sizeof(*device));
         ++runtime->input_devices_revision;
     }
@@ -30041,6 +30058,7 @@ static void keyboards_changed(BlitRuntime *runtime)
              "{\"type\":\"keyboard\",\"current\":%d,\"layout\":\"%s\",\"variant\":\"%s\","
              "\"name\":\"%s\"}", blit_keyboard_current, k->layout, k->variant, escaped);
     broadcast_stream(runtime, event, BLIT_STREAM_INPUT);
+    frame_keyboards_changed(runtime);
     settings_mark_dirty(runtime);
 }
 
@@ -30690,6 +30708,10 @@ static void dispatch_evdev_key_event(BlitRuntime *runtime,
         input_device_xkb_key(keyboard, event->code, event->value != 0) : -1;
     if (event->value != 2)
         evdev_key_set_held(keyboard, event->code, event->value != 0);
+    /* ADR 0231 step 3: a press or repeat through the keyboard's compose
+       state, once, before anything reads what the key types. */
+    if (event->value != 0)
+        input_device_compose_feed(keyboard, event->code);
     /* K_OFF leaves VT switching to the owner. Recovery uses physical key
        identities on THIS keyboard, not application remaps or API injection. */
     if (blit_vt_owned() && device_id &&

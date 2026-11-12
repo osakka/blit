@@ -1756,6 +1756,29 @@ blit-compositor's routes are sent the new keymap and Blit's modifiers on it
 so a desktop's switcher (a menu bar item, a shortcut) shows the one in use
 whoever changed it.
 
+**On the frame channel** (from 0.3.94), for a desktop that has no API
+token -- one the login manager started is not given it: a channel that
+sends `KEYBOARD list` is answered `KEYBOARD item <n> <layout> <variant|->
+<name...>` for each keyboard (the name, the system's description, runs to
+the end of the line) and `KEYBOARD current <n>` last, which ends a list,
+and is sent the list again on every change of the list or the current
+keyboard, whoever made it (its own switch, the API, the Blit control
+panel). `KEYBOARD current <n>` switches; an `<n>` that is not one of them,
+or another line, is answered `KEYBOARD error EINVAL`. A channel that never
+sent `KEYBOARD list` is told nothing (a channel that only draws need not
+read lines it did not ask for). A desktop with a channel per display hears
+each change on each of them.
+
+**Dead keys and compose** (from 0.3.94): a layout's dead keys (such as
+`us` `intl`'s apostrophe, dead acute) and compose sequences work in
+terminals: each keyboard has its own compose state on the locale's
+compose table (Blit runs with `C.UTF-8` or no locale, which libxkbcommon
+reads as `en_US.UTF-8`'s table, from libx11-data). A dead key, or a
+sequence under way, types nothing; the key that completes it types the
+composed text (´ then e types é; with kitty flag 16 the key is e and its
+text é); a key that cancels one types nothing. A Wayland or X program
+composes for itself, with the keymap.
+
 ### Keyboard map (xkb)
 
 `GET /v1/input/keymap` returns the keyboard as a complete xkb keymap, the
@@ -2132,7 +2155,11 @@ It speaks the frame channel above as a producer, with these additions.
   - on an input route's socket: `INPUT key|ptr|rel|btn|wheel|frame|keymap
     <id> ...`;
   - between the compositor and the desktop: every `WINDOW <verb> <id> ...`
-    line above and below, and `WINDOW ok <id>`, `WINDOW error <id> <code>`.
+    line above and below, and `WINDOW ok <id>`, `WINDOW error <id> <code>`;
+  - the keyboards (ADR 0231, from Blit 0.3.94), concerning no picture: a
+    producer's `KEYBOARD list` and `KEYBOARD current <n>`, and Blit's
+    `KEYBOARD item <n> <layout> <variant|-> <name...>`, `KEYBOARD current
+    <n>` and `KEYBOARD error EINVAL` ("Keyboards (layouts)").
   Further ids (a popup's parent, a member's top-level) are arguments after
   it. A line that concerns no one picture says 0 there: `FRAME error 0
   EINVAL` (a malformed STA1, or a message too short to name its picture),

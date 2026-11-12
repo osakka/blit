@@ -151,12 +151,13 @@ Option 3.
   restart, an unknown layout 422), `compositor_gate` (a switch to Arabic
   and back reaching a client as its keymap), `api_schema_gate`.
 
-Still to come with step 3 (dead keys and compose), and for the list:
+- Step 3, 0.3.94: `kitty_keyboard_gate` (`us(intl)`: dead acute then e
+  types é, then space the apostrophe; with flag 16 key e, text é) and
+  `frame_input_gate` (the keyboards on the frame channel, for a desktop
+  the login manager started, which has no API token: the list, a change
+  made through the API, a switch, EINVAL, opt-in). The compose data is
+  libx11-data's, which the `blit` package now depends on.
 
-- `kitty_keyboard_gate`: flag 16's text under `us` and `ara(mac-phonetic)`,
-  and Ctrl+C's base key under Arabic.
-- A dead-key and compose case (´ then e types é).
-- A switch from `us` to `ara` seen by a terminal, a Wayland client
-  (`compositor_gate`) and an X client (`xwayland_gate`) as the same text.
-- The list beyond four keyboards.
-- The `keymap` field gone from the schema (`api_schema_gate`).
+Still to come: an X client (`xwayland_gate`) reading the same text as a
+terminal after a switch; the Wayland client's keymap after a switch is in
+`compositor_gate`, and X programs take theirs from it through Xwayland.

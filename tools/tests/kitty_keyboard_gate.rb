@@ -178,14 +178,21 @@ Dir.mktmpdir('blit-kitty-keyboard') do |work|
     check.call('ara Ctrl+C by its base key','',[[29,1],[46,1],[46,0],[29,0]],
       esc+'57442;5u'+esc+'1589::99;5u'+esc+'1589::99;5:3u'+esc+'57442;1:3u')
     check.call('ara legacy text and Ctrl+C',esc+'=0u',[[31,1],[31,0],[29,1],[46,1],[46,0],[29,0]],"\u0633\x03")
+    # ADR 0231 step 3: dead keys. us(intl)'s apostrophe is dead_acute: it
+    # types nothing, then e types é, and space after it the apostrophe;
+    # with flag 16 the e is still e, its text é.
+    req.call('PUT','/v1/input/keyboards',{keyboards:[{layout:'us'},{layout:'us',variant:'intl'}],current:1})
+    check.call('dead acute then e',esc+'=0u',[[40,1],[40,0],[18,1],[18,0],[40,1],[40,0],[57,1],[57,0]],"\u00e9'")
+    check.call('dead acute then e, flag 16',esc+'=27u',[[40,1],[40,0],[18,1],[18,0]],
+      esc+'101;1;233u'+esc+'101;1:3u')
     req.call('PUT','/v1/input/keyboards',{current:0})
-    check.call('us again','',[[31,1],[31,0]],'s')
+    check.call('us again',esc+'=0u',[[31,1],[31,0]],'s')
     check.call('restore negotiated state',esc+'=9u'+esc+'?u',[],esc+'?9u')
     other=req.call('POST','/v1/terminal-sessions',{command:'/bin/cat',surface:{width:1,height:1}})
     raise 'keyboard state leaked between sessions' unless other.dig('terminal_capabilities','keyboard','active_flags')==0 &&
       req.call('GET',path).dig('terminal_capabilities','keyboard','active_flags')==9
     req.call('DELETE',"/v1/terminal-sessions/#{other['id']}")
-    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 xkb=us,ara-phonetic focus_handover=out_in legacy=preserved"
+    puts "KITTY_KEYBOARD_PASS cases=#{serial} bytes=exact query_stack=independent_bounded modifiers=super_ctrl_shift alternates=flag4 text=flag16 xkb=us,ara-phonetic,us-intl-compose focus_handover=out_in legacy=preserved"
   ensure
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil
