@@ -1262,7 +1262,8 @@ def x_layout_part(desk, lines_to, printed, log):
     size, then back inside its display; a panel asking for a place past its
     display (not past the root) kept inside it, sized past its edge kept
     inside again, a press at its far corner landing, and moved to the other
-    display with it; a display gone, its window moving to the primary.
+    display with it; the displays swapped in place, window 1 moving with
+    its display; a display gone, its window moving to the primary.
     Returns its summary."""
     c = Clip(desk, printed, log, None)
 
@@ -1384,6 +1385,11 @@ def x_layout_part(desk, lines_to, printed, log):
     c.match(r'WINDOW gone %d' % pid)
     c.saw('panel-delete', m)
 
+    # The displays swapped in place: window 1 moves with HDMI-A-1, keeping
+    # its place in it.
+    send_set('DP-1 2560 0 1920 1080 0', 'HDMI-A-1 0 0 2560 1440 144000')
+    displays(['monitor DP-1 2560,0 1920x1080 primary', 'monitor HDMI-A-1 0,0 2560x1440', 'primary DP-1',
+              'root 4480x1440', 'where main 0,0 400x300'])
     # HDMI-A-1 gone: window 1, on it, goes to the primary, DP-1, at its
     # place there; X has one display.
     send_set('DP-1 0 0 1920 1080 0')
@@ -1391,7 +1397,7 @@ def x_layout_part(desk, lines_to, printed, log):
     return ('layout: before=BLIT-1@0,0,no primary set=DP-1@0,0(0 mHz)+HDMI-A-1@1920,0 primary=HDMI-A-1->DP-1 '
             'root=4480x1440 window 1 followed->%d,%d output->DP-1 fullscreen->HDMI-A-1 origin 2560x1440 '
             'panel %d 1800,1000->1720,980 inside DP-1, 300x150->1620,930, ->HDMI-A-1 3540,930, far corner presses '
-            'gone=HDMI-A-1->window 1 to DP-1' % (mx + 1920, my, pid))
+            'swapped=window 1 with HDMI-A-1->0,0 gone=HDMI-A-1->window 1 to DP-1' % (mx + 1920, my, pid))
 
 
 def x_part(compositor, standin, server, work, wl_standin=None):

@@ -1153,8 +1153,9 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     panel asking for 1800,1000 200x100 (past DP-1, where its centre is,
     not past the 4480x1440 root) placed at 1720,980 inside DP-1, the
     desktop's 300x150 kept inside again at 1620,930, a press at 290,140
-    landing there and at 3540,930 on HDMI-A-1; HDMI-A-1 gone, window 1 at
-    0,0 on DP-1, the root 1920x1080. A first run found the compositor
+    landing there and at 3540,930 on HDMI-A-1; the two displays swapped
+    in place, window 1 moving with HDMI-A-1 to 0,0; HDMI-A-1 gone, window
+    1 at 0,0 on DP-1, the root 1920x1080. A first run found the compositor
     spinning at the first layout: the window manager's event source put
     on the loop's check list twice, a list made a loop; fixed. The
     `compositor_gate` passes under tcc and ASan/UBSan with
