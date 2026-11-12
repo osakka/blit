@@ -9,6 +9,24 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.92 Firefox's menus: a popup's subsurfaces, popups of popups, the grab
+
+- **Compositor:** a popup's subsurfaces are flattened onto the popup
+  (`WINDOW sub <id> <popup>`): Firefox draws a menu's contents in one, and
+  the owner's log showed "a popup's, not shown in this release" for every
+  menu opened. Popups of popups (submenus) are hit-tested at any depth, a
+  popup's subsurfaces in the popup, and a grabbing popup has the keyboard.
+  Hibr places them (#528).
+- **Suites:** the build environment, the tagged commit: `compositor_gate`
+  (its new popup tree: the lines, the frames, the pointer on the contents
+  and the submenu, a key to the grabbing submenu) and `xwayland_gate`,
+  both ASan/UBSan; `package_artifact_gate`. This host: gcc `-Wall -Wextra`
+  clean on the compositor; `all` 187 pass, 12 skip, and
+  `under_text_picture_gate` timed out once under parallel load (passed 3
+  of 3 alone; the server is unchanged in this release; filed); `renderer`
+  82 pass; `renderer-gles` 62 pass.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.91 keyboards from the system's xkb keymap; Blit's modifiers reach programs (ADR 0231 step 1)
 
 - **Keyboard:** what a key types, its modifiers and its locks come from
