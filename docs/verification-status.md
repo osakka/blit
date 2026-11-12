@@ -9,6 +9,25 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.93 keyboards: the system's layouts in a list, switched live (ADR 0231 step 2)
+
+- **Keyboards:** `GET/PUT /v1/input/keyboards` (an ordered list of xkb
+  layouts and variants with the system's names, and the current one) and
+  `/v1/input/keyboards/available[?layout=]` (what xkeyboard-config has).
+  A switch reaches terminals, Wayland and X programs (keymap and Blit's
+  modifiers, locks kept) and the input stream (`keyboard` event); the list
+  is kept in the settings document. Phonetic Arabic types letter by
+  letter; Ctrl+C stays 0x03 by the base key.
+- **Suites:** the build environment, the tagged commit: `compositor_gate`
+  (a switch to Arabic and back reaching the client) and `xwayland_gate`,
+  both ASan/UBSan; `package_artifact_gate`. This host: `kitty_keyboard_gate`
+  61 cases, `keyboard_settings_gate` (kept across a restart, an unknown
+  layout 422), `api_schema_gate` (53 paths); gcc `-Wall -Wextra` no new
+  warnings; `all` 188 pass, 12 skip; `renderer` 82 pass;
+  `renderer-gles` 62 pass. The Blit pane's four gates against this
+  server.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.92 Firefox's menus: a popup's subsurfaces, popups of popups, the grab
 
 - **Compositor:** a popup's subsurfaces are flattened onto the popup
