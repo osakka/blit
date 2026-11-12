@@ -1023,6 +1023,100 @@ def input_part(server, compositor, standin, work):
             blit.kill()
 
 
+def popup_tree_part(compositor, standin, work):
+    """Popups as Firefox draws a menu (docs/api.md, "Subsurfaces"), with
+    `--popup-tree`: window 1, its popup 2 at 12,63, the popup's contents a
+    subsurface of it (picture 3: `WINDOW sub 3 2 5 5 70 50 above`, the tree
+    under a popup flattened onto the popup), and a popup of the popup -- a
+    submenu -- (`WINDOW popup 4 2 60 10`) that grabs. The pointer over the
+    contents reaches the subsurface and over the submenu the submenu, in
+    the top-level's pixels on the top-level's route; a key goes to the
+    grabbing submenu. Before 0.3.92 the contents were never shown
+    ("a popup's, not shown in this release") and the menu opened empty."""
+    runtime = os.path.join(work, 'run-tree')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-tree-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    comp = client = route = None
+    log = os.path.join(work, 'compositor-tree.log')
+    out_path = os.path.join(work, 'standin-tree.out')
+    printed = lambda: open(out_path).read()
+    try:
+        cenv = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+        for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_API_TOKEN'):
+            cenv.pop(k, None)
+        comp = start([compositor, '--x11', 'off', '--log', log], cenv,
+                     open(os.path.join(work, 'compositor-tree.out'), 'w'))
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        client = start([standin, '--popup-tree', 'Tree'], dict(cenv, WAYLAND_DISPLAY='blit-0'),
+                       open(out_path, 'w'))
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Tree', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.frame(256, 160)
+        desk.send('WINDOW size 1 200 100 activated')
+        desk.frame(200, 100)
+        # The popup, then its contents and the submenu, in whatever order the
+        # client's commits bring them: every line and frame of each.
+        lines, frames = [], {}
+        deadline = time.time() + 8
+        wanted = ('WINDOW popup 2 1 12 63', 'WINDOW sub 3 2 5 5 70 50 above', 'WINDOW popup 4 2 60 10')
+        while time.time() < deadline and not (all(w in lines for w in wanted) and
+                                               set(frames) >= {2, 3, 4}):
+            got = desk.next(0.5)
+            if got is None:
+                continue
+            if got[0] == 'line':
+                lines.append(got[1])
+            elif got[0] == 'frame':
+                (image, _seq, w, h) = got[1][:4]
+                frames[image] = (w, h)
+                os.close(got[2])
+        check(all(w in lines for w in wanted),
+              lambda: 'the popup tree\'s lines: %s, expected %s\n%s' % (lines, wanted, open(log).read()))
+        check(frames.get(2) == (80, 60) and frames.get(3) == (70, 50) and frames.get(4) == (40, 30),
+              'the popup tree\'s frames: %s' % frames)
+        check('not shown' not in open(log).read(), 'a popup\'s subsurface was not shown:\n' + open(log).read())
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        frame = [0]
+
+        def send(*events):
+            text = ''
+            for event in events:
+                frame[0] += 1
+                text += 'INPUT %s\nINPUT frame %d %d\n' % (event % BLIT_PICTURE, BLIT_PICTURE, frame[0])
+            route.sendall(text.encode())
+
+        def saw(*wanted):
+            want = ['STANDIN ' + w for w in wanted]
+            wait_for(lambda: all(w in printed().splitlines() for w in want),
+                     lambda: 'the tree client saw none of %s:\n%s' % (want, printed()))
+
+        # Over the popup's contents: the subsurface, in its own pixels (the
+        # popup at 12,63, its contents at 5,5 of it).
+        send('ptr %d 20.00 70.00')
+        saw('pointer enter popsub 3.00 2.00')
+        # Over the submenu (60,10 of the popup): the submenu, over the menu.
+        send('ptr %d 80.00 80.00')
+        saw('pointer enter popup2 8.00 7.00')
+        # A key: the grabbing submenu has the keyboard.
+        send('key %d 30 press', 'key %d 30 release')
+        saw('keyboard enter popup2')
+        desk.send('WINDOW close 1')
+    finally:
+        if route: route.close()
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+    return 'popup-contents=sub-of-popup(WINDOW sub 3 2) submenu=popup-of-popup(WINDOW popup 4 2) pointer=popsub,popup2 keys=grab'
+
+
 def lock_part(compositor, standin, work):
     """zwp_pointer_constraints_v1 asked of the desktop (docs/api.md, "Pointer
     lock"), with `--lock`: a oneshot lock pending until `WINDOW lock 1 on`
@@ -1985,6 +2079,7 @@ def main():
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
+        print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))
         if server:

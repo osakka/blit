@@ -2138,18 +2138,23 @@ It speaks the frame channel above as a producer, with these additions.
   - `WINDOW popup <id> <parent> <x> <y>`: a popup or menu, its own picture,
     at an offset in the parent's surface pixels (not on-screen pixels: the
     desktop may show the parent scaled); the desktop keeps it there when the
-    parent moves, and may draw it past the parent's window. Sent again for
+    parent moves, and may draw it past the parent's window. `<parent>` is a
+    top-level, or a popup for a popup of a popup (a submenu), at an offset
+    in that popup's surface pixels, drawn over it. A popup's size is its
+    frames': no line says it, so a desktop sizes the popup from its newest
+    frame (Firefox's permission panel grows after it first shows). Sent again for
     the same id when the program moves the popup (`xdg_popup.reposition`,
     or an X menu moved by its program; from 0.3.82): the desktop moves the
     popup it has, from its next frame.
   - `WINDOW sub <id> <parent> <x> <y> <w> <h> above|below`: a subsurface
     (`wl_subsurface`), its own picture, as a popup's is, with no `WINDOW
-    new`: owned, moved, hidden and closed with its top-level, never in the
-    window list or the focus. `<parent>` is always the top-level: a tree of
-    subsurfaces is flattened, `<x> <y>` the sum of the positions down to it
-    in the top-level's surface pixels (negative allowed), `<w> <h>` its
-    committed buffer's size, `above` or `below` the top-level's own
-    picture. Sent when it first has a buffer (and every subsurface above it
+    new`: owned, moved, hidden and closed with its window, never in the
+    window list or the focus. `<parent>` is the window the tree is drawn in:
+    the top-level, or a popup (from 0.3.92; Firefox draws a menu's contents
+    in a subsurface of the popup) -- a tree of subsurfaces is flattened onto
+    it, `<x> <y>` the sum of the positions down to it in that window's
+    surface pixels (negative allowed), `<w> <h>` its committed buffer's
+    size, `above` or `below` that window's own picture. Sent when it first has a buffer (and every subsurface above it
     in the tree is mapped), and again, for all of that top-level's
     subsurfaces, bottom to top, whenever any is new or its offset, size or
     place in the order changes; positions and order are applied at the
@@ -2159,10 +2164,10 @@ It speaks the frame channel above as a producer, with these additions.
     `FRM1`/`FRM3` under `<id>`, released like any picture's. The desktop
     places it 1:1 at its offset (Blit's and kitty's `X=`/`Y=` cell offset
     gives the exact pixel), clipped to the window body, and sends Blit
-    `INPUT member <id> <parent> <x> <y>` as for a popup; the compositor
-    hit-tests subsurfaces by their input regions (an empty one, as Firefox
-    sets on its content, gives the pointer to the parent). A subsurface of
-    a popup is not shown in this release (logged).
+    `INPUT member <id> <top-level> <x> <y>` as for a popup, at its offset
+    added down to the top-level; the compositor hit-tests subsurfaces by
+    their input regions (an empty one, as Firefox sets on its content, gives
+    the pointer to the parent), a popup's in the popup.
   - `WINDOW decor <id> server|client`: who draws the frame
     (`zxdg_decoration`). `client` (a program that insists on its own, such
     as GTK's client-side decorations) gets a bare window from the desktop,
@@ -2617,8 +2622,12 @@ It speaks the frame channel above as a producer, with these additions.
   a line, and takes it away when another window's route sends one, when
   the desktop's `WINDOW size` for it drops `activated`, or when its route's
   socket ends (releasing what was down); a popup of the top-level under
-  the pointer gets the pointer in its own pixels, and the surface a button
-  went down on keeps it until the last button is up. Clients are told the
+  the pointer, at any depth (the deepest it is in: a submenu over its
+  menu), gets the pointer in its own pixels, or the subsurface of it under
+  the pointer does, and the surface a button went down on keeps it until
+  the last button is up. A popup that took a grab (`xdg_popup.grab`, as a
+  menu does) has the keyboard while it is mapped, the deepest of them, so
+  a menu's arrows and Enter are its own (from 0.3.92). Clients are told the
   key repeat Blit's keymap answer carries (`X-Blit-Repeat-Rate`,
   `X-Blit-Repeat-Delay`: the active keyboard's), and again when it
   changes; none (rate 0) without Blit's answer.

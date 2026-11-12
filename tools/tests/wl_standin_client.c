@@ -71,6 +71,10 @@
    D pressed with Control down destroys its window (the client stays,
    printing `STANDIN gone`) and the keyboard's leave then ends it, as an X
    terminal's window goes under Xwayland when its shell exits on Ctrl-D.
+   With --popup-tree, as Firefox draws a menu: at the popup's first
+   configure its contents are a 70x50 subsurface of it at 5,5 (`popsub`),
+   and a 40x30 popup of the popup at 60,10 of it (`popup2`, a submenu)
+   takes a grab, printing `STANDIN popup tree`.
    With --popup-move, after
    the popup's first frame it repositions it (xdg_popup.reposition, offset
    12,13: at 22,73) and prints `STANDIN popup repositioned <token>`.
@@ -201,6 +205,13 @@ struct standin {
     int gone_on_ctrl_d, gone;     /* --gone-on-ctrl-d: Ctrl+D destroys the window, as a shell's exit takes an X terminal's */
     uint32_t mods_dep;            /* the depressed modifiers, as last told */
     int popup_move, popup_moved;  /* --popup-move: reposition it once, after its first frame */
+    /* --popup-tree: as Firefox draws a menu -- the popup's contents in a
+       subsurface of it, and a popup of the popup (a submenu) that grabs. */
+    int popup_tree, tree_made;
+    struct wl_surface *popsub_surface, *popup2_surface;
+    struct wl_subsurface *popsub;
+    struct xdg_surface *popup2_xdg;
+    struct xdg_popup *popup2;
     struct wl_surface *popup_surface;
     /* --sub */
     int sub_script, sub_step;
@@ -447,11 +458,14 @@ static const struct xdg_toplevel_listener toplevel_listener = {
     toplevel_configure, toplevel_close, toplevel_bounds, toplevel_capabilities,
 };
 
+static void popup_tree(struct standin *s);
+
 static void popup_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
     struct standin *s = data;
     xdg_surface_ack_configure(xs, serial);
     draw(s, s->popup_surface, 80, 60);
+    if (s->popup_tree && !s->tree_made && s->popup) popup_tree(s);
     if (s->popup_move && !s->popup_moved && s->popup) {
         /* The same positioner with offset 12,13: at 22,73 of the toplevel. */
         struct xdg_positioner *pos = xdg_wm_base_create_positioner(s->wm_base);
@@ -468,6 +482,64 @@ static void popup_surface_configure(void *data, struct xdg_surface *xs, uint32_t
 }
 
 static const struct xdg_surface_listener popup_surface_listener = { popup_surface_configure };
+
+static void popup2_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
+{
+    struct standin *s = data;
+    xdg_surface_ack_configure(xs, serial);
+    draw(s, s->popup2_surface, 40, 30);
+}
+
+static const struct xdg_surface_listener popup2_surface_listener = { popup2_surface_configure };
+
+static void popup2_configure(void *data, struct xdg_popup *p, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    (void)data; (void)p;
+    printf("STANDIN popup2 configure %d,%d %dx%d\n", x, y, w, h);
+}
+
+static void popup2_done(void *data, struct xdg_popup *p)
+{
+    (void)data; (void)p;
+    printf("STANDIN popup2 done\n");
+}
+
+static void popup2_repositioned(void *data, struct xdg_popup *p, uint32_t token)
+{
+    (void)data; (void)p; (void)token;
+}
+
+static const struct xdg_popup_listener popup2_listener = {
+    popup2_configure, popup2_done, popup2_repositioned,
+};
+
+/* --popup-tree, at the popup's first configure: its contents a 70x50
+   subsurface at 5,5, and a 40x30 popup of it at 60,10 that grabs. */
+static void popup_tree(struct standin *s)
+{
+    struct xdg_positioner *pos;
+    s->tree_made = 1;
+    s->popsub_surface = wl_compositor_create_surface(s->compositor);
+    s->popsub = wl_subcompositor_get_subsurface(s->subcompositor, s->popsub_surface, s->popup_surface);
+    wl_subsurface_set_position(s->popsub, 5, 5);
+    wl_subsurface_set_desync(s->popsub);
+    draw(s, s->popsub_surface, 70, 50);
+    wl_surface_commit(s->popup_surface);
+    pos = xdg_wm_base_create_positioner(s->wm_base);
+    xdg_positioner_set_size(pos, 40, 30);
+    xdg_positioner_set_anchor_rect(pos, 60, 10, 1, 1);
+    xdg_positioner_set_anchor(pos, XDG_POSITIONER_ANCHOR_TOP_LEFT);
+    xdg_positioner_set_gravity(pos, XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT);
+    s->popup2_surface = wl_compositor_create_surface(s->compositor);
+    s->popup2_xdg = xdg_wm_base_get_xdg_surface(s->wm_base, s->popup2_surface);
+    xdg_surface_add_listener(s->popup2_xdg, &popup2_surface_listener, s);
+    s->popup2 = xdg_surface_get_popup(s->popup2_xdg, s->popup_xdg, pos);
+    xdg_popup_add_listener(s->popup2, &popup2_listener, s);
+    xdg_popup_grab(s->popup2, s->seat, 0);
+    xdg_positioner_destroy(pos);
+    wl_surface_commit(s->popup2_surface);
+    printf("STANDIN popup tree\n");
+}
 
 static void popup_configure(void *data, struct xdg_popup *p, int32_t x, int32_t y, int32_t w, int32_t h)
 {
@@ -753,7 +825,8 @@ static const char *surface_name(struct standin *s, struct wl_surface *surface)
 {
     return surface == NULL ? "none" : surface == s->surface ? "main" :
            surface == s->popup_surface ? "popup" : surface == s->child_surface ? "child" :
-           surface == s->sub_surface ? "sub" : "other";
+           surface == s->sub_surface ? "sub" : surface == s->popsub_surface ? "popsub" :
+           surface == s->popup2_surface ? "popup2" : "other";
 }
 
 static void keyboard_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd,
@@ -1477,6 +1550,7 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--popup-move") == 0) s.want_popup = s.popup_move = 1;
+        else if (strcmp(argv[i], "--popup-tree") == 0) s.want_popup = s.popup_tree = 1;
         else if (strcmp(argv[i], "--gone-on-ctrl-d") == 0) s.gone_on_ctrl_d = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;

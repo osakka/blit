@@ -298,6 +298,7 @@ struct bc_xdg {
        at px, py. */
     struct bc_xwin *xwin;
     int xpopup;
+    int grabbed;                      /* xdg_popup.grab: the keyboard is the topmost grabbing popup's */
 };
 
 /* Xwayland and its window manager (the X section). The atoms the window
@@ -506,6 +507,7 @@ static void x_frame_measure(struct bc_xdg *x, struct bc_surface *surface);
 static void x_configure(struct bc_xdg *x);
 static void x_close(struct bc_xdg *x);
 static void x_popup_close(struct bc_xdg *x);
+static int subs_show(struct bc_xdg *root, struct bc_xdg *fresh, int resend);
 static void x_focus_follows(struct bc_server *s, struct bc_surface *surface);
 static void x_pointer_over(struct bc_server *s, struct bc_surface *surface);
 static const char *x_cursor_of(struct bc_server *s, struct wl_client *client, int shown);
@@ -726,6 +728,8 @@ static void announce_popup(struct bc_xdg *x)
     logf_("popup %u: parent %u at %d,%d%s", x->id, p->id, p->gx + x->px, p->gy + x->py,
           x->xpopup ? " (an X override-redirect window)" : "");
     window_set_output(x, p->output);
+    /* Its subsurfaces, which may have drawn before it was announced. */
+    subs_show(x, NULL, 1);
 }
 
 /* `WINDOW gone`, once, after everything of the id is released: copied
@@ -1376,9 +1380,10 @@ static struct bc_xdg *surface_pic(struct bc_surface *surface)
     return surface->xdg ? surface->xdg : surface->sub;
 }
 
-/* The top-level a subsurface belongs to and its offset in that top-level's
-   surface pixels; NULL when its chain does not reach a top-level (a parent
-   gone, no role yet, or a popup's: not shown in this release). */
+/* The window a subsurface's tree is flattened onto -- its top-level, or the
+   popup it is drawn in (Firefox draws a menu's contents in a subsurface of
+   the popup) -- and its offset in that window's surface pixels; NULL when
+   its chain reaches neither (a parent gone, no role yet). */
 static struct bc_xdg *sub_root(const struct bc_xdg *sub, int32_t *ox, int32_t *oy)
 {
     int32_t x = 0, y = 0;
@@ -1390,7 +1395,7 @@ static struct bc_xdg *sub_root(const struct bc_xdg *sub, int32_t *ox, int32_t *o
         if (p->xdg) {
             if (ox) *ox = x;
             if (oy) *oy = y;
-            return window_is_toplevel(p->xdg) ? p->xdg : NULL;
+            return window_is_toplevel(p->xdg) || window_is_popup(p->xdg) ? p->xdg : NULL;
         }
         sub = p->sub;
     }
@@ -1403,8 +1408,7 @@ static struct bc_xdg *surface_window(struct bc_surface *surface)
 {
     struct bc_xdg *x;
     if (surface == NULL) return NULL;
-    if (surface->sub) return sub_root(surface->sub, NULL, NULL);
-    x = surface->xdg;
+    x = surface->sub ? sub_root(surface->sub, NULL, NULL) : surface->xdg;
     while (window_is_popup(x) && x->parent) x = x->parent;
     return window_is_toplevel(x) ? x : NULL;
 }
@@ -2916,9 +2920,6 @@ static int sub_apply_buffer(struct bc_xdg *sub, struct wl_resource *buffer, int 
     sub->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf->width;
     sub->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf->height;
     root = sub_root(sub, NULL, NULL);
-    if (root == NULL && sub->sub_parent && sub->sub_parent->xdg && sub->sub_parent->xdg->popup &&
-        !sub->sub_shown)
-        logf_("subsurface %u: a popup's, not shown in this release", sub->id);
     subs_show(root, sub, 1);
     /* Shown now: a frame of its picture. Not (yet): kept, its callbacks
        answered, and sent when it is described. */
@@ -2997,7 +2998,8 @@ static void subs_parent_applied(struct bc_surface *parent)
         if (c->cached && sub_effectively_sync(c)) sub_apply_cached(c);
     }
     root = parent->sub ? sub_root(parent->sub, NULL, NULL)
-                       : window_is_toplevel(parent->xdg) ? parent->xdg : NULL;
+                       : window_is_toplevel(parent->xdg) || window_is_popup(parent->xdg) ? parent->xdg
+                                                                                         : NULL;
     subs_show(root, NULL, 1);
 }
 
@@ -4209,9 +4211,13 @@ static void toplevel_destroyed(struct wl_resource *resource)
 static void popup_grab(struct wl_client *client, struct wl_resource *resource,
                        struct wl_resource *seat, uint32_t serial)
 {
-    /* The desktop sends `WINDOW close` for a click outside; input is
-       milestone B. */
-    (void)client; (void)resource; (void)seat; (void)serial;
+    /* The topmost grabbing popup has the keyboard while it is mapped
+       (keyboard_target): a menu's arrows and Enter are its own. A click
+       outside the program's surfaces is the desktop's to see, which sends
+       `WINDOW close`, and that is popup_done. */
+    struct bc_xdg *x = wl_resource_get_user_data(resource);
+    (void)client; (void)seat; (void)serial;
+    if (x) x->grabbed = 1;
 }
 
 static void popup_reposition(struct wl_client *client, struct wl_resource *resource,
@@ -4767,61 +4773,121 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
    first), the toplevel, those below it -- each only where its input
    region takes the pointer (a program routes a subsurface's input to its
    parent with an empty one) -- else the toplevel. */
-static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, double px,
-                                         double py, double *lx, double *ly)
+/* A window's surface origin in its top-level's surface pixels: 0, 0 for the
+   top-level; a popup's, down its chain of parents (a submenu's parent is a
+   popup), each at its parent's geometry plus its offset less its own
+   geometry. Returns its depth: 0 the top-level, 1 a popup of it, ... */
+static int xdg_origin(const struct bc_xdg *x, double *ox, double *oy)
+{
+    int depth = 0;
+    *ox = *oy = 0;
+    while (window_is_popup(x) && x->parent) {
+        *ox += x->parent->gx + x->px - x->gx;
+        *oy += x->parent->gy + x->py - x->gy;
+        x = x->parent;
+        ++depth;
+    }
+    return depth;
+}
+
+/* The surface of one window's tree -- the window and its subsurfaces,
+   flattened onto it -- at (wx, wy) in the window's own surface pixels:
+   above subsurfaces first, then the window where its input region takes
+   it, then those below; the window itself when none does. */
+static struct bc_surface *tree_target(struct bc_xdg *w, double wx, double wy, double *lx, double *ly)
 {
     struct bc_sub_at at[BC_SUBS_MAX];
     int n, i, pass;
-    struct bc_xdg *p;
-    wl_list_for_each(p, &s->windows, link) {
-        double ox, oy;
-        if (!window_is_popup(p) || p->parent != x || !p->mapped || !p->id || p->surface == NULL) continue;
-        ox = x->gx + p->px - p->gx;
-        oy = x->gy + p->py - p->gy;
-        if (px >= ox && py >= oy && px < ox + p->buffer_w && py < oy + p->buffer_h) {
-            *lx = px - ox;
-            *ly = py - oy;
-            return p->surface;
-        }
-    }
-    n = subs_collect(x, at);
+    n = subs_collect(w, at);
     for (pass = 0; pass < 3; ++pass) {
         if (pass == 1) {
-            if (x->surface && surface_takes_pointer(x->surface, x->buffer_w, x->buffer_h, px, py)) break;
+            if (w->surface && surface_takes_pointer(w->surface, w->buffer_w, w->buffer_h, wx, wy)) break;
             continue;
         }
         for (i = n - 1; i >= 0; --i) {
             struct bc_xdg *c = at[i].sub;
             if (at[i].above != (pass == 0) || c->surface == NULL) continue;
-            if (surface_takes_pointer(c->surface, c->buffer_w, c->buffer_h, px - at[i].x, py - at[i].y)) {
-                *lx = px - at[i].x;
-                *ly = py - at[i].y;
+            if (surface_takes_pointer(c->surface, c->buffer_w, c->buffer_h, wx - at[i].x, wy - at[i].y)) {
+                *lx = wx - at[i].x;
+                *ly = wy - at[i].y;
                 return c->surface;
             }
         }
     }
-    *lx = px;
-    *ly = py;
-    return x->surface;
+    *lx = wx;
+    *ly = wy;
+    return w->surface;
 }
 
-/* A surface's origin in its toplevel's pixels (the toplevel's is 0, 0). */
+/* The surface under (px, py), the top-level's surface pixels: its popups
+   first, at any depth, the deepest one the point is in (a submenu over its
+   menu), and in that popup its own tree; else the top-level's tree. */
+static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, double px,
+                                         double py, double *lx, double *ly)
+{
+    struct bc_xdg *p, *best = NULL;
+    double bx = 0, by = 0;
+    int best_depth = 0;
+    wl_list_for_each(p, &s->windows, link) {
+        double ox, oy;
+        const struct bc_xdg *top = p;
+        int depth;
+        if (!window_is_popup(p) || !p->mapped || !p->id || p->surface == NULL) continue;
+        while (window_is_popup(top) && top->parent) top = top->parent;
+        if (top != x) continue;
+        depth = xdg_origin(p, &ox, &oy);
+        if (px >= ox && py >= oy && px < ox + p->buffer_w && py < oy + p->buffer_h &&
+            depth >= best_depth) {
+            best = p;
+            best_depth = depth;
+            bx = ox;
+            by = oy;
+        }
+    }
+    if (best) return tree_target(best, px - bx, py - by, lx, ly);
+    return tree_target(x, px, py, lx, ly);
+}
+
+/* Where the top-level's keys go: its deepest mapped popup that took a grab
+   (a submenu over its menu), else the top-level itself. */
+static struct bc_surface *keyboard_target(struct bc_server *s, struct bc_xdg *x)
+{
+    struct bc_xdg *p;
+    struct bc_surface *best = x->surface;
+    int best_depth = 0;
+    wl_list_for_each(p, &s->windows, link) {
+        const struct bc_xdg *top = p;
+        double ox, oy;
+        int depth;
+        if (!window_is_popup(p) || !p->grabbed || !p->mapped || !p->id || p->surface == NULL) continue;
+        while (window_is_popup(top) && top->parent) top = top->parent;
+        if (top != x) continue;
+        depth = xdg_origin(p, &ox, &oy);
+        if (depth > best_depth) {
+            best = p->surface;
+            best_depth = depth;
+        }
+    }
+    return best;
+}
+
+/* A surface's origin in its toplevel's pixels (the toplevel's is 0, 0): a
+   popup's down its chain, a subsurface's its offset in the window it is
+   flattened onto plus that window's. */
 static void surface_origin(struct bc_surface *surface, double *ox, double *oy)
 {
-    struct bc_xdg *p = surface->xdg;
     *ox = *oy = 0;
     if (surface->sub) {
         int32_t sx = 0, sy = 0;
-        if (sub_root(surface->sub, &sx, &sy)) {
-            *ox = sx;
-            *oy = sy;
+        struct bc_xdg *root = sub_root(surface->sub, &sx, &sy);
+        if (root) {
+            xdg_origin(root, ox, oy);
+            *ox += sx;
+            *oy += sy;
         }
         return;
     }
-    if (window_is_popup(p) && p->parent) {
-        *ox = p->parent->gx + p->px - p->gx;
-        *oy = p->parent->gy + p->py - p->gy;
-    }
+    if (surface->xdg) xdg_origin(surface->xdg, ox, oy);
 }
 
 static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly)
@@ -5166,7 +5232,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
     case BC_INPUT_KEY: {
         uint32_t bit = 1u << (in.code % 8);
         int down = (s->keys_down[in.code / 8] & bit) != 0;
-        keyboard_focus(s, x->surface);
+        keyboard_focus(s, keyboard_target(s, x));
         if (in.pressed == down) return;  /* a release of a key never pressed here */
         if (in.pressed) s->keys_down[in.code / 8] |= (unsigned char)bit;
         else s->keys_down[in.code / 8] &= (unsigned char)~bit;
@@ -9090,10 +9156,10 @@ static void reannounce(struct bc_server *s)
         if (x->hidden) bc_wire_line(w, "WINDOW hide %u", x->id);
         ++windows;
     }
-    /* Each top-level's subsurfaces, after its popups. */
+    /* Each top-level's and popup's subsurfaces, after the popups. */
     wl_list_for_each(x, &s->windows, link) x->sub_shown = x->subsurface ? 0 : x->sub_shown;
     wl_list_for_each_reverse(x, &s->windows, link)
-        if (window_is_toplevel(x) && x->id) windows += subs_show(x, NULL, 0);
+        if ((window_is_toplevel(x) || window_is_popup(x)) && x->id) windows += subs_show(x, NULL, 0);
     /* Each shown window's newest frame. */
     wl_list_for_each_reverse(x, &s->windows, link)
         if (x->id && x->mapped && (!x->subsurface || x->sub_shown)) {
