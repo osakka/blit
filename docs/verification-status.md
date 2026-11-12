@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.88 the desktop's displays, X's layout and primary (Hibr #514)
+
+- **Displays:** `WINDOW layout <name> <x> <y> <w> <h> <mHz>` and `WINDOW
+  layout end` give one `wl_output` per display at its place (with
+  `zxdg_output_manager_v1`); `WINDOW output` takes the display's name, so
+  two displays of one mode are told apart. X's layout mirrors the
+  displays: the root is their union, an X window stays inside its display
+  and follows it, a full-screen one goes to its display's origin.
+  `WINDOW primary <name>` is X's RandR primary (re-set after Xwayland
+  restarts), so games size themselves to the display the desktop's Full
+  Screen On setting names (Hibr 0.99.497). A desktop that sends no layout
+  gets the earlier behaviour.
+- **Suites:** the build environment, the tagged commit: `compositor_gate`
+  (layout, named output), `xwayland_gate` (RandR monitors and primary,
+  placement, full screen, displays swapped, restart), both with ASan/UBSan;
+  gcc `-Wall -Wextra` clean; `package_artifact_gate`. This host: `all` 187
+  pass, 13 skip (`compositor_gate` skipped for the missing
+  libxcb-randr0-dev, installed after; it then passed here), `renderer` 82
+  pass, `renderer-gles` 62 pass; `documentation_gate`.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.87 the system linker links; Blit's crash backtrace
 
 - **Hardening:** tcc compiles, the system linker links (`tools/tcc-link.sh`):
