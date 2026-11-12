@@ -142,6 +142,8 @@ struct bc_output {
     char name[BC_NAME_BYTES + 1];     /* wl_output's and xdg_output's name, so X's */
     int laid;                         /* a display of the desktop's layout */
     int named;                        /* named by the set being applied */
+    int follow;                       /* moved or resized by it: its X windows follow */
+    int32_t from_x, from_y;           /* its place before that */
     struct wl_event_source *destroy;  /* removed: its global destroyed after BC_OUTPUT_LINGER_MS */
 };
 
@@ -3512,8 +3514,10 @@ static void layout_end(struct bc_server *s)
             changed = 1;
         } else if (o->x != d->x || o->y != d->y || o->width != d->width || o->height != d->height ||
                    o->refresh_mhz != d->refresh_mhz) {
-            int32_t from_x = o->x, from_y = o->y;
             int moved = o->x != d->x || o->y != d->y;
+            o->follow = 1;
+            o->from_x = o->x;
+            o->from_y = o->y;
             o->x = d->x;
             o->y = d->y;
             o->width = d->width;
@@ -3522,9 +3526,6 @@ static void layout_end(struct bc_server *s)
             output_changed(o, moved);
             logf_("display %s: %dx%d at %d,%d, %u mHz", d->name, d->width, d->height, d->x, d->y,
                   d->refresh_mhz);
-            /* Its X windows with it. */
-            wl_list_for_each(x, &s->windows, link)
-                if (x->output == o && x->xwin && !x->xpopup) x_follow(x, from_x, from_y);
             changed = 1;
         }
         wl_list_remove(&o->link);
@@ -3546,6 +3547,14 @@ static void layout_end(struct bc_server *s)
     wl_list_for_each(o, &s->outputs, link) {
         if (o->x + o->width > s->layout_w) s->layout_w = o->x + o->width;
         if (o->y + o->height > s->layout_h) s->layout_h = o->y + o->height;
+    }
+    /* The X windows of a display moved or resized with it, inside the new
+       extent. */
+    wl_list_for_each(o, &s->outputs, link) {
+        if (!o->follow) continue;
+        o->follow = 0;
+        wl_list_for_each(x, &s->windows, link)
+            if (x->output == o && x->xwin && !x->xpopup) x_follow(x, o->from_x, o->from_y);
     }
     /* The windows of the displays gone, to the primary; their globals are
        destroyed a moment later. */
