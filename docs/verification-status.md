@@ -9,6 +9,25 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.90 a keyboard's repeat period is state; a configuration sent back as read is accepted
+
+- **Input devices:** `repeat_period_ms`, the period the kernel holds, is
+  reported in the device's `state`, not its `configuration`. A
+  configuration holds only what may be written, as Blit refuses
+  against; carrying the period, a configuration sent back as read had
+  the device's whole entry refused, and a settings document saved by
+  the Blit control panel lost every keyboard setting while the PUT
+  answered 200 (found writing the Blit Keyboard pane, pane 0.1.30).
+- **Suites:** the build environment, the tagged commit: `compositor_gate`,
+  `xwayland_gate` (ASan/UBSan), `package_artifact_gate`. This host:
+  `keyboard_settings_gate` (the period from state, configuration without
+  it, a configuration sent back as read answered 200); `all` 188 pass,
+  12 skip; `renderer` 82 pass; `renderer-gles` 62 pass;
+  `api_schema_gate`, `documentation_gate`. The Blit pane's
+  `blit_keyboard_gate`, `blit_mouse_gate`, `blit_panel_gate` and
+  `blit_ui_gate` against this server.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.89 kitty keyboard flag 16, the text a key types
 
 - **Keyboard:** kitty flag 16, report associated text (with flag 8): a
