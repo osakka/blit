@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-12: 0.3.95 the desktop's shortcuts kept from programs; no X focus fight
+
+- **INPUT keep:** the desktop names its shortcuts on its channel and Blit
+  withholds them from program windows (press, repeats, release); the
+  owner saw F10, Alt+W and Alt+Tab act in the program as well. `KEYBOARD
+  reserved` gives the desktop Blit's own chords (console switch, stop
+  chord) for its clash check. Hibr sends them from 0.99.505.
+- **X focus:** with no X window activated, an X program that takes X's
+  focus keeps it (it routes no keys) and asks once. Steam had been
+  fighting the compositor about twenty times a second (36,714 put-backs
+  in the owner's log), CPU spent through dragging and everything else.
+  The drag itself was Hibr's: a dragged window's route stayed on since
+  0.99.492; Hibr 0.99.505 takes it off and gates it.
+- **Suites:** the build environment, the tagged commit: `compositor_gate`
+  and `xwayland_gate` (its new keeper case; it first failed on the gate's
+  own expectation of the lines' order, fixed in the gate), both
+  ASan/UBSan; `package_artifact_gate`. This host: `frame_input_gate`
+  (keep and reserved); gcc no new warnings; `all` 188 pass, 12 skip;
+  `renderer` 81 pass and `kms_frame_timing_gate` failed once while the
+  Blit pane was signed and checked beside it (40 against 58 fps), then
+  passed 3 of 3 alone; `renderer-gles` 62 pass.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.94 keyboards on the frame channel; dead keys and compose (ADR 0231 step 3)
 
 - **Keyboards for a desktop without the API token:** `KEYBOARD list`
