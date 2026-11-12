@@ -1697,9 +1697,16 @@ def desktop_part(compositor, standin, work):
                      'STANDIN seat capabilities 3', 'STANDIN seat name seat0',
                      'STANDIN output geometry Blit blit-compositor', 'STANDIN output scale 1',
                      'STANDIN output name BLIT-1', 'STANDIN output mode 1920x1080\n',
-                     'STANDIN capabilities 2 3 4\n', 'STANDIN enter BLIT-1 1920x1080@60000\n',
-                     'STANDIN done draws=6 releases=6 frames=5'):
+                     'STANDIN capabilities 2 3 4\n', 'STANDIN enter BLIT-1 1920x1080@60000\n'):
             check(want in output, 'the stand-in did not print %r:\n%s' % (want, output))
+        # Six draws, each released; their frame callbacks answered, but the
+        # popup's last one maybe not: callbacks are answered at the next
+        # refresh, and the popup is closed as soon as its moved frame
+        # arrives, so it can go first (its callback destroyed with it).
+        # Every frame being presented is the check above (presented=6).
+        check('STANDIN done draws=6 releases=6 frames=6' in output or
+              'STANDIN done draws=6 releases=6 frames=5' in output,
+              lambda: 'the stand-in\'s counts:\n' + output)
         check(sorted(desk.input_socks) == [1, 3], 'INPUT sock for the toplevels only: %s' % desk.input_socks)
         # The output is the display's, never a window's size.
         check('STANDIN output mode 320x200' not in output and 'STANDIN output mode 500x300' not in output,
