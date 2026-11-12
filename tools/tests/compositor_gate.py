@@ -316,8 +316,10 @@ def appmenu_part(desk, standin, env, display, work, log):
         desk.nothing(0.3)
         check('appmenu: an address that is not D-Bus syntax is ignored' in open(log).read(),
               'the address that is not D-Bus syntax was not noted')
-        desk.send('WINDOW size 12 200 120')
-        desk.frame(200, 120, image_id=12)
+        # A new size (the same one is no configure since 0.3.87): the
+        # stand-in releases its address at its next configure.
+        desk.send('WINDOW size 12 210 120')
+        desk.frame(210, 120, image_id=12)
         desk.line('WINDOW appmenu 12 - -')
         desk.send('WINDOW close 12')
         desk.line('WINDOW gone 12')
@@ -610,6 +612,8 @@ def sub_part(desk, standin, env, display, work):
             desk.line(want)
         desk.frame(256, 160, image_id=7)
         # 1: synchronized. The parent's frame, then nothing while the
+        # Each step's nudge is a new size: the same one is no configure
+        # (0.3.87), and the stand-in moves on at each configure.
         # subsurface's commit is only cached, then the line and its frame.
         desk.send('WINDOW size 7 200 120')
         desk.frame(200, 120, image_id=7)
@@ -620,8 +624,8 @@ def sub_part(desk, standin, env, display, work):
         wait_for(lambda: 'STANDIN sub step 1' in printed(), lambda: 'no sub step 1:\n' + printed())
         # 2: desynchronized. Its new size and frame at once, at the old
         # position; the new position only at the parent's commit.
-        desk.send('WINDOW size 7 200 120')
-        desk.frame(200, 120, image_id=7)
+        desk.send('WINDOW size 7 202 120')
+        desk.frame(202, 120, image_id=7)
         desk.line('WINDOW sub 8 7 20 30 48 24 above')
         desk.frame(48, 24, image_id=8)
         desk.line('WINDOW sub 8 7 40 10 48 24 above')
@@ -647,8 +651,8 @@ def sub_part(desk, standin, env, display, work):
         desk.nothing(0.3)
         pointer(45, 15, 'pointer enter main 45.00 15.00')
         # 4: the whole surface again: the subsurface has it, in its pixels.
-        desk.send('WINDOW size 7 200 120')
-        desk.frame(200, 120, image_id=7)
+        desk.send('WINDOW size 7 202 120')
+        desk.frame(202, 120, image_id=7)
         wait_for(lambda: 'STANDIN sub step 4' in printed(), lambda: 'no sub step 4:\n' + printed())
         pointer(46, 16, 'pointer leave main', 'pointer enter sub 6.00 6.00')
         # 5: below the parent: `below`, and the parent over it has the pointer.
@@ -658,8 +662,8 @@ def sub_part(desk, standin, env, display, work):
         wait_for(lambda: 'STANDIN sub step 5' in printed(), lambda: 'no sub step 5:\n' + printed())
         pointer(47, 17, 'pointer leave sub', 'pointer enter main 47.00 17.00')
         # 6: the wl_subsurface destroyed: its picture gone at once.
-        desk.send('WINDOW size 7 200 120')
-        desk.frame(200, 120, image_id=7)
+        desk.send('WINDOW size 7 202 120')
+        desk.frame(202, 120, image_id=7)
         desk.line('WINDOW gone 8')
         wait_for(lambda: 'STANDIN sub step 6' in printed(), lambda: 'no sub step 6:\n' + printed())
         desk.send('WINDOW close 7')
