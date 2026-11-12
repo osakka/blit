@@ -198,7 +198,7 @@ verdict('repeat-is-reported-only-where-the-kernel-autorepeats') do
   check(keyboard.fetch('capabilities', []).include?('repeat'),
         "the keyboard reports EV_REP, got #{keyboard['capabilities'].inspect}")
   check(keyboard.dig('configuration', 'repeat_delay_ms') == 250 &&
-        keyboard.dig('configuration', 'repeat_period_ms') == 33 &&
+        keyboard.dig('state', 'repeat_period_ms') == 33 &&
         keyboard.dig('configuration', 'repeat_rate_hz') == 30,
         'and what the kernel has, with the rate derived from the period, got ' \
         "#{keyboard['configuration'].inspect}")
@@ -220,16 +220,22 @@ verdict('a-rate-is-quantised-to-the-period-and-the-read-back-is-reported') do
   configuration = patched.to_h.fetch('configuration', {})
   check(configuration['repeat_delay_ms'] == 400,
         "the delay is kept exactly, got #{configuration['repeat_delay_ms'].inspect}")
-  check(configuration['repeat_period_ms'] == 50,
-        "20 Hz is a 50 ms period, got #{configuration['repeat_period_ms'].inspect}")
+  check(patched.to_h.dig('state', 'repeat_period_ms') == 50,
+        "20 Hz is a 50 ms period, got #{patched.to_h.dig('state', 'repeat_period_ms').inspect}")
+  check(!configuration.key?('repeat_period_ms'),
+        "the period is a reading, in state, not configuration: #{configuration.inspect}")
+  # configuration is exactly what may be written: sent back as read, it is
+  # accepted (it carried the read-only period before 0.3.90 and was refused).
+  code, echoed = configure(KEYBOARD, configuration)
+  check(code == 200, "a configuration sent back as read -> #{code} #{echoed.inspect}")
   check(configuration['repeat_rate_hz'] == 20,
         "which reads back as 20 Hz, got #{configuration['repeat_rate_hz'].inspect}")
   # 7 Hz is 142.857 ms, which the kernel can only hold as 142 -- so the
   # read-back is 7 Hz again, and a request of 3 Hz is 333 ms and reads back as
   # 3. The point of reporting the read-back is that the two can differ.
   _, odd = configure(KEYBOARD, { 'repeat_rate_hz' => 7 })
-  check(odd.to_h.dig('configuration', 'repeat_period_ms') == 142,
-        "7 Hz is a 142 ms period, got #{odd.to_h.dig('configuration', 'repeat_period_ms').inspect}")
+  check(odd.to_h.dig('state', 'repeat_period_ms') == 142,
+        "7 Hz is a 142 ms period, got #{odd.to_h.dig('state', 'repeat_period_ms').inspect}")
   check(odd.to_h.dig('configuration', 'repeat_rate_hz') == 7,
         'and reads back as 7 Hz')
   [[{ 'repeat_delay_ms' => 5 }, 'a delay below the floor'],
@@ -355,7 +361,7 @@ verdict('keyboard-settings-survive-a-restart') do
   configuration = device(KEYBOARD).to_h.fetch('configuration', {})
   check(configuration['repeat_delay_ms'] == 300 &&
         configuration['repeat_rate_hz'] == 25 &&
-        configuration['repeat_period_ms'] == 40,
+        device(KEYBOARD).to_h.dig('state', 'repeat_period_ms') == 40,
         "and it is in force again after a restart, got #{configuration.inspect}")
   check(configuration['caps_lock_boot'] == true &&
         configuration['num_lock_boot'] == false,

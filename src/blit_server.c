@@ -6840,6 +6840,14 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
     if (device->kinds & BLIT_INPUT_KIND_KEYBOARD)
         complete &= json_appendf(body, capacity, &used,
             ",\"events\":%llu,\"keys\":%llu", device->events, device->keys);
+    /* The repeat period the kernel holds is a reading, not a setting:
+       configuration carries only what may be written back, so a controller
+       that returns a device's configuration as it read it is not refused. */
+    if (input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD) &&
+        (device->capabilities & BLIT_INPUT_CAP_REPEAT) &&
+        device->repeat_period_ms > 0)
+        complete &= json_appendf(body, capacity, &used,
+            ",\"repeat_period_ms\":%d", device->repeat_period_ms);
     if (device->kinds & BLIT_INPUT_KIND_POINTER)
         complete &= json_appendf(body, capacity, &used,
             ",\"pointer_events\":%llu,\"pointer_syncs\":%llu,"
@@ -6910,16 +6918,15 @@ static size_t input_device_item_json(const BlitRuntime *runtime,
        where the kernel autorepeats -- a device without EV_REP has no rate to
        show and none to set (issue #66) -- and the values are what the last
        read from the kernel found, not what Blit last asked for: the rate is
-       quantised to a whole-millisecond period on the way in. */
+       quantised to a whole-millisecond period on the way in (the period
+       itself is in state). */
     if (input_device_supports(device, BLIT_INPUT_KIND_KEYBOARD)) {
         if ((device->capabilities & BLIT_INPUT_CAP_REPEAT) &&
             device->repeat_period_ms > 0)
             complete &= json_appendf(body, capacity, &used,
-                ",\"repeat_delay_ms\":%d,\"repeat_rate_hz\":%d,"
-                "\"repeat_period_ms\":%d",
+                ",\"repeat_delay_ms\":%d,\"repeat_rate_hz\":%d",
                 device->repeat_delay_ms,
-                input_repeat_rate_for_period(device->repeat_period_ms),
-                device->repeat_period_ms);
+                input_repeat_rate_for_period(device->repeat_period_ms));
         if (device->caps_lock_boot >= 0)
             complete &= json_appendf(body, capacity, &used,
                 ",\"caps_lock_boot\":%s",

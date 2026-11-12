@@ -68,9 +68,9 @@ keyboards.each do |keyboard|
                   configuration.fetch('repeat_rate_hz')]
   puts format('  %-50s delay=%4d ms period=%3d ms rate=%3d Hz', id,
               configuration.fetch('repeat_delay_ms'),
-              configuration.fetch('repeat_period_ms'),
+              keyboard.fetch('state').fetch('repeat_period_ms'),
               configuration.fetch('repeat_rate_hz'))
-  check(configuration.fetch('repeat_period_ms') > 0,
+  check(keyboard.fetch('state').fetch('repeat_period_ms') > 0,
         "#{id} reports a period the kernel actually holds")
 end
 
@@ -87,12 +87,12 @@ subject = keyboards.first.fetch('id')
   configuration = patched.fetch('configuration')
   puts format('  set delay=%4d rate=%3d -> kernel delay=%4d period=%3d rate=%3d',
               delay, rate, configuration.fetch('repeat_delay_ms'),
-              configuration.fetch('repeat_period_ms'),
+              patched.fetch('state').fetch('repeat_period_ms'),
               configuration.fetch('repeat_rate_hz'))
   check(configuration.fetch('repeat_delay_ms') == delay,
         "the kernel took the delay exactly, got #{configuration['repeat_delay_ms']}")
-  check(configuration.fetch('repeat_period_ms') == period,
-        "#{rate} Hz is a #{period} ms period, got #{configuration['repeat_period_ms']}")
+  check(patched.fetch('state').fetch('repeat_period_ms') == period,
+        "#{rate} Hz is a #{period} ms period, got #{patched['state']['repeat_period_ms']}")
 end
 
 # A refusal where the hardware has no repeat to set.

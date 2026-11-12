@@ -1659,7 +1659,6 @@ survive a release):
 |---|---|
 | `repeat_delay_ms` | how long a key is held before it repeats |
 | `repeat_rate_hz` | how many repeats a second |
-| `repeat_period_ms` | read-only; the period the kernel actually holds |
 | `caps_lock_boot`, `num_lock_boot` | the lock states to apply when the device opens |
 | `modifiers` | a sparse map from evdev code to the role that code plays |
 | `keymap` | a sparse map from evdev code to the characters it types |
@@ -1670,7 +1669,11 @@ the hardware is doing and not what Blit last asked for. That distinction is
 observable, because the kernel holds a period in whole milliseconds while a
 person adjusts a rate in hertz: 30 Hz is a 33 ms period and reads back as 30,
 but 7 Hz is 142.857 ms, which the kernel keeps as 142. Read the values back
-rather than assuming the request took.
+rather than assuming the request took. The period itself is a reading, so
+it is `state.repeat_period_ms`, not part of `configuration`: a device's
+`configuration` holds only what may be written, so a controller can send it
+back as it read it (before 0.3.90 the period sat in `configuration`, and a
+settings document that carried it back had that device's entry refused).
 
 Repeat applies only where the device's `capabilities` include `repeat`, which
 is EV_REP. A device the kernel does not autorepeat for has no rate to set, so
@@ -1694,7 +1697,8 @@ PATCH /v1/input/devices/{device_id}
   { "configuration": { "repeat_delay_ms": 250, "repeat_rate_hz": 30,
                        "num_lock_boot": true,
                        "modifiers": { "58": "control", "125": "none" } } }
-  -> read repeat_period_ms and repeat_rate_hz back from the response
+  -> read repeat_rate_hz back from configuration, and the period the kernel
+     holds from state.repeat_period_ms
 ```
 
 An empty `modifiers` object clears the map. Every property is per device: two

@@ -4591,6 +4591,15 @@ components:
             pointer_motion: {type: integer, minimum: 0}
             pointer_wheel: {type: integer, minimum: 0}
             pointer_buttons: {type: integer, minimum: 0}
+            repeat_period_ms:
+              type: integer
+              minimum: 1
+              description: >-
+                The repeat period the kernel holds, from which
+                `configuration.repeat_rate_hz` is derived; a keyboard that
+                repeats only. A reading, so not in `configuration` (before
+                0.3.90 it was, and a configuration sent back as read was
+                refused).
           additionalProperties: false
         configuration:
           type: object
@@ -4749,13 +4758,7 @@ components:
                 read-back can differ from the request: 30 Hz is a 33 ms
                 period, which reads back as 30 Hz, while 7 Hz is 142 ms. That
                 is why the read-back is what gets reported, and why
-                `repeat_period_ms` is reported beside it.
-            repeat_period_ms:
-              type: integer
-              minimum: 1
-              description: >-
-                Read-only. The period the kernel actually holds, from which
-                `repeat_rate_hz` is derived.
+                `state.repeat_period_ms` is reported with it.
             caps_lock_boot:
               type: boolean
               description: >-
