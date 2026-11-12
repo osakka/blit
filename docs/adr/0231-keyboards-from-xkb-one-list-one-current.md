@@ -1,6 +1,7 @@
 # ADR 0231: Keyboards from xkb: one list, one current keyboard
 
-- Status: proposed (needs the owner's OK: `blit` gains libxkbcommon)
+- Status: accepted (the owner's OK, 2026-11-12); implementing in three
+  releases (below)
 - Date: 2026-11-12
 - Scope: what a key types, everywhere Blit delivers it (terminals through
   the kitty and legacy encoders, Wayland programs through blit-compositor's
@@ -27,7 +28,8 @@ The owner wants:
 - a Keyboard pane that lists whatever there is, with no Blit release for a
   new language.
 
-The owner types in English and Arabic.
+The owner types US on both machines; the first non-US case is phonetic
+Arabic, letter by letter (`ara(mac-phonetic)`), which the owner chose.
 
 ## Options considered
 
@@ -54,14 +56,21 @@ Option 3.
   its own `xkb_keymap`. Blit does not use xkb groups, because libxkbcommon
   1.7 caps a keymap at 4 of them; switching keyboards swaps whole keymaps
   instead, so the list has no length limit.
-- **The current keyboard.** There is one current keyboard per seat, not per
-  device and not per window. Blit holds it; `keyboard <index>` on the input
+- **The current keyboard.** There is one current keyboard (one keymap) per
+  seat, not per device and not per window. Modifier and lock state stays
+  per device, as now (each keyboard has its own `xkb_state` on the shared
+  keymap), so Shift on one keyboard does not shift another. Blit holds it; `keyboard <index>` on the input
   route, or the API, sets it. If someone wants each window to remember its
   own keyboard, the desktop sets the current keyboard when focus changes,
   and Blit still holds only one.
-- **One source of what a key types.** `xkb_state_key_get_utf8` replaces
-  `evdev_key_character` and the US tables for the legacy encoder, kitty
-  flag 16's text and the input stream's text. The kitty key code is the
+- **One source of what a key types.** The keysym the device's state gives
+  a key, as UTF-32 (`xkb_keysym_to_utf32`, not `xkb_state_key_get_utf8`,
+  which applies the Control transformation), replaces
+  `evdev_key_character` for the legacy encoder, kitty flag 16's text and
+  the input stream's text. A chord's bytes (Ctrl+C is 0x03) come from the
+  base key, the US key at that position, so Ctrl+C is 0x03 under Arabic
+  too. Keypad and functional keys keep Blit's own kitty codes; only text
+  keys take their code from the keymap. The kitty key code is the
   keymap's level-1 symbol; flag 4's base key stays the US PC-101 key at
   the same position, as now, so shortcuts are the same in every layout. Dead keys and
   compose come from `xkb_compose` with the locale's table. The
@@ -69,10 +78,28 @@ Option 3.
   (`xkb_keymap_get_as_string`), not one generated from Blit's tables.
   Switching keyboards sends Wayland programs a new keymap and moves
   Xwayland with them.
+- **One source of modifier and lock state.** Blit's per-device
+  `xkb_state` is it. The modifier roles are applied as a translation of
+  the physical code to the role's own code (Caps Lock as Control becomes
+  Left Control) before the state sees it, counted so two keys holding one
+  modifier release it with the last. The compositor stops keeping its own
+  state: Blit sends `INPUT modifiers <id> <depressed> <latched> <locked>
+  <group>` on the route, so Num Lock at Start and a lock held across a
+  keyboard switch reach Wayland and X programs (before this they did not:
+  the compositor's state started with no locks).
+- **The layout decides Right Alt.** Blit treated Right Alt as AltGr
+  always; under xkb it is what the layout says (Alt in `us`, AltGr in
+  layouts that have a third level).
+- **xkb options are not offered yet.** An option can remap a modifier,
+  which is a second way to say what a role says; that is decided before
+  any option is offered.
 - **The device `keymap` overrides go.** A per-key override is what an xkb
   option or a user's own symbols file says, so the field is removed rather
   than kept beside the list. The `modifiers` role map and repeat stay per
-  device: they describe the hardware, not the language.
+  device: they describe the hardware, not the language. A stored `keymap`
+  is removed from the settings document when it is loaded (logged with
+  the device), not kept as an unknown property: kept, every later save
+  would carry it back and have the device's entry refused.
 - **Modular by data.** The pane lists what the system's xkb rules say
   exists (`evdev.xml`). A user's own layouts in `~/.config/xkb` are found
   the same way, if the libxkbcommon in use reads that path; this is
@@ -85,6 +112,18 @@ Option 3.
   the Switch Layout action in its shortcut table (Hibr #518) all set Blit's
   one current keyboard, and all show it. The login and lock screens show it
   and can switch it, because passwords are typed there.
+
+## Releases
+
+1. xkb for `us`: text, chords, the kitty codes, role translation, the
+   modifiers line, the served keymap from xkb, the `keymap` property
+   removed. `us` was compared with Blit's table for every key and level:
+   every printable key is the same; the key beside Left Shift on ISO
+   keyboards (KEY_102ND) now types `<` and `>`; Right Alt is Alt.
+2. The list, the current keyboard and switching, with the API, the Blit
+   Keyboard pane's list and the desktop's switchers (Hibr).
+3. Dead keys and compose, with the compose table's locale chosen
+   explicitly (Blit runs with no LANG).
 
 ## Consequences
 
