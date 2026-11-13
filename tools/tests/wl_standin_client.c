@@ -119,9 +119,10 @@
    pointer frame` and, from zwp_relative_pointer_v1 when it is offered,
    `STANDIN relative <dx> <dy>`.
 
-   With --text-input (or --text-input-password), it takes a
-   zwp_text_input_v3 for its seat and, on its enter, enables it (of the
-   normal, or the password, purpose) and commits: a text field with the
+   With --text-input (or --text-input-password, --text-input-phone,
+   --text-input-sensitive), it takes a zwp_text_input_v3 for its seat and,
+   on its enter, enables it (of the normal, the password or the phone
+   purpose, or normal hinted sensitive data) and commits: a text field with the
    focus. It prints `STANDIN ti enter|leave`, `STANDIN ti preedit <text>`
    (`-` for none), `STANDIN ti commit <text>` and `STANDIN ti done
    <serial>` (ADR 0233).
@@ -135,6 +136,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <stdint.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -237,6 +239,7 @@ struct standin {
     struct xdg_activation_v1 *activation;
     /* --cursor */
     int cursor;
+    int hang;                         /* --hang: H stops it until SIGUSR1 (ADR 0235) */
     struct wp_cursor_shape_manager_v1 *shape_manager;
     struct wp_cursor_shape_device_v1 *shape_device;
     struct wl_surface *cursor_surface;
@@ -878,6 +881,19 @@ static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uin
     struct standin *s = data;
     (void)k; (void)time;
     printf("STANDIN key %u %u\n", key, state);
+    if (s->hang && key == 35 && state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        /* A program that stops answering: nothing is read or answered --
+           pings included -- until the gate's SIGUSR1. */
+        sigset_t usr1;
+        int got;
+        sigemptyset(&usr1);
+        sigaddset(&usr1, SIGUSR1);
+        printf("STANDIN hang\n");
+        fflush(stdout);
+        sigwait(&usr1, &got);
+        printf("STANDIN resume\n");
+        fflush(stdout);
+    }
     if (s->gone_on_ctrl_d && !s->gone && key == 32 && state == WL_KEYBOARD_KEY_STATE_PRESSED &&
         (s->mods_dep & 4u)) {
         /* Its window goes with Ctrl and D still down; the client stays
@@ -1295,8 +1311,11 @@ static void ti_enter(void *data, struct zwp_text_input_v3 *ti, struct wl_surface
     (void)surface;
     printf("STANDIN ti enter\n");
     zwp_text_input_v3_enable(ti);
-    zwp_text_input_v3_set_content_type(ti, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
-                                       s->text_input == 2 ? ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD
+    zwp_text_input_v3_set_content_type(ti,
+                                       s->text_input == 4 ? ZWP_TEXT_INPUT_V3_CONTENT_HINT_SENSITIVE_DATA
+                                                          : ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+                                       s->text_input == 2 ? ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD :
+                                       s->text_input == 3 ? ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PHONE
                                                           : ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
     zwp_text_input_v3_commit(ti);
 }
@@ -1619,6 +1638,14 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
         else if (strcmp(argv[i], "--cursor") == 0) s.cursor = 1;
+        else if (strcmp(argv[i], "--hang") == 0) {
+            /* SIGUSR1 kept for sigwait, from the start. */
+            sigset_t usr1;
+            sigemptyset(&usr1);
+            sigaddset(&usr1, SIGUSR1);
+            sigprocmask(SIG_BLOCK, &usr1, NULL);
+            s.hang = 1;
+        }
         else if (strcmp(argv[i], "--appmenu") == 0) s.appmenu_mode = 1;
         else if (strcmp(argv[i], "--activate") == 0) s.activate_mode = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
@@ -1627,6 +1654,8 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;
         else if (strcmp(argv[i], "--text-input-password") == 0) s.text_input = 2;
+        else if (strcmp(argv[i], "--text-input-phone") == 0) s.text_input = 3;
+        else if (strcmp(argv[i], "--text-input-sensitive") == 0) s.text_input = 4;
         else if (strcmp(argv[i], "--animate") == 0 && i + 1 < argc) s.animate = atoi(argv[++i]);
         else title = argv[i];
     }

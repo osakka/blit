@@ -9,6 +9,15 @@
 #include "blit_pointer_names.h"
 
 #define BLIT_POINTER_MAX 264   /* a shake grows the pointer to 256 px (ADR 0234) */
+#define BLIT_POINTER_SPOKES 12 /* the busy pointer's spokes (ADR 0235) */
+#define BLIT_POINTER_SHAPE_BUSY 4
+/* The busy pointer's spokes, clockwise from 12 o'clock: unit directions
+   (sin, -cos) of k * 30 degrees, constants so the art needs no libm. */
+static const float blit_pointer_spoke_dir[BLIT_POINTER_SPOKES][2] = {
+    {0.0f, -1.0f}, {0.5f, -0.8660254f}, {0.8660254f, -0.5f}, {1.0f, 0.0f},
+    {0.8660254f, 0.5f}, {0.5f, 0.8660254f}, {0.0f, 1.0f}, {-0.5f, 0.8660254f},
+    {-0.8660254f, 0.5f}, {-1.0f, 0.0f}, {-0.8660254f, -0.5f}, {-0.5f, -0.8660254f}
+};
 typedef struct {
     int shape;                 /* index into blit_pointer_shapes */
     int palette;               /* pearl, obsidian, neon, amber */
@@ -32,6 +41,16 @@ static const char *const blit_pointer_shapes[] = {
 #define BLIT_POINTER_SHAPE_COUNT 11
 #define BLIT_POINTER_API_SHAPES 3
 static const char *const blit_pointer_palettes[] = {"pearl", "obsidian", "neon", "amber"};
+
+/* One sequence for every piece of pointer art, so two arts never share a
+   revision: the display and the GLES texture cache take an equal revision
+   for the same picture, and the busy pointer hands them the shown art and
+   its spun copy in turn (ADR 0235). */
+static unsigned long long blit_pointer_next_revision(void)
+{
+    static unsigned long long revision;
+    return ++revision;
+}
 
 static BlitPointerConfig blit_pointer_default(void)
 {
@@ -103,13 +122,15 @@ static float blit_pointer_distance(int shape, float x, float y)
         return d;
     }
     if (shape == 4) {
-        static const float glass[][2] = {
-            {9, 5}, {23, 5}, {23, 8}, {17.5f, 16}, {23, 24}, {23, 27},
-            {9, 27}, {9, 24}, {14.5f, 16}, {9, 8}
-        };
-        d = blit_pointer_polygon(glass, 10, x, y);
-        BLIT_POINTER_MIN(d, blit_pointer_capsule(x, y, 7, 4, 25, 4, 1.6f));
-        BLIT_POINTER_MIN(d, blit_pointer_capsule(x, y, 7, 28, 25, 28, 1.6f));
+        /* Busy (wait, progress): a ring of BLIT_POINTER_SPOKES spokes about
+           the hotspot, drawn alike; blit_pointer_spin dims them in turn, so
+           it goes round. */
+        int k;
+        for (k = 0; k < BLIT_POINTER_SPOKES; ++k) {
+            float dx = blit_pointer_spoke_dir[k][0], dy = blit_pointer_spoke_dir[k][1];
+            BLIT_POINTER_MIN(d, blit_pointer_capsule(x, y, 16 + 6.0f * dx, 16 + 6.0f * dy,
+                                                     16 + 13.0f * dx, 16 + 13.0f * dy, 1.7f));
+        }
         return d;
     }
     if (shape >= 5 && shape <= 9) {
@@ -213,7 +234,7 @@ static int blit_pointer_sample(const BlitPointerConfig *config, float vx, float 
 static void blit_pointer_build(BlitPointerArt *art, BlitPointerConfig config)
 {
     static signed char band[(BLIT_POINTER_MAX + 1) * (BLIT_POINTER_MAX + 1)];
-    unsigned long long revision = art->revision + 1;
+    unsigned long long revision = blit_pointer_next_revision();
     int x, y, sx, sy, c, w;
     float scale;
     if (config.shape < 0 || config.shape >= BLIT_POINTER_SHAPE_COUNT || config.palette < 0 ||
@@ -268,7 +289,7 @@ static void blit_pointer_build(BlitPointerArt *art, BlitPointerConfig config)
 static void blit_pointer_resample(BlitPointerArt *art, const BlitPointerArt *master, int size)
 {
     BlitPointerConfig config = master->config;
-    unsigned long long revision = art->revision + 1;
+    unsigned long long revision = blit_pointer_next_revision();
     float r, scale;
     int x, y;
     if (size < 24 || size > master->config.size) return;
@@ -309,4 +330,37 @@ static uint32_t blit_pointer_blend(uint32_t background, const unsigned char *rgb
            (((rgba[1] * a + ((background >> 8) & 255) * inverse + 127) / 255) << 8) |
            ((rgba[2] * a + (background & 255) * inverse + 127) / 255);
 }
+/* ADR 0235: the busy pointer at `phase` (0 .. BLIT_POINTER_SPOKES - 1):
+   `base`, the ring with every spoke alike, with each spoke dimmed by how
+   far it trails the lit one, so successive phases go round clockwise.
+   Geometry, hotspot and config are base's; only alpha changes, so a phase
+   costs a pass over the pixels, never a raster. */
+static void blit_pointer_spin(BlitPointerArt *art, const BlitPointerArt *base, int phase)
+{
+    static const unsigned char fade[BLIT_POINTER_SPOKES] = {
+        255, 222, 192, 166, 143, 124, 108, 94, 82, 72, 64, 58
+    };
+    unsigned long long revision = blit_pointer_next_revision();
+    float scale = (float)base->config.size / 32.0f, cx, cy;
+    int x, y;
+    memcpy(art, base, sizeof(*art) - sizeof(art->rgba));
+    art->revision = revision;
+    memcpy(art->rgba, base->rgba, (size_t)base->width * (size_t)base->height * 4);
+    cx = 16.0f * scale + 1;
+    cy = 16.0f * scale + 1;
+    for (y = 0; y < art->height; ++y) for (x = 0; x < art->width; ++x) {
+        unsigned char *px = art->rgba + (y * art->width + x) * 4;
+        float dx = x + 0.5f - cx, dy = y + 0.5f - cy, best = -1e30f;
+        int spoke = 0, behind, k;
+        if (px[3] == 0) continue;
+        /* The spoke the pixel lies along: the direction it is most along. */
+        for (k = 0; k < BLIT_POINTER_SPOKES; ++k) {
+            float along = dx * blit_pointer_spoke_dir[k][0] + dy * blit_pointer_spoke_dir[k][1];
+            if (along > best) { best = along; spoke = k; }
+        }
+        behind = ((phase - spoke) % BLIT_POINTER_SPOKES + BLIT_POINTER_SPOKES) % BLIT_POINTER_SPOKES;
+        px[3] = (unsigned char)((px[3] * fade[behind] + 127) / 255);
+    }
+}
+
 #endif

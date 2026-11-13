@@ -117,6 +117,7 @@ struct BlitFrameInput {
     double last_sent[2];
     unsigned int last_over;     /* the picture the pointer was over: the route's or a member's */
     unsigned long long keymap_told; /* the keymap revision this route was sent */
+    unsigned long long busy_told;   /* the busy settings' revision it was sent (ADR 0235) */
     const char *last_miss;
     BlitFrameMember members[BLIT_FRAME_INPUT_MEMBERS];
     int member_count;
@@ -597,6 +598,17 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
             frame_input_write(session, in, line, (size_t)n, -1);
         }
     }
+    /* ADR 0235: when a program counts as busy, `off` for never; sent when
+       the route goes live and when the setting changes. */
+    if (in->busy_told != runtime->busy_revision) {
+        BlitSession *session = find_session_id(runtime, client->session_id);
+        char line[64];
+        int n = runtime->busy_config.enabled ?
+            snprintf(line, sizeof(line), "INPUT busy %u %d\n", in->image_id, runtime->busy_config.after_ms) :
+            snprintf(line, sizeof(line), "INPUT busy %u off\n", in->image_id);
+        in->busy_told = runtime->busy_revision;
+        frame_input_write(session, in, line, (size_t)n, -1);
+    }
     return 1;
 }
 
@@ -1004,6 +1016,24 @@ static void frame_input_keymap_changed(BlitRuntime *runtime)
 {
     int i, k;
     ++runtime->keymap_revision;
+    if (!frame_input_routes)
+        return;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        if (!client->used)
+            continue;
+        for (k = 0; k < client->input_capacity; ++k)
+            if (client->inputs[k] != NULL)
+                frame_input_sync(runtime, client, client->inputs[k]);
+    }
+}
+
+/* The busy pointer's settings have changed (ADR 0235): told at once to
+   every live route, and to the others when they go live. */
+static void frame_input_busy_changed(BlitRuntime *runtime)
+{
+    int i, k;
+    ++runtime->busy_revision;
     if (!frame_input_routes)
         return;
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {

@@ -30,7 +30,8 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     initial=request('GET','/v1/settings')[1]
     # The shake settings (ADR 0234) are reported with their defaults too.
     expected={'shape'=>'arrow','palette'=>'pearl','size_px'=>24,'shadow'=>true,
-              'shake_to_find'=>true,'shake_max_px'=>160,'shake_sensitivity'=>5,'shake_shrink_ms'=>900}
+              'shake_to_find'=>true,'shake_max_px'=>160,'shake_sensitivity'=>5,'shake_shrink_ms'=>900,
+              'busy_pointer'=>true,'busy_after_ms'=>2000,'busy_spin_ms'=>1000}
     abort('POINTER_APPEARANCE_FAIL missing canonical defaults') unless initial.dig('effective','pointer')==expected
     nested=initial['document'].merge('extension'=>{'pointer'=>{'size_px'=>999}})
     code,reply=request('PUT','/v1/settings',{'document'=>nested},initial['revision'])
@@ -55,6 +56,7 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     invalid=[{'size_px'=>23},{'size_px'=>65},{'size_px'=>32.5},{'size_px'=>'32'},
              {'shape'=>'nope'},{'palette'=>'nope'},{'shadow'=>1},{'unknown'=>true},
              {'shake_max_px'=>63},{'shake_max_px'=>257},{'shake_sensitivity'=>0},{'shake_sensitivity'=>11},{'shake_to_find'=>1},{'shake_shrink_ms'=>149},{'shake_shrink_ms'=>3001},
+             {'busy_pointer'=>1},{'busy_after_ms'=>499},{'busy_after_ms'=>10001},{'busy_spin_ms'=>399},{'busy_spin_ms'=>3001},
              {'shape'=>"arrow\0suffix"},{'palette'=>"pearl\0suffix"},{"shape\0suffix"=>'arrow'},nil,[]]
     invalid.each do |bad|
       doc=initial['document'].merge('pointer'=>bad)
@@ -64,7 +66,8 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     end
     custom={'shape'=>'hand','palette'=>'neon','size_px'=>48,'shadow'=>false}
     # Effective adds the shake settings' defaults (ADR 0234); the document keeps what was sent.
-    custom_effective=custom.merge('shake_to_find'=>true,'shake_max_px'=>160,'shake_sensitivity'=>5,'shake_shrink_ms'=>900)
+    custom_effective=custom.merge('shake_to_find'=>true,'shake_max_px'=>160,'shake_sensitivity'=>5,'shake_shrink_ms'=>900,
+                                   'busy_pointer'=>true,'busy_after_ms'=>2000,'busy_spin_ms'=>1000)
     code,saved=request('PUT','/v1/settings',{'document'=>initial['document'].merge('pointer'=>custom)},initial['revision'])
     abort("POINTER_APPEARANCE_FAIL save:#{code}:#{saved}") unless code==200 && saved.dig('effective','pointer')==custom_effective && saved.dig('storage','state')=='clean'
     stale,_=request('PUT','/v1/settings',{'document'=>initial['document']},initial['revision'])

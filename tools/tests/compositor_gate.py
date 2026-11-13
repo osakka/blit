@@ -1272,7 +1272,10 @@ def ime_part(compositor, standin, work):
     pinned tag (BLIT_IME_DATA). Activated, the stand-in's field has the
     keyboard (enter, then enabled) before any key. "salam" then a space:
     each letter consumed, never a wl_keyboard key, with its preedit, and the
-    word committed as Arabic when the space comes. A chord (ctrl+a) commits
+    word committed as Arabic when the space comes. Only free text is the
+    method's (ADR 0233's one rule): a password, a phone field (where
+    Arabizi would turn digits into letters) and a field hinted sensitive
+    get their keys as keys, no preedit. A chord (ctrl+a) commits
     what is held and passes as keys. With the method off (`-`), keys reach
     the program as keys. A password field (--text-input-password) is never
     the method's. The person's own layer (hibr-ime's user root,
@@ -1285,7 +1288,7 @@ def ime_part(compositor, standin, work):
     check(os.path.isdir(os.path.join(ime_root, 'data', 'arabizi')), 'no hibr-ime checkout at ' + ime_root)
     keymap = us_keymap()
     results = []
-    for mode in ('--text-input', '--text-input-password'):
+    for mode in ('--text-input', '--text-input-password', '--text-input-phone', '--text-input-sensitive'):
         runtime = os.path.join(work, 'run-ime%s' % mode)
         os.mkdir(runtime, 0o700)
         name = 'blit-compositor-gate-ime-%d%s' % (os.getpid(), mode)
@@ -1382,11 +1385,11 @@ def ime_part(compositor, standin, work):
                                'chord=commit+pass off=keys')
             else:
                 wait_for(lambda: lines()[before:].count('STANDIN key 50 1') == 1,
-                         lambda: 'a password field did not get its keys:\n' + printed())
+                         lambda: 'a %s field did not get its keys' % mode + ':\n' + printed())
                 check(not any(l.startswith('STANDIN ti preedit ') and not l.endswith(' -')
                               for l in lines()[before:]),
-                      lambda: 'the method typed into a password field:\n' + printed())
-                results.append('password=keys,no-preedit')
+                      lambda: 'the method typed into a %s field' % mode + ':\n' + printed())
+                results.append(mode[len('--text-input-'):] + '=keys,no-preedit')
             route.close()
             desk.send('WINDOW close 1')
             desk.line('WINDOW gone 1')
@@ -1399,6 +1402,124 @@ def ime_part(compositor, standin, work):
                     p.wait()
             listener.close()
     return ' '.join(results)
+
+
+def busy_part(compositor, standin, work):
+    """ADR 0235: a program that stops answering is busy. The gate plays the
+    desktop and Blit's route, says `INPUT busy 1 1000`, and drives the
+    stand-in with --hang (H stops it reading anything, pings included,
+    until SIGUSR1). Answering, input pings it and nothing is said. Hung,
+    a ping goes unanswered and the window is said `WINDOW busy 1 on` with
+    `WINDOW cursor 1 wait`; released, the pong brings `WINDOW busy 1 off`
+    and its own shape back (`default`, as it named none). With `INPUT busy
+    1 off` a hung program is never said busy."""
+    runtime = os.path.join(work, 'run-busy')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-busy-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    env.pop('BLIT_SERVER_PORT', None)
+    log = os.path.join(work, 'compositor-busy.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-busy.out'), 'w'))
+    client = None
+    keymap = us_keymap()
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        out_path = os.path.join(work, 'standin-busy.out')
+        client = start([standin, '--hang', 'Busy'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Busy', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.frame(256, 160)
+        desk.send('WINDOW size 1 120 80 activated')
+        desk.frame(120, 80)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.write(memfd, keymap + b'\0')
+        fcntl.fcntl(memfd, 1033, 0x0f)
+        socket.send_fds(route, [b'INPUT keymap 1 7 %d 30 250\n' % (len(keymap) + 1)], [memfd])
+        os.close(memfd)
+        route.sendall(b'INPUT busy 1 1000\n')
+        frame = [0]
+
+        def send(text):
+            frame[0] += 1
+            route.sendall(('%s\nINPUT frame 1 %d\n' % (text, frame[0])).encode())
+
+        def lines_for(seconds, until=None):
+            """WINDOW lines said in that time, pointer motion sent all the
+            while (each a chance to ping); early when `until` is said."""
+            seen, end, i = [], time.time() + seconds, 0
+            while time.time() < end:
+                i += 1
+                send('INPUT ptr 1 %d 20' % (10 + i % 50))
+                got = desk.next(0.2)
+                while got is not None:
+                    if got[0] == 'line':
+                        seen.append(got[1])
+                    elif got[0] == 'frame':
+                        os.close(got[2])
+                    got = desk.next(0.01)
+                if until and until in seen:
+                    break
+            return seen
+
+        said = lines_for(2.5)
+        check(not any(l.startswith('WINDOW busy') for l in said),
+              lambda: 'an answering program was said busy: %r' % said)
+        send('INPUT key 1 35 press')
+        wait_for(lambda: 'STANDIN hang' in printed(), lambda: 'the stand-in did not hang:\n' + printed())
+        said = lines_for(6, 'WINDOW busy 1 on')
+        check('WINDOW busy 1 on' in said, lambda: 'a hung program was not said busy: %r' % said)
+        check('WINDOW cursor 1 wait' in said, lambda: 'a busy window did not get the busy shape: %r' % said)
+        check(said.index('WINDOW busy 1 on') < said.index('WINDOW cursor 1 wait'),
+              lambda: 'busy said after its shape: %r' % said)
+        os.kill(client.pid, signal.SIGUSR1)
+        said = lines_for(5, 'WINDOW cursor 1 default')
+        check('WINDOW busy 1 off' in said and 'WINDOW cursor 1 default' in said,
+              lambda: 'answering again, it was not said off with its shape back: %r' % said)
+        route.sendall(b'INPUT busy 1 off\n')
+        send('INPUT key 1 35 release')
+        send('INPUT key 1 35 press')
+        wait_for(lambda: printed().count('STANDIN hang') == 2, lambda: 'no second hang:\n' + printed())
+        said = lines_for(2.5)
+        check(not any(l.startswith('WINDOW busy') for l in said),
+              lambda: 'with busy off, a hung program was said busy: %r' % said)
+        os.kill(client.pid, signal.SIGUSR1)
+        wait_for(lambda: printed().count('STANDIN resume') == 2, lambda: 'no second resume:\n' + printed())
+        # Force Quit's path: busy, then killed with its ping outstanding.
+        # The compositor lives on (and, under the sanitizers, frees cleanly):
+        # its window goes, and nothing is said busy for it after.
+        route.sendall(b'INPUT busy 1 1000\n')
+        send('INPUT key 1 35 release')
+        send('INPUT key 1 35 press')
+        wait_for(lambda: printed().count('STANDIN hang') == 3, lambda: 'no third hang:\n' + printed())
+        said = lines_for(6, 'WINDOW busy 1 on')
+        check('WINDOW busy 1 on' in said, lambda: 'hung again, it was not said busy: %r' % said)
+        client.kill()
+        client.wait(5)
+        got = desk.next(5)
+        while got is not None and not (got[0] == 'line' and got[1] == 'WINDOW gone 1'):
+            if got[0] == 'frame':
+                os.close(got[2])
+            got = desk.next(5)
+        check(got is not None, 'a killed busy program\'s window did not go')
+        route.close()
+        check(comp.poll() is None, 'the compositor died with its busy program')
+        quit_compositor(desk, comp)
+        return 'answering=quiet hung=busy(on,wait) answered=off,default off=never-busy killed-busy=gone,survived'
+    finally:
+        for proc in (client, comp):
+            if proc and proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        listener.close()
 
 
 class _Blit:
@@ -2273,6 +2394,7 @@ def main():
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
+        print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))

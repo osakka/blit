@@ -481,6 +481,32 @@ Arabizi had none. Agreed with hibr on 2026-11-13, with the owner's go-ahead:
   `keyboard_settings_gate` checks the name, `arabizi_gate` the shipped
   data, `package_artifact_gate` the Recommends.
 
+### The one rule: where an input method types (agreed 2026-11-13)
+
+Agreed by Blit, Hibr and the Browser, at the owner's "one source of truth":
+an input method types **only into free text**. It never types into:
+- **secrets:** passwords, PINs, one-time codes, card numbers, and fields
+  hinted sensitive or hidden;
+- **structured fields:** numbers, phone numbers, email addresses, URLs,
+  dates and times, and usernames. Arabizi turns digits into letters
+  (3 → ع), so there it would be wrong.
+
+Each side applies the rule its own way:
+- **blit-compositor (0.3.106):** the text-input-v3 purposes normal, alpha,
+  name and terminal only; the sensitive_data and hidden_text hints are
+  skipped. `compositor_gate` checks password, phone and sensitive fields:
+  their keys arrive as keys, with no preedit. Before 0.3.106 only password
+  and PIN were skipped, so a phone field converted.
+- **The Browser (hibr-browser 0.5.38, Browser 2.51):** `web focus` says
+  `text`, `secret`, `structured` or `keys`, and only `text` asks the
+  method. Anything inside a frame is `keys`, since what's inside a frame
+  can't be seen from the top document. So a login frame never gets a
+  clear-text preedit, and Arabizi inside an iframe editor is a known
+  limit.
+- **Hibr's fields:** today a field is text or secret. Field kinds
+  (number, address, date) are coming, with dt_imekey asked only for free
+  text.
+
 ## Open questions for the owner
 
 - 8 by default: ق (Gulf and Saudi) or غ (Lebanese)?

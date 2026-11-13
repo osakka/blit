@@ -2970,6 +2970,20 @@ components:
           description: >-
             How long a grown pointer takes to shrink back once the shaking
             calms (about 95% of the way back in this time).
+        busy_pointer:
+          type: boolean
+          default: true
+          description: >-
+            The busy pointer (ADR 0235): a program in a window that has not
+            answered for busy_after_ms shows Blit's spinning busy pointer
+            over its windows, until it answers.
+        busy_after_ms: {type: integer, minimum: 500, maximum: 10000, default: 2000}
+        busy_spin_ms:
+          type: integer
+          minimum: 400
+          maximum: 3000
+          default: 1000
+          description: How long the busy pointer takes to go round once.
     HudSettings:
       type: object
       description: >-

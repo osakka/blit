@@ -158,7 +158,8 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     raise "the API's own pointer changed: #{effective['pointer'].inspect}" unless
       effective['pointer'] == { 'shape' => 'arrow', 'palette' => 'pearl', 'size_px' => 24, 'shadow' => true,
                                 'shake_to_find' => true, 'shake_max_px' => 160, 'shake_sensitivity' => 5,
-                                'shake_shrink_ms' => 900 }
+                                'shake_shrink_ms' => 900, 'busy_pointer' => true, 'busy_after_ms' => 2000,
+                                'busy_spin_ms' => 1000 }
     asked = data('GET', "/v1/terminal-sessions/#{b.fetch('id')}")['pointer_shape']
     raise "B's request is not published: #{asked.inspect}" unless asked == { 'requested' => 'text', 'depth' => 1 }
     move(*centre[1])
@@ -179,12 +180,30 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     move(centre[1][0] + 1, centre[1][1])
     raise 'the busy shape is not shown over B' unless
       data('GET', '/v1/settings').dig('effective', 'pointer_shown', 'shape') == 'wait'
+    # ADR 0235: the busy pointer goes round by itself, the pointer still and
+    # nothing else changing: the pixels under it differ a third of a turn
+    # apart, and its frames count up while it is shown.
+    here = [centre[1][0] + 1, centre[1][1]]
+    first = data('GET', '/v1/settings').dig('effective', 'pointer_shown')
+    turn_a = region(screenshot, *here, 24)
+    sleep 0.34
+    turn_b = region(screenshot, *here, 24)
+    later = data('GET', '/v1/settings').dig('effective', 'pointer_shown')
+    raise 'the busy pointer did not go round (the same pixels a third of a turn apart)' if turn_a == turn_b
+    raise "the busy pointer's frames did not count up: #{first.inspect} -> #{later.inspect}" unless
+      later['spin_frames'].to_i >= first['spin_frames'].to_i + 3 && later['spin_phase'].to_i >= 0
     data('POST', "/v1/terminal-sessions/#{b.fetch('id')}/input", { data: "\r" })
     sleep 0.3
     move(centre[1][0] + 1, centre[1][1])
     move(*centre[1])
     bad = stamp_mismatches(screenshot, stamps[:arrow], *centre[1])
     raise "after RIS the pointer over B is not the display's own (#{bad} pixels differ)" unless bad.zero?
+    # Not busy any more: no more frames, the loop no longer woken for it.
+    still = data('GET', '/v1/settings').dig('effective', 'pointer_shown')
+    sleep 0.5
+    again = data('GET', '/v1/settings').dig('effective', 'pointer_shown')
+    raise "the spin went on after the busy pointer left: #{still.inspect} -> #{again.inspect}" unless
+      again['spin_frames'] == still['spin_frames'] && again['spin_phase'] == -1
 
     data('POST', "/v1/terminal-sessions/#{a.fetch('id')}/input", { data: "\r" })
     Timeout.timeout(10) do
@@ -195,7 +214,7 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     bad = stamp_mismatches(screenshot, stamps[:arrow], *centre[0])
     raise "after A exited the pointer over A is not back (#{bad} pixels differ)" unless bad.zero?
 
-    puts 'POINTER_SHAPE_PASS query=1,1,0,0 hidden=pane_a_only text=exact push_pop=wait ris=restored exit=restored'
+    puts 'POINTER_SHAPE_PASS query=1,1,0,0 hidden=pane_a_only text=exact push_pop=wait spins=pixels,frames stops ris=restored exit=restored'
   ensure
     Process.kill('TERM', pid) rescue nil
     Process.wait(pid) rescue nil

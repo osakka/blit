@@ -1581,7 +1581,20 @@ a warp and a locked or hidden pointer do not either.
 `shake_to_find` defaults to true. `shake_max_px` (64–256, default 160) is
 the largest it grows to; `shake_sensitivity` (1–10, default 5) is how hard
 a shake must be, 1 hard, 10 light; `shake_shrink_ms` (150–3000, default
-900) is how long it takes to shrink back once the shaking calms. `effective.pointer_shown` adds `size_px`
+900) is how long it takes to shrink back once the shaking calms.
+
+The busy pointer (ADR 0235): a program in a window (blit-compositor) that
+has not answered for `busy_after_ms` (500–10000, default 2000) shows the
+busy pointer over its windows until it answers; `busy_pointer` (default
+true) turns that off. The busy pointer is a ring of spokes going round,
+once each `busy_spin_ms` (400–3000, default 1000); it is also what a
+program asking `wait` or `progress` by OSC 22 gets.
+`effective.pointer_shown` adds `spin_phase` (-1 while the busy pointer is
+not shown) and `spin_frames`.
+
+```json
+{"busy_pointer":true,"busy_after_ms":2000,"busy_spin_ms":1000}
+``` `effective.pointer_shown` adds `size_px`
 (the size drawn now), `shake_scale` and `shake_sizes` (how many times the
 drawn size has changed).
 
@@ -2379,6 +2392,16 @@ It speaks the frame channel above as a producer, with these additions.
     `WINDOW size` comes when the desktop restores it.
   - `WINDOW parent <id> <parent|0>`: a transient parent set or cleared after
     `WINDOW new`.
+  - `WINDOW busy <id> on|off` (0.3.106, ADR 0235): the window's program
+    has not answered a ping for Blit's `busy_after_ms` (`INPUT busy`), or
+    has answered again. Sent for each of that program's top-levels, on
+    each change and again when a window is announced again, never for a
+    window holding a pointer lock or confinement (a game loading must not
+    spin). While on, the window's `WINDOW cursor` is `wait`, Blit's
+    spinning busy pointer, unless the program hid its pointer (`none`);
+    when off, its own shape again (`default` when it named none). Hibr
+    shows "(not responding)" and offers Force Quit. X programs answer no
+    xdg ping and are never busy here.
   - `WINDOW activate <id> <reason>` (0.3.86): the program asks for its
     top-level `<id>` to have the focus. `<reason>` is one word: `x-focus`
     (an X program took X's input focus itself onto one of its windows;
@@ -2725,12 +2748,17 @@ It speaks the frame channel above as a producer, with these additions.
                                        the keyboard's xkb modifiers
   INPUT method <id> <name|-> [<options>]
                                        the current keyboard's input method
+  INPUT busy <id> <ms|off>             when a program counts as busy
   ```
   `INPUT method` (from 0.3.101, ADR 0233) follows each keymap, with no
   `frame`. It is the input method the current keyboard is: `arabizi` for
   Arabic (Arabizi), `-` for an xkb keyboard. The compositor runs that
   method, hibr-ime's, for a program whose text field asks for one through
-  `zwp_text_input_v3`, and which isn't a password or PIN field. Each key
+  `zwp_text_input_v3`, and only for free text (from 0.3.106, ADR 0233's
+  one rule): the normal, alpha, name and terminal purposes, never a
+  password, PIN, a field hinted sensitive or hidden, nor a digits, number,
+  phone, URL, email, date or time field, where Arabizi would turn digits
+  into letters. Each key
   pressed with no ctrl, alt or super goes to the method:
   - its preedit and the words it commits go to the program as
     `preedit_string` and `commit_string`;
@@ -2741,6 +2769,13 @@ It speaks the frame channel above as a producer, with these additions.
   Leaving the program commits there. A program with a text input gets the
   keyboard when its window is activated, so its field is enabled before
   the first key.
+  `INPUT busy` (from 0.3.106, ADR 0235) is sent when the route goes live
+  and whenever the pointer settings change it, with no `frame`: the
+  `busy_after_ms` a ping may go unanswered, or `off` (`busy_pointer`
+  false). Until it comes, the compositor pings nothing. When input is
+  given to a window, the compositor pings its program (xdg_wm_base),
+  one ping outstanding and none sooner than 500 ms after the last; a ping
+  unanswered for that long makes the program busy (`WINDOW busy`, below).
   Keys are evdev codes as the keymap reads them: a device's `modifiers` role
   already applied (Caps Lock as Control is Left Control), and a key held by
   two physical keys sent once (ADR 0231). The modifiers are Blit's own xkb

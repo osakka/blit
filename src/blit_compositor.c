@@ -251,7 +251,9 @@ struct bc_xdg {
     /* toplevel */
     struct bc_xdg *parent;
     char title[BC_TEXT_BYTES + 1], appid[BC_TEXT_BYTES + 1];
-    char cursor[24];                  /* the pointer shape last sent (WINDOW cursor), "" none yet */
+    char cursor[24];                  /* the pointer shape its program asked for, "" none yet */
+    char cursor_sent[24];             /* the shape last sent (WINDOW cursor): `wait` while busy */
+    int busy_sent;                    /* `WINDOW busy <id> on` said (ADR 0235) */
     int32_t min_w, min_h, max_w, max_h;           /* committed */
     int32_t pmin_w, pmin_h, pmax_w, pmax_h;       /* pending */
     int limits_sent;
@@ -472,6 +474,8 @@ struct bc_server {
     struct wl_list text_inputs;       /* bc_text_input */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
     struct wl_list constraints;       /* bc_constraint: pointer locks and confinements */
+    struct wl_list wms;               /* bc_wm: each xdg_wm_base, its pings (ADR 0235) */
+    uint32_t busy_after_ms;           /* Blit's `INPUT busy`: 0, off, until it says */
     /* the clipboard (ADR 0229): [0] Ctrl-C/V, [1] the primary selection */
     struct bc_selection sel[2];
     struct wl_list devices[2];        /* wl_data_device, zwp_primary_selection_device_v1 */
@@ -512,6 +516,8 @@ static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r);
 static void keyboard_send_modifiers(struct bc_server *s, int force);
 static void keyboard_focus(struct bc_server *s, struct bc_surface *surface);
 static void constraints_window_gone(struct bc_xdg *x);
+static void window_cursor_send(struct bc_xdg *x);
+static void window_busy_announce(struct bc_xdg *x);
 static void constraint_ask_surface(struct bc_surface *surface);
 static void constraint_surface_gone(struct bc_surface *surface);
 static int x_hold(struct bc_surface *surface, struct wl_resource *buffer, int attached);
@@ -697,7 +703,11 @@ static void announce_hints(struct bc_xdg *x, int parent)
     if (x->gw > 0 && x->gh > 0) send_geometry(x);
     if (x->fullscreen) bc_wire_line(w, "WINDOW fullscreen %u on", x->id);
     if (x->maximize) bc_wire_line(w, "WINDOW maximize %u on", x->id);
-    if (x->cursor[0]) bc_wire_line(w, "WINDOW cursor %u %s", x->id, x->cursor);
+    /* Busy, and the shape that goes with it, as they are now (ADR 0235). */
+    x->busy_sent = 0;
+    x->cursor_sent[0] = '\0';
+    window_busy_announce(x);
+    window_cursor_send(x);
     if (x->surface && x->surface->appmenu_service[0]) send_appmenu(x);
     /* Its input, straight from Blit to its own input socket (one route per
        toplevel); the desktop relays the request under its own id. */
@@ -3682,9 +3692,9 @@ static void cursor_set(struct bc_server *s, struct wl_client *client, const char
     struct bc_xdg *x;
     if (s->ptr_focus == NULL || wl_resource_get_client(s->ptr_focus->resource) != client) return;
     x = surface_window(s->ptr_focus);
-    if (x == NULL || strcmp(x->cursor, name) == 0) return;
+    if (x == NULL) return;
     snprintf(x->cursor, sizeof(x->cursor), "%s", name);
-    if (x->id) bc_wire_line(&s->wire, "WINDOW cursor %u %s", x->id, name);
+    window_cursor_send(x);
 }
 
 static void pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
@@ -4418,10 +4428,7 @@ static void wm_get_xdg_surface(struct wl_client *client, struct wl_resource *res
     wl_resource_set_implementation(x->resource, &xdg_surface_impl, x, xdg_surface_destroyed);
 }
 
-static void wm_pong(struct wl_client *client, struct wl_resource *resource, uint32_t serial)
-{
-    (void)client; (void)resource; (void)serial;
-}
+static void wm_pong(struct wl_client *client, struct wl_resource *resource, uint32_t serial);
 
 static const struct xdg_wm_base_interface wm_base_impl = {
     .destroy = bc_destroy_request,
@@ -4430,11 +4437,13 @@ static const struct xdg_wm_base_interface wm_base_impl = {
     .pong = wm_pong,
 };
 
+static void wm_base_bound(struct bc_server *s, struct wl_resource *r);
+
 static void bind_wm_base(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 {
     struct wl_resource *r = wl_resource_create(client, &xdg_wm_base_interface, (int)version, id);
     if (r == NULL) { wl_client_post_no_memory(client); return; }
-    wl_resource_set_implementation(r, &wm_base_impl, data, NULL);
+    wm_base_bound(data, r);
 }
 
 /* ---- zxdg_decoration_manager_v1: server-side ---- */
@@ -4750,6 +4759,7 @@ struct bc_text_input {
     struct wl_list link;
     int enabled, pending_enabled;
     uint32_t purpose, pending_purpose;
+    uint32_t hint, pending_hint;
     uint32_t commits;                 /* commit requests so far: done's serial */
     struct bc_surface *entered;       /* the surface it was told it is on */
 };
@@ -4792,8 +4802,9 @@ static void ti_content_type(struct wl_client *client, struct wl_resource *resour
                             uint32_t purpose)
 {
     struct bc_text_input *t = wl_resource_get_user_data(resource);
-    (void)client; (void)hint;
+    (void)client;
     t->pending_purpose = purpose;
+    t->pending_hint = hint;
 }
 
 static void ti_cursor_rectangle(struct wl_client *client, struct wl_resource *resource, int32_t x,
@@ -4815,6 +4826,7 @@ static void ti_commit(struct wl_client *client, struct wl_resource *resource)
     }
     t->enabled = t->pending_enabled;
     t->purpose = t->pending_purpose;
+    t->hint = t->pending_hint;
 }
 
 static const struct zwp_text_input_v3_interface text_input_impl = {
@@ -4870,6 +4882,27 @@ static int ime_has_text_input(struct bc_server *s, struct bc_surface *surface)
     return 0;
 }
 
+/* The one rule, shared with Hibr's fields and the Browser (ADR 0233):
+   an input method types only into free text -- normal, alpha, name and
+   terminal fields -- never into secrets (password, PIN, a field hinted
+   sensitive or hidden) nor structured fields (digits, numbers, phone,
+   URL, email, dates and times), where Arabizi would turn digits into
+   letters. */
+static int ime_free_text(const struct bc_text_input *t)
+{
+    if (t->hint & (ZWP_TEXT_INPUT_V3_CONTENT_HINT_SENSITIVE_DATA | ZWP_TEXT_INPUT_V3_CONTENT_HINT_HIDDEN_TEXT))
+        return 0;
+    switch (t->purpose) {
+    case ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL:
+    case ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_ALPHA:
+    case ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NAME:
+    case ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_TERMINAL:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 /* The text input the method types into now, or NULL: an input method in
    use, and the focused program's enabled text input on the focused
    surface, not for a password or a PIN. */
@@ -4878,9 +4911,7 @@ static struct bc_text_input *ime_target(struct bc_server *s)
     struct bc_text_input *t;
     if (s->ime.name[0] == '\0' || s->kbd_focus == NULL) return NULL;
     wl_list_for_each(t, &s->text_inputs, link)
-        if (t->enabled && t->entered == s->kbd_focus &&
-            t->purpose != ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD &&
-            t->purpose != ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PIN)
+        if (t->enabled && t->entered == s->kbd_focus && ime_free_text(t))
             return t;
     return NULL;
 }
@@ -5402,6 +5433,181 @@ static int window_locked(struct bc_server *s, struct bc_xdg *x)
 
 static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly);
 
+/* ---- busy programs (ADR 0235) ----
+
+   A program that stops answering is busy, and its windows show Blit's busy
+   pointer. When input is given to a window, its program is pinged
+   (xdg_wm_base.ping): at most one ping outstanding, and none sooner than
+   BC_BUSY_PING_GAP_MS after the last. Unanswered after Blit's threshold
+   (`INPUT busy <id> <ms>`), the program is busy: each of its windows is
+   said `WINDOW busy <id> on`, and its shape becomes `wait` (the desktop
+   relays it as any program's shape). The pong ends it: `off`, and the
+   shape the program asked for back. Off (`INPUT busy <id> off`, or before
+   Blit says) pings nothing. A window holding a pointer lock or
+   confinement (a game) is never shown busy: a game loading must not
+   spin. X programs answer no xdg ping: never busy here. */
+
+#define BC_BUSY_PING_GAP_MS 500
+
+struct bc_wm {
+    struct wl_resource *resource;     /* xdg_wm_base */
+    struct bc_server *server;
+    struct wl_list link;              /* bc_server.wms */
+    struct wl_event_source *timer;    /* the threshold, armed while a ping is out */
+    uint32_t serial;                  /* the ping outstanding, 0 none */
+    uint32_t sent_ms;                 /* when the last ping went */
+    int pinged;                       /* a ping has gone */
+    int busy;
+};
+
+static struct bc_wm *client_wm(struct bc_server *s, struct wl_client *client)
+{
+    struct bc_wm *w;
+    wl_list_for_each(w, &s->wms, link)
+        if (wl_resource_get_client(w->resource) == client) return w;
+    return NULL;
+}
+
+static int window_held(struct bc_server *s, struct bc_xdg *x)
+{
+    struct bc_constraint *c;
+    wl_list_for_each(c, &s->constraints, link)
+        if (c->active && c->window == x->id) return 1;
+    return 0;
+}
+
+/* Whether x's program is busy now and it may be shown so. */
+static int window_busy(struct bc_xdg *x)
+{
+    struct bc_wm *w;
+    if (x->surface == NULL || x->id == 0) return 0;
+    w = client_wm(x->server, wl_resource_get_client(x->surface->resource));
+    return w && w->busy && !window_held(x->server, x);
+}
+
+/* The shape the desktop is told: `wait` while busy (unless the program
+   hid its pointer), else the program's own; `default` when it asked none
+   and something else was said. */
+static void window_cursor_send(struct bc_xdg *x)
+{
+    const char *want = x->cursor;
+    if (x->id == 0) return;
+    if (window_busy(x) && strcmp(x->cursor, "none") != 0) want = "wait";
+    if (!want[0]) want = x->cursor_sent[0] ? "default" : "";
+    if (!want[0] || strcmp(want, x->cursor_sent) == 0) return;
+    snprintf(x->cursor_sent, sizeof(x->cursor_sent), "%s", want);
+    bc_wire_line(&x->server->wire, "WINDOW cursor %u %s", x->id, want);
+}
+
+/* `WINDOW busy <id> on|off` when what was said is no longer so. */
+static void window_busy_announce(struct bc_xdg *x)
+{
+    int busy = window_busy(x);
+    if (x->id == 0 || busy == x->busy_sent) return;
+    x->busy_sent = busy;
+    bc_wire_line(&x->server->wire, "WINDOW busy %u %s", x->id, busy ? "on" : "off");
+}
+
+static void wm_busy_set(struct bc_wm *w, int busy)
+{
+    struct bc_server *s = w->server;
+    struct wl_client *client = wl_resource_get_client(w->resource);
+    struct bc_xdg *x;
+    if (w->busy == busy) return;
+    w->busy = busy;
+    wl_list_for_each(x, &s->windows, link) {
+        if (x->toplevel == NULL || x->surface == NULL ||
+            wl_resource_get_client(x->surface->resource) != client) continue;
+        window_busy_announce(x);
+        window_cursor_send(x);
+    }
+    logf_("busy: a program %s", busy ? "has not answered: busy" : "answered: no longer busy");
+}
+
+static int wm_threshold(void *data)
+{
+    struct bc_wm *w = data;
+    if (w->serial) wm_busy_set(w, 1);
+    return 0;
+}
+
+static void wm_pong(struct wl_client *client, struct wl_resource *resource, uint32_t serial)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_wm *w;
+    (void)client;
+    wl_list_for_each(w, &s->wms, link) {
+        if (w->resource != resource) continue;
+        if (serial != w->serial) return;
+        w->serial = 0;
+        if (w->timer) wl_event_source_timer_update(w->timer, 0);
+        wm_busy_set(w, 0);
+        return;
+    }
+}
+
+static void wm_base_destroyed(struct wl_resource *resource)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_wm *w, *next;
+    wl_list_for_each_safe(w, next, &s->wms, link) {
+        if (w->resource != resource) continue;
+        wm_busy_set(w, 0);
+        if (w->timer) wl_event_source_remove(w->timer);
+        wl_list_remove(&w->link);
+        free(w);
+        return;
+    }
+}
+
+static void wm_base_bound(struct bc_server *s, struct wl_resource *r)
+{
+    struct bc_wm *w = calloc(1, sizeof(*w));
+    wl_resource_set_implementation(r, &wm_base_impl, s, wm_base_destroyed);
+    if (w == NULL) return;   /* never pinged: never busy */
+    w->resource = r;
+    w->server = s;
+    w->timer = wl_event_loop_add_timer(s->loop, wm_threshold, w);
+    wl_list_insert(&s->wms, &w->link);
+}
+
+/* Input given to x: its program pinged, when Blit asks and none is out. */
+static void busy_poke(struct bc_server *s, struct bc_xdg *x)
+{
+    struct wl_client *client;
+    struct bc_wm *w;
+    uint32_t now;
+    if (s->busy_after_ms == 0 || x->surface == NULL) return;
+    client = wl_resource_get_client(x->surface->resource);
+    if (client == s->x.client || (w = client_wm(s, client)) == NULL || w->serial || w->timer == NULL)
+        return;
+    now = now_ms();
+    if (w->pinged && now - w->sent_ms < BC_BUSY_PING_GAP_MS) return;
+    w->serial = wl_display_next_serial(s->display);
+    w->sent_ms = now;
+    w->pinged = 1;
+    xdg_wm_base_send_ping(w->resource, w->serial);
+    wl_event_source_timer_update(w->timer, (int)s->busy_after_ms);
+}
+
+/* Blit's `INPUT busy`: the threshold, or off -- every program then not
+   busy, nothing outstanding. */
+static void busy_configure(struct bc_server *s, uint32_t after_ms)
+{
+    struct bc_wm *w;
+    if (s->busy_after_ms != after_ms) {
+        if (after_ms) logf_("busy: a program unanswered for %u ms is busy", after_ms);
+        else logf_("busy: off");
+    }
+    s->busy_after_ms = after_ms;
+    if (after_ms) return;
+    wl_list_for_each(w, &s->wms, link) {
+        w->serial = 0;
+        if (w->timer) wl_event_source_timer_update(w->timer, 0);
+        wm_busy_set(w, 0);
+    }
+}
+
 /* The desktop's hold ended: unlocked or unconfined; a oneshot constraint
    is then spent. */
 static void constraint_deactivate(struct bc_constraint *c)
@@ -5567,6 +5773,10 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         ime_set(s, in.method, in.options);
         return;
     }
+    if (in.kind == BC_INPUT_BUSY) {
+        busy_configure(s, in.code);
+        return;
+    }
     if (in.kind == BC_INPUT_MODIFIERS) {
         /* The seat's modifiers are Blit's (ADR 0231): whichever window's
            route they came on, the focused client is told when they change. */
@@ -5576,6 +5786,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
     }
     x = window_by_id(s, conn->id);
     if (!window_is_toplevel(x) || x->surface == NULL) return;  /* gone meanwhile */
+    if (in.kind != BC_INPUT_FRAME) busy_poke(s, x);
     switch (in.kind) {
     case BC_INPUT_KEY: {
         uint32_t bit = 1u << (in.code % 8);
@@ -9754,6 +9965,7 @@ int main(int argc, char **argv)
     wl_list_init(&server.pointers);
     wl_list_init(&server.relative_pointers);
     wl_list_init(&server.constraints);
+    wl_list_init(&server.wms);
     wl_list_init(&server.devices[0]);
     wl_list_init(&server.devices[1]);
     server.line_fd = -1;

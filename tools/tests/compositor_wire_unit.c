@@ -228,6 +228,13 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 60001", &in) == BC_INPUT_UNKNOWN, "keymap, delay");
     EXPECT(bc_parse_input("INPUT keymap 3 42 9607 25 600 1", &in) == BC_INPUT_UNKNOWN, "keymap, extra");
     EXPECT(bc_parse_input("INPUT on 3", &in) == BC_INPUT_UNKNOWN, "not an input line");
+    /* ADR 0235: when a program is busy, in ms, or off. */
+    EXPECT(bc_parse_input("INPUT busy 3 2000\n", &in) == BC_INPUT_BUSY && in.id == 3 && in.code == 2000,
+           "busy");
+    EXPECT(bc_parse_input("INPUT busy 3 off", &in) == BC_INPUT_BUSY && in.code == 0, "busy off");
+    EXPECT(bc_parse_input("INPUT busy 3 0", &in) == BC_INPUT_UNKNOWN, "busy 0");
+    EXPECT(bc_parse_input("INPUT busy 3 60001", &in) == BC_INPUT_UNKNOWN, "busy, too long");
+    EXPECT(bc_parse_input("INPUT busy 3 offx", &in) == BC_INPUT_UNKNOWN, "busy, extra");
 }
 
 static void convert(void)

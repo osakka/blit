@@ -2,7 +2,8 @@
 #include <linux/input.h>
 #include <dirent.h>
 #include "blit_kms.h"
-#include "blit_pointer_shake.h"   /* ADR 0234: shake to find the pointer */
+#include "blit_pointer_shake.h"
+#include "blit_pointer_busy.h"     /* ADR 0235: the busy pointer's settings */   /* ADR 0234: shake to find the pointer */
 #include "blit_vt.h"
 #include "blit_font.h"
 #include "blit_raster.h"
@@ -1513,6 +1514,18 @@ typedef struct {
     uint64_t shake_next_us;
     uint64_t shake_quiet_since_us;
     unsigned long long diagnostic_pointer_shake_sizes;
+    /* ADR 0235: the busy pointer goes round. pointer_spun_art is the shown
+       art with its spokes dimmed for the phase (the shown art itself, the
+       cache key, never changes per frame); the phase now (-1 when the
+       pointer is not the busy one), when to step next (0 when not), and
+       how long a turn takes. */
+    BlitPointerArt pointer_spun_art;
+    int pointer_spin_phase;
+    uint64_t spin_next_us;
+    int busy_spin_ms;
+    BlitBusyConfig busy_config;
+    unsigned long long busy_revision;   /* bumped when busy_config changes */
+    unsigned long long diagnostic_pointer_spin_frames;
     int pointer_hidden;
     int pointer_output;
     float pointer_x;
@@ -2798,6 +2811,13 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
         if (next <= now) { wait_ms = 0; break; }
         if ((int)((next - now + 999ULL) / 1000ULL) < wait_ms)
             wait_ms = (int)((next - now + 999ULL) / 1000ULL);
+    }
+    /* ADR 0235: the busy pointer's next step, only while it is shown. */
+    if (runtime->spin_next_us != 0) {
+        if (runtime->spin_next_us <= now)
+            wait_ms = 0;
+        else if ((int)((runtime->spin_next_us - now + 999ULL) / 1000ULL) < wait_ms)
+            wait_ms = (int)((runtime->spin_next_us - now + 999ULL) / 1000ULL);
     }
     /* ADR 0234: a shaken pointer's next step, only while it is grown. */
     if (runtime->shake_next_us != 0) {
@@ -11487,6 +11507,7 @@ static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
 
 static int frame_input_holds(const BlitSession *session, unsigned int image_id);
 static void frame_input_keymap_changed(BlitRuntime *runtime);
+static void frame_input_busy_changed(BlitRuntime *runtime);
 
 /* ADR 0226: whether a picture counts as shown, and so is never freed for
    room: placed and not deleted, or with a placement held for its next
@@ -22547,6 +22568,60 @@ static void pointer_shake_tick(BlitRuntime *runtime, uint64_t now)
     }
 }
 
+/* ADR 0235: the art the display draws -- the shown art, or for the busy
+   pointer, the shown art with its spokes dimmed for the phase now. */
+static int pointer_spinning(const BlitRuntime *runtime)
+{
+    return runtime->pointer_shown_art.revision && !runtime->pointer_hidden &&
+        runtime->pointer_shown_art.config.shape == BLIT_POINTER_SHAPE_BUSY;
+}
+
+static int pointer_spin_phase_at(const BlitRuntime *runtime, uint64_t now)
+{
+    uint64_t step = (uint64_t)(runtime->busy_spin_ms > 0 ? runtime->busy_spin_ms : 1000) * 1000ULL /
+        BLIT_POINTER_SPOKES;
+    return (int)((now / step) % BLIT_POINTER_SPOKES);
+}
+
+static void pointer_art_present(BlitRuntime *runtime)
+{
+    const BlitPointerArt *art = &runtime->pointer_shown_art;
+    if (pointer_spinning(runtime)) {
+        int phase = runtime->pointer_spin_phase >= 0 ? runtime->pointer_spin_phase :
+            pointer_spin_phase_at(runtime, monotonic_us());
+        blit_pointer_spin(&runtime->pointer_spun_art, &runtime->pointer_shown_art, phase);
+        runtime->pointer_spin_phase = phase;
+        ++runtime->diagnostic_pointer_spin_frames;
+        art = &runtime->pointer_spun_art;
+    }
+    if (runtime->kms)
+        blit_kms_set_pointer_art(runtime->kms, art);
+}
+
+/* The busy pointer's step: the next phase drawn when it is due, and the
+   loop woken for the one after, only while the busy pointer is shown. */
+static void pointer_spin_tick(BlitRuntime *runtime, uint64_t now)
+{
+    uint64_t step;
+    int phase;
+    if (!pointer_spinning(runtime) || !runtime->pointer_valid) {
+        runtime->spin_next_us = 0;
+        if (runtime->pointer_spin_phase >= 0 && !pointer_spinning(runtime))
+            runtime->pointer_spin_phase = -1;
+        return;
+    }
+    step = (uint64_t)(runtime->busy_spin_ms > 0 ? runtime->busy_spin_ms : 1000) * 1000ULL /
+        BLIT_POINTER_SPOKES;
+    phase = pointer_spin_phase_at(runtime, now);
+    if (phase != runtime->pointer_spin_phase) {
+        runtime->pointer_spin_phase = phase;
+        pointer_art_present(runtime);
+        mark_pointer_dirty_outputs(runtime, runtime->pointer_output, runtime->pointer_output);
+        runtime->render_pending = 1;
+    }
+    runtime->spin_next_us = (now / step + 1) * step;
+}
+
 static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -23794,9 +23869,11 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
                  "\"size_px\":%d,\"shadow\":%s,\"shake_to_find\":%s,"
-                 "\"shake_max_px\":%d,\"shake_sensitivity\":%d,\"shake_shrink_ms\":%d},"
+                 "\"shake_max_px\":%d,\"shake_sensitivity\":%d,\"shake_shrink_ms\":%d,"
+                 "\"busy_pointer\":%s,\"busy_after_ms\":%d,\"busy_spin_ms\":%d},"
                  "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s,"
-                 "\"size_px\":%d,\"shake_scale\":%.2f,\"shake_sizes\":%llu},"
+                 "\"size_px\":%d,\"shake_scale\":%.2f,\"shake_sizes\":%llu,"
+                 "\"spin_phase\":%d,\"spin_frames\":%llu},"
                  "\"hud\":%s}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled ? "true" : "false",
@@ -23829,13 +23906,16 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->shake_config.enabled ? "true" : "false",
                  runtime->shake_config.max_px, runtime->shake_config.sensitivity,
                  runtime->shake_config.shrink_ms,
+                 runtime->busy_config.enabled ? "true" : "false", runtime->busy_config.after_ms,
+                 runtime->busy_config.spin_ms,
                  blit_pointer_shapes[runtime->pointer_shown_art.revision ?
                      runtime->pointer_shown_art.config.shape :
                      runtime->pointer_art.config.shape],
                  runtime->pointer_hidden ? "true" : "false",
                  runtime->pointer_shown_art.revision ? runtime->pointer_shown_art.config.size :
                      runtime->pointer_art.config.size,
-                 (double)runtime->shake.scale, runtime->diagnostic_pointer_shake_sizes, hud);
+                 (double)runtime->shake.scale, runtime->diagnostic_pointer_shake_sizes,
+                 runtime->pointer_spin_phase, runtime->diagnostic_pointer_spin_frames, hud);
 }
 
 /* A read-only, point-in-event-loop-turn state dump for operators and
@@ -25373,7 +25453,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "A settings write carries the whole document under \"document\", as a JSON object.");
                 return;
             }
-            if (!pointer_config_parse(document,&proposed_pointer,NULL)) {
+            if (!pointer_config_parse(document,&proposed_pointer,NULL,NULL)) {
                 send_problem(fd,400,"Bad Request","invalid_settings_pointer",
                              "Pointer shape, palette, size_px (24..64 integer), shadow, shake_to_find, shake_max_px (64..256), shake_sensitivity (1..10) and shake_shrink_ms (150..3000) must match the appearance schema.");
                 return;
@@ -26500,7 +26580,7 @@ static void discover_displays(BlitRuntime *runtime)
         atexit(blit_vt_close);
     }
     runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
-    blit_kms_set_pointer_art(runtime->kms,&runtime->pointer_shown_art);
+    pointer_art_present(runtime);
     if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                sizeof(error)) < 0) {
         /* No KMS is no presentation: Blit serves its API with no outputs
@@ -28496,12 +28576,15 @@ static void update_pointer_shape(BlitRuntime *runtime)
             blit_pointer_resample(&runtime->pointer_shown_art, runtime->shake_master, config.size);
         else
             blit_pointer_build(&runtime->pointer_shown_art, config);
-        if (runtime->kms)
-            blit_kms_set_pointer_art(runtime->kms, &runtime->pointer_shown_art);
     } else if (hidden == runtime->pointer_hidden) {
         return;
     }
     runtime->pointer_hidden = hidden;
+    /* The art drawn: the shown art, or the busy pointer at the phase now,
+       stepped from here by pointer_spin_tick (ADR 0235). */
+    runtime->pointer_spin_phase = -1;
+    pointer_art_present(runtime);
+    pointer_spin_tick(runtime, monotonic_us());
     mark_pointer_dirty_outputs(runtime, runtime->pointer_output,
                                runtime->pointer_output);
     runtime->render_pending = 1;
@@ -32067,6 +32150,11 @@ int main(int argc, char **argv)
        settings say otherwise. */
     blit_shake_init(&runtime.shake);
     runtime.shake_config = blit_shake_default();
+    /* ADR 0235: the busy pointer, not shown, a turn a second. */
+    runtime.pointer_spin_phase = -1;
+    runtime.busy_spin_ms = 1000;
+    runtime.busy_config = blit_busy_default();
+    runtime.busy_revision = 1;
     runtime.frame_fd = -1;
     runtime.login_observer_fd = -1;
     runtime.evdev_watch_fd = -1;
@@ -32895,6 +32983,7 @@ int main(int argc, char **argv)
             kms_check_slots(&runtime, now, held);
             effects_animation_tick(&runtime, now);
             pointer_shake_tick(&runtime, now);
+            pointer_spin_tick(&runtime, now);
             recent_tick(&runtime, now);
             update_tick(&runtime, now);
             hibr_identity_refresh(&runtime, now);

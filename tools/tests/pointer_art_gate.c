@@ -51,11 +51,39 @@ int main(int argc, char **argv)
             sheet[k] = colour>>16;sheet[k+1]=colour>>8;sheet[k+2]=colour;
         }
     }
+    /* ADR 0235: the busy pointer goes round (every phase different, each
+       spoke lit in turn, geometry kept), and no two arts -- built, spun,
+       resampled -- ever share a revision, since the display takes an
+       equal revision for the same picture. */
+    {
+        static BlitPointerArt base, spun[BLIT_POINTER_SPOKES], master, grown;
+        unsigned long long seen[BLIT_POINTER_SPOKES + 3];
+        int p, q, n = 0;
+        config.shape = BLIT_POINTER_SHAPE_BUSY; config.palette = 1; config.size = 24;
+        blit_pointer_build(&base, config);
+        seen[n++] = base.revision;
+        for (p = 0; p < BLIT_POINTER_SPOKES; ++p) {
+            blit_pointer_spin(&spun[p], &base, p);
+            if (spun[p].width != base.width || spun[p].hotspot_x != base.hotspot_x ||
+                memcmp(&spun[p].config, &base.config, sizeof(base.config))) return 7;
+            for (q = 0; q < p; ++q)
+                if (!memcmp(spun[p].rgba, spun[q].rgba, (size_t)base.width * base.height * 4)) return 8;
+            seen[n++] = spun[p].revision;
+        }
+        config.size = 160;
+        blit_pointer_build(&master, config);
+        seen[n++] = master.revision;
+        blit_pointer_resample(&grown, &master, 96);
+        seen[n++] = grown.revision;
+        for (p = 0; p < n; ++p)
+            for (q = 0; q < p; ++q)
+                if (seen[p] == seen[q] || !seen[p]) return 9;
+    }
     if (argc == 2) {
         FILE *file = fopen(argv[1],"wb"); if (!file) return 4;
         fprintf(file,"P6\n640 320\n255\n");fwrite(sheet,1,640*320*3,file);fclose(file);
     }
     free(sheet);
-    printf("POINTER_ART_PASS shapes=%d palettes=4 sizes=41 antialias=present hotspot=bounded alpha=exact preview=source-derived\n", BLIT_POINTER_SHAPE_COUNT);
+    printf("POINTER_ART_PASS shapes=%d palettes=4 sizes=41 antialias=present hotspot=bounded alpha=exact preview=source-derived busy=12-phases revisions=unique\n", BLIT_POINTER_SHAPE_COUNT);
     return 0;
 }

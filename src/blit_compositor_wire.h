@@ -733,7 +733,8 @@ enum {
     BC_INPUT_FRAME,         /* time_us */
     BC_INPUT_KEYMAP,        /* revision size rate delay, and a memfd: no frame follows */
     BC_INPUT_MODIFIERS,     /* mods[4]: depressed latched locked group (ADR 0231) */
-    BC_INPUT_METHOD         /* method, options: the input method in use, "-" none (ADR 0233) */
+    BC_INPUT_METHOD,        /* method, options: the input method in use, "-" none (ADR 0233) */
+    BC_INPUT_BUSY           /* code: ms before a program is busy, 0 for off (ADR 0235) */
 };
 
 typedef struct {
@@ -773,7 +774,7 @@ static int bc_parse_input(const char *line, BcInput *out)
         { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
         { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
         { "keymap ", BC_INPUT_KEYMAP }, { "modifiers ", BC_INPUT_MODIFIERS },
-        { "method ", BC_INPUT_METHOD },
+        { "method ", BC_INPUT_METHOD }, { "busy ", BC_INPUT_BUSY },
     };
     const char *p;
     size_t i;
@@ -816,6 +817,15 @@ static int bc_parse_input(const char *line, BcInput *out)
         }
         break;
     }
+    case BC_INPUT_BUSY:
+        /* `off`, or the milliseconds a ping may go unanswered: 1..60000. */
+        if (strncmp(p, "off", 3) == 0) {
+            out->code = 0;
+            p += 3;
+        } else if (bc_read_u32(&p, 60000, &out->code) != 0 || out->code == 0) {
+            return out->kind = BC_INPUT_UNKNOWN;
+        }
+        break;
     case BC_INPUT_MODIFIERS: {
         int k;
         for (k = 0; k < 4; ++k)

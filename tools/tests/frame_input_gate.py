@@ -505,7 +505,9 @@ class LineReceiver:
     <depressed> <latched> <locked> <group>` (ADR 0231), Blit's keyboard
     state, after a key in that key's frame or on its own with none; and
     `INPUT method <id> <name|->` (ADR 0233), the input method of the
-    current keyboard, after each keymap, with no frame."""
+    current keyboard, after each keymap, with no frame; and `INPUT busy
+    <id> <ms|off>` (ADR 0235), when a program counts as busy, when the
+    route goes live and when the setting changes, with no frame."""
 
     def __init__(self, work, name='input-0'):
         self.path = os.path.join(work, name)
@@ -520,6 +522,7 @@ class LineReceiver:
         self.keymaps = []     # (text, rate, delay) of each keymap line
         self.modifiers = []   # (depressed, latched, locked, group) of each modifiers line
         self.methods = []     # the method of each method line, '-' for none
+        self.busy = []        # the threshold of each busy line, 'off' for never
         self.fds = []         # passed and not yet matched to a line
         self.frames = 0
         self.total = 0        # every event line read
@@ -537,6 +540,7 @@ class LineReceiver:
         self.events, self.notices, self.keymaps, self.fds = [], [], [], []
         self.modifiers = []
         self.methods = []
+        self.busy = []
         self.frames = self.total = 0
         self.eof = False
         self.accept()
@@ -581,6 +585,10 @@ class LineReceiver:
                 check(len(words) >= 4 and self.total == self.frames and self.keymaps,
                       'a method line %r (after a keymap, outside an event)' % line)
                 self.methods.append(words[3])
+            elif words[1] == 'busy':
+                check(len(words) == 4 and (words[3] == 'off' or words[3].isdigit()) and
+                      self.total == self.frames, 'a busy line %r (outside an event)' % line)
+                self.busy.append(words[3])
             elif words[1] == 'keymap':
                 check(len(words) == 7 and int(words[3]) > 0 and self.total == self.frames,
                       'a keymap line %r' % line)
@@ -1000,6 +1008,31 @@ def sock():
               '(%d bytes)' % (len(text), len(served)))
         check((rate, delay) == served_repeat, 'the route\'s repeat %s, the API\'s %s'
               % ((rate, delay), served_repeat))
+        # ADR 0235: the busy threshold, told when the route went live, and
+        # again, live, when the pointer settings change it.
+        receiver.read(0.3)
+        check(receiver.busy == ['2000'], 'the busy line when the route went live: %s (methods %s)' % (receiver.busy, receiver.methods))
+
+        def pointer_settings(changes):
+            settings = server.api('GET', '/v1/settings')
+            document = settings['document']
+            document['pointer'] = dict(document.get('pointer') or {}, **changes)
+            request = urllib.request.Request(server.base + '/v1/settings', method='PUT',
+                                             data=json.dumps({'document': document}).encode(),
+                                             headers={'Content-Type': 'application/json',
+                                                      'If-Match': str(settings['revision'])})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                check(response.status == 200, 'PUT /v1/settings %s' % response.status)
+
+        pointer_settings({'busy_after_ms': 3500})
+        wait_for(lambda: (receiver.read(0.1), receiver.busy[-1:] == ['3500'])[1],
+                 lambda: 'a new busy threshold did not reach the route: %s' % receiver.busy)
+        pointer_settings({'busy_pointer': False})
+        wait_for(lambda: (receiver.read(0.1), receiver.busy[-1:] == ['off'])[1],
+                 lambda: 'busy off did not reach the route: %s' % receiver.busy)
+        pointer_settings({'busy_pointer': True, 'busy_after_ms': 2000})
+        wait_for(lambda: (receiver.read(0.1), receiver.busy[-1:] == ['2000'])[1],
+                 lambda: 'busy back on did not reach the route: %s' % receiver.busy)
 
         def key(code, *values):
             for v in values:
@@ -1285,7 +1318,7 @@ def sock():
           'off+unfocused+console=silent release_all=off,focus,console,close,delete wheel=0,-1/0,1 '
           'ptr=frame-pixels absolute=%s outside=silent relative=70,-30_in_%d,hidden,still %s '
           'keymap=memfd,at-live,once,=api(%s) on_before_accept=queued closed=ENOENT '
-          'not-taken=dropped+ENOENT frames=%d %s'
+          'not-taken=dropped+ENOENT frames=%d %s busy=live(2000),put(3500),off,on'
           % (','.join(cases), moves, confine, notices, frames, several))
 
 
