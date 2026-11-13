@@ -30115,8 +30115,29 @@ static void settings_apply_keyboards(BlitRuntime *runtime, int news)
         if (!has_list) snprintf(problem, sizeof(problem), "keyboards: no list");
         ok = 0;
     } else {
-        ok = blit_keyboards_set(layouts, variants, n, has_current ? current : 0, problem,
-                                sizeof(problem));
+        /* ADR 0233: an input method's keyboard whose data is not installed
+           (hibr-ime removed) is set aside, said once, and the rest of the
+           list kept -- not the whole list lost to US. */
+        int i, kept = 0, cur = has_current ? current : 0, new_cur = 0;
+        for (i = 0; i < n; ++i) {
+            const char *method = blit_keyboard_method(layouts[i], variants[i]);
+            if (method && !blit_keyboard_method_installed(method)) {
+                char said[160];
+                snprintf(said, sizeof(said), "keyboard %s %s set aside: its input method's data is not installed",
+                         layouts[i], variants[i]);
+                fprintf(stderr, "blit: %s\n", said);
+                diagnostic_log(runtime, "warning", "keyboard_set_aside", said);
+                continue;
+            }
+            if (i == cur) new_cur = kept;
+            if (kept != i) {
+                memcpy(layouts[kept], layouts[i], BLIT_KEYBOARD_NAME);
+                memcpy(variants[kept], variants[i], BLIT_KEYBOARD_NAME);
+            }
+            ++kept;
+        }
+        ok = kept > 0 ? blit_keyboards_set(layouts, variants, kept, new_cur, problem, sizeof(problem))
+                      : blit_keyboards_default(problem, sizeof(problem));
     }
     if (!ok) {
         fprintf(stderr, "blit: stored keyboards not applied: %s\n", problem);
@@ -30169,6 +30190,12 @@ static void keyboards_available_json(const char *layout, char *out, size_t capac
         }
     }
     if (file) fclose(file);
+    /* ADR 0233: Arabizi, when its method's data is installed. */
+    if (layout != NULL && strcmp(layout, "ara") == 0 && blit_keyboard_method_installed("arabizi")) {
+        json_appendf(out, capacity, &used, "%s{\"variant\":\"arabizi\",\"name\":\"Arabic (Arabizi)\"}",
+                     first ? "" : ",");
+        first = 0;
+    }
     json_appendf(out, capacity, &used, "]}");
 }
 

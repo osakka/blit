@@ -81,11 +81,38 @@ static int blit_keyboard_name_ok(const char *name, int empty_ok)
     return 1;
 }
 
-/* One keyboard compiled from the system's data: its keymap and its text. */
+/* ADR 0233: the keyboards that are input methods (hibr-ime), not xkb
+   layouts: Arabic (Arabizi) is typed on the US keys and turned into Arabic
+   by its method. The method's name, or NULL for an xkb keyboard. */
+static const char *blit_keyboard_method(const char *layout, const char *variant)
+{
+    return strcmp(layout, "ara") == 0 && strcmp(variant, "arabizi") == 0 ? "arabizi" : NULL;
+}
+
+/* Whether a method's data is installed: <BLIT_IME_DATA or /usr/share/blit>/<method>/. */
+static int blit_keyboard_method_installed(const char *method)
+{
+    const char *root = getenv("BLIT_IME_DATA");
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/%s/%s.rules", root && root[0] ? root : "/usr/share/blit", method, method);
+    return access(path, R_OK) == 0;
+}
+
+/* One keyboard compiled from the system's data: its keymap and its text.
+   An input method's keyboard is the US keys'. */
 static int blit_xkb_compile(const char *layout, const char *variant, struct xkb_keymap **keymap,
                             char **text, char *problem, size_t capacity)
 {
     struct xkb_rule_names rules;
+    if (blit_keyboard_method(layout, variant)) {
+        if (!blit_keyboard_method_installed(blit_keyboard_method(layout, variant))) {
+            snprintf(problem, capacity, "the %s input method's data is not installed",
+                     blit_keyboard_method(layout, variant));
+            return 0;
+        }
+        layout = "us";
+        variant = "";
+    }
     if (blit_xkb_context == NULL)
         blit_xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     if (blit_xkb_context == NULL) {
@@ -237,7 +264,12 @@ static void blit_keyboard_description(const char *layout, const char *variant, c
 {
     char line[512], *name, *text, *ignored;
     int section = 0;
-    FILE *file = blit_xkb_rules_list();
+    FILE *file;
+    if (blit_keyboard_method(layout, variant)) {
+        snprintf(out, capacity, "Arabic (Arabizi)");
+        return;
+    }
+    file = blit_xkb_rules_list();
     snprintf(out, capacity, "%s%s%s", layout, variant[0] ? " " : "", variant);
     if (file == NULL)
         return;

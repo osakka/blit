@@ -72,7 +72,7 @@ PROBE
 then
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" $(cat "$proto/include") $compositor_cflags \
-        "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c $protocol_sources \
+        "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c $protocol_sources $(cat "$proto/ime") \
         $compositor_libs -lm -o "$out/blit-compositor-asan"
     # As compositor_gate: without address randomisation (GCC 12's
     # AddressSanitizer under this kernel), which Xwayland inherits too.

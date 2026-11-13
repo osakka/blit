@@ -845,6 +845,7 @@ def input_part(server, compositor, standin, work):
         with open(os.path.join(nodes, node + '.identity'), 'w') as out:
             out.write('bustype=3\nvendor=05ac\nproduct=0256\nversion=0100\nphys=usb-gate/%s\n%s' % (node, identity))
     env = gate_env.server_env(dict(BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'),
+                          BLIT_IME_DATA=ime_data(),
                           BLIT_SETTINGS_PATH=os.path.join(work, 'settings-input.json'),
                           BLIT_LOGIN_AUTOSTART='0', BLIT_FONT_ROOT=os.path.join(ROOT, 'assets/fonts'),
                           BLIT_EXPECT_DESKTOP='0', BLIT_TEST_MODE='1', BLIT_TEST_VT_SIGNALS='1',
@@ -1236,6 +1237,154 @@ def lock_part(compositor, standin, work):
         listener.close()
 
 
+def ime_data():
+    """The pinned hibr-ime tag's data directory (packaging/IME_VERSION)."""
+    root = os.environ.get('BLIT_IME_ROOT') or os.path.join(
+        ROOT, 'build', 'hibr-ime-' + open(os.path.join(ROOT, 'packaging/IME_VERSION')).read().strip())
+    return os.path.join(root, 'data')
+
+
+def us_keymap():
+    """The US keymap's text, compiled by libxkbcommon as Blit compiles it."""
+    import ctypes
+    import ctypes.util
+    xkb = ctypes.CDLL(ctypes.util.find_library('xkbcommon') or 'libxkbcommon.so.0')
+
+    class Names(ctypes.Structure):
+        _fields_ = [(n, ctypes.c_char_p) for n in ('rules', 'model', 'layout', 'variant', 'options')]
+
+    xkb.xkb_context_new.restype = ctypes.c_void_p
+    xkb.xkb_keymap_new_from_names.restype = ctypes.c_void_p
+    xkb.xkb_keymap_new_from_names.argtypes = [ctypes.c_void_p, ctypes.POINTER(Names), ctypes.c_int]
+    xkb.xkb_keymap_get_as_string.restype = ctypes.c_void_p
+    xkb.xkb_keymap_get_as_string.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    ctx = xkb.xkb_context_new(0)
+    names = Names(b'evdev', b'pc105', b'us', b'', b'')
+    keymap = xkb.xkb_keymap_new_from_names(ctx, ctypes.byref(names), 0)
+    check(keymap, 'libxkbcommon compiled no US keymap')
+    return ctypes.string_at(xkb.xkb_keymap_get_as_string(keymap, 1))
+
+
+def ime_part(compositor, standin, work):
+    """ADR 0233: the input method in a program's text field, through
+    zwp_text_input_v3. The gate plays the desktop and Blit's route, with the
+    US keymap and `INPUT method 1 arabizi`, and hibr-ime's data from the
+    pinned tag (BLIT_IME_DATA). Activated, the stand-in's field has the
+    keyboard (enter, then enabled) before any key. "salam" then a space:
+    each letter consumed, never a wl_keyboard key, with its preedit, and the
+    word committed as Arabic when the space comes. A chord (ctrl+a) commits
+    what is held and passes as keys. With the method off (`-`), keys reach
+    the program as keys. A password field (--text-input-password) is never
+    the method's."""
+    ime_root = os.environ.get('BLIT_IME_ROOT') or os.path.join(
+        ROOT, 'build', 'hibr-ime-' + open(os.path.join(ROOT, 'packaging/IME_VERSION')).read().strip())
+    check(os.path.isdir(os.path.join(ime_root, 'data', 'arabizi')), 'no hibr-ime checkout at ' + ime_root)
+    keymap = us_keymap()
+    results = []
+    for mode in ('--text-input', '--text-input-password'):
+        runtime = os.path.join(work, 'run-ime%s' % mode)
+        os.mkdir(runtime, 0o700)
+        name = 'blit-compositor-gate-ime-%d%s' % (os.getpid(), mode)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        listener.bind('\0' + name)
+        listener.listen(2)
+        env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime,
+                             BLIT_IME_DATA=os.path.join(ime_root, 'data'))
+        env.pop('WAYLAND_DISPLAY', None)
+        env.pop('BLIT_SERVER_PORT', None)
+        log = os.path.join(work, 'compositor-ime%s.log' % mode)
+        comp = start([compositor, '--x11', 'off', '--log', log], env,
+                     open(os.path.join(work, 'compositor-ime%s.out' % mode), 'w'))
+        client = None
+        try:
+            desk = Desktop(listener)
+            desk.line('WINDOW display blit-0 -')
+            out_path = os.path.join(work, 'standin-ime%s.out' % mode)
+            client = start([standin, mode, 'Field'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+            printed = lambda: open(out_path).read()
+            lines = lambda: printed().splitlines()
+            for want in ('WINDOW new 1 0', 'WINDOW title 1 Field', 'WINDOW appid 1 blit.standin',
+                         'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+                desk.line(want)
+            desk.frame(256, 160)
+            wait_for(lambda: 'STANDIN ti made' in lines(), lambda: 'no text input made:\n' + printed())
+            desk.send('WINDOW size 1 120 80 activated')
+            desk.frame(120, 80)
+            wait_for(lambda: 'STANDIN ti enter' in lines(),
+                     lambda: 'the field was not entered on activation:\n' + printed())
+            route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            route.connect(desk.input_socks[1])
+            memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+            os.write(memfd, keymap + b'\0')
+            fcntl.fcntl(memfd, 1033, 0x0f)
+            socket.send_fds(route, [b'INPUT keymap 1 7 %d 30 250\n' % (len(keymap) + 1)], [memfd])
+            os.close(memfd)
+            route.sendall(b'INPUT method 1 arabizi\n')
+            frame = [0]
+
+            def keys(*codes, mods=None):
+                text = ''
+                if mods is not None:
+                    text += 'INPUT modifiers 1 %d 0 0 0\n' % mods
+                for code in codes:
+                    for state in ('press', 'release'):
+                        frame[0] += 1
+                        text += 'INPUT key 1 %d %s\nINPUT frame 1 %d\n' % (code, state, frame[0])
+                if mods is not None:
+                    text += 'INPUT modifiers 1 0 0 0 0\n'
+                route.sendall(text.encode())
+
+            wait_for(lambda: any(l.startswith('STANDIN keymap format=1') for l in lines()),
+                     lambda: 'no keymap reached the client:\n' + printed())
+            before = len(lines())
+            keys(31, 30, 38, 30, 50)             # s a l a m
+            if mode == '--text-input':
+                wait_for(lambda: 'STANDIN ti preedit سلام' in lines()[before:],
+                         lambda: 'no preedit سلام:\n' + printed())
+                check(not any(l.startswith('STANDIN key ') for l in lines()[before:]),
+                      lambda: 'a key the method took reached the program:\n' + printed())
+                keys(57)                         # space: the word committed
+                wait_for(lambda: 'STANDIN ti commit سلام ' in lines(),
+                         lambda: 'no commit "سلام ":\n' + printed())
+                check(not any(l.startswith('STANDIN key 57') for l in lines()[before:]),
+                      lambda: 'the space reached the program as a key:\n' + printed())
+                mark = len(lines())
+                keys(48, 30)                     # b a, held
+                wait_for(lambda: 'STANDIN ti preedit با' in lines()[mark:] or
+                         any(l.startswith('STANDIN ti preedit ب') for l in lines()[mark:]),
+                         lambda: 'no preedit for "ba":\n' + printed())
+                keys(30, mods=4)                 # ctrl+a: commit, then the chord passes
+                wait_for(lambda: any(l.startswith('STANDIN ti commit ب') for l in lines()[mark:]),
+                         lambda: 'a chord did not commit what was held:\n' + printed())
+                wait_for(lambda: 'STANDIN key 30 1' in lines()[mark:],
+                         lambda: 'the chord did not pass to the program:\n' + printed())
+                mark = len(lines())
+                route.sendall(b'INPUT method 1 -\n')
+                keys(31)
+                wait_for(lambda: 'STANDIN key 31 1' in lines()[mark:],
+                         lambda: 'with no method, s did not reach the program:\n' + printed())
+                results.append('field=preedit(سلام),commit(سلام ),keys-taken chord=commit+pass off=keys')
+            else:
+                wait_for(lambda: lines()[before:].count('STANDIN key 50 1') == 1,
+                         lambda: 'a password field did not get its keys:\n' + printed())
+                check(not any(l.startswith('STANDIN ti preedit ') and not l.endswith(' -')
+                              for l in lines()[before:]),
+                      lambda: 'the method typed into a password field:\n' + printed())
+                results.append('password=keys,no-preedit')
+            route.close()
+            desk.send('WINDOW close 1')
+            desk.line('WINDOW gone 1')
+            check(client.wait(5) == 0, 'the field stand-in failed:\n' + printed())
+            quit_compositor(desk, comp)
+        finally:
+            for p in (client, comp):
+                if p and p.poll() is None:
+                    p.kill()
+                    p.wait()
+            listener.close()
+    return ' '.join(results)
+
+
 class _Blit:
     """frame_input_gate's Session wants an object with api()."""
     api = staticmethod(lambda method, path, body=None: api(method, path, body))
@@ -1331,13 +1480,26 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
     wait_for(lambda: 'STANDIN keymap format=1 size=%d xkb=1' % (len(texts[0]) + 1) in printed().splitlines()[before:],
              lambda: 'the switch back to US did not reach the client:\n' + printed())
     order.append('switch=ara:%dB,us' % len(arabic))
+    # ADR 0233: Arabic (Arabizi) made current is the method on the route,
+    # its keymap the US keys'; back to US, no method.
+    log = os.path.join(work, 'compositor-input.log')
+    api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'}, {'layout': 'ara', 'variant': 'arabizi'}],
+                                       'current': 1})
+    check(urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10).read() == texts[0],
+          'the Arabizi keyboard is not typed on the US keys')
+    wait_for(lambda: 'input method: arabizi' in open(log).read(),
+             lambda: 'Arabizi did not reach the compositor as its method:\n' + open(log).read()[-2000:])
+    api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'}], 'current': 0})
+    wait_for(lambda: 'input method: none' in open(log).read(),
+             lambda: 'back to US, the method stayed:\n' + open(log).read()[-2000:])
+    order.append('arabizi=method-line,us-keys,none')
     mark[0] = len(printed().splitlines())
     ch.line('INPUT off 41\n')
     ch.close()
     api('DELETE', '/v1/terminal-sessions/%s' % session.id)
     return ('blit-member-e2e=popup@%.2f,%.2f repeat=blit:30/250,patch->20/400 '
             'keyboard-switch=B:%s+20/500,A:%s+20/400 before-the-key one-keymap numlock=blit %s'
-            % (x, y, order[0], order[1], order[2]))
+            % (x, y, order[0], order[1], ' '.join(order[2:])))
 
 
 def dmabuf_part(compositor, standin, work):
@@ -2094,6 +2256,7 @@ def main():
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
+        print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))

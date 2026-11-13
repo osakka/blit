@@ -119,6 +119,13 @@
    pointer frame` and, from zwp_relative_pointer_v1 when it is offered,
    `STANDIN relative <dx> <dy>`.
 
+   With --text-input (or --text-input-password), it takes a
+   zwp_text_input_v3 for its seat and, on its enter, enables it (of the
+   normal, or the password, purpose) and commits: a text field with the
+   focus. It prints `STANDIN ti enter|leave`, `STANDIN ti preedit <text>`
+   (`-` for none), `STANDIN ti commit <text>` and `STANDIN ti done
+   <serial>` (ADR 0233).
+
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
    blue = 0x80 | ((x >> 8) & 7) << 3 | ((y >> 8) & 7).
@@ -148,6 +155,7 @@
 #include "appmenu-client-protocol.h"
 #include "xdg-activation-v1-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
+#include "text-input-unstable-v3-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -180,6 +188,10 @@ struct standin {
     struct wl_callback *callbacks[16];   /* frame callbacks not yet answered */
     struct timespec first_draw;
     struct wl_seat *seat;
+    /* --text-input: 1 a normal field, 2 a password field */
+    int text_input;
+    struct zwp_text_input_manager_v3 *ti_manager;
+    struct zwp_text_input_v3 *ti;
     struct wl_keyboard *keyboard;
     struct wl_pointer *pointer;
     struct standin_output {
@@ -1277,6 +1289,55 @@ static void seat_name(void *data, struct wl_seat *seat, const char *name)
 
 static const struct wl_seat_listener seat_listener = { seat_capabilities, seat_name };
 
+static void ti_enter(void *data, struct zwp_text_input_v3 *ti, struct wl_surface *surface)
+{
+    struct standin *s = data;
+    (void)surface;
+    printf("STANDIN ti enter\n");
+    zwp_text_input_v3_enable(ti);
+    zwp_text_input_v3_set_content_type(ti, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+                                       s->text_input == 2 ? ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD
+                                                          : ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+    zwp_text_input_v3_commit(ti);
+}
+
+static void ti_leave(void *data, struct zwp_text_input_v3 *ti, struct wl_surface *surface)
+{
+    (void)data; (void)surface;
+    printf("STANDIN ti leave\n");
+    zwp_text_input_v3_disable(ti);
+    zwp_text_input_v3_commit(ti);
+}
+
+static void ti_preedit(void *data, struct zwp_text_input_v3 *ti, const char *text, int32_t begin,
+                       int32_t end)
+{
+    (void)data; (void)ti; (void)begin; (void)end;
+    printf("STANDIN ti preedit %s\n", text && text[0] ? text : "-");
+}
+
+static void ti_commit_string(void *data, struct zwp_text_input_v3 *ti, const char *text)
+{
+    (void)data; (void)ti;
+    printf("STANDIN ti commit %s\n", text ? text : "");
+}
+
+static void ti_delete(void *data, struct zwp_text_input_v3 *ti, uint32_t before, uint32_t after)
+{
+    (void)data; (void)ti;
+    printf("STANDIN ti delete %u %u\n", before, after);
+}
+
+static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial)
+{
+    (void)data; (void)ti;
+    printf("STANDIN ti done %u\n", serial);
+}
+
+static const struct zwp_text_input_v3_listener ti_listener = {
+    ti_enter, ti_leave, ti_preedit, ti_commit_string, ti_delete, ti_done,
+};
+
 static void output_geometry(void *data, struct wl_output *o, int32_t x, int32_t y, int32_t pw,
                             int32_t ph, int32_t subpixel, const char *make, const char *model,
                             int32_t transform)
@@ -1429,6 +1490,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
     else if (strcmp(interface, xdg_wm_base_interface.name) == 0)
         s->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
                                       version < 5 ? version : 5);
+    else if (strcmp(interface, zwp_text_input_manager_v3_interface.name) == 0 && s->text_input)
+        s->ti_manager = wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1);
     else if (strcmp(interface, wl_seat_interface.name) == 0) {
         s->seat = wl_registry_bind(registry, name, &wl_seat_interface, version < 8 ? version : 8);
         wl_seat_add_listener(s->seat, &seat_listener, s);
@@ -1562,6 +1625,8 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--xdg-output") == 0) s.xdg_mode = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
+        else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;
+        else if (strcmp(argv[i], "--text-input-password") == 0) s.text_input = 2;
         else if (strcmp(argv[i], "--animate") == 0 && i + 1 < argc) s.animate = atoi(argv[++i]);
         else title = argv[i];
     }
@@ -1575,6 +1640,15 @@ int main(int argc, char **argv)
     wl_registry_add_listener(registry, &registry_listener, &s);
     wl_display_roundtrip(s.display);
     wl_display_roundtrip(s.display); /* the seat's and the output's events */
+    if (s.text_input) {
+        if (s.ti_manager == NULL || s.seat == NULL) {
+            fprintf(stderr, "STANDIN --text-input: no zwp_text_input_manager_v3\n");
+            return 1;
+        }
+        s.ti = zwp_text_input_manager_v3_get_text_input(s.ti_manager, s.seat);
+        zwp_text_input_v3_add_listener(s.ti, &ti_listener, &s);
+        printf("STANDIN ti made\n");
+    }
     if (s.clip) {
         if (s.ddm == NULL || s.psm == NULL || s.seat == NULL) {
             fprintf(stderr, "STANDIN --clip: no data device manager or primary selection\n");
@@ -1685,6 +1759,8 @@ int main(int argc, char **argv)
     if (s.primary_source) zwp_primary_selection_source_v1_destroy(s.primary_source);
     if (s.data_device) wl_data_device_release(s.data_device);
     if (s.primary_device) zwp_primary_selection_device_v1_destroy(s.primary_device);
+    if (s.ti) zwp_text_input_v3_destroy(s.ti);
+    if (s.ti_manager) zwp_text_input_manager_v3_destroy(s.ti_manager);
     if (s.ddm) wl_data_device_manager_destroy(s.ddm);
     if (s.psm) zwp_primary_selection_device_manager_v1_destroy(s.psm);
     if (s.subcompositor) wl_subcompositor_destroy(s.subcompositor);

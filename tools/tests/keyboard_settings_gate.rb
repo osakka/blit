@@ -160,10 +160,17 @@ File.write(File.join(nodes, 'event1.identity'), <<~SIDECAR)
 SIDECAR
 
 $server = nil
+# ADR 0233: the input methods' data, the pinned hibr-ime tag's; a start may
+# be given none, as a system without hibr-ime.
+IME_DATA = File.join(ENV['BLIT_IME_ROOT'] ||
+                     File.join(ROOT, 'build', "hibr-ime-#{File.read(File.join(ROOT, 'packaging/IME_VERSION')).strip}"),
+                     'data')
+$ime_data = IME_DATA
 def start
   $server = gate_spawn({ **gate_display_env, 'BLIT_PSF_FONT' => FONT,
                     'BLIT_INPUT_ROOT' => File.join(INPUT_ROOT, 'nodes'),
                     'BLIT_SETTINGS_PATH' => DOCUMENT,
+                    'BLIT_IME_DATA' => $ime_data,
                     },
                   BINARY, PORT.to_s, out: '/dev/null', err: '/dev/null')
   Timeout.timeout(20) do
@@ -444,6 +451,45 @@ verdict('the-keyboards-survive-a-restart') do
   check(code == 200 && listed.to_h['current'] == 5 && listed['keyboards'].length == 6,
         "six keyboards, the sixth current, got #{code} #{listed.inspect}")
   request('PUT', '/v1/input/keyboards', { 'keyboards' => [{ 'layout' => 'us' }], 'current' => 0 })
+end
+
+# ADR 0233: Arabic (Arabizi) is a keyboard while hibr-ime's data is
+# installed, typed on the US keys. Started without that data, a stored list
+# keeps its other keyboards and the current one, and Arabizi is set aside
+# (not the whole list lost to US); it is neither offered nor accepted.
+verdict('arabizi-is-a-keyboard-while-its-data-is-installed') do
+  _, offered = request('GET', '/v1/input/keyboards/available?layout=ara')
+  check(offered.to_h.fetch('variants', []).any? { |v| v['variant'] == 'arabizi' && v['name'] == 'Arabic (Arabizi)' },
+        "Arabizi is offered with its data, got #{offered.inspect}")
+  code, listed = request('PUT', '/v1/input/keyboards',
+                         { 'keyboards' => [{ 'layout' => 'us' }, { 'layout' => 'ara', 'variant' => 'arabizi' },
+                                           { 'layout' => 'ara', 'variant' => 'buckwalter' }],
+                           'current' => 2 })
+  check(code == 200 && listed.to_h['keyboards'][1]['name'] == 'Arabic (Arabizi)',
+        "a list with Arabizi -> #{code} #{listed.inspect}")
+  begin
+    Timeout.timeout(10) do
+      sleep 0.1 until JSON.parse(File.read(DOCUMENT)).dig('keyboards', 'list').to_a.length == 3
+    end
+  rescue Timeout::Error, Errno::ENOENT
+    check(false, 'the list with Arabizi reached the document')
+  end
+  stop
+  $ime_data = File.join(INPUT_ROOT, 'no-ime-data')
+  start
+  _, listed = request('GET', '/v1/input/keyboards')
+  check(listed.to_h.fetch('keyboards', []).map { |k| [k['layout'], k['variant']] } == [['us', ''], ['ara', 'buckwalter']] &&
+        listed.to_h['current'] == 1,
+        "without its data Arabizi is set aside and the rest kept, Buckwalter current, got #{listed.inspect}")
+  _, offered = request('GET', '/v1/input/keyboards/available?layout=ara')
+  check(offered.to_h.fetch('variants', []).none? { |v| v['variant'] == 'arabizi' },
+        "Arabizi is not offered without its data, got #{offered.inspect}")
+  code, = request('PUT', '/v1/input/keyboards', { 'keyboards' => [{ 'layout' => 'ara', 'variant' => 'arabizi' }] })
+  check(code == 422, "Arabizi without its data is refused, got #{code}")
+  request('PUT', '/v1/input/keyboards', { 'keyboards' => [{ 'layout' => 'us' }], 'current' => 0 })
+  stop
+  $ime_data = IME_DATA
+  start
 end
 
 unless $failures.empty?

@@ -158,9 +158,9 @@ case "$target" in
         done
         # The input methods (hibr-ime, ADR 0233): the compositor runs them
         # for program windows through text-input-v3, so every build of the
-        # compositor (the gates' too) compiles them from this list, with the
-        # include flags in $proto/include.
-        ime_sources >> "$proto/sources"
+        # compositor (the gates' too) compiles $proto/ime with the include
+        # flags in $proto/include. The protocol list stays the clients' too.
+        ime_sources > "$proto/ime"
         printf '%s\n' "-I$ime_root/include" "-I$ime_root/src" > "$proto/include"
         # No -g: the package (packaging/build-deb.sh, blit-compositor) must
         # be the same bytes from any checkout, and tcc 0.9.27 records the
@@ -172,7 +172,7 @@ case "$target" in
         compile -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             -I"$ROOT/src" -I"$proto" $(cat "$proto/include") $cflags -- \
-            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources")
+            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources") $(cat "$proto/ime")
         # shellcheck disable=SC2046,SC2086
         "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -lm -ldl
         ;;

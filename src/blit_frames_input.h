@@ -587,6 +587,15 @@ static int frame_input_sync(BlitRuntime *runtime, const BlitFrameClient *client,
            an event, so no frame and not counted. */
         frame_input_modifiers_text(runtime, NULL, in, 1, mods, sizeof(mods));
         frame_input_write(session, in, mods, strlen(mods), -1);
+        /* ADR 0233: the input method the current keyboard is, "-" none;
+           the compositor runs it for the program's text fields. */
+        {
+            const BlitKeyboard *k = &blit_keyboards[blit_keyboard_current];
+            const char *method = blit_keyboard_method(k->layout, k->variant);
+            char line[96];
+            int n = snprintf(line, sizeof(line), "INPUT method %u %s\n", in->image_id, method ? method : "-");
+            frame_input_write(session, in, line, (size_t)n, -1);
+        }
     }
     return 1;
 }

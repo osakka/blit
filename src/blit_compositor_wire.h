@@ -732,7 +732,8 @@ enum {
     BC_INPUT_WHEEL,         /* dx, dy (notches) */
     BC_INPUT_FRAME,         /* time_us */
     BC_INPUT_KEYMAP,        /* revision size rate delay, and a memfd: no frame follows */
-    BC_INPUT_MODIFIERS      /* mods[4]: depressed latched locked group (ADR 0231) */
+    BC_INPUT_MODIFIERS,     /* mods[4]: depressed latched locked group (ADR 0231) */
+    BC_INPUT_METHOD         /* method, options: the input method in use, "-" none (ADR 0233) */
 };
 
 typedef struct {
@@ -746,6 +747,8 @@ typedef struct {
     uint32_t size;          /* keymap: the memfd's bytes, text and NUL */
     int32_t rate, delay;    /* keymap: repeat per second, ms; 0 0 none */
     uint32_t mods[4];       /* modifiers: depressed, latched, locked, group */
+    char method[32];        /* method: its name, "" for none */
+    char options[96];       /* method: its options, space-separated */
 } BcInput;
 
 /* A decimal number as Blit writes it: an optional '-', digits, and an
@@ -770,6 +773,7 @@ static int bc_parse_input(const char *line, BcInput *out)
         { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
         { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
         { "keymap ", BC_INPUT_KEYMAP }, { "modifiers ", BC_INPUT_MODIFIERS },
+        { "method ", BC_INPUT_METHOD },
     };
     const char *p;
     size_t i;
@@ -790,6 +794,28 @@ static int bc_parse_input(const char *line, BcInput *out)
         else if (strncmp(p, "release", 7) == 0) p += 7;
         else return out->kind = BC_INPUT_UNKNOWN;
         break;
+    case BC_INPUT_METHOD: {
+        /* `-` or a name of a-z, 0-9 and '-', then the options to the end of
+           the line in the same letters and spaces. */
+        size_t n = strcspn(p, " \n");
+        size_t j;
+        if (n == 0 || n >= sizeof(out->method)) return out->kind = BC_INPUT_UNKNOWN;
+        for (j = 0; j < n; ++j)
+            if (!((p[j] >= 'a' && p[j] <= 'z') || (p[j] >= '0' && p[j] <= '9') || p[j] == '-'))
+                return out->kind = BC_INPUT_UNKNOWN;
+        if (!(n == 1 && p[0] == '-')) memcpy(out->method, p, n);
+        p += n;
+        if (*p == ' ') {
+            n = strcspn(++p, "\n");
+            if (n >= sizeof(out->options)) return out->kind = BC_INPUT_UNKNOWN;
+            for (j = 0; j < n; ++j)
+                if (!((p[j] >= 'a' && p[j] <= 'z') || (p[j] >= '0' && p[j] <= '9') || p[j] == '-' || p[j] == ' '))
+                    return out->kind = BC_INPUT_UNKNOWN;
+            memcpy(out->options, p, n);
+            p += n;
+        }
+        break;
+    }
     case BC_INPUT_MODIFIERS: {
         int k;
         for (k = 0; k < 4; ++k)

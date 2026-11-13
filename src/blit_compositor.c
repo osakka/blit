@@ -94,6 +94,8 @@
 #include "xwayland-shell-v1-server-protocol.h"
 #include "xdg-activation-v1-server-protocol.h"
 #include "xdg-output-unstable-v1-server-protocol.h"
+#include "text-input-unstable-v3-server-protocol.h"
+#include "ime.h"
 #include "blit_compositor_wire.h"
 #include "blit_pointer_names.h"
 #include "blit_crash.h"
@@ -456,6 +458,17 @@ struct bc_server {
     /* input (the seat section) */
     struct wl_list input_conns;       /* bc_input_conn: Blit's routes */
     struct wl_list keyboards, pointers;   /* wl_keyboard, wl_pointer resources */
+    /* The input method (ADR 0233): the one Blit says is in use ("" none),
+       its data and engine (hibr-ime) once loaded, the keys it took (their
+       releases are its too), and every program's text inputs. */
+    struct {
+        char name[32], options[96];
+        ImeData *data;
+        ImeEngine *engine;
+        char *problem;          /* why the data did not load, logged once */
+        unsigned char taken[0x300 / 8];
+    } ime;
+    struct wl_list text_inputs;       /* bc_text_input */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
     struct wl_list constraints;       /* bc_constraint: pointer locks and confinements */
     /* the clipboard (ADR 0229): [0] Ctrl-C/V, [1] the primary selection */
@@ -4717,6 +4730,304 @@ static void keyboard_send_modifiers(struct bc_server *s, int force)
 }
 
 /* Every key still down released, to the focused client and the xkb state. */
+/* ---- input methods (ADR 0233): text-input-v3, the engines hibr-ime's ----
+
+   A program's text field asks for an input method with zwp_text_input_v3
+   (enable, its content type, commit). While Blit says one is in use
+   (`INPUT method`), and the focused program has a text input enabled that
+   is not for a password or a PIN, and no ctrl, alt or super is held, each
+   key pressed goes to the engine: its preedit and commits go to the program
+   as preedit_string and commit_string, and a key it consumes (with its
+   release) never reaches the program as a key. A key it passes, and a
+   chord, commit what is held first. Leaving a program commits there; a
+   field the program disables loses what was held, as it can no longer be
+   told. The keys' characters are Blit's keymap's, with Blit's modifiers. */
+
+struct bc_text_input {
+    struct wl_resource *resource;
+    struct bc_server *s;
+    struct wl_list link;
+    int enabled, pending_enabled;
+    uint32_t purpose, pending_purpose;
+    uint32_t commits;                 /* commit requests so far: done's serial */
+    struct bc_surface *entered;       /* the surface it was told it is on */
+};
+
+static void text_input_free(struct wl_resource *resource)
+{
+    struct bc_text_input *t = wl_resource_get_user_data(resource);
+    wl_list_remove(&t->link);
+    free(t);
+}
+
+static void ti_enable(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_text_input *t = wl_resource_get_user_data(resource);
+    (void)client;
+    /* enable resets the state: a new field, of the normal kind until said. */
+    t->pending_enabled = 1;
+    t->pending_purpose = ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL;
+}
+
+static void ti_disable(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_text_input *t = wl_resource_get_user_data(resource);
+    (void)client;
+    t->pending_enabled = 0;
+}
+
+static void ti_surrounding(struct wl_client *client, struct wl_resource *resource, const char *text,
+                           int32_t cursor, int32_t anchor)
+{
+    (void)client; (void)resource; (void)text; (void)cursor; (void)anchor;
+}
+
+static void ti_cause(struct wl_client *client, struct wl_resource *resource, uint32_t cause)
+{
+    (void)client; (void)resource; (void)cause;
+}
+
+static void ti_content_type(struct wl_client *client, struct wl_resource *resource, uint32_t hint,
+                            uint32_t purpose)
+{
+    struct bc_text_input *t = wl_resource_get_user_data(resource);
+    (void)client; (void)hint;
+    t->pending_purpose = purpose;
+}
+
+static void ti_cursor_rectangle(struct wl_client *client, struct wl_resource *resource, int32_t x,
+                                int32_t y, int32_t width, int32_t height)
+{
+    (void)client; (void)resource; (void)x; (void)y; (void)width; (void)height;
+}
+
+static void ti_commit(struct wl_client *client, struct wl_resource *resource)
+{
+    struct bc_text_input *t = wl_resource_get_user_data(resource);
+    struct bc_server *s = t->s;
+    (void)client;
+    ++t->commits;
+    if (t->enabled && !t->pending_enabled && s->ime.engine && ime_pending(s->ime.engine)) {
+        char *dropped = ime_flush(s->ime.engine);
+        ime_text_free(dropped);
+        logf_("input method: a field disabled while a word was held: dropped");
+    }
+    t->enabled = t->pending_enabled;
+    t->purpose = t->pending_purpose;
+}
+
+static const struct zwp_text_input_v3_interface text_input_impl = {
+    .destroy = bc_destroy_request,
+    .enable = ti_enable,
+    .disable = ti_disable,
+    .set_surrounding_text = ti_surrounding,
+    .set_text_change_cause = ti_cause,
+    .set_content_type = ti_content_type,
+    .set_cursor_rectangle = ti_cursor_rectangle,
+    .commit = ti_commit,
+};
+
+static void ti_get(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                   struct wl_resource *seat)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_text_input *t = calloc(1, sizeof(*t));
+    (void)seat;
+    if (t == NULL) { wl_client_post_no_memory(client); return; }
+    t->resource = wl_resource_create(client, &zwp_text_input_v3_interface,
+                                     wl_resource_get_version(resource), id);
+    if (t->resource == NULL) { free(t); wl_client_post_no_memory(client); return; }
+    t->s = s;
+    wl_resource_set_implementation(t->resource, &text_input_impl, t, text_input_free);
+    wl_list_insert(&s->text_inputs, &t->link);
+    if (s->kbd_focus && wl_resource_get_client(s->kbd_focus->resource) == client) {
+        zwp_text_input_v3_send_enter(t->resource, s->kbd_focus->resource);
+        t->entered = s->kbd_focus;
+    }
+}
+
+static const struct zwp_text_input_manager_v3_interface text_input_manager_impl = {
+    .destroy = bc_destroy_request,
+    .get_text_input = ti_get,
+};
+
+static void bind_text_input_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zwp_text_input_manager_v3_interface,
+                                               (int)version, id);
+    if (r == NULL) { wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(r, &text_input_manager_impl, data, NULL);
+}
+
+/* Whether the program that owns surface has a text input. */
+static int ime_has_text_input(struct bc_server *s, struct bc_surface *surface)
+{
+    struct bc_text_input *t;
+    wl_list_for_each(t, &s->text_inputs, link)
+        if (wl_resource_get_client(t->resource) == wl_resource_get_client(surface->resource))
+            return 1;
+    return 0;
+}
+
+/* The text input the method types into now, or NULL: an input method in
+   use, and the focused program's enabled text input on the focused
+   surface, not for a password or a PIN. */
+static struct bc_text_input *ime_target(struct bc_server *s)
+{
+    struct bc_text_input *t;
+    if (s->ime.name[0] == '\0' || s->kbd_focus == NULL) return NULL;
+    wl_list_for_each(t, &s->text_inputs, link)
+        if (t->enabled && t->entered == s->kbd_focus &&
+            t->purpose != ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD &&
+            t->purpose != ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PIN)
+            return t;
+    return NULL;
+}
+
+/* The engine, its data read on first need from BLIT_IME_DATA or
+   /usr/share/blit (<root>/<method>); NULL when it cannot be had (logged
+   once). */
+static ImeEngine *ime_engine(struct bc_server *s)
+{
+    if (s->ime.engine) return s->ime.engine;
+    if (s->ime.problem) return NULL;
+    if (s->ime.data == NULL) {
+        const char *root = getenv("BLIT_IME_DATA");
+        s->ime.data = ime_load(s->ime.name, root && root[0] ? root : "/usr/share/blit", &s->ime.problem);
+        if (s->ime.data == NULL) {
+            logf_("input method %s: %s", s->ime.name, s->ime.problem ? s->ime.problem : "out of memory");
+            if (s->ime.problem == NULL) s->ime.problem = strdup("out of memory");
+            return NULL;
+        }
+        logf_("input method %s: loaded", s->ime.name);
+    }
+    s->ime.engine = ime_new(s->ime.data, s->ime.options[0] ? s->ime.options : NULL);
+    return s->ime.engine;
+}
+
+/* The engine's state to text input t: the preedit (or none), what it
+   commits, and done. */
+static void ime_send(struct bc_text_input *t, const char *commit)
+{
+    char *pre = ime_preedit(t->s->ime.engine);
+    if (pre && pre[0]) {
+        int32_t n = (int32_t)strlen(pre);
+        zwp_text_input_v3_send_preedit_string(t->resource, pre, n, n);
+    } else {
+        zwp_text_input_v3_send_preedit_string(t->resource, NULL, 0, 0);
+    }
+    if (commit && commit[0]) zwp_text_input_v3_send_commit_string(t->resource, commit);
+    zwp_text_input_v3_send_done(t->resource, t->commits);
+    ime_text_free(pre);
+}
+
+/* Everything held, committed into t (when there is a t to tell). */
+static void ime_commit_held(struct bc_server *s, struct bc_text_input *t)
+{
+    char *text;
+    if (s->ime.engine == NULL || !ime_pending(s->ime.engine)) return;
+    text = ime_flush(s->ime.engine);
+    if (t) ime_send(t, text);
+    ime_text_free(text);
+}
+
+/* ime.h's key for evdev `code`: its own word for keys with no character,
+   else the character Blit's keymap gives it with Blit's modifiers; -1 for
+   a key with neither. */
+static int ime_key_of(struct xkb_state *st, uint32_t code)
+{
+    uint32_t c;
+    switch (code) {
+    case 14: return IME_BACKSPACE;
+    case 28: case 96: return IME_ENTER;
+    case 15: return IME_TAB;
+    case 1: return IME_ESCAPE;
+    case 105: return IME_LEFT;
+    case 106: return IME_RIGHT;
+    case 103: return IME_UP;
+    case 108: return IME_DOWN;
+    case 102: return IME_HOME;
+    case 107: return IME_END;
+    case 111: return IME_DELETE;
+    }
+    c = xkb_state_key_get_utf32(st, code + 8);
+    return c >= 0x20 && c != 0x7f && c <= 0x10ffff ? (int)c : -1;
+}
+
+/* A key from Blit, offered to the input method first: 1 when the method
+   took it (a release follows its press), so the program is not told. */
+static int ime_key(struct bc_server *s, uint32_t code, int pressed)
+{
+    unsigned char bit = (unsigned char)(1u << (code % 8));
+    struct bc_text_input *t;
+    struct xkb_state *st;
+    ImeEngine *e;
+    char *commit;
+    int key, chord, passes = 1;
+    if (code >= 0x300) return 0;
+    if (!pressed) {
+        if (!(s->ime.taken[code / 8] & bit)) return 0;
+        s->ime.taken[code / 8] &= (unsigned char)~bit;
+        return 1;
+    }
+    if ((t = ime_target(s)) == NULL || s->keymap == NULL || (e = ime_engine(s)) == NULL) return 0;
+    if ((st = xkb_state_new(s->keymap)) == NULL) return 0;
+    xkb_state_update_mask(st, s->mods_blit[0], s->mods_blit[1], s->mods_blit[2], 0, 0, s->mods_blit[3]);
+    chord = xkb_state_mod_name_is_active(st, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0 ||
+            xkb_state_mod_name_is_active(st, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0 ||
+            xkb_state_mod_name_is_active(st, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0;
+    key = chord ? -1 : ime_key_of(st, code);
+    xkb_state_unref(st);
+    if (key < 0) {
+        ime_commit_held(s, t);
+        return 0;
+    }
+    if ((commit = ime_feed(e, key, &passes)) == NULL) return 0;
+    ime_send(t, commit);
+    ime_text_free(commit);
+    if (passes) return 0;
+    s->ime.taken[code / 8] |= bit;
+    return 1;
+}
+
+/* Blit's `INPUT method`: the method in use and its options, "" none. What
+   was held is committed where it was being typed first. */
+static void ime_set(struct bc_server *s, const char *name, const char *options)
+{
+    if (strcmp(s->ime.name, name) == 0 && strcmp(s->ime.options, options) == 0) return;
+    ime_commit_held(s, ime_target(s));
+    if (s->ime.engine) { ime_engine_free(s->ime.engine); s->ime.engine = NULL; }
+    if (strcmp(s->ime.name, name) != 0) {
+        if (s->ime.data) { ime_free(s->ime.data); s->ime.data = NULL; }
+        ime_text_free(s->ime.problem);
+        s->ime.problem = NULL;
+    }
+    snprintf(s->ime.name, sizeof(s->ime.name), "%s", name);
+    snprintf(s->ime.options, sizeof(s->ime.options), "%s", options);
+    logf_("input method: %s%s%s", name[0] ? name : "none", options[0] ? " " : "", options);
+}
+
+/* The keyboard leaves `from` and enters `to`: what was held is committed
+   into the field it was typed in, and the text inputs are told. */
+static void ime_focus(struct bc_server *s, struct bc_surface *from, struct bc_surface *to)
+{
+    struct bc_text_input *t;
+    if (from) {
+        ime_commit_held(s, ime_target(s));
+        wl_list_for_each(t, &s->text_inputs, link)
+            if (t->entered == from) {
+                zwp_text_input_v3_send_leave(t->resource, from->resource);
+                t->entered = NULL;
+            }
+    }
+    if (to)
+        wl_list_for_each(t, &s->text_inputs, link)
+            if (wl_resource_get_client(t->resource) == wl_resource_get_client(to->resource)) {
+                zwp_text_input_v3_send_enter(t->resource, to->resource);
+                t->entered = to;
+            }
+}
+
 static void keyboard_release_all(struct bc_server *s)
 {
     struct wl_resource *r;
@@ -4747,6 +5058,7 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
     struct wl_resource *r;
     struct wl_array keys;
     if (s->kbd_focus == surface) return;
+    if (s->kbd_focus) ime_focus(s, s->kbd_focus, NULL);
     if (s->kbd_focus) {
         keyboard_release_all(s);
         seat_for_client(r, &s->keyboards, s->kbd_focus)
@@ -4765,6 +5077,7 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
         wl_keyboard_send_enter(r, wl_display_next_serial(s->display), surface->resource, &keys);
     wl_array_release(&keys);
     keyboard_send_modifiers(s, 1);
+    ime_focus(s, NULL, surface);
     logf_("keyboard: enter window %u", surface->xdg ? surface->xdg->id : 0);
 }
 
@@ -5219,6 +5532,10 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         keymap_from_route(s, &in, fd);
         return;
     }
+    if (in.kind == BC_INPUT_METHOD) {
+        ime_set(s, in.method, in.options);
+        return;
+    }
     if (in.kind == BC_INPUT_MODIFIERS) {
         /* The seat's modifiers are Blit's (ADR 0231): whichever window's
            route they came on, the focused client is told when they change. */
@@ -5233,6 +5550,9 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         uint32_t bit = 1u << (in.code % 8);
         int down = (s->keys_down[in.code / 8] & bit) != 0;
         keyboard_focus(s, keyboard_target(s, x));
+        /* The input method first (ADR 0233): a key it takes is not the
+           program's, nor is that key's release. */
+        if (ime_key(s, in.code, in.pressed)) return;
         if (in.pressed == down) return;  /* a release of a key never pressed here */
         if (in.pressed) s->keys_down[in.code / 8] |= (unsigned char)bit;
         else s->keys_down[in.code / 8] &= (unsigned char)~bit;
@@ -8856,6 +9176,11 @@ static void handle_line(struct bc_server *s, const char *line)
         if (l.activated) x->asked = 0;
         /* The desktop took the window's focus away: so does the keyboard. */
         if (!l.activated && x->surface && s->kbd_focus == x->surface) keyboard_focus(s, NULL);
+        /* A program with a text input (ADR 0233) is given the keyboard when
+           activated, not at its first key: its field is enabled before
+           that key, so the input method has the first key too. */
+        if (l.activated && x->surface && ime_has_text_input(s, x->surface))
+            keyboard_focus(s, keyboard_target(s, x));
         logf_("window %u: size %dx%d%s%s%s", l.id, l.width, l.height,
               l.fullscreen ? " fullscreen" : "", l.maximized ? " maximized" : "",
               l.activated ? " activated" : "");
@@ -9394,6 +9719,7 @@ int main(int argc, char **argv)
     server.format_table_fd = -1;
     wl_list_init(&server.input_conns);
     wl_list_init(&server.keyboards);
+    wl_list_init(&server.text_inputs);
     wl_list_init(&server.pointers);
     wl_list_init(&server.relative_pointers);
     wl_list_init(&server.constraints);
@@ -9518,6 +9844,9 @@ int main(int argc, char **argv)
         !wl_global_create(server.display, &wp_cursor_shape_manager_v1_interface,
                           BC_VERSION(2, wp_cursor_shape_manager_v1_interface), &server,
                           bind_shape_manager) ||
+        !wl_global_create(server.display, &zwp_text_input_manager_v3_interface,
+                          BC_VERSION(1, zwp_text_input_manager_v3_interface), &server,
+                          bind_text_input_manager) ||
         !wl_global_create(server.display, &org_kde_kwin_appmenu_manager_interface,
                           BC_VERSION(1, org_kde_kwin_appmenu_manager_interface), &server,
                           bind_appmenu_manager) ||

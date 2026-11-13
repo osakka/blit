@@ -503,7 +503,9 @@ class LineReceiver:
     <rate> <delay>`, which is no event and has no frame, with a sealed
     memfd of the keymap passed with it; and `INPUT modifiers <id>
     <depressed> <latched> <locked> <group>` (ADR 0231), Blit's keyboard
-    state, after a key in that key's frame or on its own with none."""
+    state, after a key in that key's frame or on its own with none; and
+    `INPUT method <id> <name|->` (ADR 0233), the input method of the
+    current keyboard, after each keymap, with no frame."""
 
     def __init__(self, work, name='input-0'):
         self.path = os.path.join(work, name)
@@ -517,6 +519,7 @@ class LineReceiver:
         self.notices = []     # `keymap <id> <revision>`
         self.keymaps = []     # (text, rate, delay) of each keymap line
         self.modifiers = []   # (depressed, latched, locked, group) of each modifiers line
+        self.methods = []     # the method of each method line, '-' for none
         self.fds = []         # passed and not yet matched to a line
         self.frames = 0
         self.total = 0        # every event line read
@@ -533,6 +536,7 @@ class LineReceiver:
         self.buffer = b''
         self.events, self.notices, self.keymaps, self.fds = [], [], [], []
         self.modifiers = []
+        self.methods = []
         self.frames = self.total = 0
         self.eof = False
         self.accept()
@@ -573,6 +577,10 @@ class LineReceiver:
                 check(len(words) == 7 and all(w.isdigit() for w in words[3:]),
                       'a modifiers line %r' % line)
                 self.modifiers.append(tuple(int(w) for w in words[3:]))
+            elif words[1] == 'method':
+                check(len(words) >= 4 and self.total == self.frames and self.keymaps,
+                      'a method line %r (after a keymap, outside an event)' % line)
+                self.methods.append(words[3])
             elif words[1] == 'keymap':
                 check(len(words) == 7 and int(words[3]) > 0 and self.total == self.frames,
                       'a keymap line %r' % line)

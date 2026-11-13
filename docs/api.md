@@ -1793,8 +1793,15 @@ text, at most 4095 bytes, is never logged. 400 `invalid_text` without text;
 `<BLIT_IME_DATA>/arabizi`, by default `/usr/share/blit/arabizi`) are missing.
 The engine is hibr-ime's (LGPL-3.0-or-later), built in from the tag pinned
 in `packaging/IME_VERSION`.
-The keyboard itself, Arabic (Arabizi), joins the keyboard list when it can
-type where the owner types (ADR 0233's later phases).
+From 0.3.101, **Arabic (Arabizi)** is a keyboard:
+`{"layout":"ara","variant":"arabizi"}`, listed by
+`/v1/input/keyboards/available?layout=ara` while its data is installed. It
+is typed on the US keys, and Blit's compositor turns it into Arabic in
+programs' text fields (`INPUT method`, below). In Hibr's own fields it
+types plain US keys until hibr-ime's Hibr module does the same there. A
+stored list with Arabizi, started where its data isn't installed, keeps
+its other keyboards and sets Arabizi aside, with the warning
+`keyboard_set_aside`.
 
 **Dead keys and compose** (from 0.3.94): a layout's dead keys (such as
 `us` `intl`'s apostrophe, dead acute) and compose sequences work in
@@ -2692,7 +2699,24 @@ It speaks the frame channel above as a producer, with these additions.
                                        the keymap (a memfd passed with it)
   INPUT modifiers <id> <depressed> <latched> <locked> <group>
                                        the keyboard's xkb modifiers
+  INPUT method <id> <name|-> [<options>]
+                                       the current keyboard's input method
   ```
+  `INPUT method` (from 0.3.101, ADR 0233) follows each keymap, with no
+  `frame`. It is the input method the current keyboard is: `arabizi` for
+  Arabic (Arabizi), `-` for an xkb keyboard. The compositor runs that
+  method, hibr-ime's, for a program whose text field asks for one through
+  `zwp_text_input_v3`, and which isn't a password or PIN field. Each key
+  pressed with no ctrl, alt or super goes to the method:
+  - its preedit and the words it commits go to the program as
+    `preedit_string` and `commit_string`;
+  - a key it consumes, with its release, never reaches the program as a
+    key;
+  - a key it passes (Enter, a Backspace with nothing held), and a chord,
+    commit what is held first.
+  Leaving the program commits there. A program with a text input gets the
+  keyboard when its window is activated, so its field is enabled before
+  the first key.
   Keys are evdev codes as the keymap reads them: a device's `modifiers` role
   already applied (Caps Lock as Control is Left Control), and a key held by
   two physical keys sent once (ADR 0231). The modifiers are Blit's own xkb
