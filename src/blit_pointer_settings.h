@@ -11,8 +11,8 @@ static int pointer_member_key_decode(char *key, size_t capacity)
 }
 
 /* The pointer's appearance and, when `shake` is given, its shake to find
-   (ADR 0234): shake_to_find, shake_max_px (64..256) and shake_sensitivity
-   (1..10), kept apart from the appearance, which is the art's own key. */
+   (ADR 0234): shake_to_find, shake_max_px (64..256), shake_sensitivity
+   (1..10) and shake_shrink_ms (150..3000), kept apart from the appearance, which is the art's own key. */
 static int pointer_config_parse(const char *document, BlitPointerConfig *config,
                                 BlitShakeConfig *shake)
 {
@@ -78,18 +78,21 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config,
             else if (!strcmp(value,"false")) on = 0;
             else return 0;
             if (bit == 8) config->shadow = on; else shake->enabled = on;
-        } else if (!strcmp(key,"shake_max_px") || !strcmp(key,"shake_sensitivity")) {
+        } else if (!strcmp(key,"shake_max_px") || !strcmp(key,"shake_sensitivity") ||
+                   !strcmp(key,"shake_shrink_ms")) {
             char *end;
             long number, low, high;
-            int max_px = !strcmp(key,"shake_max_px");
-            bit = max_px ? 32 : 64;
-            low = max_px ? 64 : 1;
-            high = max_px ? BLIT_POINTER_MAX - 8 : 10;
+            int max_px = !strcmp(key,"shake_max_px"), shrink = !strcmp(key,"shake_shrink_ms");
+            bit = max_px ? 32 : shrink ? 128 : 64;
+            low = max_px ? 64 : shrink ? BLIT_SHAKE_SHRINK_MIN : 1;
+            high = max_px ? BLIT_POINTER_MAX - 8 : shrink ? BLIT_SHAKE_SHRINK_MAX : 10;
             for (i=0; value[i]; ++i) if (value[i] < '0' || value[i] > '9') return 0;
             if (i == 0 || (i > 1 && value[0] == '0')) return 0;
             number = strtol(value,&end,10);
             if (*end || number < low || number > high) return 0;
-            if (max_px) shake->max_px = (int)number; else shake->sensitivity = (int)number;
+            if (max_px) shake->max_px = (int)number;
+            else if (shrink) shake->shrink_ms = (int)number;
+            else shake->sensitivity = (int)number;
         } else return 0;
         if (seen & bit) return 0;
         seen |= bit;

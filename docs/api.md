@@ -1575,12 +1575,13 @@ straight sweep, slow wandering or a jittering hand do not grow it; a drag,
 a warp and a locked or hidden pointer do not either.
 
 ```json
-{"shake_to_find":true,"shake_max_px":160,"shake_sensitivity":5}
+{"shake_to_find":true,"shake_max_px":160,"shake_sensitivity":5,"shake_shrink_ms":900}
 ```
 
 `shake_to_find` defaults to true. `shake_max_px` (64–256, default 160) is
 the largest it grows to; `shake_sensitivity` (1–10, default 5) is how hard
-a shake must be, 1 hard, 10 light. `effective.pointer_shown` adds `size_px`
+a shake must be, 1 hard, 10 light; `shake_shrink_ms` (150–3000, default
+900) is how long it takes to shrink back once the shaking calms. `effective.pointer_shown` adds `size_px`
 (the size drawn now), `shake_scale` and `shake_sizes` (how many times the
 drawn size has changed).
 

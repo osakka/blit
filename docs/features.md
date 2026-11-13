@@ -131,7 +131,7 @@ The [font reference](font-reference.md) lists every glyph and icon codepoint.
 | Touchpad: move, two-finger scroll, click | 0.2.2 | — | Used |
 | Touchpad: tap to click, tap and drag, ignored while typing | 0.2.3, 0.2.34 | 0193 | Hardware pending (the HP Chromebook) |
 | Pointer appearance: three shapes, four palettes, 24–64 px, shadow | 0.1.550 | 0133 | Used |
-| Shake to find: shaking the mouse grows the pointer, the harder the bigger, easing back as it calms; on by default, the most (64–256 px) and sensitivity (1–10) set in `document.pointer`; a sweep, a drag or a warp do not grow it; nothing spent at rest | 0.3.102 | 0234 | Tested (`pointer_shake_gate`, `pointer_settings_gate` shake verdict; not yet the owner's hand) |
+| Shake to find: shaking the mouse grows the pointer, the harder the bigger, easing back as it calms; on by default, the most (64–256 px), sensitivity (1–10) and, since 0.3.104, the time to shrink back (150–3000 ms) set in `document.pointer`; a sweep, a drag or a warp do not grow it; nothing spent at rest | 0.3.102 | 0234 | Tested (`pointer_shake_gate`, `pointer_settings_gate` shake verdict; not yet the owner's hand) |
 | Gamepads: discovery, dead zone, inverted axes | 0.1.454 | 0013 | Hardware pending (a gamepad) |
 | Ctrl+Alt+Fn switches virtual console; the console is restored if Blit stops | 0.1.587 | 0170 | Used |
 | Ctrl+Alt+Backspace stops Blit; can be changed or turned off | 0.1.461 | — | Used |

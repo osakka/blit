@@ -89,6 +89,27 @@ int main(void)
     check(s.scale == 1.0f && blit_shake_tick(&s, now, &c, 24) == 0,
           "it did not settle back to 1 and idle", s.scale);
 
+    /* The shrink time is the user's: a quick one is back sooner than a
+       slow one, from the same shake. */
+    {
+        BlitShakeConfig quick = blit_shake_default(), slow = blit_shake_default();
+        BlitShake a, b;
+        uint64_t ta = now, tb = now;
+        quick.shrink_ms = 300;
+        slow.shrink_ms = 2400;
+        blit_shake_init(&a);
+        blit_shake_init(&b);
+        drive(&a, &quick, &ta, 1200, hard_x, shake_y);
+        drive(&b, &slow, &tb, 1200, hard_x, shake_y);
+        rest(&a, &quick, &ta, 1200);
+        rest(&b, &slow, &tb, 1200);
+        check(a.scale == 1.0f, "a quick shrink was not back at 1.2 s", a.scale);
+        check(b.scale > 1.5f, "a slow shrink was already back at 1.2 s", b.scale);
+        rest(&b, &slow, &tb, 3000);
+        check(b.scale == 1.0f, "a slow shrink never settled", b.scale);
+        now = ta > tb ? ta : tb;
+    }
+
     blit_shake_init(&s);
     most = drive(&s, &off, &now, 1200, hard_x, shake_y);
     check(most == 1.0f, "switched off, it grew", most);
@@ -99,7 +120,7 @@ int main(void)
     check(s.target == 1.0f && s.n == 0, "a reset kept its history", s.target);
 
     if (failures) return 1;
-    printf("POINTER_SHAKE_PASS sweep=1 wander=1 jitter=1 gentle=%.2f hard=%.2f most=%dpx eases-back settles off=1 reset\n",
+    printf("POINTER_SHAKE_PASS sweep=1 wander=1 jitter=1 gentle=%.2f hard=%.2f most=%dpx eases-back settles shrink=quick,slow off=1 reset\n",
            gentle, hard, c.max_px);
     return 0;
 }

@@ -14,8 +14,9 @@
 
    The pointer's scale follows: 1 below the threshold, growing
    continuously with the ratio above it, up to the most the settings allow.
-   It rises quickly (BLIT_SHAKE_ATTACK_US) and eases back slowly
-   (BLIT_SHAKE_RELEASE_US) as the shaking calms -- the history ages out of
+   It rises quickly (BLIT_SHAKE_ATTACK_US) and eases back as the shaking
+   calms, over the user's shrink time (shrink_ms: about 95% of the way
+   back in that time, a time constant of a third of it) -- the history ages out of
    the window, so the ratio falls on its own. Nothing here costs anything
    while the scale is 1 and nobody shakes. */
 
@@ -26,14 +27,17 @@
 #define BLIT_SHAKE_WINDOW_US 750000ULL
 #define BLIT_SHAKE_MIN_DIAGONAL 60.0f
 #define BLIT_SHAKE_ATTACK_US 60000.0
-#define BLIT_SHAKE_RELEASE_US 300000.0
 #define BLIT_SHAKE_RAMP 3.0f        /* ratio above the threshold for the most */
 
 typedef struct {
     int enabled;
     int max_px;                     /* the largest the pointer grows to */
     int sensitivity;                /* 1 (a hard shake) .. 10 (a light one) */
+    int shrink_ms;                  /* time to ease back, BLIT_SHAKE_SHRINK_MIN..MAX */
 } BlitShakeConfig;
+
+#define BLIT_SHAKE_SHRINK_MIN 150
+#define BLIT_SHAKE_SHRINK_MAX 3000
 
 typedef struct {
     float x[BLIT_SHAKE_POINTS], y[BLIT_SHAKE_POINTS];
@@ -46,7 +50,7 @@ typedef struct {
 
 static BlitShakeConfig blit_shake_default(void)
 {
-    BlitShakeConfig c = {1, 160, 5};
+    BlitShakeConfig c = {1, 160, 5, 900};
     return c;
 }
 
@@ -167,7 +171,13 @@ static int blit_shake_tick(BlitShake *s, uint64_t now, const BlitShakeConfig *c,
     blit_shake_aim(s, c, base_px);
     dt = s->ticked_us && now > s->ticked_us ? (double)(now - s->ticked_us) : 0.0;
     s->ticked_us = now;
-    tau = s->target > s->scale ? BLIT_SHAKE_ATTACK_US : BLIT_SHAKE_RELEASE_US;
+    if (s->target > s->scale) {
+        tau = BLIT_SHAKE_ATTACK_US;
+    } else {
+        int ms = c->shrink_ms < BLIT_SHAKE_SHRINK_MIN ? BLIT_SHAKE_SHRINK_MIN :
+                 c->shrink_ms > BLIT_SHAKE_SHRINK_MAX ? BLIT_SHAKE_SHRINK_MAX : c->shrink_ms;
+        tau = ms * 1000.0 / 3.0;
+    }
     s->scale += (float)((s->target - s->scale) * (1.0 - exp(-dt / tau)));
     /* At rest once the drawn size can no longer differ from the base: no
        ticks spent easing what nobody can see. */

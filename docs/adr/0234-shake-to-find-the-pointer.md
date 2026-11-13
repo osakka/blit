@@ -71,6 +71,14 @@ the size changes, not the whole output.
 size drawn now (`size_px`), `shake_scale` and `shake_sizes` (how many times
 the drawn size has changed).
 
+**Amended 2026-11-13 (0.3.104), at the owner's request:** how quickly it
+shrinks back is theirs too. `shake_shrink_ms` 150–3000 (default 900, the
+0.3.102 behaviour) sets the easing back: a time constant of a third of it,
+so about 95% of the way back in that time once the detector's target has
+fallen. The rise stays quick (60 ms). `pointer_shake_gate` checks that a
+300 ms shrink is back at 1.2 s while a 2400 ms one is still grown, and
+settles later.
+
 ## Consequences
 
 - On by default: the owner asked for it, and it costs nothing at rest. The

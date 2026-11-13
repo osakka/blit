@@ -157,7 +157,8 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     raise "over A the API should report hidden: #{shown.inspect}" unless shown['hidden'] == true
     raise "the API's own pointer changed: #{effective['pointer'].inspect}" unless
       effective['pointer'] == { 'shape' => 'arrow', 'palette' => 'pearl', 'size_px' => 24, 'shadow' => true,
-                                'shake_to_find' => true, 'shake_max_px' => 160, 'shake_sensitivity' => 5 }
+                                'shake_to_find' => true, 'shake_max_px' => 160, 'shake_sensitivity' => 5,
+                                'shake_shrink_ms' => 900 }
     asked = data('GET', "/v1/terminal-sessions/#{b.fetch('id')}")['pointer_shape']
     raise "B's request is not published: #{asked.inspect}" unless asked == { 'requested' => 'text', 'depth' => 1 }
     move(*centre[1])

@@ -23794,7 +23794,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
                  "\"size_px\":%d,\"shadow\":%s,\"shake_to_find\":%s,"
-                 "\"shake_max_px\":%d,\"shake_sensitivity\":%d},"
+                 "\"shake_max_px\":%d,\"shake_sensitivity\":%d,\"shake_shrink_ms\":%d},"
                  "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s,"
                  "\"size_px\":%d,\"shake_scale\":%.2f,\"shake_sizes\":%llu},"
                  "\"hud\":%s}}",
@@ -23828,6 +23828,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->pointer_art.config.shadow ? "true" : "false",
                  runtime->shake_config.enabled ? "true" : "false",
                  runtime->shake_config.max_px, runtime->shake_config.sensitivity,
+                 runtime->shake_config.shrink_ms,
                  blit_pointer_shapes[runtime->pointer_shown_art.revision ?
                      runtime->pointer_shown_art.config.shape :
                      runtime->pointer_art.config.shape],
@@ -25374,7 +25375,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             }
             if (!pointer_config_parse(document,&proposed_pointer,NULL)) {
                 send_problem(fd,400,"Bad Request","invalid_settings_pointer",
-                             "Pointer shape, palette, size_px (24..64 integer), shadow, shake_to_find, shake_max_px (64..256) and shake_sensitivity (1..10) must match the appearance schema.");
+                             "Pointer shape, palette, size_px (24..64 integer), shadow, shake_to_find, shake_max_px (64..256), shake_sensitivity (1..10) and shake_shrink_ms (150..3000) must match the appearance schema.");
                 return;
             }
             {

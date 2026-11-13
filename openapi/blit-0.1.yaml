@@ -2962,6 +2962,14 @@ components:
           maximum: 10
           default: 5
           description: 1 needs a hard shake, 10 a light one.
+        shake_shrink_ms:
+          type: integer
+          minimum: 150
+          maximum: 3000
+          default: 900
+          description: >-
+            How long a grown pointer takes to shrink back once the shaking
+            calms (about 95% of the way back in this time).
     HudSettings:
       type: object
       description: >-
