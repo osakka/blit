@@ -9,6 +9,23 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.104 the time a shaken pointer takes to shrink back
+
+- **The setting:** `shake_shrink_ms` (150–3000, default 900, the 0.3.102
+  behaviour), at the owner's request; in the Blit Mouse pane 0.1.34 as
+  **Shrink Back Over**.
+- **Gates:**
+  - this host: `all` 190 pass, 11 skip; `renderer` 84; `renderer-gles`
+    64; no failures;
+  - `pointer_shake_gate`: quick and slow shrink;
+  - the pane's mouse, panel, UI and catalogue gates against 0.3.104.
+- **Live, the mini PC:** the pair update to 0.3.104 was verified, and
+  `effective.pointer` reports `shake_shrink_ms` 900.
+- **Published:**
+  - to hibr-apt; GitHub rejected the first mirror push (index-pack), and
+    it matched after a re-sync;
+  - pane 0.1.34 to hibr-apps, with the owner's OK.
+
 ## 2026-11-13: 0.3.103 Arabizi's data from hibr-ime's own package
 
 - **The data:** read from /usr/share/hibr-ime/arabizi (hibr-ime-arabizi,
