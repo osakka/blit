@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.103 Arabizi's data from hibr-ime's own package
+
+- **The data:** read from /usr/share/hibr-ime/arabizi (hibr-ime-arabizi,
+  recommended). blit no longer ships /usr/share/blit/arabizi. The pin is
+  hibr-ime v0.1.1. One root definition (`src/blit_ime_root.h`) serves the
+  server and the compositor.
+- **Gates on this host:**
+  - `all` 190 pass, 11 skip; `renderer-gles` 64.
+  - `renderer` 83, with one failure: `settings_persistence_gate` timed
+    out waiting for a restart while I was searching transcripts on the
+    host. It passed 3 of 3 alone.
+  - The build environment's gates and the package gate (no Arabizi data
+    in blit, Recommends hibr-ime-arabizi).
+- **This host:** the owner upgraded it to Debian 13. Its LDAP lookups then
+  failed: Debian 13's OpenSSL libldap needs hash links in /etc/ssl/certs,
+  and the gibnet intermediate and root were one file without them. The
+  owner split them, and the release was built after that.
+- **Live, the mini PC:**
+  - with the owner's OK, hibr 0.99.517, hibr-ime 0.1.1 and
+    hibr-ime-arabizi 0.1.1 were installed through apt before the update
+    (`dpkg --audit` clean);
+  - then the pair update to 0.3.103, verified;
+  - Arabizi still offered (`?layout=ara`), the owner's list kept with no
+    set-aside, and the dry run "marhaba, kif el 7al?" → "مرحبا، كيف الحال؟".
+- **Published** to hibr-apt (signature good, mirror synced).
+
 ## 2026-11-13: 0.3.102 shake to find the pointer
 
 - **Shake to find** (ADR 0234): shaking the mouse grows the pointer, the
