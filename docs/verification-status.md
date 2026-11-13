@@ -9,6 +9,38 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.106 the busy pointer; input methods only in free text
+
+- **The busy pointer** (ADR 0235, agreed with Hibr): blit-compositor pings
+  a program when input is given to it. Unanswered for `busy_after_ms`,
+  the program's windows are `WINDOW busy on` with the `wait` shape. Blit's
+  `wait` is now a ring of 12 spokes going round once each `busy_spin_ms`.
+  Pane 0.1.35 has Busy Pointer, Busy After and Spin Once Every.
+- **The one rule** (ADR 0233, agreed with Hibr and the Browser): an input
+  method types only into free text. The compositor now skips phone,
+  number, email, URL and date purposes, and sensitive or hidden hints.
+- **Found before release** (second opinion), fixed and gated:
+  - the shown art and its spun copy counted revisions apart, so the
+    display could have kept a spinner frame after a program recovered;
+    there is one sequence now;
+  - a program killed while busy is gated under ASan/UBSan;
+  - the art needs no libm.
+- **The Browser** (hibr-browser-51, not yet released): it routes Arabizi
+  through Hibr's dt_imekey, the same engine. Its screen test with the real
+  module, built here at hibr-ime v0.1.2, passed 11/11 twice: "salam"
+  held, a space commits "سلام ", secret and structured fields untouched.
+  Hibr's console hands Blit display-order presentation forms, which Blit
+  draws as given.
+- **Gates on this host:** `all` 190 pass, 11 skip; `renderer` 84;
+  `renderer-gles` 64; no failures. Also the build environment's gates and
+  the package gate.
+- **Live, the mini PC:** the pair update to 0.3.106 was verified, and
+  `effective.pointer` reports the busy defaults. The compositor there
+  runs the new detection after a Restart Desktop.
+- **Published:**
+  - to hibr-apt (signature good, GitHub matches);
+  - pane 0.1.35 to hibr-apps, with the owner's OK.
+
 ## 2026-11-13: 0.3.105 Arabizi in programs follows the person's own tuning
 
 - **hibr-ime v0.1.2** (IME_API 2): blit-compositor reads the person's
