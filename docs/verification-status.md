@@ -9,6 +9,48 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.101 Arabic (Arabizi) as a keyboard, into programs through text-input-v3
+
+- **The engine** is hibr-ime's (itdlabs/hibr-ime v0.1.0, 305542f, LGPL),
+  built in from the pinned tag: packaging/IME_VERSION, with build-flags.sh
+  the one place that knows it. Blit's own copy is gone. The data is
+  installed from the tag into /usr/share/blit/arabizi until hibr-ime's
+  package exists.
+- **blit-compositor:**
+  - it implements zwp_text_input_v3 and runs the method for a program's
+    enabled, non-password field;
+  - the program sees a preedit while typing, the word committed on a space
+    or punctuation, and no raw keys for what the method takes;
+  - chords and Enter commit first;
+  - a program with a text input gets the keyboard on activation.
+- **Blit:**
+  - Arabic (Arabizi) is a keyboard (on the US keys), offered while its
+    data is installed;
+  - `INPUT method` follows every keymap on each route;
+  - a stored list whose method data is missing keeps the rest of the list.
+- **Gates:**
+  - `compositor_gate` ime (stand-in field: salam → preedit سلام, commit
+    "سلام "; chord; method off; password), in both builds, ASan and UBSan
+    too, plus the real-Blit switch.
+  - `keyboard_settings_gate`, `frame_input_gate`, `xwayland_gate`.
+  - The first full run failed five graphics gates. Each compiled the
+    server with its own copy of the source list, missing hibr-ime. The
+    copies were replaced by build-flags.sh `--sources server`.
+  - The release's `package_artifact_gate` caught /usr/share/blit as a
+    "build path" (root /blit). It now anchors the check to paths that
+    begin with the root.
+  - This host: `all` 189 pass, 11 skip; `renderer` 83; `renderer-gles` 63.
+- **Live, the mini PC:**
+  - the pair update to 0.3.101 (`dpkg --audit` clean, nothing staged);
+  - IME_VERSION 0.1.0, and the data present;
+  - Arabizi offered and, at the owner's request, added to their keyboards
+    (US current);
+  - the dry run: "marhaba, kif el 7al? ana b5eir w enta?" →
+    "مرحبا، كيف الحال؟ أنا بخير وأنت؟".
+  - Typing into programs needs the new compositor, which the desktop
+    starts at its next Restart Desktop.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-13: 0.3.100 the Arabizi engine (ADR 0233, phase 1)
 
 - **The engine:** Latin Arabizi to Arabic, key by key, with tashkeel on

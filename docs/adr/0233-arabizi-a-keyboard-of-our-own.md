@@ -406,6 +406,16 @@ The scorer exists so that people needn't type it strictly.
   where the owner types (phase 2: Hibr #542's `text` event; phase 3:
   text-input-v3 for Wayland programs).
 
+### Recorded: phase 3 (0.3.101, 2026-11-13)
+
+- **The adaptor:** zwp_text_input_v3 in blit-compositor, running
+  hibr-ime's engine (v0.1.0 pinned) for program windows.
+- **The keyboard:** Arabic (Arabizi) in Blit's list.
+- **The method line:** `INPUT method` on routes.
+- **Gates:** `compositor_gate` (ime part, and the real-Blit switch),
+  `keyboard_settings_gate`, `frame_input_gate` and `xwayland_gate`.
+- **Live:** deployed to the mini PC (docs/verification-status.md).
+
 ## Open questions for the owner
 
 - 8 by default: ق (Gulf and Saudi) or غ (Lebanese)?
