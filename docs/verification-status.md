@@ -9,6 +9,31 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.99 a terminal session is running from its program's start
+
+- **#155:** a session said `starting` until its program's first output.
+  A client waiting for a silent program to end took that for "not
+  started" and deleted a session running apt-get on the mini PC (caught
+  before the unpack; dpkg clean). Now `running` from the fork, and the
+  first output is a flag that still arms the pane's geometry reassert.
+  `starting` is gone from terminal sessions: the schema enum and nine
+  checks.
+- **Gates:**
+  - `session_lifecycle_gate`: a silent program running at creation and
+    1.5 s in, then stopped. It fails against the 0.3.98 binary.
+  - This host, run with nothing beside it: `all` 188 pass, 11 skip;
+    `renderer` 82; `renderer-gles` 62.
+  - The build environment: `compositor_gate`, `xwayland_gate`,
+    `package_artifact_gate`, `update_restart_gate`, `update_pair_gate`
+    6/6.
+- **Live, the mini PC:**
+  - The pair update to 0.3.99; `dpkg --audit` clean; nothing staged.
+  - A silent `sleep 2` read running, running, stopped.
+  - The login session's geometry reassert settled (8 attempts, 8
+    matches). The login screen is drawn in its configured pane
+    (`pane-display-93-2`, layout 1x2).
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-13: 0.3.98 the display's refresh rate on the frame channel
 
 - **DISPLAY rate:** a channel that sends it is answered `DISPLAY rate
