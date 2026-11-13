@@ -9,6 +9,36 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.100 the Arabizi engine (ADR 0233, phase 1)
+
+- **The engine:** Latin Arabizi to Arabic, key by key, with tashkeel on
+  request. Its dry run is `POST /v1/input/arabizi/convert`. Its rules and
+  word lists are in /usr/share/blit/arabizi (the word lists CC BY-SA 4.0,
+  credited, and shipped with the owner's OK). Nobody can type with it
+  yet: the keyboard isn't listed.
+- **Where it goes next:** the owner placed the engine in hibr (one engine;
+  hibr hosts it, and Blit is an adaptor compiled from hibr's tree). The
+  stand-alone library is handed over as hibr #543. Blit drops its copy
+  when it can pin a hibr release that carries it.
+- **Gates:**
+  - `arabizi_gate`: maintainer's set 80% of words, 78% of lines; the
+    owner's private set 68% and 38%, numbers only. Also the worst case,
+    tashkeel, 400 and 503.
+  - `api_schema_gate` covers 54 paths, and `package_artifact_gate` checks
+    the shipped data and its credit.
+  - This host: `all` 188 pass, 11 skip; `documentation_gate` failed first
+    on the undocumented `BLIT_ARABIZI_ROOT`, now in blit(8), and then
+    passed. `renderer` 83; `renderer-gles` 62, and
+    `presentation_effects_gate` counted 20 frames a second against 30
+    once, while I was compiling beside it, then passed 3 of 3 alone.
+- **Live, the mini PC:**
+  - The pair update to 0.3.100 (`dpkg --audit` clean, nothing staged),
+    with /usr/share/blit/arabizi present.
+  - The endpoint turned "ahlan wa sahlan, kif 7alak? inshallah kollo
+    tamam" into "اهلا وسهلا، كيف حالك؟ إن شاء الله كلو تمام", and, with
+    tashkeel, "kitab jameel" into "كِتاب جَميل".
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-13: 0.3.99 a terminal session is running from its program's start
 
 - **#155:** a session said `starting` until its program's first output.
