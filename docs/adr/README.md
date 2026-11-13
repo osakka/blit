@@ -248,6 +248,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0229 — Programs and the desktop: one owner per concern](0229-programs-and-the-desktop-one-owner-per-concern.md) (proposed)
 - [0230 — Dependencies from the system, through pkg-config](0230-dependencies-from-the-system-through-pkg-config.md)
 - [0231 — Keyboards from xkb: one list, one current keyboard](0231-keyboards-from-xkb-one-list-one-current.md)
+- [0232 — An update installs blit and its compositor together](0232-an-update-installs-blit-and-its-compositor-together.md)
 
 ## Status
 

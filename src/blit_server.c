@@ -166,6 +166,8 @@ extern char **environ;
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
+/* ADR 0232: blit and blit-compositor, back to back in one upload. */
+#define BLIT_UPDATE_MAX_PACKAGES 2
 #define BLIT_LOGIN_RESTART_DELAY_US 1000000ULL
 /* How long a preferred login pane that has not appeared yet is waited for
    before the login screen goes to the first pane there is. A primary chosen
@@ -566,12 +568,15 @@ typedef struct {
     size_t length;
     uint64_t accepted_us;
     char request[BLIT_REQUEST_SIZE];
-    int update_fd;
-    size_t update_expected;
+    int update_fd;              /* the staged file of the part being written */
+    size_t update_expected;     /* the whole body */
     size_t update_received;
     uint64_t update_last_progress_us;
-    char update_path[256];
-    char update_sha256[65];
+    int update_count, update_part;
+    size_t update_part_received;
+    size_t update_lengths[BLIT_UPDATE_MAX_PACKAGES];
+    char update_paths[BLIT_UPDATE_MAX_PACKAGES][256];
+    char update_sha256[BLIT_UPDATE_MAX_PACKAGES][65];
     int screenshot_output_index;
     /* ADR 0189: a settings request parked until its save is durable:
        1 PUT /v1/settings, 2 DELETE /v1/settings. */
@@ -2114,6 +2119,7 @@ static void terminal_sessions_json(BlitRuntime *runtime, char *body,
 static void observation_json(BlitRuntime *runtime, char *body,
                              size_t capacity);
 static void remove_http_client(BlitRuntime *runtime, int index);
+static void update_unlink_staged(BlitHttpClient *client);
 static void terminal_clear_cell(BlitSurface *surface, int x, int y);
 static void terminal_clear_wide_overlap(BlitSurface *surface, int x, int y);
 static void mark_cursor_damage(BlitSurface *surface, int x, int y);
@@ -31029,8 +31035,7 @@ static void remove_http_client(BlitRuntime *runtime, int index)
         return;
     if (runtime->http_clients[index].update_fd >= 0) {
         close(runtime->http_clients[index].update_fd);
-        if (runtime->http_clients[index].update_path[0] != '\0')
-            unlink(runtime->http_clients[index].update_path);
+        update_unlink_staged(&runtime->http_clients[index]);
     }
     free(runtime->http_clients[index].response_body);
     close(runtime->http_clients[index].fd);
@@ -31318,14 +31323,16 @@ static int update_package_valid(const char *path, const char *expected_sha,
        an explicit package-name check in the update child before install. */
     space = strchr(package_name, '\n');
     if (space != NULL) *space = '\0';
-    if (strcmp(package_name, "blit") != 0) {
-        snprintf(detail, detail_capacity, "package is not blit");
+    if (strcmp(package_name, "blit") != 0 &&
+        strcmp(package_name, "blit-compositor") != 0) {
+        snprintf(detail, detail_capacity,
+                 "package is not blit or blit-compositor");
         return 0;
     }
     return 1;
 }
 
-static int run_update_helper(const char *path, const char *sha256,
+static int run_update_helper(const BlitHttpClient *client,
                              char *output, size_t capacity)
 {
     struct sockaddr_un address;
@@ -31347,7 +31354,19 @@ static int run_update_helper(const char *path, const char *sha256,
         snprintf(output, capacity, "root update helper is unavailable");
         return 0;
     }
-    length = snprintf(output, capacity, "UPDATE %s %s\n", path, sha256);
+    /* UPDATE <path> <sha256> [<path> <sha256>]: the helper owns which of
+       them it installs (ADR 0232). */
+    {
+        char line[1024];
+        int part;
+        length = snprintf(line, sizeof(line), "UPDATE");
+        for (part = 0; part < client->update_count; ++part)
+            length += snprintf(line + length, sizeof(line) - (size_t)length,
+                               " %s %s", client->update_paths[part],
+                               client->update_sha256[part]);
+        length += snprintf(line + length, sizeof(line) - (size_t)length, "\n");
+        snprintf(output, capacity, "%s", line);
+    }
     if (write(fd, output, (size_t)length) != length) {
         close(fd);
         return 0;
@@ -31447,17 +31466,123 @@ static void reset_update_state(BlitRuntime *runtime, int fd,
               "update state reset\"}");
 }
 
+static void update_unlink_staged(BlitHttpClient *client)
+{
+    int part;
+    for (part = 0; part < BLIT_UPDATE_MAX_PACKAGES; ++part)
+        if (client->update_paths[part][0] != '\0') {
+            unlink(client->update_paths[part]);
+            client->update_paths[part][0] = '\0';
+        }
+}
+
+/* X-Blit-Packages: <length>:<sha256> [<length>:<sha256>], in body order
+   (ADR 0232). The lengths must sum to Content-Length. */
+static int update_packages_parse(BlitHttpClient *client, const char *value,
+                                 size_t content_length)
+{
+    const char *cursor = value;
+    size_t total = 0;
+    client->update_count = 0;
+    while (*cursor != '\0') {
+        char *end;
+        unsigned long long length;
+        int i;
+        while (*cursor == ' ') ++cursor;
+        if (*cursor == '\0') break;
+        if (client->update_count == BLIT_UPDATE_MAX_PACKAGES ||
+            *cursor < '0' || *cursor > '9')
+            return 0;
+        length = strtoull(cursor, &end, 10);
+        /* Each at most the whole body, so the sum cannot wrap. */
+        if (length == 0 || length > content_length || *end != ':') return 0;
+        cursor = end + 1;
+        for (i = 0; i < 64; ++i)
+            if (!((cursor[i] >= '0' && cursor[i] <= '9') ||
+                  (cursor[i] >= 'a' && cursor[i] <= 'f')))
+                return 0;
+        if (cursor[64] != '\0' && cursor[64] != ' ') return 0;
+        client->update_lengths[client->update_count] = (size_t)length;
+        memcpy(client->update_sha256[client->update_count], cursor, 64);
+        client->update_sha256[client->update_count][64] = '\0';
+        client->update_count++;
+        total += (size_t)length;
+        cursor += 64;
+    }
+    return client->update_count > 0 && total == content_length;
+}
+
+/* The update helper is a separate systemd service. PrivateTmp gives each
+   service a different /tmp, so an upload staged there cannot be seen by
+   the root helper. Use the package-owned shared directory by default;
+   tests may explicitly select a private staging dir. */
+static const char *update_directory(void)
+{
+    const char *directory = getenv("BLIT_UPDATE_DIRECTORY");
+    return directory != NULL && directory[0] != '\0' ? directory :
+        "/var/lib/blit/updates";
+}
+
+/* Open the staged file of the current part. update_fd stays open from the
+   first byte to the last: it is what marks the upload active. */
+static int update_open_part(BlitHttpClient *client)
+{
+    char *path = client->update_paths[client->update_part];
+    snprintf(path, sizeof(client->update_paths[0]), "%s/blit-update-XXXXXX",
+             update_directory());
+    client->update_fd = mkstemp(path);
+    if (client->update_fd < 0) {
+        path[0] = '\0';
+        return 0;
+    }
+    client->update_part_received = 0;
+    return 1;
+}
+
+/* Stage the body's bytes, each part in its own file. */
+static int update_stage_bytes(BlitHttpClient *client, const unsigned char *data,
+                              size_t length)
+{
+    while (length > 0) {
+        size_t room = client->update_lengths[client->update_part] -
+            client->update_part_received;
+        size_t chunk = length < room ? length : room;
+        if (write(client->update_fd, data, chunk) != (ssize_t)chunk)
+            return 0;
+        data += chunk;
+        length -= chunk;
+        client->update_part_received += chunk;
+        client->update_received += chunk;
+        if (client->update_part_received ==
+                client->update_lengths[client->update_part] &&
+            client->update_part + 1 < client->update_count) {
+            int previous = client->update_fd;
+            client->update_part++;
+            if (!update_open_part(client)) {
+                client->update_fd = previous;   /* closed by the caller's removal */
+                return 0;
+            }
+            close(previous);
+        }
+    }
+    return 1;
+}
+
 static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
 {
-    char output[512];
+    char output[1024];
+    int part;
     close(client->update_fd);
     client->update_fd = -1;
-    if (!update_package_valid(client->update_path, client->update_sha256,
-                              runtime->update_detail,
-                              sizeof(runtime->update_detail))) {
+    for (part = 0; part < client->update_count; ++part) {
+        if (update_package_valid(client->update_paths[part],
+                                 client->update_sha256[part],
+                                 runtime->update_detail,
+                                 sizeof(runtime->update_detail)))
+            continue;
         snprintf(runtime->update_state, sizeof(runtime->update_state),
                  "failed");
-        unlink(client->update_path);
+        update_unlink_staged(client);
         send_problem(client->fd, 422, "Unprocessable Entity", "update_invalid",
                      runtime->update_detail);
         return;
@@ -31466,14 +31591,13 @@ static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
     snprintf(output, sizeof(output), "console recovery lease unavailable");
     {
         int installed = blit_vt_update_lease(1) == 0 &&
-            run_update_helper(client->update_path, client->update_sha256,
-                              output, sizeof(output));
+            run_update_helper(client, output, sizeof(output));
         blit_vt_update_lease(0);
         if (!installed) {
             snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
             snprintf(runtime->update_detail, sizeof(runtime->update_detail),
                      "privileged update failed: %s", output);
-            unlink(client->update_path);
+            update_unlink_staged(client);
             send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
                          runtime->update_detail);
             return;
@@ -31515,14 +31639,13 @@ static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
         remove_http_client(runtime, (int)(client - runtime->http_clients));
         return;
     }
-    if (write(client->update_fd, chunk, (size_t)received) != received) {
+    if (!update_stage_bytes(client, chunk, (size_t)received)) {
         snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
         snprintf(runtime->update_detail, sizeof(runtime->update_detail),
                  "staged package write failed");
         remove_http_client(runtime, (int)(client - runtime->http_clients));
         return;
     }
-    client->update_received += (size_t)received;
     client->update_last_progress_us = monotonic_us();
     if (client->update_received == client->update_expected)
         finish_update_upload(runtime, client);
@@ -31567,18 +31690,9 @@ static void service_http_client(BlitRuntime *runtime, int index)
         strncmp(client->request, "PUT /v1/control/update ", 23) == 0) {
         size_t header_length = (size_t)(headers_end - client->request) + 4;
         size_t content_length = 0;
-        char sha256[65];
-        /* The update helper is a separate systemd service.  PrivateTmp gives
-           each service a different /tmp, so an upload staged there cannot be
-           seen by the root helper.  Use the package-owned shared directory
-           by default; tests may explicitly select a private staging dir. */
-        char temporary[PATH_MAX];
-        const char *update_directory = getenv("BLIT_UPDATE_DIRECTORY");
-        if (update_directory == NULL || update_directory[0] == '\0')
-            update_directory = "/var/lib/blit/updates";
-        snprintf(temporary, sizeof(temporary), "%s/blit-update-XXXXXX",
-                 update_directory);
-        int temporary_fd;
+        size_t early = client->length > header_length ?
+            client->length - header_length : 0;
+        char packages[200];
         const char *length_header = strstr(client->request, "Content-Length:");
         if (runtime->update_token[0] == '\0' ||
             !update_authorized(runtime, client->request)) {
@@ -31590,10 +31704,13 @@ static void service_http_client(BlitRuntime *runtime, int index)
         if (length_header != NULL)
             content_length = (size_t)strtoull(length_header + 15, NULL, 10);
         if (content_length == 0 || content_length > 64U * 1024U * 1024U ||
-            !request_header(client->request, "X-Blit-SHA256:", sha256,
-                            sizeof(sha256)) || strlen(sha256) != 64) {
+            !request_header(client->request, "X-Blit-Packages:", packages,
+                            sizeof(packages)) ||
+            strlen(packages) + 1 >= sizeof(packages) ||
+            !update_packages_parse(client, packages, content_length) ||
+            early > content_length) {
             send_problem(client->fd, 413, "Payload Too Large", "update_invalid",
-                         "A bounded package length and SHA-256 header are required.");
+                         "A bounded body and X-Blit-Packages (<length>:<sha256> per package, summing to Content-Length) are required.");
             remove_http_client(runtime, index);
             return;
         }
@@ -31601,27 +31718,23 @@ static void service_http_client(BlitRuntime *runtime, int index)
            remainder of the package body. */
         send_all(client->fd, "HTTP/1.1 100 Continue\r\n\r\n",
                  strlen("HTTP/1.1 100 Continue\r\n\r\n"));
-        temporary_fd = mkstemp(temporary);
-        if (temporary_fd < 0) {
+        client->update_part = 0;
+        client->update_received = 0;
+        if (!update_open_part(client)) {
             send_problem(client->fd, 500, "Internal Server Error", "update_stage_failed",
                          "The update package could not be staged.");
             remove_http_client(runtime, index);
             return;
         }
-        client->update_fd = temporary_fd;
         client->update_expected = content_length;
-        client->update_received = client->length > header_length ?
-            client->length - header_length : 0;
         client->update_last_progress_us = monotonic_us();
-        snprintf(client->update_path, sizeof(client->update_path), "%s", temporary);
-        snprintf(client->update_sha256, sizeof(client->update_sha256), "%s", sha256);
         snprintf(runtime->update_state, sizeof(runtime->update_state), "receiving");
         snprintf(runtime->update_detail, sizeof(runtime->update_detail),
-                 "receiving Debian package");
-        if (client->update_received > content_length ||
-            (client->update_received > 0 &&
-             write(client->update_fd, client->request + header_length,
-                   client->update_received) != (ssize_t)client->update_received)) {
+                 "receiving Debian packages");
+        if (early > 0 &&
+            !update_stage_bytes(client,
+                                (const unsigned char *)client->request + header_length,
+                                early)) {
             remove_http_client(runtime, index);
             return;
         }

@@ -34,7 +34,7 @@ out=/blit${out#"$ROOT"}
 hibr=/blit${hibr#"$ROOT"}
 version=$(sed -n '1p' "$ROOT/packaging/VERSION")
 
-BLIT_HIBR_ROOT=$hibr exec "$ROOT/tools/build-env/run.sh" sh -eu -c '
+BLIT_HIBR_ROOT=$hibr "$ROOT/tools/build-env/run.sh" sh -eu -c '
 out=$1 version=$2
 gate() {
     name=$1
@@ -58,6 +58,22 @@ packaging/build-deb.sh "$out"
 tools/release/generate-manifest.sh "$out/blit_${version}-1_amd64.deb" "releases/$version.yaml"
 gate package_gate env BLIT_GATE_PACKAGE="$out/blit_${version}-1_amd64.deb" tools/run-gates.sh packaging
 grep RUN_GATES_PASS "$out/package_gate.txt"
+' build-release "$out" "$version"
+
+# ADR 0232: the real update helper and real dpkg, as root in a throwaway
+# container of the same environment (a skip or failure ends the release).
+pair_log=$ROOT${out#/blit}/update_pair_gate.txt
+if ! BLIT_BUILD_ENV_ROOT=1 "$ROOT/tools/build-env/run.sh" \
+        sh tools/tests/update_pair_gate.sh "$out/blit_${version}-1_amd64.deb" \
+        > "$pair_log" 2>&1; then
+    tail -40 "$pair_log" >&2
+    echo "blit: update_pair_gate failed" >&2
+    exit 1
+fi
+grep UPDATE_PAIR_GATE_PASS "$pair_log"
+
+"$ROOT/tools/build-env/run.sh" sh -eu -c '
+out=$1 version=$2
 for p in blit blit-compositor; do
     dpkg-deb -f "$out/${p}_${version}-1_amd64.deb" Package Version Depends | paste -sd " "
 done

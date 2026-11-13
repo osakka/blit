@@ -632,7 +632,6 @@ suite_lifecycle() {
     run_gate shutdown_key_gate.rb ruby tools/tests/shutdown_key_gate.rb
     run_gate update_idle_timeout_gate.sh "$ROOT"/tools/tests/update_idle_timeout_gate.sh
     run_gate update_reset_gate.sh "$ROOT"/tools/tests/update_reset_gate.sh
-    run_gate update_restart_gate.sh "$ROOT"/tools/tests/update_restart_gate.sh
     run_serial_gate restart_after_update_gate.rb ruby tools/tests/restart_after_update_gate.rb
     run_gate hibr_identity_refresh_gate.rb ruby tools/tests/hibr_identity_refresh_gate.rb
     run_gate update_cancel_gate.sh "$ROOT"/tools/tests/update_cancel_gate.sh
@@ -641,6 +640,9 @@ suite_lifecycle() {
 suite_packaging() {
     if [ -n "$PACKAGE" ]; then
         run_gate package_artifact_gate.sh "$ROOT"/tools/tests/package_artifact_gate.sh "$PACKAGE"
+        # Needs a real package pair: the upload, split into one staged file
+        # per package (ADR 0232), and the exit that restarts the unit.
+        run_gate update_restart_gate.sh "$ROOT"/tools/tests/update_restart_gate.sh
     else
         skip_gate package_artifact_gate.sh "set BLIT_GATE_PACKAGE to a .deb"
     fi

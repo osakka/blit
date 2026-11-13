@@ -41,9 +41,10 @@ done
 test "$ready" = 1
 
 sha=$(sha256sum "$bad_package" | awk '{print $1}')
+length=$(wc -c <"$bad_package" | tr -d ' ')
 status=$(curl --silent --show-error --request PUT \
     -H 'Content-Type: application/vnd.debian.binary-package' \
-    -H 'X-Blit-Update-Token: test-token' -H "X-Blit-SHA256: $sha" \
+    -H 'X-Blit-Update-Token: test-token' -H "X-Blit-Packages: $length:$sha" \
     --data-binary "@$bad_package" \
     -w '\nHTTP=%{http_code}' \
     "http://127.0.0.1:$port/v1/control/update")

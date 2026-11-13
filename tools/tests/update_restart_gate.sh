@@ -57,6 +57,13 @@ if [ -z "$package" ] || [ ! -f "$package" ]; then
     echo "UPDATE_RESTART_SKIP no blit .deb to install; build one or set BLIT_GATE_PACKAGE"
     exit 77
 fi
+# ADR 0232: the upload carries blit and the compositor of its version, back
+# to back; the server must stage each in its own file.
+compositor=$(dirname "$package")/blit-compositor_$(dpkg-deb -f "$package" Version)_amd64.deb
+if [ ! -f "$compositor" ]; then
+    echo "UPDATE_RESTART_SKIP no $compositor beside the blit package"
+    exit 77
+fi
 
 printf '%s\n' test-token >"$token_file"
 
@@ -82,6 +89,13 @@ with open(log, 'w') as handle:
         client, _ = server.accept()
         request = client.recv(4096).decode('utf-8', 'replace')
         handle.write('request %s' % request)
+        # Each staged file must be exactly the part the request names.
+        import hashlib
+        words = request.split()
+        for path, digest in zip(words[1::2], words[2::2]):
+            with open(path, 'rb') as staged:
+                actual = hashlib.sha256(staged.read()).hexdigest()
+            handle.write('staged %s\n' % ('match' if actual == digest else 'differs'))
         handle.flush()
         client.sendall(b'OK\n')
         client.close()
@@ -147,11 +161,13 @@ pid=
 # --- an update install exits instead: the pid is gone, non-zero ---
 start_server
 install_pid=$pid
-sha=$(sha256sum "$package" | awk '{print $1}')
+part() { echo "$(wc -c <"$1" | tr -d ' '):$(sha256sum "$1" | cut -c1-64)"; }
+cat "$package" "$compositor" >"$work/body"
 status=$(curl --silent --show-error --request PUT \
     -H 'Content-Type: application/vnd.debian.binary-package' \
-    -H 'X-Blit-Update-Token: test-token' -H "X-Blit-SHA256: $sha" \
-    --data-binary "@$package" -w '\nHTTP=%{http_code}' \
+    -H 'X-Blit-Update-Token: test-token' \
+    -H "X-Blit-Packages: $(part "$package") $(part "$compositor")" \
+    --data-binary "@$work/body" -w '\nHTTP=%{http_code}' \
     "http://127.0.0.1:$port/v1/control/update")
 if ! printf '%s\n' "$status" | grep -q 'HTTP=202'; then
     echo "UPDATE_RESTART_FAIL the install was not accepted: $status" >&2
@@ -164,6 +180,12 @@ if ! printf '%s\n' "$status" | grep -q '"state":"restarting"'; then
 fi
 if ! grep -q 'request UPDATE ' "$helper_log"; then
     echo "UPDATE_RESTART_FAIL the helper was never asked to install" >&2
+    cat "$helper_log" >&2
+    exit 1
+fi
+if [ "$(grep -c '^staged match$' "$helper_log")" != 2 ] ||
+   grep -q '^staged differs$' "$helper_log"; then
+    echo "UPDATE_RESTART_FAIL the two packages were not staged as sent" >&2
     cat "$helper_log" >&2
     exit 1
 fi

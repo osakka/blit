@@ -46,11 +46,15 @@ render_manifest() {
     adapter_sha256=$9
     hibr_version=${10}
     hibr_abi=${11}
+    compositor_package=${12}
+    compositor_sha256=${13}
 
     cat <<EOF
 release: $release
 package: $(basename "$package")
 package_sha256: $package_sha256
+compositor_package: $(basename "$compositor_package")
+compositor_package_sha256: $compositor_sha256
 source_commit: $source_commit
 package_documentation_commit: $documentation_commit
 server_binary_sha256: $server_sha256
@@ -82,6 +86,11 @@ generate() {
     [ "$documentation_commit" != "" ] || fail "documentation commit is empty"
 
     package_sha256=$(sha256sum "$package" | awk '{print $1}')
+    # ADR 0232: the compositor of the same version is deployed with it.
+    compositor_package=$(dirname "$package")/blit-compositor_${package_version}_amd64.deb
+    test -f "$compositor_package" ||
+        fail "no $(basename "$compositor_package") beside the package"
+    compositor_sha256=$(sha256sum "$compositor_package" | awk '{print $1}')
     stage=$(mktemp -d "${TMPDIR:-/tmp}/blit-manifest.XXXXXX")
     trap 'rm -rf "$stage"' EXIT HUP INT TERM
     dpkg-deb -x "$package" "$stage"
@@ -112,13 +121,15 @@ generate() {
         render_manifest "$package" "$package_version" "$release" \
             "$package_sha256" "$source_commit" "$documentation_commit" \
             "$server_sha256" "$helper_sha256" "$adapter_sha256" \
-            "$hibr_version" "$hibr_abi" >"$temporary"
+            "$hibr_version" "$hibr_abi" "$compositor_package" \
+            "$compositor_sha256" >"$temporary"
         mv -f "$temporary" "$output"
     else
         render_manifest "$package" "$package_version" "$release" \
             "$package_sha256" "$source_commit" "$documentation_commit" \
             "$server_sha256" "$helper_sha256" "$adapter_sha256" \
-            "$hibr_version" "$hibr_abi"
+            "$hibr_version" "$hibr_abi" "$compositor_package" \
+            "$compositor_sha256"
     fi
 }
 

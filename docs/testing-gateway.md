@@ -79,16 +79,20 @@ curl --fail -H "Authorization: Bearer $TOKEN" \
 ```
 
 These report the expected server version and `state: "ready"`. The upload
-itself is authorized by the update token alone. Upload only a
-package whose SHA-256 was independently recorded:
+itself is authorized by the update token alone. Upload only
+packages whose SHA-256 was independently recorded (the release manifest's
+`package_sha256` and `compositor_package_sha256`).
+`tools/deploy/update-live.sh HOST blit_X.Y.Z-1_amd64.deb` does this.
+By hand, the two packages go back to back, with `X-Blit-Packages` naming
+each one's length and SHA-256 (ADR 0232):
 
 ```sh
-sha256sum blit_X.Y.Z-1_amd64.deb
+cat blit_X.Y.Z-1_amd64.deb blit-compositor_X.Y.Z-1_amd64.deb > body
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
-  --header 'X-Blit-SHA256: RECORDED_SHA256' \
+  --header "X-Blit-Packages: BLIT_BYTES:BLIT_SHA256 COMPOSITOR_BYTES:COMPOSITOR_SHA256" \
   --header 'Content-Type: application/vnd.debian.binary-package' \
-  --data-binary @blit_X.Y.Z-1_amd64.deb \
+  --data-binary @body \
   http://127.0.0.1:8080/v1/control/update
 ```
 

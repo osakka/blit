@@ -213,6 +213,7 @@ Errors are `application/problem+json` with stable codes.
 | Feature | Since | ADR | Status |
 | --- | --- | --- | --- |
 | Install a new package through the API; a separate root helper checks and installs it | 0.1.232 | 0008 | Used |
+| An API update installs blit and blit-compositor together, at one version, in one `dpkg --install`; the helper refuses blit alone where blit-compositor is installed, never adds blit-compositor where it is not, accepts only files from its staging directory, and removes them after answering (`X-Blit-Packages`) | 0.3.97 | 0232 | Tested (`update_pair_gate`: real helper and dpkg, six cases; `update_restart_gate`: the split upload) |
 | Settings, devices and the shutdown chord survive updates | 0.1.451 | 0067 | Used |
 | Restart in place through the API, without a reboot | 0.1.451 | — | Used |
 | After an `apt upgrade`, Blit restarts itself at the login screen when nobody is signed in (or only reports it: `server.restart_after_update`) | 0.3.27 | 0205 | Used |

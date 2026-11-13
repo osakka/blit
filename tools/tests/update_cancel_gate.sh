@@ -53,7 +53,7 @@ ruby -rsocket -e '
           "Content-Type: application/vnd.debian.binary-package\r\n" \
           "Content-Length: 1000000\r\n" \
           "X-Blit-Update-Token: test-token\r\n" \
-          "X-Blit-SHA256: " + ("0" * 64) + "\r\n" \
+          "X-Blit-Packages: 1000000:" + ("0" * 64) + "\r\n" \
           "Connection: close\r\n\r\n")
   sleep 30
 ' "$port" >/dev/null 2>&1 &

@@ -878,16 +878,25 @@ paths:
     put:
       tags: [control]
       operationId: uploadUpdatePackage
-      summary: Upload, verify, install, and restart from a Blit Debian package
+      summary: Upload, verify, install, and restart from Blit's Debian packages
+      description: >-
+        ADR 0232. The body is blit's package, optionally followed by
+        blit-compositor's of the same version, back to back.
+        X-Blit-Packages gives each one's length and SHA-256 in body order;
+        the lengths sum to Content-Length. The root helper installs blit
+        together with blit-compositor when the host has blit-compositor
+        installed (and refuses an update without it then); it never adds
+        blit-compositor to a host without it.
       parameters:
         - in: header
           name: X-Blit-Update-Token
           required: true
           schema: {type: string, minLength: 1}
         - in: header
-          name: X-Blit-SHA256
+          name: X-Blit-Packages
           required: true
-          schema: {type: string, pattern: '^[0-9a-fA-F]{64}$'}
+          description: '`<length>:<sha256>` per package, space-separated, at most two'
+          schema: {type: string, pattern: '^[1-9][0-9]*:[0-9a-f]{64}( [1-9][0-9]*:[0-9a-f]{64})?$'}
       requestBody:
         required: true
         content:

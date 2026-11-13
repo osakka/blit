@@ -13,6 +13,9 @@
 # container (an unprivileged LXC host cannot mount /proc for it).
 # BLIT_BUILD_ENV_PODMAN overrides the podman command ("podman" or
 # "sudo -n podman"). Host networking: gates listen on 127.0.0.1 ports.
+# BLIT_BUILD_ENV_ROOT=1 runs COMMAND as root in the container instead: only
+# for a gate that installs packages into the throwaway container
+# (update_pair_gate, ADR 0232). It must not write into the checkout.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -48,7 +51,9 @@ for name in BLIT_GATE_TIMEOUT BLIT_GATE_PACKAGE BLIT_HIBR_ROOT; do
     set -- -e "$name=$value" "$@"
 done
 # shellcheck disable=SC2086
+user="$(id -u):$(id -g)"
+[ "${BLIT_BUILD_ENV_ROOT:-}" = 1 ] && user=0:0
 exec $podman_cmd run --rm --network=host \
-    --user "$(id -u):$(id -g)" -e HOME=/tmp -e LANG=C.UTF-8 \
+    --user "$user" -e HOME=/tmp -e LANG=C.UTF-8 \
     -v "$ROOT:/blit" -w /blit \
     "$@"

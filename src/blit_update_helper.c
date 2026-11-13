@@ -19,6 +19,9 @@
 #ifndef UPDATE_RUNTIME_DIR
 #define UPDATE_RUNTIME_DIR "/run/blit"
 #endif
+#ifndef UPDATE_STAGING_DIR
+#define UPDATE_STAGING_DIR "/var/lib/blit/updates"
+#endif
 #define COMMAND_DETAIL_CAPACITY 384
 
 static void safe_detail(char *detail)
@@ -31,7 +34,8 @@ static void safe_detail(char *detail)
               (byte >= '0' && byte <= '9') ||
               byte == ' ' || byte == '.' || byte == ',' || byte == ':' ||
               byte == ';' || byte == '_' || byte == '/' || byte == '-' ||
-              byte == '(' || byte == ')' || byte == '='))
+              byte == '(' || byte == ')' || byte == '=' ||
+              byte == '+' || byte == '~'))
             detail[i] = ' ';
     }
 }
@@ -138,75 +142,123 @@ static int run_command(const char *command, char *const arguments[],
                        char *detail, size_t detail_capacity)
 { return run_command_bounded(command, arguments, detail, detail_capacity, 0); }
 
-static int package_identity(const char *path)
+/* ADR 0232: an update installs blit together with every installed package
+   that pins blit's version -- today blit-compositor, which depends on
+   blit (= its own version). This helper is the one place that rule lives. */
+#define UPDATE_MAX_PACKAGES 2
+
+typedef struct {
+    char path[256];
+    char sha256[65];
+    char name[64];
+    char version[128];
+} UpdatePackage;
+
+static int package_field(const char *path, const char *field,
+                         char *out, size_t capacity)
 {
-    int pipe_fds[2];
-    pid_t child;
-    char output[64];
-    ssize_t length;
-    int status;
-    if (pipe(pipe_fds) < 0) return 0;
-    child = fork();
-    if (child < 0) return 0;
-    if (child == 0) {
-        dup2(pipe_fds[1], STDOUT_FILENO);
-        close(pipe_fds[0]); close(pipe_fds[1]);
-        execl("/usr/bin/dpkg-deb", "dpkg-deb", "--field", path,
-              "Package", (char *)NULL);
-        _exit(127);
-    }
-    close(pipe_fds[1]);
-    length = read(pipe_fds[0], output, sizeof(output) - 1);
-    close(pipe_fds[0]);
-    if (waitpid(child, &status, 0) != child || length < 0 ||
-        !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    char detail[COMMAND_DETAIL_CAPACITY];
+    if (!run_command("/usr/bin/dpkg-deb", (char *const[]){
+            (char *)"dpkg-deb", (char *)"--field", (char *)path,
+            (char *)field, NULL}, detail, sizeof(detail)) ||
+        detail[0] == '\0' || strchr(detail, ' ') != NULL ||
+        strlen(detail) >= capacity)
         return 0;
-    output[length] = '\0';
-    if (length > 0 && output[length - 1] == '\n') output[length - 1] = '\0';
-    return strcmp(output, "blit") == 0;
+    snprintf(out, capacity, "%s", detail);
+    return 1;
 }
 
-static int request_update(const char *path, const char *expected,
+static int sha256_matches(const char *path, const char *expected)
+{
+    char detail[COMMAND_DETAIL_CAPACITY];
+    return run_command("/usr/bin/sha256sum", (char *const[]){
+            (char *)"sha256sum", (char *)path, NULL},
+            detail, sizeof(detail)) &&
+        strlen(expected) == 64 && strncmp(detail, expected, 64) == 0;
+}
+
+/* Present: dpkg knows the package in any state that has its files or its
+   dependency on blit -- everything but not-installed and config-files. */
+static int package_present(const char *name)
+{
+    char detail[COMMAND_DETAIL_CAPACITY];
+    if (!run_command("/usr/bin/dpkg-query", (char *const[]){
+            (char *)"dpkg-query", (char *)"--show",
+            (char *)"--showformat=${db:Status-Status}", (char *)name, NULL},
+            detail, sizeof(detail)))
+        return 0;
+    return detail[0] != '\0' && strcmp(detail, "not-installed") != 0 &&
+        strcmp(detail, "config-files") != 0;
+}
+
+/* Only a file the server staged: UPDATE_STAGING_DIR/blit-update-<name>,
+   no further directories. The helper is root, and it deletes what it was
+   handed, so it must never be handed anything else. */
+static int staged_path(const char *path)
+{
+    static const char prefix[] = UPDATE_STAGING_DIR "/blit-update-";
+    const char *name = path + sizeof(prefix) - 1;
+    return strncmp(path, prefix, sizeof(prefix) - 1) == 0 &&
+        name[0] != '\0' && strchr(name, '/') == NULL;
+}
+
+static int request_update(UpdatePackage *packages, int count,
                           char *detail, size_t detail_capacity)
 {
-    char output[128];
-    int pipe_fds[2];
-    pid_t child;
-    ssize_t length;
-    int status;
-    if (pipe(pipe_fds) < 0) {
-        snprintf(detail, detail_capacity, "cannot verify package checksum");
+    char *arguments[3 + UPDATE_MAX_PACKAGES];
+    int i, blit = -1, compositor = -1, argc = 0;
+
+    for (i = 0; i < count; ++i)
+        if (!staged_path(packages[i].path)) {
+            snprintf(detail, detail_capacity, "not a staged update package");
+            return 0;
+        }
+    for (i = 0; i < count; ++i) {
+        UpdatePackage *package = &packages[i];
+        if (!sha256_matches(package->path, package->sha256)) {
+            snprintf(detail, detail_capacity, "SHA-256 verification failed");
+            return 0;
+        }
+        if (!package_field(package->path, "Package", package->name,
+                           sizeof(package->name)) ||
+            !package_field(package->path, "Version", package->version,
+                           sizeof(package->version))) {
+            snprintf(detail, detail_capacity, "package identity check failed");
+            return 0;
+        }
+        if (strcmp(package->name, "blit") == 0 && blit < 0) blit = i;
+        else if (strcmp(package->name, "blit-compositor") == 0 && compositor < 0)
+            compositor = i;
+        else {
+            snprintf(detail, detail_capacity, "package identity check failed");
+            return 0;
+        }
+    }
+    if (blit < 0) {
+        snprintf(detail, detail_capacity, "the update must carry blit");
         return 0;
     }
-    child = fork();
-    if (child < 0) {
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
-        snprintf(detail, detail_capacity, "cannot verify package checksum");
+    if (compositor >= 0 &&
+        strcmp(packages[compositor].version, packages[blit].version) != 0) {
+        snprintf(detail, detail_capacity,
+                 "blit and blit-compositor versions differ");
         return 0;
     }
-    if (child == 0) {
-        dup2(pipe_fds[1], STDOUT_FILENO);
-        close(pipe_fds[0]); close(pipe_fds[1]);
-        execl("/usr/bin/sha256sum", "sha256sum", path, (char *)NULL);
-        _exit(127);
+    if (package_present("blit-compositor")) {
+        if (compositor < 0) {
+            snprintf(detail, detail_capacity,
+                     "blit-compositor is installed; the update must carry it");
+            return 0;
+        }
+    } else {
+        compositor = -1;   /* never add a package the host did not choose */
     }
-    close(pipe_fds[1]);
-    length = read(pipe_fds[0], output, sizeof(output) - 1);
-    close(pipe_fds[0]);
-    if (waitpid(child, &status, 0) != child || length < 64 ||
-        !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
-        strncmp(output, expected, 64) != 0) {
-        snprintf(detail, detail_capacity, "SHA-256 verification failed");
-        return 0;
-    }
-    if (!package_identity(path)) {
-        snprintf(detail, detail_capacity, "package identity check failed");
-        return 0;
-    }
-    return run_command("/usr/bin/dpkg", (char *const[]){
-        (char *)"dpkg", (char *)"--install", (char *)path, NULL},
-        detail, detail_capacity);
+    arguments[argc++] = (char *)"dpkg";
+    arguments[argc++] = (char *)"--install";
+    arguments[argc++] = packages[blit].path;
+    if (compositor >= 0) arguments[argc++] = packages[compositor].path;
+    arguments[argc] = NULL;
+    return run_command("/usr/bin/dpkg", arguments, detail, detail_capacity);
 }
 
 static int read_line(int fd, char *line, size_t capacity)
@@ -246,9 +298,9 @@ int main(int argc, char **argv)
         return 1;
     for (;;) {
         int client_fd = accept(server_fd, NULL, NULL);
-        char line[512];
-        char path[256];
-        char sha[65];
+        char line[1024];
+        UpdatePackage packages[UPDATE_MAX_PACKAGES];
+        int count;
         char detail[COMMAND_DETAIL_CAPACITY];
         int updated = 0;
         struct timeval socket_timeout = {3, 0};
@@ -259,9 +311,31 @@ int main(int argc, char **argv)
         if (!read_line(client_fd, line, sizeof(line))) {
             close(client_fd); continue;
         }
-        if (sscanf(line, "UPDATE %255s %64s", path, sha) == 2) {
-            if (request_update(path, sha, detail, sizeof(detail))) updated = 1;
+        /* UPDATE <path> <sha256> [<path> <sha256>] */
+        memset(packages, 0, sizeof(packages));
+        {
+            int consumed = 0, fields;
+            fields = sscanf(line, "UPDATE %255s %64s %n", packages[0].path,
+                            packages[0].sha256, &consumed);
+            count = fields == 2 ? 1 : 0;
+            if (count == 1 && line[consumed] != '\0' &&
+                line[consumed] != '\n') {
+                int tail = 0;
+                if (sscanf(line + consumed, "%255s %64s %n", packages[1].path,
+                           packages[1].sha256, &tail) == 2 &&
+                    line[consumed + tail] == '\0')
+                    count = 2;
+                else
+                    count = 0;
+            }
         }
+        if (count > 0 && request_update(packages, count, detail, sizeof(detail)))
+            updated = 1;
+        /* Installed or refused, a staged package has served its purpose;
+           every deployment used to leave one behind (ADR 0232). */
+        for (int i = 0; i < count; ++i)
+            if (staged_path(packages[i].path))
+                unlink(packages[i].path);
         if (!updated) {
             char response[COMMAND_DETAIL_CAPACITY + 8];
             if (detail[0] == '\0')

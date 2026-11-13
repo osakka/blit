@@ -4,8 +4,12 @@ set -eu
 # Operator-only tooling. This is not installed in the Debian package and
 # never guesses, prints, or stores an update credential.
 
+# ADR 0232: PACKAGE is the release's blit .deb; blit-compositor of the same
+# version must sit beside it. Both go in one upload, and the host's helper
+# installs the compositor too when the host has it.
+
 usage() {
-    echo "usage: $0 HOST PACKAGE" >&2
+    echo "usage: $0 HOST BLIT_PACKAGE (blit-compositor of its version beside it)" >&2
     echo "set BLIT_UPDATE_TOKEN or BLIT_UPDATE_TOKEN_FILE; optionally set BLIT_AUTH_TOKEN or BLIT_AUTH_TOKEN_FILE" >&2
     exit 2
 }
@@ -31,6 +35,12 @@ fi
 package_version=$(dpkg-deb -f "$package" Version)
 version=${package_version%-*}
 sha256=$(sha256sum "$package" | awk '{print $1}')
+compositor=$(dirname "$package")/blit-compositor_${package_version}_amd64.deb
+test -f "$compositor" || {
+    echo "update refused: $compositor not found beside $package" >&2
+    exit 2
+}
+compositor_sha256=$(sha256sum "$compositor" | awk '{print $1}')
 repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 manifest="$repo_root/releases/$version.yaml"
 test -f "$manifest" || {
@@ -48,6 +58,11 @@ package_name=$(basename "$package")
     echo "update refused: package checksum does not match release manifest" >&2
     exit 2
 }
+[ "$(sed -n 's/^compositor_package: //p' "$manifest")" = "$(basename "$compositor")" ] &&
+[ "$(sed -n 's/^compositor_package_sha256: //p' "$manifest")" = "$compositor_sha256" ] || {
+    echo "update refused: blit-compositor does not match release manifest" >&2
+    exit 2
+}
 base_url=${BLIT_BASE_URL:-http://$host:8080}
 api_token=${BLIT_AUTH_TOKEN:-}
 if [ "$api_token" = "" ] && [ "${BLIT_AUTH_TOKEN_FILE:-}" != "" ]; then
@@ -55,6 +70,9 @@ if [ "$api_token" = "" ] && [ "${BLIT_AUTH_TOKEN_FILE:-}" != "" ]; then
 fi
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/blit-update.XXXXXX")
 trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
+# The two packages back to back; X-Blit-Packages says where each ends.
+cat "$package" "$compositor" >"$tmpdir/body"
+parts="$(wc -c <"$package" | tr -d ' '):$sha256 $(wc -c <"$compositor" | tr -d ' '):$compositor_sha256"
 
 curl_auth() {
     if [ "$api_token" != "" ]; then
@@ -79,9 +97,9 @@ echo "$status" | grep -q '"active":false' || {
 
 http_code=$(curl_auth --request PUT \
     -H "X-Blit-Update-Token: $update_token" \
-    -H "X-Blit-SHA256: $sha256" \
+    -H "X-Blit-Packages: $parts" \
     -H 'Content-Type: application/vnd.debian.binary-package' \
-    --data-binary "@$package" \
+    --data-binary "@$tmpdir/body" \
     -o "$tmpdir/response" -w '%{http_code}' \
     "$base_url/v1/control/update") || {
     # The package postinst may deliberately restart the active unit after
@@ -106,7 +124,7 @@ case "$http_code" in
         ;;
 esac
 
-echo "accepted package $package_version (server $version) sha256=$sha256"
+echo "accepted blit and blit-compositor $package_version (server $version) sha256=$sha256 $compositor_sha256"
 echo "polling for supervised installation"
 i=0
 while [ "$i" -lt 60 ]; do
