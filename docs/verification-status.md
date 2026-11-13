@@ -9,6 +9,34 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.98 the display's refresh rate on the frame channel
+
+- **DISPLAY rate:** a channel that sends it is answered `DISPLAY rate
+  <mHz>` for its session's display, and told again when that changes.
+  This is for a desktop the login manager started, which has no token for
+  `GET /v1/displays` (Hibr #534). Opt-in; anything else is EINVAL.
+  Blit up to 0.3.97 answers the line `FRAME error 542720332 EINVAL` and
+  keeps the channel (checked against the 0.3.97 binary), so Hibr checks
+  the version first.
+- **Also since 0.3.97:** `xwayland_gate` shows an X program typing the
+  same text as a terminal after a keyboard switch (ADR 0231's last
+  evidence).
+- **Gates:**
+  - `frame_input_gate` rates: 60000 and 74973 mHz, a move told once,
+    EINVAL, opt-in. It fails with the per-turn check removed.
+  - This host, run with nothing beside it: `all` 188 pass, 11 skip;
+    `renderer` 82; `renderer-gles` 62. A first run was void: it tested a
+    binary built before the version bump.
+  - The build environment: `compositor_gate`, `xwayland_gate`,
+    `package_artifact_gate`, `update_restart_gate`, `update_pair_gate`
+    6/6.
+- **Live, the mini PC:** the first ordinary deploy through the pair
+  update. dpkg upgraded `blit` and `blit-compositor` 0.3.97 -> 0.3.98 in
+  one run (01:48:29-31). `dpkg --audit` is clean and nothing is left
+  staged. `DISPLAY rate` itself isn't exercised live until Hibr #534 asks
+  for it.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-13: 0.3.97 an update installs blit and its compositor together
 
 - **Why:** every deployment installed `blit` alone, and `blit-compositor`
