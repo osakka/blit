@@ -46,7 +46,11 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 53
+raise "unexpected path count #{paths.length}" unless paths.length == 54
+# ADR 0233: the Arabizi engine's dry run.
+raise 'arabizi convert contract missing' unless
+  paths.dig('/v1/input/arabizi/convert','post','operationId') == 'convertArabizi' &&
+  paths.dig('/v1/input/arabizi/convert','post','requestBody','content','application/json','schema','required') == %w[text]
 # ADR 0231 step 2: the keyboards, their current one, what the system has.
 raise 'input keyboards contract missing' unless
   paths.dig('/v1/input/keyboards','get','operationId') == 'getInputKeyboards' &&

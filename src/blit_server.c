@@ -24012,6 +24012,8 @@ static void settings_complete_requests(BlitRuntime *runtime, int kind, int ok,
 /* /v1/input/keyboards (ADR 0231 step 2), defined with the keyboards. */
 static void keyboards_response(int fd, BlitRuntime *runtime, const char *method, const char *path,
                                const char *payload, char *body, size_t capacity);
+/* POST /v1/input/arabizi/convert (ADR 0233), defined with the keyboards. */
+static void arabizi_convert_response(int fd, const char *payload, char *body, size_t capacity);
 /* GET /v1/input/keymap, defined after Blit's key tables. */
 static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
                                   const char *path, char *body, size_t capacity);
@@ -24332,6 +24334,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
 
     if (strcmp(path, "/v1/input/keyboards") == 0 && strcmp(method, "PUT") == 0) {
         keyboards_response(fd, runtime, method, path, payload, body, sizeof(body));
+        return;
+    }
+    if (strcmp(path, "/v1/input/arabizi/convert") == 0 && strcmp(method, "POST") == 0) {
+        arabizi_convert_response(fd, payload, body, sizeof(body));
         return;
     }
     if (strcmp(path, "/v1/fonts") == 0 && strcmp(method, "PUT") == 0) {
@@ -29740,6 +29746,7 @@ static int evdev_role_is_held(const BlitInputDevice *device, int role)
 }
 
 #include "blit_keyboard_xkb.h"
+#include "blit_arabizi.h"
 
 /* Adopt the kernel's idea of what each keyboard is holding and which of its
    locks are lit. A keyboard opened while Shift is down, or after a device
@@ -30163,6 +30170,30 @@ static void keyboards_available_json(const char *layout, char *out, size_t capac
     }
     if (file) fclose(file);
     json_appendf(out, capacity, &used, "]}");
+}
+
+/* POST /v1/input/arabizi/convert (ADR 0233): Arabizi text through the
+   engine key by key, as typing gives it -- the same path delivery uses.
+   {"text": "...", "tashkeel": false} -> {"text": "..."}. The text is at
+   most 4096 bytes and is never logged. 503 when the engine's rules or word
+   lists are missing. */
+static void arabizi_convert_response(int fd, const char *payload, char *body, size_t capacity)
+{
+    static char text[4097], out[16384], escaped[32768];
+    int tashkeel = 0;
+    if (payload == NULL || !json_string(payload, "text", text, sizeof(text)) || strlen(text) >= 4096) {
+        send_problem(fd, 400, "Bad Request", "invalid_text",
+                     "text: Arabizi to convert, 1 to 4095 bytes.");
+        return;
+    }
+    (void)json_bool(payload, "tashkeel", &tashkeel);
+    if (!az_convert(text, tashkeel, out, sizeof(out))) {
+        send_problem(fd, 503, "Service Unavailable", "arabizi_unavailable", az.problem);
+        return;
+    }
+    json_escape(out, escaped, sizeof(escaped));
+    snprintf(body, capacity, "{\"text\":\"%s\",\"tashkeel\":%s}", escaped, tashkeel ? "true" : "false");
+    send_http(fd, 200, "OK", "application/json", body);
 }
 
 /* GET /v1/input/keyboards: the list and the current one. PUT: a new list

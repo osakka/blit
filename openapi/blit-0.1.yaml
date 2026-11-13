@@ -1305,6 +1305,39 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/input/arabizi/convert:
+    post:
+      tags: [hardware]
+      operationId: convertArabizi
+      summary: Arabizi text through the Arabizi engine (ADR 0233)
+      description: >-
+        The engine's dry run. The text is fed key by key, as typing gives it,
+        the same path the Arabizi keyboard uses, and what is held at the end
+        is flushed. Used by the Control Panel's Try It and the corpus gate.
+        The text is never logged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: {type: string, minLength: 1, maxLength: 4095}
+                tashkeel: {type: boolean, default: false}
+      responses:
+        '200':
+          description: The Arabic
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text, tashkeel]
+                properties:
+                  text: {type: string}
+                  tashkeel: {type: boolean}
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/input/keyboards/available:
     get:
       tags: [hardware]

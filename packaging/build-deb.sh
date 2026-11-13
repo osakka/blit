@@ -110,6 +110,7 @@ mkdir -p "$stage/usr/lib/blit/bin" \
     "$stage/usr/lib/blit/hibr" \
     "$stage/usr/share/blit/probes" \
     "$stage/usr/lib/blit/fonts" "$stage/usr/share/blit/hibr" \
+    "$stage/usr/share/blit/arabizi" \
     "$stage/lib/systemd/system"
 cp -a "$RUNTIME_BINARY" "$stage/usr/lib/blit/bin/blit-server"
 cp -a "$UPDATE_HELPER" "$stage/usr/lib/blit/bin/blit-update-helper"
@@ -152,6 +153,11 @@ cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
 install -d -m 0755 "$stage/usr/share/doc/blit/examples"
 cp -a "$ROOT/packaging/blit-unprivileged.conf" \
     "$stage/usr/share/doc/blit/examples/"
+# The Arabizi engine's rules and word lists (ADR 0233), with their credit
+# and licence (assets/arabizi/README.md).
+for f in arabizi.rules ar-words.txt en-words.txt README.md; do
+	install -m 0644 "$ROOT/assets/arabizi/$f" "$stage/usr/share/blit/arabizi/$f"
+done
 # The fonts are Blit's own, from assets/fonts alone (ADR 0194). The build
 # bundle's fonts directory held a stale console font and a duplicate.
 if [ -d "$ROOT/assets/fonts" ]; then
@@ -216,7 +222,10 @@ version. On Debian systems the licence text is in
 
 Bundled third-party material keeps its own licence, installed beside it:
 the fonts under /usr/lib/blit/fonts/ (licenses/, the *-LICENSE.txt files,
-README.md) and the icon artwork (MIT, /usr/lib/blit/fonts/icons/LICENSE.txt).
+README.md) and the icon artwork (MIT, /usr/lib/blit/fonts/icons/LICENSE.txt). The
+Arabizi word lists under /usr/share/blit/arabizi/ are derived from Hermit
+Dave's FrequencyWords (OpenSubtitles 2018 counts) and licensed CC BY-SA 4.0;
+their credit, source and changes are in /usr/share/blit/arabizi/README.md.
 The Hibr adapter, /usr/lib/blit/hibr/console-blit.so, is built from Hibr's
 source and is distributed under the GNU Lesser General Public License,
 version 3 or later (/usr/share/common-licenses/LGPL-3).

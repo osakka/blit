@@ -525,6 +525,7 @@ suite_renderer() {
     run_gate key_encoding_gate.rb ruby tools/tests/key_encoding_gate.rb
     run_gate input_stream_text_gate.rb ruby tools/tests/input_stream_text_gate.rb
     run_gate keyboard_settings_gate.rb ruby tools/tests/keyboard_settings_gate.rb
+    run_gate arabizi_gate.py python3 tools/tests/arabizi_gate.py
     run_gate pointer_settings_gate.rb ruby tools/tests/pointer_settings_gate.rb
     run_gate display_settings_gate.rb ruby tools/tests/display_settings_gate.rb
     run_gate wallpaper_damage_gate.rb ruby tools/tests/wallpaper_damage_gate.rb

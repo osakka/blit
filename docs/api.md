@@ -1779,6 +1779,21 @@ sent `KEYBOARD list` is told nothing (a channel that only draws need not
 read lines it did not ask for). A desktop with a channel per display hears
 each change on each of them.
 
+**The Arabizi engine** (from 0.3.100, ADR 0233, phase 1): `POST
+/v1/input/arabizi/convert` with `{"text": "...", "tashkeel": false}`
+answers `{"text": "...", "tashkeel": false}`. The engine reads Latin
+Arabizi key by key: digits and digraphs by the common convention (3 ع, 7 ح,
+5 خ, 2 ء, 6 ط, 9 ص, 3' غ, 6' ظ, 9' ض, sh ش, kh خ, gh غ, ...), vowels chosen
+against a word list, an article or conjunction joined to its word, fixed
+phrases (inshallah → إن شاء الله), English left as typed, and ? , ; as ؟ ، ؛.
+With `tashkeel` it writes the short vowels it chose (كِتاب). It is the same
+path the Arabizi keyboard will type through, so this is its dry run. The
+text, at most 4095 bytes, is never logged. 400 `invalid_text` without text;
+503 `arabizi_unavailable` when the rules or word lists (in
+`BLIT_ARABIZI_ROOT`, by default `/usr/share/blit/arabizi`) are missing.
+The keyboard itself, Arabic (Arabizi), joins the keyboard list when it can
+type where the owner types (ADR 0233's later phases).
+
 **Dead keys and compose** (from 0.3.94): a layout's dead keys (such as
 `us` `intl`'s apostrophe, dead acute) and compose sequences work in
 terminals: each keyboard has its own compose state on the locale's

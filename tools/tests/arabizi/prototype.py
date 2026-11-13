@@ -57,7 +57,9 @@ class Rules:
         return self.units.get((latin, pos)) or self.units.get((latin, 'any'))
 
 
-R = Rules(os.path.join(HERE, 'arabizi.rules'))
+ROOT = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
+DATA = os.environ.get('ARABIZI_DATA', os.path.join(ROOT, 'assets', 'arabizi'))
+R = Rules(os.path.join(DATA, 'arabizi.rules'))
 
 
 def load(path, alpha):
@@ -69,8 +71,8 @@ def load(path, alpha):
     return out
 
 
-AR = load(os.path.join(HERE, 'ar_freq.txt'), lambda w: True)
-EN = load(os.path.join(HERE, 'en_50k.txt'), str.isalpha)
+AR = load(os.path.join(DATA, 'ar-words.txt'), lambda w: True)
+EN = load(os.path.join(DATA, 'en-words.txt'), str.isalpha)
 AR_TOTAL, EN_TOTAL = sum(AR.values()), sum(EN.values())
 
 

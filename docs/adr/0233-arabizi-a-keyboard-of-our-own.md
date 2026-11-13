@@ -341,6 +341,32 @@ The scorer exists so that people needn't type it strictly.
   - `xwayland_gate` (word commits).
 - **The cost per key** on the gateway loop, measured and bounded.
 
+### Recorded: phase 1 (0.3.100, 2026-11-13)
+
+- **The engine:** `src/blit_arabizi.h`, reading
+  `assets/arabizi/arabizi.rules` and the pinned word lists
+  (`tools/arabizi/make-word-lists.sh`, FrequencyWords at 525f9b5, CC BY-SA
+  4.0, credited in `assets/arabizi/README.md` and the package's copyright
+  file). The owner chose to ship them.
+- **The prototype as the oracle:** the C engine equals the key-by-key
+  prototype (`tools/tests/arabizi/keys.py`) on all 244 lines of both sets.
+  Each line takes under 1.5 ms, and the lists load once on first use, in
+  150 ms.
+- **The baseline, key by key, on the 100,000-word list:**
+  - maintainer's set: 80.1% of words (193/241) and 78.0% of lines;
+  - the owner's private set: 67.5% of words (54/80) and 38.5% of lines.
+  `arabizi_gate` holds them as floors. Raise them when the engine improves;
+  never lower them.
+- **Also gated:**
+  - the worst case: one 48-letter word of the most ambiguous units, bounded
+    to 50 ms by prefix pruning;
+  - tashkeel writes marks;
+  - an empty text is 400;
+  - missing data is 503.
+- **Not yet:** the keyboard isn't in the list. It joins when it can type
+  where the owner types (phase 2: Hibr #542's `text` event; phase 3:
+  text-input-v3 for Wayland programs).
+
 ## Open questions for the owner
 
 - 8 by default: ق (Gulf and Saudi) or غ (Lebanese)?

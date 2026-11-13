@@ -168,6 +168,19 @@ for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe
     }
 done
 test -f "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
+# ADR 0233: the Arabizi engine's data, as recorded at the source commit,
+# with its credit beside it.
+for f in arabizi.rules ar-words.txt en-words.txt README.md; do
+    cmp -s <(git -C "$root" show "$source_commit:assets/arabizi/$f") \
+        "$stage/usr/share/blit/arabizi/$f" || {
+        echo "PACKAGE_ARTIFACT_FAIL Arabizi data differs from recorded source: $f" >&2
+        exit 1
+    }
+done
+grep -q 'CC BY-SA 4.0' "$stage/usr/share/doc/blit/copyright" || {
+    echo "PACKAGE_ARTIFACT_FAIL the copyright file does not credit the Arabizi word lists" >&2
+    exit 1
+}
 grep -q 'mod load sys' "$stage/usr/share/blit/hibr/blit-login.hibr"
 grep -q 'source "\$login"' "$stage/usr/share/blit/hibr/blit-login.hibr"
 grep -q 'BLIT_HIBR_ADAPTER' "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
