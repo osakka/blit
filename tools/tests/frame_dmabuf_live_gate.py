@@ -99,7 +99,7 @@ def wait_text(sid, needle, seconds):
 def ended(sid, seconds):
     deadline = time.time() + seconds
     while time.time() < deadline:
-        if api('GET', '/v1/terminal-sessions/%s' % sid)['state'] not in ('starting', 'running'):
+        if api('GET', '/v1/terminal-sessions/%s' % sid)['state'] != 'running':
             return True
         time.sleep(0.3)
     return False

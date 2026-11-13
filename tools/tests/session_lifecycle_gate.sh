@@ -45,6 +45,21 @@ curl --fail --silent --show-error --request POST \
     --data '{"command":"/bin/sh","arguments":["-c","trap : TERM; while :; do sleep 1; done"],"surface":{"width":80,"height":24}}' \
     "http://127.0.0.1:$port/v1/terminal-sessions" >"$session"
 
+# #155: the program writes nothing, and it is running all the same, from
+# the creation's answer on (Blit up to 0.3.98 said `starting` until a
+# first byte, which a client polling for an exit took as not yet started).
+state() {
+    curl --connect-timeout 2 --max-time 3 --fail --silent --show-error \
+        "http://127.0.0.1:$port/v1/terminal-sessions/$1" |
+        sed -n 's/.*"state":"\([a-z]*\)".*/\1/p'
+}
+grep -q '"state":"running"' "$session" ||
+    { echo "SESSION_LIFECYCLE_FAIL created silent session: $(cat "$session")"; exit 1; }
+sleep 1.5
+silent=$(state 1)
+[ "$silent" = running ] ||
+    { echo "SESSION_LIFECYCLE_FAIL a silent program 1.5 s in: $silent"; exit 1; }
+
 start=$(date +%s%N)
 curl --connect-timeout 2 --max-time 3 --fail --silent --show-error \
     --request DELETE "http://127.0.0.1:$port/v1/terminal-sessions/1" \
@@ -56,4 +71,18 @@ curl --connect-timeout 2 --max-time 3 --fail --silent --show-error \
     "http://127.0.0.1:$port/v1/diagnostics/runtime" >"$runtime"
 test "$elapsed_ms" -lt 2000
 grep -q '"sessions":0' "$runtime"
-printf 'SESSION_LIFECYCLE_PASS delete_ms=%s diagnostics=responsive\n' "$elapsed_ms"
+
+# A silent program that ends: running, then stopped (exit 0).
+curl --fail --silent --show-error --request POST \
+    --header 'Content-Type: application/json' \
+    --data '{"command":"/bin/sh","arguments":["-c","sleep 1"],"surface":{"width":80,"height":24}}' \
+    "http://127.0.0.1:$port/v1/terminal-sessions" >"$session"
+second=$(sed -n 's/.*"id":"\{0,1\}\([0-9][0-9]*\).*/\1/p' "$session" | head -n 1)
+[ "$(state "$second")" = running ] ||
+    { echo "SESSION_LIFECYCLE_FAIL the silent sleep: $(state "$second")"; exit 1; }
+i=0
+while [ "$(state "$second")" = running ] && [ "$i" -lt 50 ]; do i=$((i + 1)); sleep 0.1; done
+ended=$(state "$second")
+[ "$ended" = stopped ] ||
+    { echo "SESSION_LIFECYCLE_FAIL the silent sleep ended as $ended"; exit 1; }
+printf 'SESSION_LIFECYCLE_PASS delete_ms=%s diagnostics=responsive silent=running,then-stopped\n' "$elapsed_ms"

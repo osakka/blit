@@ -5433,7 +5433,11 @@ components:
         surface_revision: {$ref: '#/components/schemas/Revision'}
         state:
           type: string
-          enum: [starting, running, stopped, failed]
+          description: >-
+            running from the moment its program is started (whether or not
+            it has written anything), then stopped when it exits 0 or is
+            stopped, or failed when it exits otherwise.
+          enum: [running, stopped, failed]
         surface_id: {$ref: '#/components/schemas/ResourceId'}
         text_layout: {$ref: '#/components/schemas/TextLayout'}
         title:

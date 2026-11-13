@@ -44,6 +44,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 
 | Feature | Since | ADR | Status |
 | --- | --- | --- | --- |
+| A terminal session is `running` from its program's start, silent or not, then `stopped` or `failed` (no `starting` until a first byte; #155) | 0.3.99 | — | Tested (`session_lifecycle_gate`: a silent program running at creation and 1.5 s in, a silent `sleep 1` then stopped) |
 | Terminal sessions started, placed, resized and stopped through the API, as any local user | 0.1 | 0002, 0010 | Used |
 | xterm-compatible emulation: 256 colours and truecolour, attributes, cursor styles, scroll regions, margins | 0.1 | 0004 | Used |
 | Terminal fixes: xterm's bright colours, underline styles, colon colours, `CSI 3 J`, margins, four character sets, background-colour erase, window size reports, DECRQM/DECRQSS/DA3 answers | 0.3.12 | — | Tested |

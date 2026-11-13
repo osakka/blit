@@ -1133,8 +1133,7 @@ created = request(base, 'POST', '/v1/terminal-sessions', {
 framed_id = created.fetch('id')
 Timeout.timeout(5) do
   loop do
-    break if request(base, 'GET', "/v1/terminal-sessions/#{framed_id}").fetch('state') != 'starting' &&
-             request(base, 'GET', "/v1/surfaces/surface-#{framed_id}/scrollback").fetch('count') == 1
+    break if request(base, 'GET', "/v1/surfaces/surface-#{framed_id}/scrollback").fetch('count') == 1
 
     sleep 0.02
   end
@@ -1199,8 +1198,7 @@ created = request(base, 'POST', '/v1/terminal-sessions', {
 shadow_id = created.fetch('id')
 Timeout.timeout(5) do
   loop do
-    break if request(base, 'GET', "/v1/terminal-sessions/#{shadow_id}").fetch('state') != 'starting' &&
-             request(base, 'GET', "/v1/surfaces/surface-#{shadow_id}/scrollback").fetch('count') == 1
+    break if request(base, 'GET', "/v1/surfaces/surface-#{shadow_id}/scrollback").fetch('count') == 1
 
     sleep 0.02
   end

@@ -656,7 +656,12 @@ discover -> create session -> place surface -> route input
 
 Create a session with `POST /v1/terminal-sessions`. The response identifies
 the session, PTY process, surface, display/pane placement, and the
-`hibr_desktop` binding. Use `PATCH /v1/terminal-sessions/{id}` for placement
+`hibr_desktop` binding. A session's `state` is `running` from the moment its
+program is started, whether or not it has written anything; then `stopped`
+when it exits 0 or is stopped, or `failed` when it exits otherwise (with
+`exit_code`). A client waiting for a program to finish waits for a state
+other than `running`. (Up to 0.3.98 a session said `starting` until its
+program's first output, so a silent program never showed `running`; #155.) Use `PATCH /v1/terminal-sessions/{id}` for placement
 and input policy, `POST /v1/terminal-sessions/{id}/input` for terminal input,
 and `DELETE` to stop the process group and release its surface.
 

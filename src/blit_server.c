@@ -1070,6 +1070,8 @@ typedef struct {
        after startup output has made the desktop session live; do not inject a
        user key such as Escape, which has desktop meaning. */
     int attach_reassert_pending;
+    /* #155: the PTY program has written; arms the geometry reassert. */
+    int output_seen;
     uint64_t attach_reassert_due_us;
     int attach_reassert_attempts;
     int attach_reassert_max_attempts;
@@ -15886,8 +15888,7 @@ static void refresh_session_state(BlitRuntime *runtime, BlitSession *session)
     char target_id[128];
 
     if (!session->used ||
-        (strcmp(session->state, "running") != 0 &&
-         strcmp(session->state, "starting") != 0))
+        (strcmp(session->state, "running") != 0))
         return;
     snprintf(target_id, sizeof(target_id), "session-%llu", session->id);
     result = waitpid(session->process_id, &status, WNOHANG);
@@ -16262,7 +16263,10 @@ static void service_attach_reasserts(BlitRuntime *runtime, uint64_t now)
         session->attach_reassert_pending = 0;
         if (session->pty_fd < 0 && !session->hibr_process)
             continue;
-        if (strcmp(session->state, "running") != 0) {
+        /* A PTY program's geometry is reasserted once it has written
+           (output_seen, #155); Hibr's own process from the start. */
+        if (strcmp(session->state, "running") != 0 ||
+            (!session->hibr_process && !session->output_seen)) {
             if (session->hibr_process) {
                 session->attach_reassert_pending = 1;
                 session->attach_reassert_due_us = now + 250000ULL;
@@ -16435,8 +16439,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         used += (size_t)snprintf(body + used, capacity - used,
                                  ",\"notification\":\"%s\"",
                                  escaped_notification);
-    if (strcmp(session->state, "running") != 0 &&
-        strcmp(session->state, "starting") != 0)
+    if (strcmp(session->state, "running") != 0)
         used += (size_t)snprintf(body + used, capacity - used,
                                  ",\"exit_code\":%d", session->exit_code);
     if (session->display_id[0]) {
@@ -16973,8 +16976,7 @@ static BlitSession *hibr_desktop_owner(BlitRuntime *runtime,
             strcmp(session->hibr_desktop_session, session_name) != 0)
             continue;
         refresh_session_state(runtime, session);
-        if (strcmp(session->state, "running") == 0 ||
-            strcmp(session->state, "starting") == 0)
+        if (strcmp(session->state, "running") == 0)
             return session;
     }
     return NULL;
@@ -17622,8 +17624,10 @@ static int create_session(BlitRuntime *runtime, const char *json,
                  BLIT_SURFACE_EXTERNAL :
                  (strcmp(surface_mode, "mirror") == 0 ?
                   BLIT_SURFACE_MIRROR : BLIT_SURFACE_TERMINAL));
-            snprintf(session->state, sizeof(session->state), "%s",
-                     hibr_process ? "running" : "starting");
+            /* #155: running from the fork. Its first output is
+               `output_seen`, which arms the pane's geometry reassert below;
+               a program that runs silently is running all the same. */
+            snprintf(session->state, sizeof(session->state), "running");
             if (hibr_process && !hibr_desktop_join &&
                 session_surface_is_owner_authored(session)) {
                 /* An external Hibr provider publishes through the API rather
@@ -18487,8 +18491,7 @@ static void service_login_manager(BlitRuntime *runtime, uint64_t now)
         find_session_id(runtime, runtime->login_session_id) : NULL;
     if (session != NULL) {
         refresh_session_state(runtime, session);
-        if (strcmp(session->state, "running") == 0 ||
-            strcmp(session->state, "starting") == 0)
+        if (strcmp(session->state, "running") == 0)
             return;
         if (session->login_manager && !session->login_exit_reported) {
             snprintf(detail, sizeof(detail),
@@ -19039,8 +19042,7 @@ static void stop_sessions(BlitRuntime *runtime)
         if (!session->used)
             continue;
         refresh_session_state(runtime, session);
-        if (strcmp(session->state, "running") == 0 ||
-            strcmp(session->state, "starting") == 0) {
+        if (strcmp(session->state, "running") == 0) {
             terminate_session_process(session->process_id);
             snprintf(session->state, sizeof(session->state), "stopped");
         }
@@ -19109,8 +19111,7 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     }
 
     refresh_session_state(runtime, session);
-    if (strcmp(session->state, "running") == 0 ||
-        strcmp(session->state, "starting") == 0) {
+    if (strcmp(session->state, "running") == 0) {
         terminate_session_process(session->process_id);
     }
     if (session->pty_fd >= 0)
@@ -19618,10 +19619,8 @@ static void service_session_output(BlitRuntime *runtime, int fd)
             char surface_event[512];
             int terminal_changed = 0;
 
-            if (strcmp(runtime->sessions[i].state, "starting") == 0) {
-                snprintf(runtime->sessions[i].state,
-                         sizeof(runtime->sessions[i].state), "running");
-                ++runtime->sessions[i].revision;
+            if (!runtime->sessions[i].output_seen) {
+                runtime->sessions[i].output_seen = 1;
                 /* Hibr's held desktop starts with its own 24x80 defaults,
                    then loads the window-manager files before it observes the
                    client's real PTY geometry. Reassert the authoritative
@@ -20841,8 +20840,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
                silently swallows the device's input. */
             refresh_session_state(runtime, route_session);
             if (route_enabled &&
-                strcmp(route_session->state, "running") != 0 &&
-                strcmp(route_session->state, "starting") != 0) {
+                strcmp(route_session->state, "running") != 0) {
                 config_problem(problem, 409, "Conflict",
                                         "input_route_target_stopped",
                                         "An enabled device route requires a live target session.");
@@ -24258,8 +24256,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         runtime->login_start_reported = 0;
         if (login_session != NULL) {
             refresh_session_state(runtime, login_session);
-            if (strcmp(login_session->state, "running") == 0 ||
-                strcmp(login_session->state, "starting") == 0) {
+            if (strcmp(login_session->state, "running") == 0) {
                 /* BLIT_LOGIN_AUTOSTART may have created the manager on the
                    default pane before an API client supplies its explicit
                    target.  The resource target and the live session must be
@@ -26085,8 +26082,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         refresh_session_state(runtime, target_session);
-        if (enabled && strcmp(target_session->state, "running") != 0 &&
-            strcmp(target_session->state, "starting") != 0) {
+        if (enabled && strcmp(target_session->state, "running") != 0) {
             send_problem(fd, 409, "Conflict", "input_route_target_stopped",
                          "An enabled input route requires a live target session.");
             return;
