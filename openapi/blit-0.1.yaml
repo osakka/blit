@@ -5028,7 +5028,13 @@ components:
           type: integer
           description: >-
             pointer_relative only. A relative Y delta, as REL_Y carries it.
-        button: {type: integer, minimum: 0, maximum: 2}
+        button:
+          type: integer
+          minimum: 0
+          maximum: 11
+          description: >-
+            0 left, 1 middle, 2 right; from 0.3.107 a mouse's further buttons
+            by X's numbers, 8 back, 9 forward, 10 and 11 (3 to 7 are refused).
         pressed: {type: boolean}
         delta: {type: integer, description: Wheel direction and magnitude.}
         code:

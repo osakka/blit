@@ -803,6 +803,45 @@ def multi(server, a, work, b):
         key(56, 0)
         ra.expect(['key 20 56 press', 'key 20 17 press', 'key 20 17 release', 'key 20 56 release'],
                   'an empty keep cleared it')
+        # Hibr #540: a pointer's further buttons (X 8..11) reach programs, by
+        # evdev code; `button<N>` chords keep them from routes, and the
+        # desktop's terminal is sent xterm's 128..131 only for a chord it
+        # keeps -- a reader that knows nothing of them sees none.
+        def press(button, mods=0):
+            if mods:
+                key(125, 1)
+            server.inject({'kind': 'pointer_button', 'button': button, 'pressed': True})
+            server.inject({'kind': 'pointer_button', 'button': button, 'pressed': False})
+            if mods:
+                key(125, 0)
+
+        before_sent = len(a.sent())
+        press(8)
+        ra.expect(['btn 20 275 press', 'btn 20 275 release'], 'back (button 8) to the program')
+        server.inject({'kind': 'pointer_button', 'code': 0x114, 'pressed': True})
+        server.inject({'kind': 'pointer_button', 'code': 0x114, 'pressed': False})
+        ra.expect(['btn 20 276 press', 'btn 20 276 release'], 'BTN_EXTRA (forward) by evdev code')
+        check(b'\033[<128;' not in a.sent()[before_sent:] and b'\033[<129;' not in a.sent()[before_sent:],
+              'an unkept further button reached the terminal: %r' % a.sent()[before_sent:])
+        ch.line('INPUT keep button8 super-button9\n')
+        press(8)
+        press(9)
+        ra.expect(['btn 20 276 press', 'btn 20 276 release'], 'only the unkept forward to the program')
+        wait_for(lambda: b'\033[<128;' in a.sent()[before_sent:],
+                 lambda: 'a kept button 8 did not reach the desktop as 128: %r' % a.sent()[before_sent:])
+        before_sent = len(a.sent())
+        press(9, mods=1)
+        key(125, 1)
+        key(125, 0)
+        ra.expect(['key 20 125 press', 'key 20 125 release', 'key 20 125 press', 'key 20 125 release'],
+                  'super-button9 kept, Super itself the program\'s')
+        wait_for(lambda: b'\033[<129;' in a.sent()[before_sent:],
+                 lambda: 'a kept super-button9 did not reach the desktop: %r' % a.sent()[before_sent:])
+        for bad in ('button4', 'button7', 'button12', 'button0', 'buttonx', 'super-button'):
+            check(ch.ask('INPUT keep %s\n' % bad) == b'INPUT error 0 EINVAL\n', '%s was not EINVAL' % bad)
+        ch.line('INPUT keep\n')
+        press(8)
+        ra.expect(['btn 20 275 press', 'btn 20 275 release'], 'an empty keep gave button 8 back')
         rb.nothing('route 21 while 20 is on')
         check(rb.notices == [], 'route 21 sent a keymap while off: %s' % rb.notices)
 
@@ -1318,7 +1357,8 @@ def sock():
           'off+unfocused+console=silent release_all=off,focus,console,close,delete wheel=0,-1/0,1 '
           'ptr=frame-pixels absolute=%s outside=silent relative=70,-30_in_%d,hidden,still %s '
           'keymap=memfd,at-live,once,=api(%s) on_before_accept=queued closed=ENOENT '
-          'not-taken=dropped+ENOENT frames=%d %s busy=live(2000),put(3500),off,on'
+          'not-taken=dropped+ENOENT frames=%d %s busy=live(2000),put(3500),off,on '
+          'buttons=8,9(code),kept(route-none,desktop-128/129),einval'
           % (','.join(cases), moves, confine, notices, frames, several))
 
 

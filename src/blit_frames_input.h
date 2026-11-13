@@ -195,8 +195,25 @@ static void frame_key_name(unsigned short code, char *out, size_t capacity)
         if (frame_key_names[i].code == code) { snprintf(out, capacity, "%s", frame_key_names[i].name); return; }
 }
 
-/* One chord: its key and modifiers, or the Super tap (`*tap` 1). Returns
-   0 for one that is not in the grammar. */
+/* Hibr #540: `button<N>`, X's numbers -- 1 left, 2 middle, 3 right, 8 to
+   11 the further ones -- to its evdev code; the wheel's 4..7 and any other
+   are not buttons here. -1 for none. (`left` and `right` are the arrow
+   keys: buttons have no names of their own.) */
+static int frame_button_code(const char *name)
+{
+    static const unsigned short codes[] = {
+        0, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT, 0, 0, 0, 0, BTN_SIDE, BTN_EXTRA, BTN_FORWARD, BTN_BACK
+    };
+    char *end;
+    long n;
+    if (strncmp(name, "button", 6) != 0 || name[6] < '1' || name[6] > '9') return -1;
+    n = strtol(name + 6, &end, 10);
+    if (*end != '\0' || n < 1 || n > 11 || codes[n] == 0) return -1;
+    return codes[n];
+}
+
+/* One chord: its key or button and modifiers, or the Super tap (`*tap` 1).
+   Returns 0 for one that is not in the grammar. */
 static int frame_keep_parse(const char *chord, unsigned short *code, unsigned char *mods, int *tap)
 {
     static const char *const prefixes[] = { "ctrl-", "alt-", "shift-", "super-" };
@@ -216,9 +233,30 @@ static int frame_keep_parse(const char *chord, unsigned short *code, unsigned ch
         return 1;
     }
     c = frame_key_code(p);
+    if (c < 0) c = frame_button_code(p);
     if (c < 0) return 0;
     *code = (unsigned short)c;
     return 1;
+}
+
+/* The modifiers a button is pressed with, in the keep grammar's bits: held
+   on any present keyboard (the pointer has none of its own). */
+static unsigned frame_pointer_keep_mods(const BlitRuntime *runtime)
+{
+    unsigned mods = 0;
+    int i;
+    /* The present keyboards, and the one keys without a device come through. */
+    for (i = 0; i <= BLIT_MAX_INPUT_DEVICES; ++i) {
+        const BlitInputDevice *d = i < BLIT_MAX_INPUT_DEVICES ? &runtime->input_devices[i] :
+            &default_keyboard_state;
+        if (i < BLIT_MAX_INPUT_DEVICES && (!d->used || !d->present)) continue;
+        if (d->ctrl) mods |= BLIT_KEEP_CTRL;
+        if (d->alt) mods |= BLIT_KEEP_ALT;
+        if (d->shift) mods |= BLIT_KEEP_SHIFT;
+        if (evdev_super_held(d)) mods |= BLIT_KEEP_SUPER;
+        if (d->altgr) mods |= BLIT_KEEP_ALTGR;
+    }
+    return mods;
 }
 
 /* Whether this session keeps the key with these modifiers. */
@@ -311,8 +349,15 @@ static void frame_input_key_mark(BlitFrameInput *in, unsigned int code, int held
 /* Blit's buttons 0, 1, 2 as the evdev codes `INPUT btn` carries. */
 static uint32_t frame_input_button_code(int button)
 {
-    return button == BLIT_POINTER_BUTTON_LEFT ? BTN_LEFT :
-        button == BLIT_POINTER_BUTTON_MIDDLE ? BTN_MIDDLE : BTN_RIGHT;
+    switch (button) {
+    case BLIT_POINTER_BUTTON_LEFT: return BTN_LEFT;
+    case BLIT_POINTER_BUTTON_MIDDLE: return BTN_MIDDLE;
+    case 8: return BTN_SIDE;
+    case 9: return BTN_EXTRA;
+    case 10: return BTN_FORWARD;
+    case 11: return BTN_BACK;
+    default: return BTN_RIGHT;
+    }
 }
 
 static void frame_input_error(BlitSession *session, const char *code)
@@ -532,8 +577,8 @@ static void frame_input_end_buttons(BlitRuntime *runtime, const BlitFrameClient 
     int i;
     if (in == NULL || in->buttons == 0)
         return;
-    for (i = 0; i < 3; ++i)
-        if (in->buttons & (1u << i)) {
+    for (i = 0; i <= BLIT_POINTER_BUTTON_X11; ++i)
+        if (pointer_button_valid(i) && (in->buttons & (1u << i))) {
             in->buttons &= ~(1u << i);
             frame_input_line(find_session_id(runtime, client->session_id), in,
                              "INPUT btn %u %u release\n", in->image_id, frame_input_button_code(i));
@@ -788,9 +833,11 @@ static void frame_input_button(BlitRuntime *runtime, int button, int pressed)
 {
     int i, k;
     const BlitSession *under;
-    if (button < 0 || button > 2)
+    unsigned mods;
+    if (!pointer_button_valid(button))
         return;
     under = frame_input_under_pointer(runtime);
+    mods = pressed ? frame_pointer_keep_mods(runtime) : 0;
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
         BlitFrameClient *client = &runtime->frame_clients[i];
         if (!client->used)
@@ -801,6 +848,11 @@ static void frame_input_button(BlitRuntime *runtime, int button, int pressed)
                route the button was pressed through. */
             int here = in != NULL && frame_input_pointer_sync(runtime, client, in, under);
             if (in == NULL || (pressed && !here) || (!pressed && !(in->buttons & (1u << button))))
+                continue;
+            /* A chord the desktop keeps (INPUT keep, Hibr #540) is the
+               desktop's: its press, and so its release, go to no route. */
+            if (pressed && frame_input_kept(find_session_id(runtime, client->session_id),
+                                            (unsigned short)frame_input_button_code(button), mods))
                 continue;
             if (pressed)
                 in->buttons |= 1u << button;

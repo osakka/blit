@@ -164,3 +164,26 @@ Option 3.
   at the key), after `s` (0x73) under US, and `s` again after the US
   keymap returns. It runs in the build environment with Xwayland 24.1,
   under ASan and UBSan as well.
+
+## Amended 2026-11-13 (0.3.107): mouse buttons as shortcuts (Hibr #540)
+
+Agreed with Hibr. A mouse's further buttons were dropped by Blit before
+0.3.107, so back and forward reached no program. They now travel as X
+numbers them: 8 back (BTN_SIDE), 9 forward (BTN_EXTRA), 10 (BTN_FORWARD)
+and 11 (BTN_BACK).
+
+- **To programs:** `INPUT btn` by evdev code.
+- **To the input stream:** `button` 8 to 11.
+- **`INPUT keep` takes buttons** as `button<N>` (1 left, 2 middle, 3
+  right, 8 to 11) with the keys' modifiers in the same order: `button8`,
+  `super-button9`, `ctrl-button2`. Buttons have no names of their own,
+  since `left` and `right` are the arrow keys, and the wheel's 4 to 7 are
+  refused.
+- **A kept button chord** (its modifiers held on any keyboard) goes to no
+  route.
+- **To a terminal:** a further button is reported as xterm's Cb 128 to
+  131, but only when that session keeps the chord. A reader that knows
+  nothing of them (Hibr before 0.99.522 took 128 for a left press) is
+  never sent one, and nothing has to be installed in a particular order.
+
+Evidence: `frame_input_gate` sock part.

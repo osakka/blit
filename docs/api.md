@@ -2253,7 +2253,16 @@ It speaks the frame channel above as a producer, with these additions.
     (a-z, 0-9, `` ` - = [ ] \ ; ' , . / ``, so `alt-w` is the W key in any
     layout and `shift-1` is Shift+1) or by name (f1-f24, up, down, left,
     right, home, end, pageup, pagedown, insert, delete, tab, enter, space,
-    escape, backspace, print, menu); `super` alone, the tap, is accepted
+    escape, backspace, print, menu) or, from 0.3.107 (Hibr #540), a mouse
+    button as `button<N>` by X's numbers: 1 left, 2 middle, 3 right, 8 back
+    (BTN_SIDE), 9 forward (BTN_EXTRA), 10 (BTN_FORWARD), 11 (BTN_BACK);
+    the wheel's 4 to 7 are not buttons here, and buttons have no names of
+    their own (`left` and `right` are the arrow keys). A button pressed with
+    exactly a kept chord's modifiers (held on any keyboard) goes to none of
+    the session's routes, and a kept further button (8 to 11) is reported
+    to the session's terminal as xterm does, Cb 128 to 131 -- the only way a
+    further button reaches a terminal, so a reader that knows nothing of them
+    is never sent one. `super` alone, the tap, is accepted
     and keeps nothing (a lone Super reaching a program is harmless, and
     the desktop sees every key). A key pressed with exactly a kept chord's
     modifiers on its keyboard (Caps Lock and Num Lock aside; AltGr held
@@ -2739,7 +2748,9 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT key   <id> <evdev-code> press|release
   INPUT ptr   <id> <x> <y>             absolute
   INPUT rel   <id> <dx> <dy>           under a relative hold
-  INPUT btn   <id> <BTN_code> press|release
+  INPUT btn   <id> <BTN_code> press|release   (BTN_LEFT..BTN_BACK; from
+                                       0.3.107 the further buttons too:
+                                       back and forward reach programs)
   INPUT wheel <id> <dx> <dy>           notches
   INPUT frame <id> <monotonic-us>      ends one batch of events
   INPUT keymap <id> <revision> <size> <rate> <delay>

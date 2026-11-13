@@ -682,6 +682,18 @@ typedef struct {
 #define BLIT_POINTER_BUTTON_RIGHT 2
 #define BLIT_POINTER_BUTTON_NONE 3
 #define BLIT_POINTER_BUTTON_UNMAPPED (-1)
+/* Hibr #540: a pointer's further buttons, by X's numbers -- 8 back
+   (BTN_SIDE), 9 forward (BTN_EXTRA), 10 (BTN_FORWARD), 11 (BTN_BACK) --
+   as their indices here. To programs (INPUT btn), the input stream, and a
+   terminal only for a chord its desktop keeps (INPUT keep). */
+#define BLIT_POINTER_BUTTON_X8 8
+#define BLIT_POINTER_BUTTON_X11 11
+
+static int pointer_button_valid(int button)
+{
+    return (button >= BLIT_POINTER_BUTTON_LEFT && button <= BLIT_POINTER_BUTTON_RIGHT) ||
+        (button >= BLIT_POINTER_BUTTON_X8 && button <= BLIT_POINTER_BUTTON_X11);
+}
 #define BLIT_MAX_BUTTON_OVERRIDES 16
 
 #define BLIT_INPUT_SCROLL_STEP_DEFAULT 1
@@ -6510,6 +6522,10 @@ static int input_device_button_target(const BlitInputDevice *device,
     if (code == BTN_LEFT) return BLIT_POINTER_BUTTON_LEFT;
     if (code == BTN_MIDDLE) return BLIT_POINTER_BUTTON_MIDDLE;
     if (code == BTN_RIGHT) return BLIT_POINTER_BUTTON_RIGHT;
+    if (code == BTN_SIDE) return 8;
+    if (code == BTN_EXTRA) return 9;
+    if (code == BTN_FORWARD) return 10;
+    if (code == BTN_BACK) return 11;
     return BLIT_POINTER_BUTTON_UNMAPPED;
 }
 
@@ -11508,6 +11524,9 @@ static void graphics_image_free(BlitSession *session, BlitGraphicsImage *image,
 static int frame_input_holds(const BlitSession *session, unsigned int image_id);
 static void frame_input_keymap_changed(BlitRuntime *runtime);
 static void frame_input_busy_changed(BlitRuntime *runtime);
+static int frame_input_kept(const BlitSession *session, unsigned short code, unsigned mods);
+static unsigned frame_pointer_keep_mods(const BlitRuntime *runtime);
+static uint32_t frame_input_button_code(int button);
 
 /* ADR 0226: whether a picture counts as shown, and so is never freed for
    room: placed and not deleted, or with a placement held for its next
@@ -15667,7 +15686,7 @@ static void dispatch_evdev_mouse_button(BlitRuntime *runtime, int device_index,
 
     if (runtime == NULL || device_index < 0 ||
         device_index >= runtime->evdev_mouse_count ||
-        button < 0 || button > 2)
+        !pointer_button_valid(button))
         return;
     bit = 1U << button;
     /* The per-device masks are the authoritative evdev state.  Do not use
@@ -25853,9 +25872,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
                                             "api-pointer");
             } else if (!json_int(payload, "button", &button) ||
                 !json_bool(payload, "pressed", &pressed) ||
-                button < 0 || button > 2) {
+                !pointer_button_valid(button)) {
                 send_problem(fd, 400, "Bad Request", "invalid_input_event",
-                             "Pointer buttons require button 0..2, or an evdev code, and a pressed boolean.");
+                             "Pointer buttons require button 0..2 or 8..11 (X's further buttons), or an evdev code, and a pressed boolean.");
                 runtime->input_source = NULL;
                 return;
             } else {
@@ -29005,6 +29024,16 @@ static void send_mouse_report(BlitRuntime *runtime,
     }
     session = session;
     flush_mouse_motion(runtime);
+    /* Hibr #540: a further button (8..11) is xterm's 128..131, and goes to a
+       terminal only when its desktop keeps that chord (INPUT keep): a reader
+       that knows nothing of them would take 128 for a left click. */
+    if (button >= BLIT_POINTER_BUTTON_X8 && button <= BLIT_POINTER_BUTTON_X11) {
+        if (session == NULL ||
+            !frame_input_kept(session, (unsigned short)frame_input_button_code(button),
+                              frame_pointer_keep_mods(runtime)))
+            return;
+        button = 120 + button;
+    }
     /* ADR 0198: while locked, buttons and the wheel go to the holder, in
        the lock's form; the deltas were just flushed, so these carry none. */
     {
@@ -29035,7 +29064,7 @@ static void send_mouse_report(BlitRuntime *runtime,
     }
     code = button + mouse_modifier_bits(runtime);
     if (session->terminal_mouse_mode == 9) {
-        if (release) return;
+        if (release || button >= 128) return;
         code = button;
     }
     if (session->terminal_mouse_pixels) {
@@ -29380,7 +29409,7 @@ static void dispatch_pointer_button_raw(BlitRuntime *runtime, int button,
     if (routed != NULL)
         target = routed;
     input_target = target;
-    if (button < 0 || button > 2)
+    if (!pointer_button_valid(button))
         return;
     if (frame_input_routes)
         frame_input_button(runtime, button, pressed);
@@ -29440,11 +29469,10 @@ static void dispatch_pointer_button(BlitRuntime *runtime, int button,
     BlitInputDevice *device = runtime != NULL ? runtime->input_source : NULL;
     uint64_t now;
 
-    if (runtime == NULL || button < BLIT_POINTER_BUTTON_LEFT ||
-        button > BLIT_POINTER_BUTTON_RIGHT)
+    if (runtime == NULL || !pointer_button_valid(button))
         return;
     if (device == NULL || !device->middle_button_emulation_enabled ||
-        button == BLIT_POINTER_BUTTON_MIDDLE) {
+        button == BLIT_POINTER_BUTTON_MIDDLE || button >= BLIT_POINTER_BUTTON_X8) {
         dispatch_pointer_button_raw(runtime, button, pressed, device_id);
         return;
     }
@@ -31269,8 +31297,9 @@ static void service_native_console(BlitRuntime *runtime)
         }
         runtime->input_source = NULL;
         for (i = 0; i < runtime->evdev_mouse_count; ++i)
-            for (button = 0; button < 3; ++button)
-                if (runtime->evdev_mouse_buttons[i] & (1U << button))
+            for (button = 0; button <= BLIT_POINTER_BUTTON_X11; ++button)
+                if (pointer_button_valid(button) &&
+                    (runtime->evdev_mouse_buttons[i] & (1U << button)))
                     dispatch_evdev_mouse_button(runtime, i, button, 0);
         /* After the releases, so a program sees its keys come up before it
            is told it lost focus. A live input route ends here too (ADR 0228). */
