@@ -28,7 +28,9 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     end
     start.call
     initial=request('GET','/v1/settings')[1]
-    expected={'shape'=>'arrow','palette'=>'pearl','size_px'=>24,'shadow'=>true}
+    # The shake settings (ADR 0234) are reported with their defaults too.
+    expected={'shape'=>'arrow','palette'=>'pearl','size_px'=>24,'shadow'=>true,
+              'shake_to_find'=>true,'shake_max_px'=>160,'shake_sensitivity'=>5}
     abort('POINTER_APPEARANCE_FAIL missing canonical defaults') unless initial.dig('effective','pointer')==expected
     nested=initial['document'].merge('extension'=>{'pointer'=>{'size_px'=>999}})
     code,reply=request('PUT','/v1/settings',{'document'=>nested},initial['revision'])
@@ -52,6 +54,7 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
     initial=request('GET','/v1/settings')[1]
     invalid=[{'size_px'=>23},{'size_px'=>65},{'size_px'=>32.5},{'size_px'=>'32'},
              {'shape'=>'nope'},{'palette'=>'nope'},{'shadow'=>1},{'unknown'=>true},
+             {'shake_max_px'=>63},{'shake_max_px'=>257},{'shake_sensitivity'=>0},{'shake_sensitivity'=>11},{'shake_to_find'=>1},
              {'shape'=>"arrow\0suffix"},{'palette'=>"pearl\0suffix"},{"shape\0suffix"=>'arrow'},nil,[]]
     invalid.each do |bad|
       doc=initial['document'].merge('pointer'=>bad)
@@ -60,17 +63,19 @@ Dir.mktmpdir('blit-pointer-appearance') do |root|
       abort('POINTER_APPEARANCE_FAIL invalid mutated settings') unless request('GET','/v1/settings')[1]==initial
     end
     custom={'shape'=>'hand','palette'=>'neon','size_px'=>48,'shadow'=>false}
+    # Effective adds the shake settings' defaults (ADR 0234); the document keeps what was sent.
+    custom_effective=custom.merge('shake_to_find'=>true,'shake_max_px'=>160,'shake_sensitivity'=>5)
     code,saved=request('PUT','/v1/settings',{'document'=>initial['document'].merge('pointer'=>custom)},initial['revision'])
-    abort("POINTER_APPEARANCE_FAIL save:#{code}:#{saved}") unless code==200 && saved.dig('effective','pointer')==custom && saved.dig('storage','state')=='clean'
+    abort("POINTER_APPEARANCE_FAIL save:#{code}:#{saved}") unless code==200 && saved.dig('effective','pointer')==custom_effective && saved.dig('storage','state')=='clean'
     stale,_=request('PUT','/v1/settings',{'document'=>initial['document']},initial['revision'])
     abort('POINTER_APPEARANCE_FAIL stale overwrite') unless stale==409
     font=request('GET','/v1/fonts')[1]
     request('PUT','/v1/fonts',{'scale'=>2.0})
-    abort('POINTER_APPEARANCE_FAIL pointer follows font') unless request('GET','/v1/settings')[1].dig('effective','pointer')==custom
+    abort('POINTER_APPEARANCE_FAIL pointer follows font') unless request('GET','/v1/settings')[1].dig('effective','pointer')==custom_effective
     Process.kill('TERM',pid);Process.wait(pid);pid=nil
     start.call
     restored=request('GET','/v1/settings')[1]
-    abort('POINTER_APPEARANCE_FAIL restart lost pointer') unless restored.dig('document','pointer')==custom && restored.dig('effective','pointer')==custom
+    abort('POINTER_APPEARANCE_FAIL restart lost pointer') unless restored.dig('document','pointer')==custom && restored.dig('effective','pointer')==custom_effective
     puts 'POINTER_APPEARANCE_PASS invalid=no_mutation scope=top_level duplicate=rejected stale=409 live=applied restart=durable font=independent'
   ensure
     Process.kill('TERM',pid) rescue nil

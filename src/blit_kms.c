@@ -112,6 +112,11 @@ typedef struct {
     int pointer_state_valid;
     float previous_pointer_x;
     float previous_pointer_y;
+    /* The size the pointer was drawn at there: its footprint when the art's
+       size has since changed (ADR 0234), so a size change repaints only the
+       old and new footprints. */
+    int previous_pointer_width;
+    int previous_pointer_height;
     int previous_pointer_visible;
     int last_view_count;
     unsigned long long last_visual_revision;
@@ -1878,18 +1883,34 @@ static void remember_output_views(KmsOutput *output,
     }
 }
 
-static int pointer_intersects_output(const KmsOutput *output,
-                                     float x, float y, int visible)
+/* Whether a pointer of width x height at (x, y) shows on the output. */
+static int pointer_rect_intersects_output(const KmsOutput *output, float x, float y,
+                                          int visible, int width, int height)
 {
     int local_x;
     int local_y;
     if (!visible) return 0;
     local_x = (int)x - output->info.x;
     local_y = (int)y - output->info.y;
-    return local_x < output->mode.hdisplay &&
-        local_x + (output->pointer_width ? output->pointer_width : 12) > 0 &&
-        local_y < output->mode.vdisplay &&
-        local_y + (output->pointer_height ? output->pointer_height : 18) > 0;
+    return local_x < output->mode.hdisplay && local_x + (width ? width : 12) > 0 &&
+        local_y < output->mode.vdisplay && local_y + (height ? height : 18) > 0;
+}
+
+static int pointer_intersects_output(const KmsOutput *output,
+                                     float x, float y, int visible)
+{
+    return pointer_rect_intersects_output(output, x, y, visible,
+                                          output->pointer_width, output->pointer_height);
+}
+
+/* The previous pointer, at the size it was drawn at. */
+static int previous_pointer_intersects_output(const KmsOutput *output)
+{
+    return pointer_rect_intersects_output(output, output->previous_pointer_x,
+                                          output->previous_pointer_y,
+                                          output->previous_pointer_visible,
+                                          output->previous_pointer_width,
+                                          output->previous_pointer_height);
 }
 
 static void restore_pointer_background(KmsOutput *output)
@@ -1964,6 +1985,7 @@ static void save_pointer_background(KmsOutput *output, float x, float y)
 static void include_pointer_damage(const KmsOutput *output,
                                    const BlitKmsSurfaceView *view,
                                    float x, float y, int visible,
+                                   int pointer_width, int pointer_height,
                                    int *damage_valid, int *damage_x,
                                    int *damage_y, int *damage_width,
                                    int *damage_height)
@@ -1980,16 +2002,16 @@ static void include_pointer_damage(const KmsOutput *output,
     int last_row;
     int cw;
     int ch;
-    if (!pointer_intersects_output(output, x, y, visible)) return;
+    if (!pointer_rect_intersects_output(output, x, y, visible, pointer_width, pointer_height)) return;
     local_x = (int)x - output->info.x;
     local_y = (int)y - output->info.y;
     cw = view->cell_width > 0 ? view->cell_width : KMS_FONT_W;
     ch = view->cell_height > 0 ? view->cell_height : KMS_FONT_H;
     left = local_x > view->origin_x ? local_x : view->origin_x;
     top = local_y > view->origin_y ? local_y : view->origin_y;
-    right = local_x + (output->pointer_width ? output->pointer_width : 12);
+    right = local_x + (pointer_width ? pointer_width : 12);
     if (right > view->origin_x + view->columns*cw) right=view->origin_x+view->columns*cw;
-    bottom = local_y + (output->pointer_height ? output->pointer_height : 18);
+    bottom = local_y + (pointer_height ? pointer_height : 18);
     if (bottom > view->origin_y + view->rows*ch) bottom=view->origin_y+view->rows*ch;
     if (left >= right || top >= bottom) return;
     first_column = (left - view->origin_x) / cw;
@@ -2483,17 +2505,12 @@ void blit_kms_set_pointer_art(BlitKms *kms, const BlitPointerArt *art)
     kms->pointer_art = art;
     if (kms->pointer_art_revision == art->revision) return;
     kms->pointer_art_revision = art->revision;
-    /* A footprint that changes size can leave pixels of the previous shape
-       outside the new one, so that repaints everything. A shape swap at the
-       same size -- every OSC 22 change -- is covered by the saved
-       background under the old stamp, and stays incremental. */
-    if (kms->pointer_art_width != art->width ||
-        kms->pointer_art_height != art->height) {
-        kms->pointer_art_width = art->width;
-        kms->pointer_art_height = art->height;
-        for (i = 0; i < kms->output_count; ++i)
-            kms_output(kms,i)->initialized = 0;
-    }
+    /* A new size, as a new shape, stays incremental: the saved background
+       restores the old footprint at the size it was saved at, and the old
+       footprint's damage is taken at the size it was drawn at
+       (previous_pointer_width; ADR 0234). */
+    kms->pointer_art_width = art->width;
+    kms->pointer_art_height = art->height;
     for (i = 0; i < kms->output_count; ++i)
         kms_output(kms,i)->pointer_state_valid = 0;
 }
@@ -2589,9 +2606,7 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
             output->previous_pointer_y != pointer_y ||
             output->previous_pointer_visible != pointer_visible;
         pointer_affects_output = pointer_changed &&
-            (pointer_intersects_output(output, output->previous_pointer_x,
-                                       output->previous_pointer_y,
-                                       output->previous_pointer_visible) ||
+            (previous_pointer_intersects_output(output) ||
              pointer_intersects_output(output, pointer_x, pointer_y,
                                        pointer_visible));
         if (pointer_affects_output)
@@ -2797,12 +2812,15 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                                            output->previous_pointer_x,
                                            output->previous_pointer_y,
                                            output->previous_pointer_visible,
+                                           output->previous_pointer_width,
+                                           output->previous_pointer_height,
                                            &pointer_damage, &pointer_x0,
                                            &pointer_y0, &pointer_width,
                                            &pointer_height);
                     include_pointer_damage(output, &views[view_index],
                                            pointer_x, pointer_y,
-                                           pointer_visible, &pointer_damage,
+                                           pointer_visible, output->pointer_width,
+                                           output->pointer_height, &pointer_damage,
                                            &pointer_x0, &pointer_y0,
                                            &pointer_width, &pointer_height);
                     if (pointer_damage)
@@ -3030,6 +3048,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
                 output->previous_pointer_x = pointer_x;
                 output->previous_pointer_y = pointer_y;
                 output->previous_pointer_visible = pointer_visible;
+                output->previous_pointer_width = output->pointer_width;
+                output->previous_pointer_height = output->pointer_height;
                 if (pointer_affects_output)
                     ++output->info.pointer_frame_submissions;
                 if (submitted_output_mask != NULL)
@@ -3122,6 +3142,8 @@ int blit_kms_present(BlitKms *kms, const BlitKmsSurfaceView *views, int view_cou
         output->previous_pointer_x = pointer_x;
         output->previous_pointer_y = pointer_y;
         output->previous_pointer_visible = pointer_visible;
+        output->previous_pointer_width = output->pointer_width;
+        output->previous_pointer_height = output->pointer_height;
         if (pointer_affects_output)
             ++output->info.pointer_frame_submissions;
         if (!hold_scene)

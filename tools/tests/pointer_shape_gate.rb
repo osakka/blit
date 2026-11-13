@@ -156,18 +156,19 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
     shown = effective.fetch('pointer_shown')
     raise "over A the API should report hidden: #{shown.inspect}" unless shown['hidden'] == true
     raise "the API's own pointer changed: #{effective['pointer'].inspect}" unless
-      effective['pointer'] == { 'shape' => 'arrow', 'palette' => 'pearl', 'size_px' => 24, 'shadow' => true }
+      effective['pointer'] == { 'shape' => 'arrow', 'palette' => 'pearl', 'size_px' => 24, 'shadow' => true,
+                                'shake_to_find' => true, 'shake_max_px' => 160, 'shake_sensitivity' => 5 }
     asked = data('GET', "/v1/terminal-sessions/#{b.fetch('id')}")['pointer_shape']
     raise "B's request is not published: #{asked.inspect}" unless asked == { 'requested' => 'text', 'depth' => 1 }
     move(*centre[1])
     shown = data('GET', '/v1/settings').dig('effective', 'pointer_shown')
     raise "over B the API should report text: #{shown.inspect}" unless
-      shown == { 'shape' => 'text', 'hidden' => false }
+      shown.slice('shape', 'hidden') == { 'shape' => 'text', 'hidden' => false }
     # A's `none` stops at the pane boundary: B's first column shows B's shape.
     edge = [panes[1].dig('pixel_region', 'x') + 3, centre[1][1]]
     move(*edge)
     shown = data('GET', '/v1/settings').dig('effective', 'pointer_shown')
-    raise "A's hide reached into B's edge: #{shown.inspect}" unless shown == { 'shape' => 'text', 'hidden' => false }
+    raise "A's hide reached into B's edge: #{shown.inspect}" unless shown.slice('shape', 'hidden') == { 'shape' => 'text', 'hidden' => false }
 
     data('POST', "/v1/terminal-sessions/#{b.fetch('id')}/input", { data: "\r" })
     sleep 0.3

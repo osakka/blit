@@ -2,6 +2,7 @@
 #include <linux/input.h>
 #include <dirent.h>
 #include "blit_kms.h"
+#include "blit_pointer_shake.h"   /* ADR 0234: shake to find the pointer */
 #include "blit_vt.h"
 #include "blit_font.h"
 #include "blit_raster.h"
@@ -1502,6 +1503,16 @@ typedef struct {
        program under the pointer asked for by OSC 22 (#138). */
     BlitPointerArt pointer_art;
     BlitPointerArt pointer_shown_art;
+    /* ADR 0234: shake to find the pointer -- the detector, its settings, the
+       art built once at the largest size (every shake size resampled from
+       it), when to tick next (0 at rest), and since when the loop has had
+       nothing to render (the master is built in such a quiet moment). */
+    BlitShake shake;
+    BlitShakeConfig shake_config;
+    BlitPointerArt *shake_master;
+    uint64_t shake_next_us;
+    uint64_t shake_quiet_since_us;
+    unsigned long long diagnostic_pointer_shake_sizes;
     int pointer_hidden;
     int pointer_output;
     float pointer_x;
@@ -2189,6 +2200,8 @@ static void broadcast_audio_device_changed(BlitRuntime *runtime,
                                            const char *change);
 static void update_pointer_position(BlitRuntime *runtime,
                                     const char *device_id);
+static void update_pointer_position_by(BlitRuntime *runtime, const char *device_id,
+                                       int by_hand);
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
                                     int button, int pressed, int delta,
                                     const char *device_id);
@@ -2786,6 +2799,13 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
         if ((int)((next - now + 999ULL) / 1000ULL) < wait_ms)
             wait_ms = (int)((next - now + 999ULL) / 1000ULL);
     }
+    /* ADR 0234: a shaken pointer's next step, only while it is grown. */
+    if (runtime->shake_next_us != 0) {
+        if (runtime->shake_next_us <= now)
+            wait_ms = 0;
+        else if ((int)((runtime->shake_next_us - now + 999ULL) / 1000ULL) < wait_ms)
+            wait_ms = (int)((runtime->shake_next_us - now + 999ULL) / 1000ULL);
+    }
     /* The performance panel's next update, only while it is on. */
     if (runtime->hud_next_us != 0) {
         if (runtime->hud_next_us <= now)
@@ -2820,6 +2840,7 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
 }
 
 static void update_pointer_shape(BlitRuntime *runtime);
+static int pointer_shake_master(BlitRuntime *runtime, const BlitPointerConfig *config);
 static BlitSession *pointer_lock_session(BlitRuntime *runtime);
 
 static void gles_guard_start(BlitRuntime *runtime)
@@ -22498,6 +22519,34 @@ static uint64_t animation_after_vblank(BlitRuntime *runtime, int output,
                                (uint64_t)(1000000.0 / refresh));
 }
 
+/* ADR 0234: the shake eased toward its target; the pointer redrawn when
+   its size steps, as a pointer-only change. At rest, nothing but an idle
+   check: the art at the largest size is built in a quiet moment (nothing
+   to render for a second), so the first shake finds it ready. */
+static void pointer_shake_tick(BlitRuntime *runtime, uint64_t now)
+{
+    int base = runtime->pointer_art.config.size;
+    int before = blit_shake_size(&runtime->shake, base);
+    int active = blit_shake_tick(&runtime->shake, now, &runtime->shake_config, base);
+    if (blit_shake_size(&runtime->shake, base) != before) {
+        ++runtime->diagnostic_pointer_shake_sizes;
+        update_pointer_shape(runtime);
+        mark_pointer_dirty_outputs(runtime, runtime->pointer_output, runtime->pointer_output);
+        runtime->render_pending = 1;
+    }
+    runtime->shake_next_us = active ? now + 8000 : 0;
+    if (runtime->render_pending || active) {
+        runtime->shake_quiet_since_us = now;
+    } else if (runtime->shake_config.enabled && now - runtime->shake_quiet_since_us > 1000000ULL &&
+               runtime->pointer_art.revision) {
+        BlitPointerConfig config = runtime->pointer_shown_art.revision ?
+            runtime->pointer_shown_art.config : runtime->pointer_art.config;
+        config.size = runtime->pointer_art.config.size;
+        (void)pointer_shake_master(runtime, &config);
+        runtime->shake_quiet_since_us = now;
+    }
+}
+
 static void effects_animation_tick(BlitRuntime *runtime, uint64_t now)
 {
     int i;
@@ -23744,8 +23793,10 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"expect_desktop\":%s,"
                  "\"login\":%s,\"login_restart_required\":%s,"
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
-                 "\"size_px\":%d,\"shadow\":%s},"
-                 "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s},"
+                 "\"size_px\":%d,\"shadow\":%s,\"shake_to_find\":%s,"
+                 "\"shake_max_px\":%d,\"shake_sensitivity\":%d},"
+                 "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s,"
+                 "\"size_px\":%d,\"shake_scale\":%.2f,\"shake_sizes\":%llu},"
                  "\"hud\":%s}}",
                  runtime->settings_revision, runtime->settings_path,
                  runtime->settings_enabled ? "true" : "false",
@@ -23775,10 +23826,15 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  blit_pointer_palettes[runtime->pointer_art.config.palette],
                  runtime->pointer_art.config.size,
                  runtime->pointer_art.config.shadow ? "true" : "false",
+                 runtime->shake_config.enabled ? "true" : "false",
+                 runtime->shake_config.max_px, runtime->shake_config.sensitivity,
                  blit_pointer_shapes[runtime->pointer_shown_art.revision ?
                      runtime->pointer_shown_art.config.shape :
                      runtime->pointer_art.config.shape],
-                 runtime->pointer_hidden ? "true" : "false", hud);
+                 runtime->pointer_hidden ? "true" : "false",
+                 runtime->pointer_shown_art.revision ? runtime->pointer_shown_art.config.size :
+                     runtime->pointer_art.config.size,
+                 (double)runtime->shake.scale, runtime->diagnostic_pointer_shake_sizes, hud);
 }
 
 /* A read-only, point-in-event-loop-turn state dump for operators and
@@ -25316,9 +25372,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
                              "A settings write carries the whole document under \"document\", as a JSON object.");
                 return;
             }
-            if (!pointer_config_parse(document,&proposed_pointer)) {
+            if (!pointer_config_parse(document,&proposed_pointer,NULL)) {
                 send_problem(fd,400,"Bad Request","invalid_settings_pointer",
-                             "Pointer shape, palette, size_px (24..64 integer) and shadow must match the appearance schema.");
+                             "Pointer shape, palette, size_px (24..64 integer), shadow, shake_to_find, shake_max_px (64..256) and shake_sensitivity (1..10) must match the appearance schema.");
                 return;
             }
             {
@@ -25756,8 +25812,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
             runtime->pointer_lock_dy += dy;
             /* Applied as absolute injection is, whether or not a physical
                mouse is attached: the evdev path's wait for a device would
-               drop an injected motion on a machine with none. */
-            update_pointer_position(runtime, "api-pointer");
+               drop an injected motion on a machine with none. It is a
+               hand's motion, as a REL pair is. */
+            update_pointer_position_by(runtime, "api-pointer", 1);
         } else if (strcmp(kind, "pointer_wheel") == 0) {
             int direction;
             if (!json_int(payload, "delta", &delta) || delta == 0) {
@@ -28378,6 +28435,25 @@ static BlitSession *mouse_target_px(BlitRuntime *runtime, int output_index,
    it, and only there: another surface, or no surface, shows the display's
    own. An exited program's request is not honoured even if its last bytes
    are still being drained. Palette, size and shadow stay the API's. */
+/* ADR 0234: the art at the shake's largest size for `config`'s shape,
+   palette and shadow, built when it is not: once, here or in a quiet moment
+   (pointer_shake_tick). 0 when it cannot be had. */
+static int pointer_shake_master(BlitRuntime *runtime, const BlitPointerConfig *config)
+{
+    BlitPointerConfig want = *config;
+    want.size = runtime->shake_config.max_px;
+    if (want.size > BLIT_POINTER_MAX - 8) want.size = BLIT_POINTER_MAX - 8;
+    if (want.size <= runtime->pointer_art.config.size) return 0;
+    if (runtime->shake_master && !memcmp(&runtime->shake_master->config, &want, sizeof(want)))
+        return 1;
+    if (runtime->shake_master == NULL &&
+        (runtime->shake_master = calloc(1, sizeof(*runtime->shake_master))) == NULL)
+        return 0;
+    blit_pointer_build(runtime->shake_master, want);
+    return runtime->shake_master->revision != 0 &&
+        !memcmp(&runtime->shake_master->config, &want, sizeof(want));
+}
+
 static void update_pointer_shape(BlitRuntime *runtime)
 {
     BlitPointerConfig config = runtime->pointer_art.config;
@@ -28406,9 +28482,19 @@ static void update_pointer_shape(BlitRuntime *runtime)
     hidden = shape == BLIT_POINTER_SHAPE_HIDDEN;
     if (shape >= 0)
         config.shape = shape;
+    /* ADR 0234: a shaken pointer is drawn bigger, resampled from the art
+       built once at its largest. */
+    {
+        int size = hidden ? config.size : blit_shake_size(&runtime->shake, config.size);
+        if (size > config.size && pointer_shake_master(runtime, &config))
+            config.size = size;
+    }
     if (!runtime->pointer_shown_art.revision ||
         memcmp(&config, &runtime->pointer_shown_art.config, sizeof(config))) {
-        blit_pointer_build(&runtime->pointer_shown_art, config);
+        if (config.size > runtime->pointer_art.config.size)
+            blit_pointer_resample(&runtime->pointer_shown_art, runtime->shake_master, config.size);
+        else
+            blit_pointer_build(&runtime->pointer_shown_art, config);
         if (runtime->kms)
             blit_kms_set_pointer_art(runtime->kms, &runtime->pointer_shown_art);
     } else if (hidden == runtime->pointer_hidden) {
@@ -28975,8 +29061,18 @@ static void send_mouse_motion_report(BlitRuntime *runtime,
                       &runtime->diagnostic_input_reports_dropped);
 }
 
+/* A move that is not a hand on a mouse: a warp, a zoom, an absolute
+   position from the API. */
 static void update_pointer_position(BlitRuntime *runtime,
                                     const char *device_id)
+{
+    update_pointer_position_by(runtime, device_id, 0);
+}
+
+/* by_hand: relative motion from a mouse, a physical one's or one injected
+   through a device, which is what a shake is made of (ADR 0234). */
+static void update_pointer_position_by(BlitRuntime *runtime, const char *device_id,
+                                       int by_hand)
 {
     float old_x;
     float old_y;
@@ -29056,6 +29152,15 @@ static void update_pointer_position(BlitRuntime *runtime,
         old_y != runtime->pointer_y || old_output != runtime->pointer_output;
     if (!changed)
         return;
+    /* ADR 0234: only a hand on the mouse shakes: a warp (the API, a zoom),
+       a button held (a drag, a slider), a locked or hidden pointer forget
+       the shake instead. */
+    if (by_hand && !confined && !runtime->pointer_hidden &&
+        pointer_lock_session(runtime) == NULL && runtime->mouse_buttons == 0)
+        blit_shake_motion(&runtime->shake, runtime->pointer_x, runtime->pointer_y, monotonic_us(),
+                          &runtime->shake_config, runtime->pointer_art.config.size);
+    else
+        blit_shake_reset(&runtime->shake);
     ++runtime->diagnostic_pointer_position_changes;
     mark_pointer_dirty_outputs(runtime, runtime->previous_pointer_output,
                                runtime->pointer_output);
@@ -29116,7 +29221,7 @@ static void update_evdev_pointer(BlitRuntime *runtime)
 {
     if (runtime->evdev_mouse_count <= 0)
         return;
-    update_pointer_position(runtime, "evdev-pointer");
+    update_pointer_position_by(runtime, "evdev-pointer", 1);
 }
 
 static void broadcast_evdev_pointer(BlitRuntime *runtime, const char *kind,
@@ -31956,6 +32061,10 @@ int main(int argc, char **argv)
     if (!bind_requested)
         bind_address = "0.0.0.0";
     memset(&runtime, 0, sizeof(runtime));
+    /* ADR 0234: a pointer at rest, shake to find on by default until the
+       settings say otherwise. */
+    blit_shake_init(&runtime.shake);
+    runtime.shake_config = blit_shake_default();
     runtime.frame_fd = -1;
     runtime.login_observer_fd = -1;
     runtime.evdev_watch_fd = -1;
@@ -32783,6 +32892,7 @@ int main(int argc, char **argv)
                 all_output_mask(&runtime) : hibr_frame_barrier_held(&runtime, now);
             kms_check_slots(&runtime, now, held);
             effects_animation_tick(&runtime, now);
+            pointer_shake_tick(&runtime, now);
             recent_tick(&runtime, now);
             update_tick(&runtime, now);
             hibr_identity_refresh(&runtime, now);

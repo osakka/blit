@@ -5005,6 +5005,9 @@ static void ime_set(struct bc_server *s, const char *name, const char *options)
     snprintf(s->ime.name, sizeof(s->ime.name), "%s", name);
     snprintf(s->ime.options, sizeof(s->ime.options), "%s", options);
     logf_("input method: %s%s%s", name[0] ? name : "none", options[0] ? " " : "", options);
+    /* Its data read now, when the keyboard is switched, not at the first
+       key typed with it: the read takes its time once, here. */
+    if (name[0]) (void)ime_engine(s);
 }
 
 /* The keyboard leaves `from` and enters `to`: what was held is committed
@@ -9938,6 +9941,11 @@ int main(int argc, char **argv)
     if (server.keymap_fd >= 0) close(server.keymap_fd);
     if (server.keymap) xkb_keymap_unref(server.keymap);
     if (server.xkb) xkb_context_unref(server.xkb);
+    /* The input method's engine and data (read when the keyboard switched
+       to it), after the text inputs that used them. */
+    if (server.ime.engine) ime_engine_free(server.ime.engine);
+    if (server.ime.data) ime_free(server.ime.data);
+    ime_text_free(server.ime.problem);
     logf_("stopped: %lu frames sent, %lu failed, %lu WINDOW lines; dmabuf %lu sent, %lu released, "
           "%lu refused, %lu copied", server.wire.frames_sent, server.wire.frames_failed,
           server.wire.lines_sent, server.wire.dmabuf_sent, server.wire.dmabuf_released,

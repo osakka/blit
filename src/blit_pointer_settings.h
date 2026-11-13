@@ -10,8 +10,13 @@ static int pointer_member_key_decode(char *key, size_t capacity)
     return end && !*end && length > 0 && strlen(key)==length;
 }
 
-static int pointer_config_parse(const char *document, BlitPointerConfig *config)
+/* The pointer's appearance and, when `shake` is given, its shake to find
+   (ADR 0234): shake_to_find, shake_max_px (64..256) and shake_sensitivity
+   (1..10), kept apart from the appearance, which is the art's own key. */
+static int pointer_config_parse(const char *document, BlitPointerConfig *config,
+                                BlitShakeConfig *shake)
 {
+    BlitShakeConfig ignored;
     const char *cursor = document, *next;
     static char member[BLIT_SETTINGS_CAPACITY];
     char member_key[128];
@@ -19,6 +24,8 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config)
     unsigned int seen = 0, bit;
     int i, present = 0;
     *config = blit_pointer_default();
+    if (shake == NULL) shake = &ignored;
+    *shake = blit_shake_default();
     while (*cursor==' ' || *cursor=='\n' || *cursor=='\r' || *cursor=='\t') ++cursor;
     if (*cursor++ != '{') return 0;
     while ((next = json_next_member(cursor,member_key,sizeof(member_key),member,sizeof(member)))) {
@@ -64,11 +71,25 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config)
             number = strtol(value,&end,10);
             if (*end || number < 24 || number > 64) return 0;
             config->size = (int)number;
-        } else if (!strcmp(key,"shadow")) {
-            bit = 8;
-            if (!strcmp(value,"true")) config->shadow = 1;
-            else if (!strcmp(value,"false")) config->shadow = 0;
+        } else if (!strcmp(key,"shadow") || !strcmp(key,"shake_to_find")) {
+            int on;
+            bit = !strcmp(key,"shadow") ? 8 : 16;
+            if (!strcmp(value,"true")) on = 1;
+            else if (!strcmp(value,"false")) on = 0;
             else return 0;
+            if (bit == 8) config->shadow = on; else shake->enabled = on;
+        } else if (!strcmp(key,"shake_max_px") || !strcmp(key,"shake_sensitivity")) {
+            char *end;
+            long number, low, high;
+            int max_px = !strcmp(key,"shake_max_px");
+            bit = max_px ? 32 : 64;
+            low = max_px ? 64 : 1;
+            high = max_px ? BLIT_POINTER_MAX - 8 : 10;
+            for (i=0; value[i]; ++i) if (value[i] < '0' || value[i] > '9') return 0;
+            if (i == 0 || (i > 1 && value[0] == '0')) return 0;
+            number = strtol(value,&end,10);
+            if (*end || number < low || number > high) return 0;
+            if (max_px) shake->max_px = (int)number; else shake->sensitivity = (int)number;
         } else return 0;
         if (seen & bit) return 0;
         seen |= bit;
@@ -85,12 +106,16 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config)
 static void settings_apply_pointer(BlitRuntime *runtime)
 {
     BlitPointerConfig config;
+    BlitShakeConfig shake;
     int i;
-    if (!pointer_config_parse(runtime->settings_document, &config)) {
+    if (!pointer_config_parse(runtime->settings_document, &config, &shake)) {
         config = blit_pointer_default();
+        shake = blit_shake_default();
         diagnostic_log(runtime,"warning","invalid_settings_pointer",
                        "Stored pointer appearance is invalid; using the default without rewriting it.");
     }
+    runtime->shake_config = shake;
+    if (!shake.enabled) blit_shake_reset(&runtime->shake);
     if (runtime->pointer_art.revision &&
         !memcmp(&config,&runtime->pointer_art.config,sizeof(config))) return;
     blit_pointer_build(&runtime->pointer_art, config);

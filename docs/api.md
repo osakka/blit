@@ -1569,6 +1569,21 @@ is one of the API shapes or a program shape (`text`, `wait`, `move`,
 Program shapes take this palette, size and shadow; the API cannot select them
 as the display's own pointer.
 
+Shake to find (ADR 0234): shaking the mouse grows the pointer, the harder
+the shake the bigger, and it eases back as the shaking calms. A fast
+straight sweep, slow wandering or a jittering hand do not grow it; a drag,
+a warp and a locked or hidden pointer do not either.
+
+```json
+{"shake_to_find":true,"shake_max_px":160,"shake_sensitivity":5}
+```
+
+`shake_to_find` defaults to true. `shake_max_px` (64–256, default 160) is
+the largest it grows to; `shake_sensitivity` (1–10, default 5) is how hard
+a shake must be, 1 hard, 10 light. `effective.pointer_shown` adds `size_px`
+(the size drawn now), `shake_scale` and `shake_sizes` (how many times the
+drawn size has changed).
+
 The Hibr control panel's `control-panel/blit` catalogue registers **Blit
 Mouse** alongside Blit. Appearance and stable-ID device controls share its
 staged settings draft and revision-checked Save. Hibr's separate Mouse pane

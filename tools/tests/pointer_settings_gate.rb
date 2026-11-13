@@ -54,7 +54,7 @@ abort("pointer-settings gate: missing #{BINARY}") unless File.executable?(BINARY
 def request(method, path, body = nil, headers = {})
   uri = BASE + path
   klass = { 'GET' => Net::HTTP::Get, 'POST' => Net::HTTP::Post,
-            'PATCH' => Net::HTTP::Patch,
+            'PATCH' => Net::HTTP::Patch, 'PUT' => Net::HTTP::Put,
             'DELETE' => Net::HTTP::Delete }.fetch(method)
   req = klass.new(uri)
   headers.each { |k, v| req[k] = v }
@@ -464,6 +464,57 @@ verdict('pointer-and-gamepad-settings-survive-a-restart') do
   gamepad = device(GAMEPAD).to_h.fetch('configuration', {})
   check(gamepad['deadzone_percent'] == 15 && gamepad['invert_axes'] == [0, 1],
         "and the gamepad's, got #{gamepad.inspect}")
+end
+
+# ADR 0234: shake to find the pointer, end to end through the fabricated
+# mouse in real time. At rest it is drawn at its set size; a fast straight
+# sweep leaves it so; a shake grows it (in 4 px steps, within the most), and
+# it settles back once the shaking stops. Switched off, a shake does
+# nothing. A most beyond 256 px is refused.
+def shown
+  request('GET', '/v1/settings').last.to_h.dig('effective', 'pointer_shown') || {}
+end
+
+def pointer_settings(changes)
+  settings = request('GET', '/v1/settings').last.to_h
+  document = settings.fetch('document', {})
+  document['pointer'] = (document['pointer'] || {}).merge(changes)
+  request('PUT', '/v1/settings', { 'document' => document }, { 'If-Match' => settings['revision'].to_s })
+end
+
+def shake_pointer(times, dx)
+  times.times do |i|
+    inject('kind' => 'pointer_relative', 'dx' => (i.even? ? dx : -dx), 'dy' => (i % 4 < 2 ? 5 : -5),
+           'device_id' => POINTER)
+    sleep 0.012
+  end
+end
+
+verdict('a-shaken-pointer-grows-and-settles') do
+  inject('kind' => 'pointer_motion', 'x' => 400, 'y' => 300)
+  sleep 1.0
+  at_rest = shown
+  check(at_rest['size_px'] == 24 && at_rest['shake_scale'] == 1.0,
+        "at rest the pointer is drawn at its set size, got #{at_rest.inspect}")
+  20.times { inject('kind' => 'pointer_relative', 'dx' => 25, 'dy' => 0, 'device_id' => POINTER); sleep 0.01 }
+  check(shown['size_px'] == 24, "a fast straight sweep grew the pointer, got #{shown.inspect}")
+  inject('kind' => 'pointer_motion', 'x' => 400, 'y' => 300)
+  shake_pointer(70, 120)
+  grown = shown
+  check(grown['size_px'].to_i > 24 && grown['size_px'].to_i <= 160 && (grown['size_px'].to_i - 24) % 4 == 0,
+        "a shake grew the pointer in 4 px steps within 160 px, got #{grown.inspect}")
+  sleep 2.5
+  settled = shown
+  check(settled['size_px'] == 24 && settled['shake_scale'] == 1.0,
+        "the pointer settled back after the shake, got #{settled.inspect}")
+  code, = pointer_settings('shake_to_find' => false)
+  check(code == 200, "switching shake to find off -> #{code}")
+  shake_pointer(70, 120)
+  check(shown['size_px'] == 24, "switched off, a shake grew the pointer, got #{shown.inspect}")
+  code, = pointer_settings('shake_to_find' => true, 'shake_max_px' => 300)
+  check(code == 400, "a most of 300 px is refused, got #{code}")
+  code, = pointer_settings('shake_to_find' => true, 'shake_max_px' => 160, 'shake_sensitivity' => 5)
+  check(code == 200, "and back on -> #{code}")
 end
 
 unless $failures.empty?

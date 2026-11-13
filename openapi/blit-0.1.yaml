@@ -2948,6 +2948,20 @@ components:
         palette: {type: string, enum: [pearl, obsidian, neon, amber], default: pearl}
         size_px: {type: integer, minimum: 24, maximum: 64, default: 24}
         shadow: {type: boolean, default: true}
+        shake_to_find:
+          type: boolean
+          default: true
+          description: >-
+            Shake to find (ADR 0234): shaking the mouse grows the pointer, the
+            harder the shake the bigger, up to shake_max_px, and it eases back
+            as the shaking calms.
+        shake_max_px: {type: integer, minimum: 64, maximum: 256, default: 160}
+        shake_sensitivity:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+          description: 1 needs a hard shake, 10 a light one.
     HudSettings:
       type: object
       description: >-

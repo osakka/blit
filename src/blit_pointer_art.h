@@ -8,7 +8,7 @@
 
 #include "blit_pointer_names.h"
 
-#define BLIT_POINTER_MAX 72
+#define BLIT_POINTER_MAX 264   /* a shake grows the pointer to 256 px (ADR 0234) */
 typedef struct {
     int shape;                 /* index into blit_pointer_shapes */
     int palette;               /* pearl, obsidian, neon, amber */
@@ -173,45 +173,132 @@ static float blit_pointer_distance(int shape, float x, float y)
     return inside ? -d : d;
 }
 
-static void blit_pointer_build(BlitPointerArt *art, BlitPointerConfig config)
+/* One sample of the art at vector point (vx, vy): its alpha and colour, and
+   its band -- 0 nothing, 1 the shadow, 2 the fill, 3 the outline -- the
+   same band everywhere meaning the same alpha and a colour that varies only
+   linearly. */
+static int blit_pointer_sample(const BlitPointerConfig *config, float vx, float vy,
+                               unsigned int *a, unsigned int colour[3])
 {
     static const unsigned char colours[4][3] = {
         {244, 248, 255}, {48, 59, 78}, {42, 239, 220}, {255, 192, 62}
     };
+    float d = blit_pointer_distance(config->shape, vx, vy);
+    int c;
+    colour[0] = colour[1] = colour[2] = 0;
+    *a = 0;
+    if (d <= 0.8f) {
+        *a = 255;
+        for (c = 0; c < 3; ++c) {
+            float light = 1.0f - vy * 0.006f;
+            colour[c] = (unsigned int)(colours[config->palette][c] * light);
+            if (colour[c] > 255) colour[c] = 255;
+            if (d >= -1.5f) colour[c] = config->palette == 1 ? 235 : 25;
+        }
+        return d >= -1.5f ? 3 : 2;
+    }
+    if (config->shadow && blit_pointer_distance(config->shape, vx - 1.4f, vy - 2.2f) <= 1.4f) {
+        *a = 75;
+        return 1;
+    }
+    return 0;
+}
+
+/* The art for config, 4x4 samples a pixel. The settings' sizes (24..64)
+   are sampled so everywhere, as they always were. A shake's larger sizes
+   (ADR 0234, up to BLIT_POINTER_MAX - 8) take one sample where a pixel's
+   corners, centre and quarter points are all of one band, and 4x4 only
+   where they are not: built as a shake needs them, in a fraction of the
+   time, with strokes there several pixels wide. */
+static void blit_pointer_build(BlitPointerArt *art, BlitPointerConfig config)
+{
+    static signed char band[(BLIT_POINTER_MAX + 1) * (BLIT_POINTER_MAX + 1)];
     unsigned long long revision = art->revision + 1;
-    int x, y, sx, sy, c;
+    int x, y, sx, sy, c, w;
     float scale;
     if (config.shape < 0 || config.shape >= BLIT_POINTER_SHAPE_COUNT || config.palette < 0 ||
-        config.palette > 3 || config.size < 24 || config.size > 64) return;
+        config.palette > 3 || config.size < 24 || config.size > BLIT_POINTER_MAX - 8) return;
     scale = (float)config.size / 32.0f;
     memset(art, 0, sizeof(*art)); art->config = config; art->revision = revision;
     art->width = art->height = config.size + 6;
     art->hotspot_x = (int)((config.shape >= 2 ? 16 : config.shape == 1 ? 12 : 2) * scale + 1);
     art->hotspot_y = (int)((config.shape >= 2 ? 16 : config.shape == 1 ? 2 : 1) * scale + 1);
+    w = art->width + 1;
+    for (y = 0; config.size > 64 && y <= art->height; ++y) for (x = 0; x <= art->width; ++x) {
+        unsigned int a, colour[3];
+        band[y * w + x] = (signed char)blit_pointer_sample(&config, (x - 1) / scale, (y - 1) / scale,
+                                                           &a, colour);
+    }
     for (y = 0; y < art->height; ++y) for (x = 0; x < art->width; ++x) {
-        unsigned int alpha = 0, rgb[3] = {0, 0, 0};
+        unsigned int alpha = 0, rgb[3] = {0, 0, 0}, a, colour[3];
         unsigned char *out = art->rgba + (y * art->width + x) * 4;
-        for (sy = 0; sy < 4; ++sy) for (sx = 0; sx < 4; ++sx) {
-            float vx = (x + (sx + 0.5f) / 4 - 1) / scale;
-            float vy = (y + (sy + 0.5f) / 4 - 1) / scale;
-            float d = blit_pointer_distance(config.shape, vx, vy);
-            unsigned int a = 0, colour[3] = {0, 0, 0};
-            if (d <= 0.8f) {
-                a = 255;
-                for (c = 0; c < 3; ++c) {
-                    float light = 1.0f - vy * 0.006f;
-                    colour[c] = (unsigned int)(colours[config.palette][c] * light);
-                    if (colour[c] > 255) colour[c] = 255;
-                    if (d >= -1.5f) colour[c] = config.palette == 1 ? 235 : 25;
-                }
-            } else if (config.shadow && blit_pointer_distance(config.shape, vx - 1.4f, vy - 2.2f) <= 1.4f) {
-                a = 75;
+        int centre = 0, q, uniform = 0;
+        if (config.size > 64) {
+            centre = blit_pointer_sample(&config, (x + 0.5f - 1) / scale, (y + 0.5f - 1) / scale,
+                                         &a, colour);
+            uniform = centre == band[y * w + x] && centre == band[y * w + x + 1] &&
+            centre == band[(y + 1) * w + x] && centre == band[(y + 1) * w + x + 1];
+            for (q = 0; uniform && q < 4; ++q) {
+                unsigned int qa, qc[3];
+                uniform = blit_pointer_sample(&config, (x + 0.25f + 0.5f * (q & 1) - 1) / scale,
+                                              (y + 0.25f + 0.5f * (q >> 1) - 1) / scale, &qa, qc) == centre;
             }
+        }
+        if (uniform) {
+            out[3] = (unsigned char)a;
+            if (a) for (c = 0; c < 3; ++c) out[c] = (unsigned char)colour[c];
+            continue;
+        }
+        for (sy = 0; sy < 4; ++sy) for (sx = 0; sx < 4; ++sx) {
+            blit_pointer_sample(&config, (x + (sx + 0.5f) / 4 - 1) / scale,
+                                (y + (sy + 0.5f) / 4 - 1) / scale, &a, colour);
             alpha += a;
             for (c = 0; c < 3; ++c) rgb[c] += colour[c] * a;
         }
         out[3] = (unsigned char)((alpha + 8) / 16);
         if (alpha) for (c = 0; c < 3; ++c) out[c] = (unsigned char)(rgb[c] / alpha);
+    }
+}
+
+/* The art at `size` (24 .. the master's), made by area-averaging `master`,
+   the same art built once at its largest (ADR 0234): each pixel the
+   alpha-weighted mean of the master pixels it covers, so a shake's every
+   size costs a resample, not a raster. Geometry as blit_pointer_build's:
+   a 1 px border, width size + 6, the hotspot scaled. */
+static void blit_pointer_resample(BlitPointerArt *art, const BlitPointerArt *master, int size)
+{
+    BlitPointerConfig config = master->config;
+    unsigned long long revision = art->revision + 1;
+    float r, scale;
+    int x, y;
+    if (size < 24 || size > master->config.size) return;
+    config.size = size;
+    scale = (float)size / 32.0f;
+    memset(art, 0, sizeof(*art)); art->config = config; art->revision = revision;
+    art->width = art->height = size + 6;
+    art->hotspot_x = (int)((config.shape >= 2 ? 16 : config.shape == 1 ? 12 : 2) * scale + 1);
+    art->hotspot_y = (int)((config.shape >= 2 ? 16 : config.shape == 1 ? 2 : 1) * scale + 1);
+    r = (float)master->config.size / (float)size;
+    for (y = 0; y < art->height; ++y) for (x = 0; x < art->width; ++x) {
+        float y0 = (y - 1) * r + 1, y1 = y0 + r, x0 = (x - 1) * r + 1, x1 = x0 + r;
+        float alpha = 0, rgb[3] = {0, 0, 0}, area = 0;
+        unsigned char *out = art->rgba + (y * art->width + x) * 4;
+        int my, mx, c;
+        for (my = (int)(y0 < 0 ? 0 : y0); my < master->height && my < y1; ++my) {
+            float wy = (my + 1 < y1 ? my + 1 : y1) - (my > y0 ? my : y0);
+            if (wy <= 0) continue;
+            for (mx = (int)(x0 < 0 ? 0 : x0); mx < master->width && mx < x1; ++mx) {
+                const unsigned char *in = master->rgba + (my * master->width + mx) * 4;
+                float wx = (mx + 1 < x1 ? mx + 1 : x1) - (mx > x0 ? mx : x0), wa;
+                if (wx <= 0) continue;
+                wa = wx * wy * in[3];
+                alpha += wa;
+                for (c = 0; c < 3; ++c) rgb[c] += wa * in[c];
+            }
+        }
+        area = r * r;
+        out[3] = (unsigned char)(alpha / area + 0.5f);
+        if (alpha > 0) for (c = 0; c < 3; ++c) out[c] = (unsigned char)(rgb[c] / alpha + 0.5f);
     }
 }
 
