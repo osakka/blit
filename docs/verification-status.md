@@ -9,6 +9,44 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.97 an update installs blit and its compositor together
+
+- **Why:** every deployment installed `blit` alone, and `blit-compositor`
+  pins `blit (= its version)`. Until the owner's apt upgrade, apt saw an
+  unmet dependency: plain `apt-get upgrade` refuses (reproduced in Debian
+  13). On 2026-11-12 the owner's updater resolved it by downgrading blit
+  0.3.90 -> 0.3.89.
+- **Change (ADR 0232):** one upload carries both packages
+  (`X-Blit-Packages`), and the root helper owns the rule. It refuses blit
+  alone where the compositor is installed and never adds the compositor
+  where it isn't. The manifest records the compositor. The helper accepts
+  only files from its staging directory and removes them after answering.
+  Nothing used to remove them: the mini PC held 333 staged packages,
+  3.4 GB.
+- **Gates:**
+  - `update_pair_gate`, the real helper and dpkg, as root in a throwaway
+    build-environment container: 6 cases pass. Against the 0.3.96 helper
+    it fails at the first case.
+  - `update_restart_gate` now runs (packaging suite; the build image gains
+    curl) and checks the split upload.
+  - Nine malformed `X-Blit-Packages` headers are refused with 413, with
+    nothing left staged.
+  - The build environment: `compositor_gate`, `xwayland_gate`,
+    `package_artifact_gate`.
+  - This host, run with nothing beside it: `all` 188 pass, 11 skip;
+    `renderer` 82 pass; `renderer-gles` 62 pass.
+- **Live, the mini PC:**
+  - Step 1, 0.3.96's script and helper: `blit` 0.3.97 with
+    `blit-compositor` 0.3.96 (the old mismatch, once more). The postinst
+    cleared `/var/lib/blit/updates`, 3.4 GB -> 16 K.
+  - Step 2, 0.3.97's script and helper: dpkg upgraded `blit` 0.3.97 and
+    `blit-compositor` 0.3.96 -> 0.3.97 in one run at 00:35:26-27.
+    `apt-get check` is clean, `dpkg --audit` is clean, and nothing is
+    left staged.
+  - The running compositor process is the old binary until the desktop
+    restarts.
+- **Published** to hibr-apt from this host (blit, blit-compositor).
+
 ## 2026-11-12: 0.3.96 a counted guard on the pointer's cost; timing gates that wait
 
 - **Guard:** `pointer_session_scans` (runtime diagnostics) counts how

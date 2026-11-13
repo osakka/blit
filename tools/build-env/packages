@@ -40,6 +40,8 @@ file
 binutils
 xz-utils
 ca-certificates
+# update_restart_gate (ADR 0232) talks to the server with curl
+curl
 # update_pair_gate (ADR 0232): what blit's install needs at runtime
 adduser
 xkb-data

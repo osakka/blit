@@ -1,6 +1,6 @@
 # ADR 0232: An update installs blit and its compositor together
 
-- Status: proposed; accepted when the 0.3.97 evidence below is recorded
+- Status: accepted (0.3.97; the evidence below, recorded 2026-11-13)
 - Date: 2026-11-12
 - Scope: `PUT /v1/control/update`, the root update helper
   (`blit-update-helper`), `tools/deploy/update-live.sh`, the release
@@ -128,3 +128,10 @@ Option 3.
   boundary.
 - The mini PC's 0.3.97 second deploy shows both packages at 0.3.97
   without an apt upgrade.
+
+Recorded for 0.3.97 (docs/verification-status.md):
+- `update_pair_gate` 6/6, in the release build;
+- `update_restart_gate` passing in the packaging suite;
+- on the mini PC, the second deploy upgraded both packages in one dpkg
+  run, with `apt-get check` and `dpkg --audit` clean and no staged files
+  left.
