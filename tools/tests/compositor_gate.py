@@ -1275,7 +1275,11 @@ def ime_part(compositor, standin, work):
     word committed as Arabic when the space comes. A chord (ctrl+a) commits
     what is held and passes as keys. With the method off (`-`), keys reach
     the program as keys. A password field (--text-input-password) is never
-    the method's."""
+    the method's. The person's own layer (hibr-ime's user root,
+    $XDG_CONFIG_HOME/hibr/ime) is read over the shipped data: a `word`
+    written there while the compositor runs (as the Arabizi pane saves
+    it) types from the next word, and a line that is not a rule is logged
+    and left out."""
     ime_root = os.environ.get('BLIT_IME_ROOT') or os.path.join(
         ROOT, 'build', 'hibr-ime-' + open(os.path.join(ROOT, 'packaging/IME_VERSION')).read().strip())
     check(os.path.isdir(os.path.join(ime_root, 'data', 'arabizi')), 'no hibr-ime checkout at ' + ime_root)
@@ -1288,8 +1292,10 @@ def ime_part(compositor, standin, work):
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         listener.bind('\0' + name)
         listener.listen(2)
+        config = os.path.join(work, 'config-ime%s' % mode)
+        os.makedirs(os.path.join(config, 'hibr', 'ime', 'arabizi'))
         env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime,
-                             BLIT_IME_DATA=os.path.join(ime_root, 'data'))
+                             BLIT_IME_DATA=os.path.join(ime_root, 'data'), XDG_CONFIG_HOME=config)
         env.pop('WAYLAND_DISPLAY', None)
         env.pop('BLIT_SERVER_PORT', None)
         log = os.path.join(work, 'compositor-ime%s.log' % mode)
@@ -1348,6 +1354,15 @@ def ime_part(compositor, standin, work):
                          lambda: 'no commit "سلام ":\n' + printed())
                 check(not any(l.startswith('STANDIN key 57') for l in lines()[before:]),
                       lambda: 'the space reached the program as a key:\n' + printed())
+                # The person's own word, saved while typing: from the next word.
+                with open(os.path.join(config, 'hibr', 'ime', 'arabizi', 'arabizi.rules'), 'w') as f:
+                    f.write('word salam = صلامي\nthis is not a rule\n')
+                mark = len(lines())
+                keys(31, 30, 38, 30, 50, 57)     # s a l a m, space
+                wait_for(lambda: 'STANDIN ti commit صلامي ' in lines()[mark:],
+                         lambda: 'the person\'s own word did not type:\n' + printed())
+                wait_for(lambda: 'not a rule' in open(log).read(),
+                         lambda: 'a line of theirs that is not a rule was not logged:\n' + open(log).read())
                 mark = len(lines())
                 keys(48, 30)                     # b a, held
                 wait_for(lambda: 'STANDIN ti preedit با' in lines()[mark:] or
@@ -1363,7 +1378,8 @@ def ime_part(compositor, standin, work):
                 keys(31)
                 wait_for(lambda: 'STANDIN key 31 1' in lines()[mark:],
                          lambda: 'with no method, s did not reach the program:\n' + printed())
-                results.append('field=preedit(سلام),commit(سلام ),keys-taken chord=commit+pass off=keys')
+                results.append('field=preedit(سلام),commit(سلام ),keys-taken user-word=next-word(صلامي),bad-line-logged '
+                               'chord=commit+pass off=keys')
             else:
                 wait_for(lambda: lines()[before:].count('STANDIN key 50 1') == 1,
                          lambda: 'a password field did not get its keys:\n' + printed())

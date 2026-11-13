@@ -30298,8 +30298,11 @@ static void keyboards_available_json(const char *layout, char *out, size_t capac
     if (file) fclose(file);
     /* ADR 0233: Arabizi, when its method's data is installed. */
     if (layout != NULL && strcmp(layout, "ara") == 0 && blit_keyboard_method_installed("arabizi")) {
-        json_appendf(out, capacity, &used, "%s{\"variant\":\"arabizi\",\"name\":\"Arabic (Arabizi)\"}",
-                     first ? "" : ",");
+        char name[256], escaped[512];
+        blit_keyboard_method_name("arabizi", name, sizeof(name));
+        json_escape(name, escaped, sizeof(escaped));
+        json_appendf(out, capacity, &used, "%s{\"variant\":\"arabizi\",\"name\":\"%s\"}",
+                     first ? "" : ",", escaped);
         first = 0;
     }
     json_appendf(out, capacity, &used, "]}");

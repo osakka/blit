@@ -176,7 +176,7 @@ ime_version=$(git -C "$root" show "$source_commit:packaging/IME_VERSION")
     echo "PACKAGE_ARTIFACT_FAIL blit ships Arabizi data hibr-ime-arabizi owns" >&2
     exit 1
 }
-[ "$(dpkg-deb -f "$package" Recommends)" = hibr-ime-arabizi ] || {
+[ "$(dpkg-deb -f "$package" Recommends)" = "hibr-ime-arabizi (>= 0.1.2)" ] || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not recommend hibr-ime-arabizi" >&2
     exit 1
 }

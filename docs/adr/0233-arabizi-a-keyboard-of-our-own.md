@@ -460,6 +460,27 @@ Arabizi had none. Agreed with hibr on 2026-11-13, with the owner's go-ahead:
   Blit's desktop and programs then convert alike, with nothing about
   Arabizi on the wire but its name.
 
+### Recorded: the person's own layer (0.3.105, 2026-11-13)
+
+- **The pin:** hibr-ime v0.1.2 (4829475), IME_API 2.
+- **blit-compositor:**
+  - loads through `ime_load_user` with `$XDG_CONFIG_HOME/hibr/ime` (or
+    `~/.config/hibr/ime`), as the desktop user it runs as;
+  - with nothing held, at a word's end, it asks `ime_stale` and reads the
+    data again;
+  - `ime_new(data, NULL)` takes the person's `options`;
+  - a line that is not a rule is logged and left out.
+- **blit-server:** the dry run stays shipped-only (`ime_load`). Root reads
+  no person's files (Hibr's rule).
+- **The keyboard's name:** from `<root>/arabizi/info` (`name`).
+- **Packaging:** `Recommends: hibr-ime-arabizi (>= 0.1.2)`. The Arabizi
+  pane ships in that package and in the catalogue.
+- **Gates:** `compositor_gate` writes `word salam = صلامي` and a broken
+  line to the user layer after the first word. The next "salam " commits
+  صلامي, and the broken line is logged (also under ASan/UBSan).
+  `keyboard_settings_gate` checks the name, `arabizi_gate` the shipped
+  data, `package_artifact_gate` the Recommends.
+
 ## Open questions for the owner
 
 - 8 by default: ق (Gulf and Saudi) or غ (Lebanese)?

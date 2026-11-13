@@ -366,7 +366,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
 Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0), libxkbcommon0 (>= 1.5.0), xkb-data, libx11-data
-Recommends: hibr-ime-arabizi
+Recommends: hibr-ime-arabizi (>= 0.1.2)
 Suggests: hibr, blit-font-sources, blit-compositor
 Breaks: hibr (<< $HIBR_FRAME_V5), $RETIRED_PACKAGES
 Description: API-driven native KMS text display server

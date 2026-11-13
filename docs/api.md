@@ -1814,9 +1814,16 @@ From 0.3.101, **Arabic (Arabizi)** is a keyboard:
 `{"layout":"ara","variant":"arabizi"}`, listed by
 `/v1/input/keyboards/available?layout=ara` while its data is installed. It
 is typed on the US keys, and Blit's compositor turns it into Arabic in
-programs' text fields (`INPUT method`, below). In Hibr's own fields it
-types plain US keys until hibr-ime's Hibr module does the same there. A
-stored list with Arabizi, started where its data isn't installed, keeps
+programs' text fields (`INPUT method`, below); with hibr-ime's Hibr
+module (Hibr 0.99.517) it does the same in Hibr's own fields. Its name in
+the list is the method's own, from `<root>/arabizi/info`. From 0.3.105 the
+compositor reads the person's own layer over the shipped data:
+`$XDG_CONFIG_HOME/hibr/ime/arabizi/` (`options`, and `arabizi.rules` lines
+such as `word <latin> = <arabic>` or a symbol's readings), which hibr-ime's
+**Arabizi** Control Panel pane writes. A change takes effect from the next
+word; a line that is not a rule is logged and left out. The dry run below
+stays the shipped data alone, since the server runs as root and reads no
+person's files. A stored list with Arabizi, started where its data isn't installed, keeps
 its other keyboards and sets Arabizi aside, with the warning
 `keyboard_set_aside`.
 

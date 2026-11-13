@@ -90,6 +90,27 @@ static const char *blit_keyboard_method(const char *layout, const char *variant)
     return strcmp(layout, "ara") == 0 && strcmp(variant, "arabizi") == 0 ? "arabizi" : NULL;
 }
 
+/* A method's name as its data names it (hibr-ime's <root>/<method>/info,
+   `name <text>`), else its own id. */
+static void blit_keyboard_method_name(const char *method, char *out, size_t capacity)
+{
+    char path[1024], line[512];
+    FILE *file;
+    size_t n;
+    snprintf(out, capacity, "%s", method);
+    snprintf(path, sizeof(path), "%s/%s/info", blit_ime_root(), method);
+    if ((file = fopen(path, "r")) == NULL) return;
+    while (fgets(line, sizeof(line), file)) {
+        n = strlen(line);
+        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r' || line[n - 1] == ' ')) line[--n] = '\0';
+        if (strncmp(line, "name ", 5) == 0 && line[5]) {
+            snprintf(out, capacity, "%s", line + 5);
+            break;
+        }
+    }
+    fclose(file);
+}
+
 /* Whether a method's data is installed: <blit_ime_root()>/<method>/. */
 static int blit_keyboard_method_installed(const char *method)
 {
@@ -266,7 +287,7 @@ static void blit_keyboard_description(const char *layout, const char *variant, c
     int section = 0;
     FILE *file;
     if (blit_keyboard_method(layout, variant)) {
-        snprintf(out, capacity, "Arabic (Arabizi)");
+        blit_keyboard_method_name(blit_keyboard_method(layout, variant), out, capacity);
         return;
     }
     file = blit_xkb_rules_list();

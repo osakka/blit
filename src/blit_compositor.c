@@ -4885,20 +4885,49 @@ static struct bc_text_input *ime_target(struct bc_server *s)
     return NULL;
 }
 
-/* The engine, its data read from <blit_ime_root()>/<method>; NULL when it cannot be had (logged
-   once). */
+/* Where the person's own layer of the input methods lives (hibr-ime's
+   user root): $XDG_CONFIG_HOME/hibr/ime, or ~/.config/hibr/ime. The
+   compositor runs as the desktop's user, so these are their own files.
+   "" when neither is set: the shipped data alone. */
+static void ime_user_root(char *out, size_t size)
+{
+    const char *config = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+    if (config && config[0] == '/') snprintf(out, size, "%s/hibr/ime", config);
+    else if (home && home[0] == '/') snprintf(out, size, "%s/.config/hibr/ime", home);
+    else out[0] = '\0';
+}
+
+/* The engine, its data read from <blit_ime_root()>/<method> with the
+   person's own layer over it; NULL when it cannot be had (logged once).
+   A line of theirs that is not a rule is logged and left out; the rest
+   types. When their layer has changed (the Arabizi pane saved) and
+   nothing is held -- a word's end -- the data and engine are read again,
+   so a change takes effect from the next word. */
 static ImeEngine *ime_engine(struct bc_server *s)
 {
+    if (s->ime.engine && s->ime.data && !ime_pending(s->ime.engine) && ime_stale(s->ime.data)) {
+        logf_("input method %s: the person's layer changed; read again", s->ime.name);
+        ime_engine_free(s->ime.engine);
+        s->ime.engine = NULL;
+        ime_free(s->ime.data);
+        s->ime.data = NULL;
+    }
     if (s->ime.engine) return s->ime.engine;
     if (s->ime.problem) return NULL;
     if (s->ime.data == NULL) {
-        s->ime.data = ime_load(s->ime.name, blit_ime_root(), &s->ime.problem);
+        char user[1024], *problem = NULL;
+        ime_user_root(user, sizeof(user));
+        s->ime.data = ime_load_user(s->ime.name, blit_ime_root(), user[0] ? user : NULL, &problem);
         if (s->ime.data == NULL) {
-            logf_("input method %s: %s", s->ime.name, s->ime.problem ? s->ime.problem : "out of memory");
-            if (s->ime.problem == NULL) s->ime.problem = strdup("out of memory");
+            logf_("input method %s: %s", s->ime.name, problem ? problem : "out of memory");
+            s->ime.problem = problem ? problem : strdup("out of memory");
             return NULL;
         }
-        logf_("input method %s: loaded", s->ime.name);
+        if (problem) {
+            logf_("input method %s: %s", s->ime.name, problem);
+            ime_text_free(problem);
+        }
+        logf_("input method %s: loaded%s%s", s->ime.name, user[0] ? ", with " : "", user);
     }
     s->ime.engine = ime_new(s->ime.data, s->ime.options[0] ? s->ime.options : NULL);
     return s->ime.engine;
