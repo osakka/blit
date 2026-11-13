@@ -96,6 +96,7 @@
 #include "xdg-output-unstable-v1-server-protocol.h"
 #include "text-input-unstable-v3-server-protocol.h"
 #include "ime.h"
+#include "blit_ime_root.h"
 #include "blit_compositor_wire.h"
 #include "blit_pointer_names.h"
 #include "blit_crash.h"
@@ -4884,16 +4885,14 @@ static struct bc_text_input *ime_target(struct bc_server *s)
     return NULL;
 }
 
-/* The engine, its data read on first need from BLIT_IME_DATA or
-   /usr/share/blit (<root>/<method>); NULL when it cannot be had (logged
+/* The engine, its data read from <blit_ime_root()>/<method>; NULL when it cannot be had (logged
    once). */
 static ImeEngine *ime_engine(struct bc_server *s)
 {
     if (s->ime.engine) return s->ime.engine;
     if (s->ime.problem) return NULL;
     if (s->ime.data == NULL) {
-        const char *root = getenv("BLIT_IME_DATA");
-        s->ime.data = ime_load(s->ime.name, root && root[0] ? root : "/usr/share/blit", &s->ime.problem);
+        s->ime.data = ime_load(s->ime.name, blit_ime_root(), &s->ime.problem);
         if (s->ime.data == NULL) {
             logf_("input method %s: %s", s->ime.name, s->ime.problem ? s->ime.problem : "out of memory");
             if (s->ime.problem == NULL) s->ime.problem = strdup("out of memory");

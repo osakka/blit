@@ -1805,7 +1805,8 @@ With `tashkeel` it writes the short vowels it chose (كِتاب). It is the same
 path the Arabizi keyboard will type through, so this is its dry run. The
 text, at most 4095 bytes, is never logged. 400 `invalid_text` without text;
 503 `arabizi_unavailable` when the rules or word lists (in
-`<BLIT_IME_DATA>/arabizi`, by default `/usr/share/blit/arabizi`) are missing.
+`<BLIT_IME_DATA>/arabizi`, by default `/usr/share/hibr-ime/arabizi`, the
+`hibr-ime-arabizi` package, which `blit` recommends) are missing.
 The engine is hibr-ime's (LGPL-3.0-or-later), built in from the tag pinned
 in `packaging/IME_VERSION`.
 From 0.3.101, **Arabic (Arabizi)** is a keyboard:

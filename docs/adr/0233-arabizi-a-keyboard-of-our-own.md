@@ -416,6 +416,50 @@ The scorer exists so that people needn't type it strictly.
   `keyboard_settings_gate`, `frame_input_gate` and `xwayland_gate`.
 - **Live:** deployed to the mini PC (docs/verification-status.md).
 
+### Recorded: the data from hibr-ime's package (0.3.103, 2026-11-13)
+
+- **The pin:** hibr-ime v0.1.1. Its engine and data are v0.1.0's
+  unchanged; the tag adds hibr-ime's own packages.
+- **The data:** read from `/usr/share/hibr-ime/<method>`, which the
+  `hibr-ime-arabizi` package installs. `blit` recommends that package and
+  no longer ships `/usr/share/blit/arabizi`. One definition of the root
+  (`src/blit_ime_root.h`, `BLIT_IME_DATA` to override) serves blit-server
+  and blit-compositor. Without the package, the keyboard is not offered,
+  and a stored list keeps the rest (`keyboard_set_aside`).
+- **Gates:** `package_artifact_gate` (no Arabizi data in `blit`,
+  `Recommends: hibr-ime-arabizi`, the recorded tag), `arabizi_gate` and
+  `keyboard_settings_gate`.
+
+### Agreed with Hibr: tuning in a Control Panel (hibr-ime v0.1.2)
+
+The owner's rule is that every feature is tuned in a Control Panel, and
+Arabizi had none. Agreed with hibr on 2026-11-13, with the owner's go-ahead:
+
+- **One user layer, read by the library.** `$XDG_CONFIG_HOME/hibr/ime/<method>/`
+  holds two files:
+  - `options`: the method's words, one per line (`tashkeel`);
+  - `<method>.rules`: the shipped format, read after the shipped rules.
+    A `unit`/`long` line replaces the shipped readings for its latin and
+    position ("3 → ع only"), and `word <latin> = <arabic>` lines are My
+    Words, winning over the lists.
+- **The API, IME_API 2:**
+  - `ime_load_user(method, root, user_root, &problem)` loads the shipped
+    rules, then the user layer over them. A missing user layer is fine; a
+    broken user line is reported with its file and line.
+  - `ime_new(data, NULL)` takes the user's options.
+  - `ime_stale(data)` says whether the user files changed since the load.
+- **The pane:** "Arabizi", hibr-ime's own, in the catalogue. It has
+  tashkeel, the readings per symbol, My Words, a live try-it box and reset.
+  It writes only the user layer.
+- **Blit, on the v0.1.2 tag:**
+  - blit-compositor loads through `ime_load_user` with the desktop user's
+    `$XDG_CONFIG_HOME/hibr/ime`;
+  - it reloads at a word boundary or a keyboard switch when `ime_stale`;
+  - it logs a user line's problem;
+  - it takes the keyboard's description from `ime info`.
+  Blit's desktop and programs then convert alike, with nothing about
+  Arabizi on the wire but its name.
+
 ## Open questions for the owner
 
 - 8 by default: ق (Gulf and Saudi) or غ (Lebanese)?

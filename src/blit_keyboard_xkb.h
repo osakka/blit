@@ -28,6 +28,7 @@
 
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-compose.h>
+#include "blit_ime_root.h"
 
 /* The keymap's <LVL3>, ISO_Level3_Shift in every pc-based layout: what the
    `altgr` role becomes, since Right Alt is Alt in a layout without a third
@@ -89,12 +90,11 @@ static const char *blit_keyboard_method(const char *layout, const char *variant)
     return strcmp(layout, "ara") == 0 && strcmp(variant, "arabizi") == 0 ? "arabizi" : NULL;
 }
 
-/* Whether a method's data is installed: <BLIT_IME_DATA or /usr/share/blit>/<method>/. */
+/* Whether a method's data is installed: <blit_ime_root()>/<method>/. */
 static int blit_keyboard_method_installed(const char *method)
 {
-    const char *root = getenv("BLIT_IME_DATA");
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s/%s.rules", root && root[0] ? root : "/usr/share/blit", method, method);
+    snprintf(path, sizeof(path), "%s/%s/%s.rules", blit_ime_root(), method, method);
     return access(path, R_OK) == 0;
 }
 

@@ -30310,17 +30310,15 @@ static void keyboards_available_json(const char *layout, char *out, size_t capac
    most 4096 bytes and is never logged. 503 when the engine's rules or word
    lists are missing. */
 /* The Arabizi method's data, read once on first use from <root>/arabizi,
-   root BLIT_IME_DATA or /usr/share/blit (until hibr-ime's own package
-   installs it); a failure is kept and reported, not retried each request. */
+   root blit_ime_root() (hibr-ime-arabizi's /usr/share/hibr-ime); a failure is kept and reported, not retried each request. */
 static ImeData *arabizi_data(const char **problem)
 {
     static ImeData *data;
     static char *failed;
     static int tried;
     if (!tried) {
-        const char *root = getenv("BLIT_IME_DATA");
         tried = 1;
-        data = ime_load("arabizi", root && root[0] ? root : "/usr/share/blit", &failed);
+        data = ime_load("arabizi", blit_ime_root(), &failed);
     }
     *problem = failed ? failed : "the Arabizi engine is unavailable";
     return data;
