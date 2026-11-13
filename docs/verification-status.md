@@ -9,6 +9,39 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.102 shake to find the pointer
+
+- **Shake to find** (ADR 0234): shaking the mouse grows the pointer, the
+  harder the bigger, up to `shake_max_px`, easing back as it calms; on by
+  default, tuned in `document.pointer` and the Blit Mouse pane.
+- **blit-compositor:** the input method's data is read when the keyboard
+  switches to it, and freed at exit.
+- **Gates:**
+  - `pointer_shake_gate` (tcc, ASan/UBSan) and `pointer_settings_gate`
+    `a-shaken-pointer-grows-and-settles` are new.
+  - The first full run failed three gates:
+    - `pointer_appearance_gate` and `pointer_shape_gate` compared the
+      pointer settings exactly and did not know the new fields. They now
+      expect the defaults, and refuse out-of-range shake values.
+    - `compositor_gate`: LeakSanitizer found the input method's engine
+      never freed at exit. Reading its data at the switch made the leak
+      visible in the password case. It is freed now.
+  - Second run on this host: `all` 190 pass, 11 skip; `renderer` 84.
+    `renderer-gles` 63 pass, with one failure: `presentation_effects`
+    measured 29.1 animation frames/s against a floor of 30, while another
+    session's process held a core. It passed 3 of 3 alone.
+  - The build environment: `compositor_gate`, `xwayland_gate`, the
+    package gate and the pair-update gate.
+- **Live, the mini PC:**
+  - the pair update to 0.3.102 was verified;
+  - `effective.pointer` reports the shake defaults, and `pointer_shown`
+    reports `shake_scale` 1.0 at rest.
+  - Not yet: the owner's hand shaking it.
+- **Published:**
+  - to hibr-apt (blit, blit-compositor; mirror synced);
+  - the Blit pane 0.1.33 (Shake to Find rows) to hibr-apps, with the
+    owner's OK.
+
 ## 2026-11-13: 0.3.101 Arabic (Arabizi) as a keyboard, into programs through text-input-v3
 
 - **The engine** is hibr-ime's (itdlabs/hibr-ime v0.1.0, 305542f, LGPL),
