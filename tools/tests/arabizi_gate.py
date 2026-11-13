@@ -3,8 +3,9 @@
 
     arabizi_gate.py [blit-server]
 
-Runs a blit-server of its own with BLIT_ARABIZI_ROOT=assets/arabizi and
-sends each line of tools/tests/arabizi/maintainer.tsv through
+Runs a blit-server of its own with the pinned hibr-ime tag's data
+(BLIT_IME_DATA) and sends each line of that tag's
+tests/arabizi/maintainer.tsv through
 POST /v1/input/arabizi/convert, which feeds it key by key as typing does.
 Word accuracy is primary, line accuracy beside it, and both must reach the
 floors below. Raise a floor when the engine improves; never lower one.
@@ -43,7 +44,7 @@ def fail(why):
 class Server:
     def __init__(self, root):
         work = tempfile.mkdtemp(prefix='blit-arabizi-gate-')
-        env = gate_env.server_env(BLIT_ARABIZI_ROOT=root, BLIT_TEST_MODE='1', BLIT_LOGIN_AUTOSTART='0',
+        env = gate_env.server_env(BLIT_IME_DATA=root, BLIT_TEST_MODE='1', BLIT_LOGIN_AUTOSTART='0',
                                   BLIT_EXPECT_DESKTOP='0', BLIT_SETTINGS_PATH=os.path.join(work, 'settings.json'),
                                   BLIT_PSF_FONT=os.path.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
         self.process = subprocess.Popen([BINARY, str(PORT)], env=env, stdout=subprocess.DEVNULL,
@@ -93,9 +94,14 @@ def score(server, path):
 
 def main():
     results = []
-    server = Server(os.path.join(ROOT, 'assets/arabizi'))
+    ime = os.environ.get('BLIT_IME_ROOT') or os.path.join(
+        ROOT, 'build', 'hibr-ime-' + open(os.path.join(ROOT, 'packaging/IME_VERSION')).read().strip())
+    if not os.path.isdir(os.path.join(ime, 'data', 'arabizi')):
+        print('ARABIZI_GATE_SKIP no hibr-ime checkout at %s (packaging/IME_VERSION)' % ime)
+        sys.exit(77)
+    server = Server(os.path.join(ime, 'data'))
     try:
-        sets = [os.path.join(ROOT, 'tools/tests/arabizi/maintainer.tsv')]
+        sets = [os.path.join(ime, 'tests/arabizi/maintainer.tsv')]
         private = os.path.join(ROOT, 'build/private/arabizi/owner.tsv')
         if os.path.exists(private):
             sets.append(private)

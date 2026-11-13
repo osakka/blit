@@ -44,7 +44,7 @@ fi
 # does not pass the caller's environment on. They go before the image, the
 # command after it.
 set -- "$image" "$@"
-for name in BLIT_GATE_TIMEOUT BLIT_GATE_PACKAGE BLIT_HIBR_ROOT; do
+for name in BLIT_GATE_TIMEOUT BLIT_GATE_PACKAGE BLIT_HIBR_ROOT BLIT_IME_ROOT; do
     eval "isset=\${$name+set}"
     [ "$isset" = set ] || continue
     eval "value=\$$name"

@@ -246,8 +246,11 @@ Directory of the bundled fonts; default
 Directory of locally installed fonts; default
 .IR /usr/local/lib/blit/fonts .
 .TP
-.B BLIT_ARABIZI_ROOT
-Directory of the Arabizi engine's rules and word lists (ADR 0233); default
+.B BLIT_IME_DATA
+Directory of the input methods' data, one subdirectory per method
+(ADR 0233; hibr-ime); default
+.IR /usr/share/blit ,
+so Arabizi's rules and word lists are read from
 .IR /usr/share/blit/arabizi .
 .SS Hibr login manager and joined displays
 .TP

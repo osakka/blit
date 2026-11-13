@@ -56,9 +56,9 @@ int main(void) { return 0; }
 PROBE
 then
     # shellcheck disable=SC2086
-    ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" $compositor_cflags \
+    ${CC:-cc} $san -std=c99 -Wall -Wno-unused-function -Isrc -I"$proto" $(cat "$proto/include") $compositor_cflags \
         "-DBLIT_BUILD_VERSION=\"asan\"" src/blit_compositor.c $protocol_sources \
-        $compositor_libs -o "$out/blit-compositor-asan"
+        $compositor_libs -lm -o "$out/blit-compositor-asan"
     # shellcheck disable=SC2086
     ${CC:-cc} $san -std=c99 -Wall -I"$proto" $client_cflags $client_sources $client_libs \
         -o "$out/wl_standin_client-asan"

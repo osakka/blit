@@ -86,6 +86,13 @@ The server links `src/blit_server.c`, `src/blit_kms.c`, `src/blit_vt.c`,
 `src/blit_font.c` and `src/blit_raster.c` against libdrm, FreeType,
 HarfBuzz, libutil and zlib.
 
+The server and the compositor build in the input methods of **hibr-ime**
+(ADR 0233), from a checkout of the tag named in `packaging/IME_VERSION`.
+It is at `build/hibr-ime-<version>` (inside the checkout, so the build
+environment sees it) or wherever `BLIT_IME_ROOT` names. Its `VERSION` must
+match, or the build stops. Blit calls `include/ime.h` only. To get it:
+`git clone --branch v<version> https://git.home.arpa/itdlabs/hibr-ime.git build/hibr-ime-<version>`.
+
 **tcc compiles, the system linker links** (from 0.3.87): each source is
 compiled by `tcc -c` and every output -- the programs and the Hibr adapter
 -- is linked by `tools/tcc-link.sh`, through `cc`, the one link step. tcc

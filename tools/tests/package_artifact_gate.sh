@@ -168,12 +168,17 @@ for entrypoint in blit-session.hibr blit-login-session.hibr blit-desktop-observe
     }
 done
 test -f "$stage/usr/share/blit/hibr/blit-runtime-console.hibr"
-# ADR 0233: the Arabizi engine's data, as recorded at the source commit,
-# with its credit beside it.
+# ADR 0233: the Arabizi data, as the pinned hibr-ime tag has it, with its
+# credit beside it.
+ime_version=$(git -C "$root" show "$source_commit:packaging/IME_VERSION")
+ime_root=${BLIT_IME_ROOT:-$root/build/hibr-ime-$ime_version}
+[ "$(sed -n '1p' "$ime_root/VERSION" 2>/dev/null)" = "$ime_version" ] || {
+    echo "PACKAGE_ARTIFACT_FAIL hibr-ime $ime_version not found at $ime_root" >&2
+    exit 1
+}
 for f in arabizi.rules ar-words.txt en-words.txt README.md; do
-    cmp -s <(git -C "$root" show "$source_commit:assets/arabizi/$f") \
-        "$stage/usr/share/blit/arabizi/$f" || {
-        echo "PACKAGE_ARTIFACT_FAIL Arabizi data differs from recorded source: $f" >&2
+    cmp -s "$ime_root/data/arabizi/$f" "$stage/usr/share/blit/arabizi/$f" || {
+        echo "PACKAGE_ARTIFACT_FAIL Arabizi data differs from hibr-ime $ime_version: $f" >&2
         exit 1
     }
 done

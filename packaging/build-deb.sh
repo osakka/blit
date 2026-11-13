@@ -153,11 +153,15 @@ cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
 install -d -m 0755 "$stage/usr/share/doc/blit/examples"
 cp -a "$ROOT/packaging/blit-unprivileged.conf" \
     "$stage/usr/share/doc/blit/examples/"
-# The Arabizi engine's rules and word lists (ADR 0233), with their credit
-# and licence (assets/arabizi/README.md).
+# The Arabizi method's rules and word lists (ADR 0233), with their credit
+# and licence, from the pinned hibr-ime tag (packaging/IME_VERSION). In
+# Blit's own path until hibr-ime's package installs them in its own: two
+# packages must never own the same files.
+ime_root=${BLIT_IME_ROOT:-$ROOT/build/hibr-ime-$(sed -n '1p' "$ROOT/packaging/IME_VERSION")}
 for f in arabizi.rules ar-words.txt en-words.txt README.md; do
-	install -m 0644 "$ROOT/assets/arabizi/$f" "$stage/usr/share/blit/arabizi/$f"
+	install -m 0644 "$ime_root/data/arabizi/$f" "$stage/usr/share/blit/arabizi/$f"
 done
+install -m 0644 "$ROOT/packaging/IME_VERSION" "$stage/usr/share/doc/blit/IME_VERSION"
 # The fonts are Blit's own, from assets/fonts alone (ADR 0194). The build
 # bundle's fonts directory held a stale console font and a duplicate.
 if [ -d "$ROOT/assets/fonts" ]; then
@@ -222,10 +226,14 @@ version. On Debian systems the licence text is in
 
 Bundled third-party material keeps its own licence, installed beside it:
 the fonts under /usr/lib/blit/fonts/ (licenses/, the *-LICENSE.txt files,
-README.md) and the icon artwork (MIT, /usr/lib/blit/fonts/icons/LICENSE.txt). The
-Arabizi word lists under /usr/share/blit/arabizi/ are derived from Hermit
-Dave's FrequencyWords (OpenSubtitles 2018 counts) and licensed CC BY-SA 4.0;
-their credit, source and changes are in /usr/share/blit/arabizi/README.md.
+README.md) and the icon artwork (MIT, /usr/lib/blit/fonts/icons/LICENSE.txt). The input
+methods built into blit-server and blit-compositor are hibr-ime's
+(Copyright (C) 2026 Omar Sakka, GNU Lesser General Public License, version 3
+or later; the version in /usr/share/doc/blit/IME_VERSION). The Arabizi data
+under /usr/share/blit/arabizi/ is hibr-ime's too: its rules LGPL-3.0-or-later,
+its word lists derived from Hermit Dave's FrequencyWords (OpenSubtitles 2018
+counts) and licensed CC BY-SA 4.0, with their credit, source and changes in
+/usr/share/blit/arabizi/README.md.
 The Hibr adapter, /usr/lib/blit/hibr/console-blit.so, is built from Hibr's
 source and is distributed under the GNU Lesser General Public License,
 version 3 or later (/usr/share/common-licenses/LGPL-3).
@@ -508,7 +516,8 @@ EOF
 cat > "$cdoc/copyright" <<EOF
 blit-compositor is part of Blit, Copyright (C) 2026 Omar Sakka, built from
 src/blit_compositor.c, src/blit_compositor_wire.h and src/blit_pointer_names.h
-in the Blit source tree. It is free software: you can redistribute it and/or modify it under
+in the Blit source tree, with hibr-ime's input methods (LGPL-3.0-or-later,
+the version in /usr/share/doc/blit/IME_VERSION) built in. It is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
 Software Foundation, either version 3 of the License, or (at your option)
 any later version. On Debian systems the licence text is in

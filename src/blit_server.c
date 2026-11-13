@@ -29746,7 +29746,7 @@ static int evdev_role_is_held(const BlitInputDevice *device, int role)
 }
 
 #include "blit_keyboard_xkb.h"
-#include "blit_arabizi.h"
+#include "ime.h"   /* hibr-ime's input methods, from the pinned tag (packaging/IME_VERSION; ADR 0233) */
 
 /* Adopt the kernel's idea of what each keyboard is holding and which of its
    locks are lit. A keyboard opened while Shift is down, or after a device
@@ -30177,9 +30177,29 @@ static void keyboards_available_json(const char *layout, char *out, size_t capac
    {"text": "...", "tashkeel": false} -> {"text": "..."}. The text is at
    most 4096 bytes and is never logged. 503 when the engine's rules or word
    lists are missing. */
+/* The Arabizi method's data, read once on first use from <root>/arabizi,
+   root BLIT_IME_DATA or /usr/share/blit (until hibr-ime's own package
+   installs it); a failure is kept and reported, not retried each request. */
+static ImeData *arabizi_data(const char **problem)
+{
+    static ImeData *data;
+    static char *failed;
+    static int tried;
+    if (!tried) {
+        const char *root = getenv("BLIT_IME_DATA");
+        tried = 1;
+        data = ime_load("arabizi", root && root[0] ? root : "/usr/share/blit", &failed);
+    }
+    *problem = failed ? failed : "the Arabizi engine is unavailable";
+    return data;
+}
+
 static void arabizi_convert_response(int fd, const char *payload, char *body, size_t capacity)
 {
-    static char text[4097], out[16384], escaped[32768];
+    static char text[4097], escaped[32768];
+    const char *problem;
+    ImeData *data;
+    char *out;
     int tashkeel = 0;
     if (payload == NULL || !json_string(payload, "text", text, sizeof(text)) || strlen(text) >= 4096) {
         send_problem(fd, 400, "Bad Request", "invalid_text",
@@ -30187,11 +30207,16 @@ static void arabizi_convert_response(int fd, const char *payload, char *body, si
         return;
     }
     (void)json_bool(payload, "tashkeel", &tashkeel);
-    if (!az_convert(text, tashkeel, out, sizeof(out))) {
-        send_problem(fd, 503, "Service Unavailable", "arabizi_unavailable", az.problem);
+    if ((data = arabizi_data(&problem)) == NULL) {
+        send_problem(fd, 503, "Service Unavailable", "arabizi_unavailable", problem);
+        return;
+    }
+    if ((out = ime_convert(data, text, tashkeel ? "tashkeel" : NULL)) == NULL) {
+        send_problem(fd, 503, "Service Unavailable", "arabizi_unavailable", "out of memory");
         return;
     }
     json_escape(out, escaped, sizeof(escaped));
+    ime_text_free(out);
     snprintf(body, capacity, "{\"text\":\"%s\",\"tashkeel\":%s}", escaped, tashkeel ? "true" : "false");
     send_http(fd, 200, "OK", "application/json", body);
 }
