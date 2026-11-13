@@ -9,6 +9,34 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.105 Arabizi in programs follows the person's own tuning
+
+- **hibr-ime v0.1.2** (IME_API 2): blit-compositor reads the person's
+  layer (`$XDG_CONFIG_HOME/hibr/ime/arabizi`, written by hibr-ime's
+  Arabizi pane) over the shipped data. A change types from the next word;
+  a bad line is logged and left out. The server's dry run stays the
+  shipped data. The keyboard is named from `info`. Recommends:
+  hibr-ime-arabizi (>= 0.1.2).
+- **Gates:**
+  - `compositor_gate`: a word saved while typing, and a bad line;
+  - this host: `renderer` 84 pass, `renderer-gles` 64;
+  - `all` 186 pass, 11 skip, 4 failures. `under_text_picture`,
+    `native_join_pty`, `hibr_join_viewport` and `login_desktop_observer`
+    timed out or stalled while the host's 15-minute load average was 4.5
+    (not this session's work). Each passed 3 of 3 alone.
+- **Live, the mini PC:**
+  - with the owner's OK, hibr-ime and hibr-ime-arabizi upgraded to 0.1.2
+    through apt (`dpkg --audit` clean);
+  - then the pair update to 0.3.105, verified;
+  - the keyboard is named "Arabic (Arabizi)" from `info`, and the dry run
+    gives "ana b5eir" → "أنا بخير".
+  - The owner reports Arabizi converting in YouTube's search (Firefox
+    through blit-compositor) and in Hibr's own fields.
+  - Hibr's terminal windows don't convert there: an unpackaged
+    /var/lib/hibr/apps/term.hibr 1.0, from Oct 15, may be shadowing
+    Terminal 1.8.3. Reported to hibr; it's the owner's call.
+- **Published** to hibr-apt.
+
 ## 2026-11-13: 0.3.104 the time a shaken pointer takes to shrink back
 
 - **The setting:** `shake_shrink_ms` (150–3000, default 900, the 0.3.102
