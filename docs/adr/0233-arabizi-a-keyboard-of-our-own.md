@@ -9,6 +9,45 @@
   Hibr's desktop, to Wayland programs and to X programs, and its Control
   Panel tuning.
 
+## Amended 2026-11-13: where Arabizi lives
+
+The owner decided Arabizi is its own product, **hibr-arabizi**
+(itdlabs/hibr-arabizi). It has its own version, its own deb, rpm and Arch
+packages, and its own catalogue entry, on hibr-browser's pattern, and is
+not in hibr by default. That repository holds:
+- the engine (arabizi.c and arabizi.h, LGPL-3.0-or-later);
+- the rules;
+- the word lists (CC BY-SA 4.0, credited);
+- the hibr module, the Control Panel pane and the tests.
+
+**One engine, two hosts.**
+- **hibr** runs it as a module for its own fields and terminal windows,
+  wherever hibr runs (on Blit, a Mac, over ssh). It draws the preedit
+  itself.
+- **Blit** is an adaptor. It compiles arabizi.c from a pinned hibr-arabizi
+  tag and runs the engine only where hibr can't: while a program window has
+  the keys (Wayland through text-input-v3, X by word commits) or when no
+  hibr desktop runs.
+- **A hibr desktop field** gets plain keys from Blit, as before.
+
+**What this replaces below:**
+- the `TEXT field` and `TEXT preedit` contract with the desktop, which is
+  withdrawn;
+- "an input method in Blit" for desktop fields;
+- Blit's state directory for the user's words. The user's words, choices
+  and Control Panel are hibr-arabizi's, per user, in hibr.
+
+**What stays:**
+- Blit's keyboard list holds the Arabizi entry;
+- the engine's behaviour, rules, gates and measurements;
+- the phases, now split between the two repositories.
+
+hibr keeps a general input-method hook (hibr #543) and the tashkeel
+fixes in its fields (hibr #542).
+
+Blit 0.3.100 carries a copy of the engine (src/blit_arabizi.h) behind its
+dry run only. It is removed when Blit pins the first hibr-arabizi tag.
+
 ## Context
 
 The owner asked for:

@@ -64,7 +64,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Drag and drop | Hibr | `CLIP` extended with a drag | later |
 | Activation: a program asks for its window's focus (xdg_activation's token; an X program's `_NET_ACTIVE_WINDOW`, or X's focus taken itself and put back) | program asks, Hibr decides (its focus-stealing setting) | `WINDOW activate <id> x-focus\|x-active\|xdg-activation`; granted with `WINDOW size ... activated` | 0.3.86 |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |
-| Text input and input methods | Hibr | zwp_text_input_v3 | later |
+| Text input and input methods | Hibr (the desktop's fields); the engine itself is hibr-arabizi's, also run by Blit while a program window has the keys (ADR 0233, amended 2026-11-13) | zwp_text_input_v3 in blit-compositor for program windows | later |
 | Displays: which there are, their places, names and refresh, the primary (programs' wl_outputs, X's RandR outputs and primary) | Hibr (its layout of Blit's displays) | `WINDOW layout <name> <x> <y> <w> <h> <mHz>`, `WINDOW layout end`, `WINDOW primary <name>`; a window's display by `WINDOW output` | 0.3.88 (Hibr #514) |
 | Scale (HiDPI): viewporter, fractional scale | Blit's outputs | `WINDOW output` with a scale | later |
 | Portals: colour scheme, settings, notifications, screenshots | Hibr (Blit for screenshots) | D-Bus, xdg-desktop-portal | colour scheme with phase 2 (ADR 0228) |

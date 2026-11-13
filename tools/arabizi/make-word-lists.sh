@@ -1,18 +1,19 @@
 #!/bin/sh
-# tools/arabizi/make-word-lists.sh
+# make-word-lists.sh [OUTDIR]
 #
 # ADR 0233: the Arabizi engine's word lists, made from Hermit Dave's
 # FrequencyWords (OpenSubtitles 2018 counts, content CC-BY-SA-4.0) at a
-# pinned commit, so the same files come out every time. Writes
-# assets/arabizi/ar-words.txt (the 100,000 most frequent Arabic words,
+# pinned commit, so the same files come out every time. Writes, in OUTDIR
+# (by default assets/arabizi beside this script's tree), ar-words.txt (the 100,000 most frequent Arabic words,
 # Arabic letters only, seen at least 3 times) and en-words.txt (the 50,000
 # most frequent English words, used only to leave English typed as English),
-# and checks them against the sums recorded below.
+# and prints their sums.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 COMMIT=525f9b560de45753a5ea01069454e72e9aa541c6
 BASE=https://raw.githubusercontent.com/hermitdave/FrequencyWords/$COMMIT/content/2018
-OUT=$ROOT/assets/arabizi
+OUT=${1:-$ROOT/assets/arabizi}
+mkdir -p "$OUT"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
