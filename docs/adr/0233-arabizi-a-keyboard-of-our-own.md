@@ -45,7 +45,10 @@ offered. Both are one key, one letter.
 - 218 lines of mixed-dialect Arabizi with their Arabic, written by Blit's
   maintainer.
 - 26 lines of the owner's own Levantine typing, as they wrote them; the
-  owner confirmed the Arabic for each. Held out: never tuned on.
+  owner confirmed the Arabic for each. Kept privately, never in this
+  repository: it is personal. It was held out for the first score, but
+  rules were then added from its misses, so it no longer is. A fresh set
+  from the owner is the held-out one, scored as a number only.
 
 **Scores** (whole-line exact match; "loose" counts hamza seats and ة/ه as
 equal):
@@ -58,7 +61,7 @@ equal):
 The gap on the owner's lines is the finding:
 - **Dialect words:** Levantine words (منيحة, مناح, رايحين, اشتقتلكم) are
   rare in a subtitle-based list.
-- **Names:** Ghina, Mansi, Nawara.
+- **Names:** the people the owner writes to.
 - **English mixed in:** "all is well my friends", "Chicken Nuggets".
 - **Context:** "3am" is عم before a verb and عام before a noun.
 - **Classical endings:** in salamu, ra7matu, allahu the final vowel is a
@@ -66,6 +69,16 @@ The gap on the owner's lines is the finding:
 
 A bigger list didn't help: 100,000 words scored 82% and 610,000 scored
 83% on the maintainer's set.
+
+These scores are provisional on three counts. They have to be measured
+again before any gate threshold is set:
+- **Look-ahead:** the prototype converted whole lines, joining across
+  spaces (el bait → البيت, wa barakato → وبركاته), which typing key by key
+  can only do by holding the preedit (below).
+- **Metric:** whole-line exact match is too coarse; word accuracy is the
+  primary measure.
+- **Word list:** they used the 610,000-word list, not the 100,000-word file
+  that ships.
 
 ### Tashkeel today
 
@@ -119,8 +132,22 @@ current keyboard and a text field has focus (below).
 
 - **Keys:** Latin letters, digits, apostrophe and hyphen build a *preedit*:
   the Latin typed so far in this word and its best Arabic reading.
-- **Commit:** a space, punctuation, Enter or Tab commits the reading and
-  then passes the key on (punctuation becomes ؟ ، ؛).
+- **Commit:** a space or Enter commits the reading, then passes as its
+  key. Punctuation commits too, but differently: the converted mark (؟ ، ؛,
+  or the punctuation as typed) is the last character of the same commit,
+  and the original key is not passed.
+- **Tab:** cycles the candidates while a preedit exists, and passes as Tab
+  when none does, since dialogs move the focus with it.
+- **Held across a space:** an article (el, al, il, and the sun-letter forms
+  esh, en, ...), a conjunction (wa, w, ou, o), or a word that can begin a
+  fixed phrase (in, ma, ...) stays in the preedit when a space follows.
+  The next word then joins it (البيت, وبركاته, إن شاء الله). A second
+  space, punctuation, Enter, or a next word that does not continue the
+  phrase commits what is held, as its own reading, and typing goes on.
+  The preedit may span words, but the engine never deletes.
+- **The dry run is the same code:** the endpoint and the corpus gate feed
+  the text key by key through the engine. They have no second path that
+  sees the whole line.
 - **Backspace with a preedit:** takes one Latin letter back, and the
   reading is recomputed.
 - **Escape:** cancels the preedit.
@@ -130,8 +157,10 @@ current keyboard and a text field has focus (below).
 - **Focus lost mid-word:** commits by default. The setting **On Focus
   Loss** offers commit or drop.
 - **No text field focused:** the Arabizi keyboard types plain US keys, so
-  menus, lists, type-to-search without a field and shortcut capture behave
-  as they always do.
+  menus, lists and shortcut capture behave as they always do. While a
+  menu, a dropdown or a confirm box is open over a focused field (they take
+  the keys), the desktop sends `TEXT field off`, then `TEXT field on` again
+  when it closes. Type-to-search is the one menu that is a field.
 - **Real digits:** a word of digits only stays digits (2024, 24/7). A digit
   next to a letter is a letter. To type a digit inside a word, use the
   **Literal key** setting (default: a backquote before the digit, `` `3 ``).
@@ -175,8 +204,8 @@ Panel could have named.
 
 1. **My Words:** the user's own Arabizi → Arabic entries (names, family
    words, spellings). They win over every rule and score, applied at once.
-2. **Choosing:** a key (Tab by default) cycles the preedit through its next
-   candidates before committing. The pick is remembered as a My Words entry
+2. **Choosing:** Tab (the Candidates key) cycles the preedit through its
+   next candidates while a preedit exists. The pick is remembered as a My Words entry
    when **Learn From My Choices** is on.
 3. **Retraining:** opt-in and local. Committed words and the user's
    choices are kept in Blit's state directory (never sent anywhere), and the
@@ -296,8 +325,10 @@ The scorer exists so that people needn't type it strictly.
 ## Evidence (to be recorded per phase)
 
 - **The corpus gate:**
-  - the maintainer's and the owner's sets as `tools/tests/arabizi/*.tsv`;
-  - exact and loose scores, held-out sets reported apart;
+  - the maintainer's set as `tools/tests/arabizi/*.tsv`;
+  - the owner's sets read from a private path outside the repository when
+    present, and reported as numbers only;
+  - word accuracy primary, line accuracy beside it, exact and loose;
   - a threshold that only rises.
   - Target on the owner's typing: 95% exact once My Words and the model are
     in. 100% for every word the owner has corrected once.
