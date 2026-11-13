@@ -9,6 +9,28 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-13: 0.3.107 a mouse's back and forward; button chords kept as shortcuts
+
+- **Further buttons** (X 8 to 11: BTN_SIDE, BTN_EXTRA, BTN_FORWARD,
+  BTN_BACK) reach program routes (`INPUT btn`), the input stream and API
+  injection. Blit dropped them before, so back and forward did nothing in
+  Firefox.
+- **Button chords in `INPUT keep`** (`button<N>`, Hibr #540, agreed with
+  Hibr), with no names, since `left`/`right` are arrow keys. A kept chord
+  goes to no route. A further button reaches a terminal as 128 to 131 only
+  when its session keeps the chord, because Hibr before 0.99.522 reads 128
+  as a left press. Hibr 0.99.522 falls back on EINVAL against an older
+  Blit.
+- **Gates on this host:** `all` 190 pass, 11 skip; `renderer` 84;
+  `renderer-gles` 63 with one failure: `presentation_effects` counted 1
+  swaying frame of 20 where it wants 2, with timing sampled under the
+  other sessions' load. It passed 6 of 7 alone. This release doesn't
+  touch effects, and the same gate passed in 0.3.106's full run.
+- **Live, the mini PC:** the pair update to 0.3.107 was verified.
+- **Published** to hibr-apt (signature good, GitHub matches). longwire was
+  unreachable, so no HOLD could be sent; the push went cleanly onto
+  origin/main.
+
 ## 2026-11-13: 0.3.106 the busy pointer; input methods only in free text
 
 - **The busy pointer** (ADR 0235, agreed with Hibr): blit-compositor pings
