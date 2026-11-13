@@ -341,7 +341,10 @@ if [ -f "$compositor_package" ]; then
         exit 1
     }
     if strings "$cstage/usr/bin/blit-compositor" |
-            sed -E 's#/tmp/\.X(11-unix(/X%d)?|%d-lock|<n>-lock)##g' | grep -F -e "$root" -e /tmp/ >/dev/null; then
+            sed -E 's#/tmp/\.X(11-unix(/X%d)?|%d-lock|<n>-lock)##g' |
+            grep -E -e "(^|[^[:alnum:]_./-])$root(/|\$)" -e /tmp/ >/dev/null; then
+        # The checkout's root as a path of its own: /blit/src/... in the
+        # build environment, but not /usr/share/blit, which ends in it.
         echo "PACKAGE_ARTIFACT_FAIL blit-compositor records a build path" >&2
         exit 1
     fi
