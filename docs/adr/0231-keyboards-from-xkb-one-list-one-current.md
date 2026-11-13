@@ -158,6 +158,9 @@ Option 3.
   made through the API, a switch, EINVAL, opt-in). The compose data is
   libx11-data's, which the `blit` package now depends on.
 
-Still to come: an X client (`xwayland_gate`) reading the same text as a
-terminal after a switch; the Wayland client's keymap after a switch is in
-`compositor_gate`, and X programs take theirs from it through Xwayland.
+- X programs, 2026-11-13: `xwayland_gate`. Blit's ara(mac-phonetic)
+  keymap is sent as the next revision. S reaches the X stand-in as keysym
+  arabic_seen (0x5d3, the س a terminal types; the X server's mapping read
+  at the key), after `s` (0x73) under US, and `s` again after the US
+  keymap returns. It runs in the build environment with Xwayland 24.1,
+  under ASan and UBSan as well.

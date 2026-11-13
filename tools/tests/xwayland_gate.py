@@ -25,6 +25,10 @@ order:
   - Blit's input on the window's socket (with blit-server's keymap, as
     Blit sends it, when a blit-server is given): a click at 10,12 reaching
     the X client as ButtonPress 1 at 10,12, a key (evdev 30) as KeyPress 38;
+  - a keyboard switch (ADR 0231), with a blit-server: Blit's keymap for
+    ara(mac-phonetic) sent as the next revision, S reaching the X client
+    as keysym arabic_seen (0x5d3, the س a terminal types), and after the
+    US keymap again as s;
   - the space bar: 150 frames drawn, and the compositor's measure of its
     first 60 frames, commit to frame sent (printed);
   - Xwayland alive after its AccessX timeout has expired since the last
@@ -274,10 +278,11 @@ def wayland_globals(path):
 
 def blit_keymap(server, work):
     """Blit's keymap and repeat, from a blit-server of the gate's own with
-    one fabricated keyboard (as compositor_gate's input part), or None
-    without a server."""
+    one fabricated keyboard (as compositor_gate's input part), and the
+    keymap Blit serves once ara(mac-phonetic) is the current keyboard (ADR
+    0231); Nones without a server."""
     if not server or not os.access(server, os.X_OK):
-        return None, None
+        return None, None, None
     nodes = os.path.join(work, 'nodes')
     os.mkdir(nodes)
     open(os.path.join(nodes, 'event1'), 'w').close()
@@ -296,7 +301,12 @@ def blit_keymap(server, work):
         answer = urllib.request.urlopen(cg.BASE + '/v1/input/keymap', timeout=10)
         keymap = answer.read()
         repeat = (int(answer.headers['X-Blit-Repeat-Rate']), int(answer.headers['X-Blit-Repeat-Delay']))
-        return keymap, repeat
+        cg.api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'},
+                                                             {'layout': 'ara', 'variant': 'mac-phonetic'}],
+                                              'current': 1})
+        arabic = urllib.request.urlopen(cg.BASE + '/v1/input/keymap', timeout=10).read()
+        check(arabic != keymap, 'Blit served the US keymap for the Arabic keyboard')
+        return keymap, repeat, arabic
     finally:
         blit.terminate()
         try:
@@ -1440,7 +1450,7 @@ def x_layout_part(desk, lines_to, printed, log):
 
 
 def x_part(compositor, standin, server, work, wl_standin=None):
-    keymap, repeat = blit_keymap(server, work)
+    keymap, repeat, arabic = blit_keymap(server, work)
     runtime = os.path.join(work, 'run')
     os.mkdir(runtime, 0o700)
     name = 'blit-xwayland-gate-%d' % os.getpid()
@@ -1506,15 +1516,20 @@ def x_part(compositor, standin, server, work, wl_standin=None):
 
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[1])
-        if keymap:
+        def send_keymap(text, revision):
+            """Blit's keymap as Blit sends it: sealed, on the route."""
+            seen = open(log).read().count('keymap: %d bytes from Blit' % len(text))
             memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
-            os.write(memfd, keymap + b'\0')
+            os.write(memfd, text + b'\0')
             fcntl.fcntl(memfd, 1033, 0x0f)  # F_ADD_SEALS: seal, shrink, grow, write
-            socket.send_fds(route, [b'INPUT keymap %d 7 %d %d %d\n' % (BLIT_PICTURE, len(keymap) + 1, repeat[0],
-                                                                         repeat[1])], [memfd])
+            socket.send_fds(route, [b'INPUT keymap %d %d %d %d %d\n' % (BLIT_PICTURE, revision, len(text) + 1,
+                                                                          repeat[0], repeat[1])], [memfd])
             os.close(memfd)
-            wait_for(lambda: 'keymap: %d bytes from Blit' % len(keymap) in open(log).read(),
+            wait_for(lambda: open(log).read().count('keymap: %d bytes from Blit' % len(text)) > seen,
                      lambda: 'the compositor did not take Blit\'s keymap:\n' + open(log).read())
+
+        if keymap:
+            send_keymap(keymap, 7)
         frame = [0]
 
         def lines_to(*lines):
@@ -1530,6 +1545,26 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         lines_to('key %%d %d press' % KEY_A, 'key %%d %d release' % KEY_A)
         wait_for(lambda: 'XSTANDIN key %d' % (KEY_A + 8) in printed(),
                  lambda: 'the key did not reach the X client as keycode %d:\n%s' % (KEY_A + 8, printed()))
+
+        # ADR 0231: a keyboard switch, as Blit makes it (the current
+        # keyboard's keymap, the next revision), reaches X programs through
+        # Xwayland: S types what it types in a terminal (kitty_keyboard_gate:
+        # س under ara(mac-phonetic)), arabic_seen, and s again after the
+        # switch back. Keysyms as the X server maps them at the key.
+        switched = 'none'
+        if arabic:
+            def key_sym(code, sym, why):
+                before = len(printed().splitlines())
+                lines_to('key %%d %d press' % code, 'key %%d %d release' % code)
+                wait_for(lambda: any(line == 'XSTANDIN key-sym %d 0x%x' % (code + 8, sym)
+                                     for line in printed().splitlines()[before:]),
+                         lambda: '%s: wanted key %d sym 0x%x:\n%s' % (why, code + 8, sym, printed()))
+            key_sym(KEY_S, 0x73, 'S under US')
+            send_keymap(arabic, 8)
+            key_sym(KEY_S, 0x5d3, 'S after the switch to ara(mac-phonetic)')
+            send_keymap(keymap, 9)
+            key_sym(KEY_S, 0x73, 'S after the switch back to US')
+            switched = 'ara:%dB' % len(arabic)
 
         # 150 drawings (Xwayland commits at most one a refresh, so some
         # coalesce): the compositor's measure of the window's first 60 frames.
@@ -1625,10 +1660,10 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         check(not os.path.exists('/tmp/.X11-unix/X%d' % number) and not os.path.exists(lock),
               'the X socket or lock outlived the compositor')
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
-                '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s measure=min %s us median %s us '
+                '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s switch=%s measure=min %s us median %s us '
                 '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s %s '
                 '%s %s close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
-                'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none',
+                'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none', switched,
                                      measure.group(1), measure.group(2), frames, milestone_c, milestone_d, focus,
                                      layout, restart,
                                      len(desk.cursors)))

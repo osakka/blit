@@ -101,6 +101,9 @@
      XSTANDIN active-asked dialog        the K key
      XSTANDIN menu-focused               the Z menu took X's focus
      XSTANDIN key <keycode>              a KeyPress
+     XSTANDIN key-sym <keycode> <keysym> after it, the keysym the X server
+                                         maps it to now (level 1, or 2 with
+                                         Shift): an X program's text
      XSTANDIN undecorated|decorated      the D key
      XSTANDIN button <n> <x>,<y>         a ButtonPress, in the window
      XSTANDIN animated <n>
@@ -902,6 +905,24 @@ static void paste_chunk(const xcb_property_notify_event_t *pn)
     free(r);
 }
 
+/* The keysym the X server maps a keycode to at the moment of the key, read
+   with the core GetKeyboardMapping each time, so a keymap Xwayland was
+   given since (a keyboard switch, ADR 0231) is the one read. */
+static uint32_t key_symbol(xcb_keycode_t code, uint16_t state)
+{
+    xcb_get_keyboard_mapping_reply_t *map =
+        xcb_get_keyboard_mapping_reply(conn, xcb_get_keyboard_mapping(conn, code, 1), NULL);
+    uint32_t sym = 0;
+    if (map != NULL) {
+        xcb_keysym_t *syms = xcb_get_keyboard_mapping_keysyms(map);
+        int per = map->keysyms_per_keycode;
+        int level = (state & XCB_MOD_MASK_SHIFT) && per > 1 ? 1 : 0;
+        if (per > 0) sym = syms[level] ? syms[level] : syms[0];
+        free(map);
+    }
+    return sym;
+}
+
 static void clip_key(uint8_t code, xcb_timestamp_t time)
 {
     switch (code) {
@@ -1149,6 +1170,7 @@ int main(int argc, char **argv)
                     break;
                 }
                 say("key %u", k->detail);
+                say("key-sym %u 0x%x", k->detail, key_symbol(k->detail, k->state));
                 clip_key(k->detail, k->time);
                 if (k->detail == KEYCODE_D) {
                     /* flags (MWM_HINTS_DECORATIONS, 2), functions,
