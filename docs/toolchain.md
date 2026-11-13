@@ -90,7 +90,12 @@ The server and the compositor build in the input methods of **hibr-ime**
 (ADR 0233), from a checkout of the tag named in `packaging/IME_VERSION`.
 It is at `build/hibr-ime-<version>` (inside the checkout, so the build
 environment sees it) or wherever `BLIT_IME_ROOT` names. Its `VERSION` must
-match, or the build stops. Blit calls `include/ime.h` only. To get it:
+match, or the build stops. Blit calls `include/ime.h` only.
+`tools/build-flags.sh` is the one place that knows the pin: `--cflags
+server|compositor` carries its include directories, `--libs` its `-lm`,
+`--ime-sources` its sources, and `--sources server` the server's sources
+besides `src/blit_server.c` (with hibr-ime's), for the build and every
+gate that compiles the server itself. To get it:
 `git clone --branch v<version> https://git.home.arpa/itdlabs/hibr-ime.git build/hibr-ime-<version>`.
 
 **tcc compiles, the system linker links** (from 0.3.87): each source is

@@ -6,18 +6,6 @@ output=${1:-$ROOT/build/blit/blit-server}
 target=${2:-server}
 version=$(sed -n '1p' "$ROOT/packaging/VERSION")
 hibr_version=$(sed -n '1p' "$ROOT/packaging/HIBR_VERSION")
-# hibr-ime (ADR 0233, amended): the input methods, built in from a pinned
-# tag's checkout, as Hibr's adapter is from a pinned Hibr tree. Blit calls
-# include/ime.h only.
-ime_version=$(sed -n '1p' "$ROOT/packaging/IME_VERSION")
-ime_root=${BLIT_IME_ROOT:-$ROOT/build/hibr-ime-$ime_version}
-ime_sources() {
-    if [ "$(sed -n '1p' "$ime_root/VERSION" 2>/dev/null)" != "$ime_version" ]; then
-        echo "blit: hibr-ime $ime_version not found at $ime_root (set BLIT_IME_ROOT)" >&2
-        exit 1
-    fi
-    ls "$ime_root"/src/*.c "$ime_root"/methods/*/*.c
-}
 hibr_abi=$(sed -n '1p' "$ROOT/packaging/HIBR_ABI")
 
 case "$version" in
@@ -66,10 +54,8 @@ case "$target" in
             "-DBLIT_BUILD_VERSION=\"$version\"" \
             "-DBLIT_HIBR_VERSION=\"$hibr_version\"" \
             "-DBLIT_HIBR_ABI=$hibr_abi" \
-            -I"$ime_root/include" -I"$ime_root/src" $cflags -- \
-            "$ROOT/src/blit_server.c" "$ROOT/src/blit_kms.c" "$ROOT/src/blit_vt.c" \
-            "$ROOT/src/blit_font.c" "$ROOT/src/blit_raster.c" \
-            $(ime_sources)
+            $cflags -- \
+            "$ROOT/src/blit_server.c" $("$ROOT/tools/build-flags.sh" --sources server)
         # shellcheck disable=SC2046,SC2086
         "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -ldl
         ;;
@@ -157,11 +143,8 @@ case "$target" in
             echo "$proto/$base-protocol.c" >> "$proto/sources"
         done
         # The input methods (hibr-ime, ADR 0233): the compositor runs them
-        # for program windows through text-input-v3, so every build of the
-        # compositor (the gates' too) compiles $proto/ime with the include
-        # flags in $proto/include. The protocol list stays the clients' too.
-        ime_sources > "$proto/ime"
-        printf '%s\n' "-I$ime_root/include" "-I$ime_root/src" > "$proto/include"
+        # for program windows through text-input-v3; their sources come from
+        # build-flags.sh --ime-sources, their headers with --cflags.
         # No -g: the package (packaging/build-deb.sh, blit-compositor) must
         # be the same bytes from any checkout, and tcc 0.9.27 records the
         # compiler's working directory and each source's path in its stabs
@@ -171,10 +154,10 @@ case "$target" in
         # shellcheck disable=SC2046,SC2086
         compile -O2 -std=c99 \
             "-DBLIT_BUILD_VERSION=\"$version\"" \
-            -I"$ROOT/src" -I"$proto" $(cat "$proto/include") $cflags -- \
-            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources") $(cat "$proto/ime")
+            -I"$ROOT/src" -I"$proto" $cflags -- \
+            "$ROOT/src/blit_compositor.c" $(cat "$proto/sources") $("$ROOT/tools/build-flags.sh" --ime-sources)
         # shellcheck disable=SC2046,SC2086
-        "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -lm -ldl
+        "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -ldl
         ;;
     *)
         echo "blit: unknown TCC target '$target' (use server, helper, adapter, or compositor)" >&2

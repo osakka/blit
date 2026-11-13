@@ -21,4 +21,9 @@ module BuildFlags
   def self.libs(*groups)
     ask('--libs', groups)
   end
+
+  # The server's C sources besides src/blit_server.c, hibr-ime's with them.
+  def self.server_sources
+    ask('--sources', ['server'])
+  end
 end

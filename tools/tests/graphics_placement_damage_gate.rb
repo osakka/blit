@@ -11,7 +11,7 @@ at_exit { [out, native].each { |path| File.delete(path) if File.file?(path) } }
 runner = ENV['BLIT_GRAPHICS_VALGRIND'] == '1' ? %w[valgrind --error-exitcode=99 --leak-check=full --errors-for-leak-kinds=definite,indirect] : []
 abort 'build failed' unless system('tcc', '-O2', '-std=c99',
   *BuildFlags.cflags('server'), 'tools/tests/graphics_placement_damage_gate.c',
-  'src/blit_kms.c', 'src/blit_vt.c', 'src/blit_font.c', 'src/blit_raster.c',
+  *BuildFlags.server_sources,
   *BuildFlags.libs('server'), '-o', out)
 abort 'graphics placement damage failed' unless system(*runner, out)
 abort 'native build failed' unless system('tcc', '-O2', '-std=c99',

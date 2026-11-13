@@ -15,6 +15,16 @@
 #                                      ships no pkg-config file, so it is
 #                                      found in the same share directory)
 #   build-flags.sh --scanner           the wayland-scanner program
+#   build-flags.sh --ime-sources       hibr-ime's C sources, built into the
+#                                      server and the compositor
+#   build-flags.sh --sources server    the server's C sources besides
+#                                      src/blit_server.c (which a gate may
+#                                      include instead), hibr-ime's with them
+#
+# hibr-ime (ADR 0233): the input methods, built in from a checkout of the
+# tag in packaging/IME_VERSION -- build/hibr-ime-<version>, or BLIT_IME_ROOT
+# -- whose VERSION must match. The server's and the compositor's --cflags
+# carry its include directories and their --libs its -lm.
 #
 # Groups:
 #   server      blit-server: libdrm, FreeType, HarfBuzz (link only), zlib,
@@ -105,6 +115,16 @@ require() {
     done
 }
 
+# The pinned hibr-ime checkout's directory; stops when it is not there.
+ime_root() {
+    here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+    version=$(sed -n '1p' "$here/packaging/IME_VERSION")
+    root=${BLIT_IME_ROOT:-$here/build/hibr-ime-$version}
+    [ "$(sed -n '1p' "$root/VERSION" 2>/dev/null)" = "$version" ] ||
+        die "hibr-ime $version not found at $root (packaging/IME_VERSION; set BLIT_IME_ROOT; docs/toolchain.md)"
+    echo "$root"
+}
+
 # flags --cflags|--libs GROUP...
 flags() {
     kind=$1
@@ -120,6 +140,16 @@ flags() {
             modules="$modules $lmods"
             extras="$extras $extra"
         fi
+        case $name in
+        server|compositor)
+            if [ "$kind" = --cflags ]; then
+                ime=$(ime_root) || exit 1
+                extras="$extras -I$ime/include -I$ime/src"
+            else
+                extras="$extras -lm"
+            fi
+            ;;
+        esac
     done
     # shellcheck disable=SC2086
     require $modules
@@ -183,6 +213,17 @@ case $1 in
     [ -f "$dir/appmenu.xml" ] ||
         die "plasma-wayland-protocols' appmenu.xml not found under $dir (docs/toolchain.md)"
     echo "$dir"
+    ;;
+--ime-sources)
+    ime=$(ime_root) || exit 1
+    ls "$ime"/src/*.c "$ime"/methods/*/*.c
+    ;;
+--sources)
+    [ "${2:-}" = server ] || die "usage: build-flags.sh --sources server"
+    here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+    ime=$(ime_root) || exit 1
+    for f in blit_kms.c blit_vt.c blit_font.c blit_raster.c; do echo "$here/src/$f"; done
+    ls "$ime"/src/*.c "$ime"/methods/*/*.c
     ;;
 --scanner)
     scanner=$(variable wayland-scanner wayland_scanner)
