@@ -18,3 +18,6 @@ BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools
 # under it, the keys' the focused one (docs/api.md).
 printf '2 0 0 0\n1 1024 768\n2 1024 768\n' > "$GATE_DISPLAY_DIR/state"
 BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools/tests/frame_input_gate.py displays
+# The same two displays: their refresh rates on the channel, for a desktop
+# the login manager started (`DISPLAY rate`).
+BLIT_GATE_SERVER_ENV="$GATE_DISPLAY_ENV ${BLIT_GATE_SERVER_ENV:-}" python3 tools/tests/frame_input_gate.py rates

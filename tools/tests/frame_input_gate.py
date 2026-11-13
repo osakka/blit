@@ -1431,6 +1431,39 @@ def scans():
             r.close()
 
 
+def rates():
+    """The display's refresh rate on the frame channel, for a desktop the
+    login manager started (no API token, so no GET /v1/displays). Two
+    displays at 60 and 74.973 Hz, a session on each: `DISPLAY rate` is
+    answered `DISPLAY rate <mHz>` for the channel's own display (rounded
+    to the mHz), and told again when the session moves to the other
+    display; a channel that did not ask is told nothing; anything else is
+    `DISPLAY error EINVAL`."""
+    work = tempfile.mkdtemp(prefix='blit-input-rates-gate-')
+    server = Server(19840 + OFFSET, work, {'BLIT_TEST_REFRESH_HZ': '60,74.973'})
+    channels = []
+    try:
+        a = Session(server, work, 'a', 'display-1')
+        b = Session(server, work, 'b', 'display-2')
+        cha, chb, quiet = Channel(a), Channel(b), Channel(a)
+        channels.extend((cha, chb, quiet))
+        check(cha.ask('DISPLAY rate\n') == b'DISPLAY rate 60000\n', 'display-1 was not 60000 mHz')
+        check(chb.ask('DISPLAY rate\n') == b'DISPLAY rate 74973\n', 'display-2 was not 74973 mHz')
+        for bad in ('DISPLAY what', 'DISPLAY rate now', 'DISPLAY ratex', 'DISPLAY '):
+            check(cha.ask(bad + '\n') == b'DISPLAY error EINVAL\n', '%r was not EINVAL' % bad)
+        server.api('PATCH', '/v1/terminal-sessions/%s' % a.id, {'display_id': 'display-2'})
+        moved = cha.reply(3.0)
+        check(moved == b'DISPLAY rate 74973\n', 'the move to display-2 was told %r' % moved)
+        check(cha.reply(0.3) == b'', 'the rate was told twice')
+        check(quiet.reply(0.3) == b'', 'a channel that did not ask was told the rate')
+        check(cha.ask('DISPLAY rate\n') == b'DISPLAY rate 74973\n', 'asking again was not answered')
+        return 'rate=60000,74973 moved=74973 once einval=4 opt-in'
+    finally:
+        for ch in channels:
+            ch.close()
+        server.stop()
+
+
 if __name__ == '__main__':
     mode = sys.argv[1] if len(sys.argv) > 1 else 'local'
     if mode == 'sock':
@@ -1442,5 +1475,8 @@ if __name__ == '__main__':
     elif mode == 'displays':
         TAG = 'FRAME_INPUT_DISPLAYS'
         print('FRAME_INPUT_DISPLAYS_PASS %s' % displays())
+    elif mode == 'rates':
+        TAG = 'FRAME_INPUT_RATES'
+        print('FRAME_INPUT_RATES_PASS %s' % rates())
     else:
         local()

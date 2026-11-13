@@ -1978,6 +1978,17 @@ A client may also be sent `HUD1 on` or `HUD1 off` lines, and may send STA1
 status lines for the performance panel (a malformed one is answered
 `FRAME error 0 EINVAL`); see "Performance panel".
 
+A client may send `DISPLAY rate` (from 0.3.98) to learn the refresh rate of
+the display its session is on: it is answered `DISPLAY rate <mHz>` (the
+mode's rate in millihertz, `60000` for 60 Hz, `74973` for 74.973 Hz) and
+sent the line again whenever that changes: a mode set, displays rescanned,
+or the session moved to another display. It is for a desktop with no API
+token (one the login manager started), which cannot read `refresh_hz`
+from `GET /v1/displays`. Opt-in, as `KEYBOARD list` is: a channel that
+never asked is told nothing. Another `DISPLAY` line is answered
+`DISPLAY error EINVAL`. A desktop with a channel per display hears each
+display's own rate on its channel.
+
 A client may send frames whose pixels are already in
 GPU memory: `FRM3`, a 72-byte header with the DRM fourcc, the format
 modifier and up to four planes, their dmabuf descriptors (and optionally an

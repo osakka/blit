@@ -826,6 +826,48 @@ static void frame_hud_notify(BlitRuntime *runtime)
     }
 }
 
+/* The refresh rate of the display a channel's session is on, for a
+   desktop the login manager started (no API token, so no GET
+   /v1/displays): a channel that sends `DISPLAY rate` is answered
+   `DISPLAY rate <mHz>` and told again whenever that changes -- a mode
+   set, a rescan, the session moved to another display. Checked once a
+   turn, as HUD1 is. Opt-in; anything else is `DISPLAY error EINVAL`. */
+static void frame_display_rate_notify(BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        BlitSession *session;
+        unsigned long mhz;
+        char line[48];
+        if (!client->used || !client->authenticated || !client->rate_wanted)
+            continue;
+        session = find_session_id(runtime, client->session_id);
+        if (session == NULL)
+            continue;
+        mhz = (unsigned long)(output_refresh_hz(runtime, session_output_index(runtime, session)) *
+                              1000.0 + 0.5);
+        if (mhz == client->rate_sent_mhz)
+            continue;
+        client->rate_sent_mhz = mhz;
+        snprintf(line, sizeof(line), "DISPLAY rate %lu\n", mhz);
+        frame_reply(client->fd, line);
+    }
+}
+
+static void frame_display_request(BlitRuntime *runtime, BlitFrameClient *client,
+                                  const unsigned char *message, size_t length)
+{
+    if ((length == 12 || (length == 13 && message[12] == '\n')) &&
+        memcmp(message, "DISPLAY rate", 12) == 0) {
+        client->rate_wanted = 1;
+        client->rate_sent_mhz = 0;   /* answered now, whatever was told before */
+        frame_display_rate_notify(runtime);
+    } else {
+        frame_reply(client->fd, "DISPLAY error EINVAL\n");
+    }
+}
+
 /* ADR 0228: `WINDOW <event> <id> ...` is answered `WINDOW error <id>
    ENOTSUP`: Blit reached directly places no program windows, the desktop
    does. The id is the line's third word, 0 when it has none or it cannot
@@ -1011,6 +1053,15 @@ static void frame_client_service(BlitRuntime *runtime, int index)
                 frame_reply(client->fd, "KEYBOARD error EINVAL\n");
             else
                 frame_keyboards_request(runtime, client, message, (size_t)got);
+            continue;
+        }
+        if (got >= 8 && memcmp(message, "DISPLAY ", 8) == 0) {
+            /* A line, no descriptor. */
+            for (j = 0; j < fd_count; ++j) close(fds[j]);
+            if (fd_count != 0 || (header.msg_flags & (MSG_TRUNC | MSG_CTRUNC)))
+                frame_reply(client->fd, "DISPLAY error EINVAL\n");
+            else
+                frame_display_request(runtime, client, message, (size_t)got);
             continue;
         }
         if (got >= 7 && memcmp(message, "WINDOW ", 7) == 0) {

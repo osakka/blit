@@ -985,6 +985,10 @@ typedef struct {
     /* ADR 0231: sent `KEYBOARD list`, so told the keyboards and every
        change of them (blit_frames.h, frame_keyboards). */
     int keyboards_wanted;
+    /* Sent `DISPLAY rate`, so told its display's refresh rate and every
+       change of it; the last told, in mHz (blit_frames.h). */
+    int rate_wanted;
+    unsigned long rate_sent_mhz;
 } BlitFrameClient;
 
 #define BLIT_FRAME_DELETED 64
@@ -2067,6 +2071,7 @@ static void recent_note_present(BlitRuntime *runtime, int output,
 static void recent_tick(BlitRuntime *runtime, uint64_t now);
 static void recent_json(const BlitRuntime *runtime, int output, char *out, size_t capacity);
 static void frame_hud_notify(BlitRuntime *runtime);
+static void frame_display_rate_notify(BlitRuntime *runtime);
 /* ADR 0228: physical input to blit-compositor's input sockets (blit_frames_input.h). */
 static int frame_input_routes;
 static void frame_input_key(BlitRuntime *runtime, BlitInputDevice *keyboard,
@@ -32703,6 +32708,7 @@ int main(int argc, char **argv)
             update_tick(&runtime, now);
             hibr_identity_refresh(&runtime, now);
             hud_reconcile(&runtime);
+            frame_display_rate_notify(&runtime);
             hud_tick(&runtime, now);
             if (blit_vt_active() && runtime.render_pending &&
                 (output_mask = due_output_mask(&runtime, now)) != 0) {
