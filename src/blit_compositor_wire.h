@@ -648,7 +648,8 @@ enum {
     BC_LINE_OTHER,          /* understood, nothing to do (HUD1, INPUT ok|error) */
     BC_LINE_CLIP_OFFER,     /* CLIP offer <seq> clipboard|primary [<type> ...] */
     BC_LINE_CLIP_READ,      /* CLIP read <seq> <type>, a pipe's write end with it */
-    BC_LINE_CLIP_CLEAR      /* CLIP clear <seq> */
+    BC_LINE_CLIP_CLEAR,     /* CLIP clear <seq> */
+    BC_LINE_TEACHDONE       /* WINDOW teachdone <id> commit|cancel: the desktop's teach box ended (ADR 0233) */
 };
 
 /* A display's name in the desktop's layout: one word of bytes above the
@@ -734,7 +735,8 @@ enum {
     BC_INPUT_KEYMAP,        /* revision size rate delay, and a memfd: no frame follows */
     BC_INPUT_MODIFIERS,     /* mods[4]: depressed latched locked group (ADR 0231) */
     BC_INPUT_METHOD,        /* method, options: the input method in use, "-" none (ADR 0233) */
-    BC_INPUT_BUSY           /* code: ms before a program is busy, 0 for off (ADR 0235) */
+    BC_INPUT_BUSY,          /* code: ms before a program is busy, 0 for off (ADR 0235) */
+    BC_INPUT_IME            /* action (0 cycle, 1 back, 2 teach), code: the key it was (ADR 0233) */
 };
 
 typedef struct {
@@ -750,6 +752,7 @@ typedef struct {
     uint32_t mods[4];       /* modifiers: depressed, latched, locked, group */
     char method[32];        /* method: its name, "" for none */
     char options[96];       /* method: its options, space-separated */
+    int action;             /* ime: 0 cycle, 1 back, 2 teach */
 } BcInput;
 
 /* A decimal number as Blit writes it: an optional '-', digits, and an
@@ -774,7 +777,7 @@ static int bc_parse_input(const char *line, BcInput *out)
         { "key ", BC_INPUT_KEY }, { "ptr ", BC_INPUT_PTR }, { "rel ", BC_INPUT_REL },
         { "btn ", BC_INPUT_BTN }, { "wheel ", BC_INPUT_WHEEL }, { "frame ", BC_INPUT_FRAME },
         { "keymap ", BC_INPUT_KEYMAP }, { "modifiers ", BC_INPUT_MODIFIERS },
-        { "method ", BC_INPUT_METHOD }, { "busy ", BC_INPUT_BUSY },
+        { "method ", BC_INPUT_METHOD }, { "busy ", BC_INPUT_BUSY }, { "ime ", BC_INPUT_IME },
     };
     const char *p;
     size_t i;
@@ -815,6 +818,17 @@ static int bc_parse_input(const char *line, BcInput *out)
             memcpy(out->options, p, n);
             p += n;
         }
+        break;
+    }
+    case BC_INPUT_IME: {
+        /* `cycle|back|teach <evdev code>`: the input method's key, pressed. */
+        static const char *const actions[] = { "cycle ", "back ", "teach " };
+        int a;
+        for (a = 0; a < 3 && strncmp(p, actions[a], strlen(actions[a])) != 0; ++a) {}
+        if (a == 3) return out->kind = BC_INPUT_UNKNOWN;
+        p += strlen(actions[a]);
+        out->action = a;
+        if (bc_read_u32(&p, 0x2ff, &out->code) != 0) return out->kind = BC_INPUT_UNKNOWN;
         break;
     }
     case BC_INPUT_BUSY:
@@ -987,6 +1001,18 @@ static int bc_parse_line(const char *line, BcLine *out)
         if (bc_read_name(&p, out->name) != 0 || (*p != '\0' && *p != '\n'))
             return out->kind = BC_LINE_UNKNOWN;
         return out->kind = BC_LINE_PRIMARY;
+    }
+    if (strncmp(line, "WINDOW teachdone ", 17) == 0) {
+        /* commit: the word was taught (it is in the person's rules), commit
+           the held word as it now reads; cancel: keep it held. */
+        p = line + 17;
+        if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0 || *p++ != ' ')
+            return out->kind = BC_LINE_UNKNOWN;
+        if (strncmp(p, "commit", 6) == 0) { out->on = 1; p += 6; }
+        else if (strncmp(p, "cancel", 6) == 0) { out->on = 0; p += 6; }
+        else return out->kind = BC_LINE_UNKNOWN;
+        if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
+        return out->kind = BC_LINE_TEACHDONE;
     }
     if (strncmp(line, "WINDOW close ", 13) == 0) {
         p = line + 13;

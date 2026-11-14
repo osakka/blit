@@ -507,6 +507,30 @@ Each side applies the rule its own way:
   (number, address, date) are coming, with dt_imekey asked only for free
   text.
 
+### Recorded: cycle, or teach (0.3.109, hibr-ime v0.1.5, IME_API 3)
+
+The owner chose "cycle, or teach" (agreed with Hibr, 2026-11-14). On the
+owner's own typing, the meant word wasn't among the method's spellings for
+about half the words, so cycling alone wasn't enough.
+- **The keys:** the desktop's Shortcuts set them, the one place they're
+  set, and send them to Blit as `INPUT imekeys cycle= back= teach=`. Blit
+  sends a press of one to the focused route as `INPUT ime <id> <action>
+  <code>`, in key order with the letters. A cycle can't overtake or trail
+  the word it cycles, which a path through the desktop could.
+- **blit-compositor:**
+  - `ime_cycle` for cycle and back;
+  - teach sends `WINDOW teach <id> <latin> <arabic>` and holds the word;
+    `WINDOW teachdone <id> commit` means `ime_stale`, `ime_reload` (the
+    person's rules in place, ~0.15 ms against a 72 ms whole load), then
+    commit; `cancel` keeps the word held;
+  - with nothing being typed, the key goes to the program.
+- **The engine writes the person's own My Words** when a picked spelling
+  is let go of. That only happens in the compositor, which runs as the
+  person; blit-server's dry run loads no person's layer and so never
+  writes.
+- **Packaging:** Recommends `hibr-ime-arabizi (>= 0.1.5)` (its Levantine
+  and names list).
+
 ## Open questions for the owner
 
 - 8 by default: ق (Gulf and Saudi) or غ (Lebanese)?

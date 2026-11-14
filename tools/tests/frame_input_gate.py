@@ -585,6 +585,14 @@ class LineReceiver:
                 check(len(words) >= 4 and self.total == self.frames and self.keymaps,
                       'a method line %r (after a keymap, outside an event)' % line)
                 self.methods.append(words[3])
+            elif words[1] == 'ime':
+                # ADR 0233: the input method's key as its action, an event
+                # with its frame like a key.
+                check(len(words) == 5 and words[3] in ('cycle', 'back', 'teach') and words[4].isdigit() and
+                      self.total == self.frames, 'an ime line %r' % line)
+                self.total += 1
+                self.events.append(' '.join(words[1:]))
+                self.stamps.append((' '.join(words[1:]), 0))
             elif words[1] == 'busy':
                 check(len(words) == 4 and (words[3] == 'off' or words[3].isdigit()) and
                       self.total == self.frames, 'a busy line %r (outside an event)' % line)
@@ -842,6 +850,38 @@ def multi(server, a, work, b):
         ch.line('INPUT keep\n')
         press(8)
         ra.expect(['btn 20 275 press', 'btn 20 275 release'], 'an empty keep gave button 8 back')
+        # ADR 0233: the input method's keys, set by the desktop, reach the
+        # route as their actions in key order with the letters around them;
+        # the key itself is not sent, nor its release. Unset, the key is a key.
+        ch.line('INPUT imekeys cycle=ctrl-space back=ctrl-shift-space teach=ctrl-t\n')
+        key(30, 1, 0)
+        key(29, 1)
+        key(57, 1, 0)
+        key(29, 0)
+        key(48, 1, 0)
+        ra.expect(['key 20 30 press', 'key 20 30 release', 'key 20 29 press', 'ime 20 cycle 57',
+                   'key 20 29 release', 'key 20 48 press', 'key 20 48 release'],
+                  'ctrl-space as cycle, in order between letters')
+        key(29, 1)
+        key(42, 1)
+        key(57, 1, 0)
+        key(42, 0)
+        key(20, 1, 0)
+        key(29, 0)
+        ra.expect(['key 20 29 press', 'key 20 42 press', 'ime 20 back 57', 'key 20 42 release',
+                   'ime 20 teach 20', 'key 20 29 release'], 'back and teach')
+        for bad in ('spin=ctrl-space', 'cycle=ctrl-nope', 'cycle', 'cycle=super', 'cycle=button8'):
+            check(ch.ask('INPUT imekeys %s\n' % bad) == b'INPUT error 0 EINVAL\n', '%s was not EINVAL' % bad)
+        key(29, 1)
+        key(57, 1, 0)
+        key(29, 0)
+        ra.expect(['key 20 29 press', 'ime 20 cycle 57', 'key 20 29 release'], 'a refused line kept the set')
+        ch.line('INPUT imekeys\n')
+        key(29, 1)
+        key(57, 1, 0)
+        key(29, 0)
+        ra.expect(['key 20 29 press', 'key 20 57 press', 'key 20 57 release', 'key 20 29 release'],
+                  'an empty imekeys gave ctrl-space back to the program')
         rb.nothing('route 21 while 20 is on')
         check(rb.notices == [], 'route 21 sent a keymap while off: %s' % rb.notices)
 
@@ -1358,7 +1398,8 @@ def sock():
           'ptr=frame-pixels absolute=%s outside=silent relative=70,-30_in_%d,hidden,still %s '
           'keymap=memfd,at-live,once,=api(%s) on_before_accept=queued closed=ENOENT '
           'not-taken=dropped+ENOENT frames=%d %s busy=live(2000),put(3500),off,on '
-          'buttons=8,9(code),kept(route-none,desktop-128/129),einval'
+          'buttons=8,9(code),kept(route-none,desktop-128/129),einval '
+          'imekeys=cycle,back,teach(in-order),einval,kept-on-refusal,cleared'
           % (','.join(cases), moves, confine, notices, frames, several))
 
 

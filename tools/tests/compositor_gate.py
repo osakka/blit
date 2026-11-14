@@ -1366,6 +1366,80 @@ def ime_part(compositor, standin, work):
                          lambda: 'the person\'s own word did not type:\n' + printed())
                 wait_for(lambda: 'not a rule' in open(log).read(),
                          lambda: 'a line of theirs that is not a rule was not logged:\n' + open(log).read())
+                # ADR 0233, hibr-ime IME_API 3: the input method's keys, as Blit
+                # sends them (INPUT ime). Cycle steps the held word to another
+                # spelling, kept in their own layer once let go of.
+                rules = os.path.join(config, 'hibr', 'ime', 'arabizi', 'arabizi.rules')
+
+                def ime(action, code):
+                    frame[0] += 1
+                    route.sendall(b'INPUT ime 1 %s %d\nINPUT frame 1 %d\n' % (action.encode(), code, frame[0]))
+
+                def preedits(since):
+                    return [l[len('STANDIN ti preedit '):] for l in lines()[since:]
+                            if l.startswith('STANDIN ti preedit ')]
+
+                mark = len(lines())
+                keys(48, 30, 31)                 # b a s, held
+                wait_for(lambda: preedits(mark) and preedits(mark)[-1] not in ('-', ''),
+                         lambda: 'no preedit for "bas":\n' + printed())
+                first = preedits(mark)[-1]
+                ime('cycle', 57)
+                wait_for(lambda: preedits(mark)[-1] != first,
+                         lambda: 'cycle did not change the held word from %s:\n%s' % (first, printed()))
+                picked = preedits(mark)[-1]
+                keys(57)                         # space: the picked spelling committed
+                wait_for(lambda: 'STANDIN ti commit %s ' % picked in lines()[mark:],
+                         lambda: 'the cycled spelling %s was not committed:\n%s' % (picked, printed()))
+                wait_for(lambda: os.path.exists(rules) and ('word bas = %s' % picked) in open(rules).read(),
+                         lambda: 'the picked spelling was not kept in their layer: %r' %
+                         (open(rules).read() if os.path.exists(rules) else None))
+                # Nothing held: the shortcut's key is the program's own.
+                mark = len(lines())
+                ime('cycle', 57)
+                wait_for(lambda: 'STANDIN key 57 1' in lines()[mark:] and 'STANDIN key 57 0' in lines()[mark:],
+                         lambda: 'with nothing held, the cycle key did not reach the program:\n' + printed())
+                # Teach: the desktop is asked, the word stays held; on commit
+                # the person's new word (written by the desktop) is what goes.
+                mark = len(lines())
+                keys(37, 23, 20, 30, 48)         # k i t a b, held
+                wait_for(lambda: preedits(mark) and preedits(mark)[-1] not in ('-', ''),
+                         lambda: 'no preedit for "kitab":\n' + printed())
+                ime('teach', 20)
+                asked = None
+                for _ in range(50):
+                    got = desk.next(0.2)
+                    if got and got[0] == 'line' and got[1].startswith('WINDOW teach 1 '):
+                        asked = got[1]
+                        break
+                    if got and got[0] == 'frame':
+                        os.close(got[2])
+                check(asked is not None and asked.split(' ')[3] == 'kitab',
+                      'teach did not ask the desktop with the word as typed: %r' % asked)
+                with open(rules, 'a') as f:
+                    f.write('word kitab = كتابي\n')
+                desk.send('WINDOW teachdone 1 commit')
+                wait_for(lambda: any(l.startswith('STANDIN ti commit كتابي') for l in lines()[mark:]),
+                         lambda: 'teachdone commit did not commit the taught word:\n' + printed())
+                # Cancel: the word stays held, as it was.
+                mark = len(lines())
+                keys(37, 23, 20, 30, 48)
+                wait_for(lambda: preedits(mark) and preedits(mark)[-1] not in ('-', ''),
+                         lambda: 'no preedit for the second "kitab":\n' + printed())
+                ime('teach', 20)
+                for _ in range(50):
+                    got = desk.next(0.2)
+                    if got and got[0] == 'line' and got[1].startswith('WINDOW teach 1 '):
+                        break
+                    if got and got[0] == 'frame':
+                        os.close(got[2])
+                desk.send('WINDOW teachdone 1 cancel')
+                time.sleep(0.3)
+                check(not any(l.startswith('STANDIN ti commit') for l in lines()[mark:]),
+                      lambda: 'teachdone cancel committed:\n' + printed())
+                keys(57)
+                wait_for(lambda: any(l.startswith('STANDIN ti commit كتابي') for l in lines()[mark:]),
+                         lambda: 'after cancel, the held word (now taught) did not commit on space:\n' + printed())
                 mark = len(lines())
                 keys(48, 30)                     # b a, held
                 wait_for(lambda: 'STANDIN ti preedit با' in lines()[mark:] or
@@ -1382,6 +1456,7 @@ def ime_part(compositor, standin, work):
                 wait_for(lambda: 'STANDIN key 31 1' in lines()[mark:],
                          lambda: 'with no method, s did not reach the program:\n' + printed())
                 results.append('field=preedit(سلام),commit(سلام ),keys-taken user-word=next-word(صلامي),bad-line-logged '
+                               'cycle=other-spelling,kept-in-layer plain-key teach=commit,cancel '
                                'chord=commit+pass off=keys')
             else:
                 wait_for(lambda: lines()[before:].count('STANDIN key 50 1') == 1,

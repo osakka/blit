@@ -313,6 +313,67 @@ static void frame_input_keep(BlitRuntime *runtime, BlitFrameClient *client,
     session->keep_count = n;
 }
 
+/* ADR 0233: the input method's keys, in the order of their actions. */
+static const char *const frame_imekey_actions[3] = {"cycle", "back", "teach"};
+
+/* `INPUT imekeys [cycle=<chord>] [back=<chord>] [teach=<chord>]`: the
+   session's whole set replaced (an empty one clears it); one word that is
+   not an action and a chord in keep's grammar refuses the line (`INPUT
+   error 0 EINVAL`) and keeps the set. Not answered otherwise. */
+static void frame_input_imekeys(BlitRuntime *runtime, BlitFrameClient *client,
+                                const unsigned char *message, ssize_t length)
+{
+    static char line[512];
+    unsigned short codes[3] = {0, 0, 0};
+    unsigned char mods[3] = {0, 0, 0};
+    BlitSession *session = find_session_id(runtime, client->session_id);
+    char *word, *save = NULL;
+    ssize_t i;
+    if (length > 0 && message[length - 1] == '\n')
+        --length;
+    for (i = 0; i < length; ++i)
+        if (message[i] < 0x20 || message[i] == 0x7f)
+            break;
+    if (session == NULL || i != length || length >= (ssize_t)sizeof(line)) {
+        frame_input_refuse(runtime, client, 0, "EINVAL");
+        return;
+    }
+    memcpy(line, message, (size_t)length);
+    line[length] = '\0';
+    for (word = strtok_r(line + 13, " ", &save); word; word = strtok_r(NULL, " ", &save)) {
+        char *eq = strchr(word, '=');
+        unsigned short code;
+        unsigned char m;
+        int a, tap;
+        if (eq == NULL) {
+            frame_input_refuse(runtime, client, 0, "EINVAL");
+            return;
+        }
+        *eq = '\0';
+        for (a = 0; a < 3 && strcmp(word, frame_imekey_actions[a]) != 0; ++a) {}
+        if (a == 3 || !frame_keep_parse(eq + 1, &code, &m, &tap) || tap || code >= BTN_MISC) {
+            frame_input_refuse(runtime, client, 0, "EINVAL");
+            return;
+        }
+        codes[a] = code;
+        mods[a] = m;
+    }
+    memcpy(session->imekey_codes, codes, sizeof(codes));
+    memcpy(session->imekey_mods, mods, sizeof(mods));
+}
+
+/* Which input-method action this key press is for the session, -1 none. */
+static int frame_input_imekey(const BlitSession *session, unsigned short code, unsigned mods)
+{
+    int a;
+    if (session == NULL || (mods & BLIT_KEEP_ALTGR)) return -1;
+    for (a = 0; a < 3; ++a)
+        if (session->imekey_codes[a] != 0 && session->imekey_codes[a] == code &&
+            session->imekey_mods[a] == mods)
+            return a;
+    return -1;
+}
+
 /* Blit's own chords, which no shortcut can have, in the grammar: the
    console switch, Ctrl+Alt+F1 to F12, and the stop chord as configured
    (none when it is switched off). */
@@ -814,6 +875,19 @@ static void frame_input_key(BlitRuntime *runtime, BlitInputDevice *keyboard,
                desktop keeps (INPUT keep), whose press went to it alone. */
             if (!pressed && !frame_input_key_held(in, code))
                 continue;
+            /* ADR 0233: the input method's keys travel as its actions, in
+               key order with the letters; the compositor gives the key to
+               the program when nothing is being typed. Neither the press
+               nor (as it was never held here) its release is a key here. */
+            if (pressed) {
+                int action = frame_input_imekey(find_session_id(runtime, client->session_id), physical, mods);
+                if (action >= 0) {
+                    frame_input_line(find_session_id(runtime, client->session_id), in,
+                                     "INPUT ime %u %s %u\n", in->image_id,
+                                     frame_imekey_actions[action], code);
+                    continue;
+                }
+            }
             if (pressed && frame_input_kept(find_session_id(runtime, client->session_id), physical, mods))
                 continue;
             frame_input_key_mark(in, code, pressed);
@@ -1399,6 +1473,11 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
     if (length >= 10 && memcmp(message, "INPUT keep", 10) == 0 &&
         (length == 10 || message[10] == ' ' || message[10] == '\n')) {
         frame_input_keep(runtime, client, message, length);
+        return;
+    }
+    if (length >= 13 && memcmp(message, "INPUT imekeys", 13) == 0 &&
+        (length == 13 || message[13] == ' ' || message[13] == '\n')) {
+        frame_input_imekeys(runtime, client, message, length);
         return;
     }
     if (length > 0 && message[length - 1] == '\n')

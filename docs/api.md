@@ -2251,6 +2251,15 @@ It speaks the frame channel above as a producer, with these additions.
     `KEYBOARD item <n> <layout> <variant|-> <name...>`, `KEYBOARD reserved
     <chord>...`, `KEYBOARD current <n>` and `KEYBOARD error EINVAL`
     ("Keyboards (layouts)").
+  - **`INPUT imekeys [cycle=<chord>] [back=<chord>] [teach=<chord>]`**
+    (0.3.109, ADR 0233): the input method's keys, from the desktop's
+    Shortcuts. It replaces the session's set (an empty one clears it) and
+    is not answered; a word that is not one of the three actions with a
+    chord in keep's grammar refuses the line, `INPUT error 0 EINVAL`, and
+    keeps the set. A key pressed with exactly that chord's modifiers goes to
+    the focused route as `INPUT ime <id> <action> <code>`, in key order,
+    instead of the key (and its release goes nowhere); the desktop still
+    sees it, as it sees every key.
   - **`INPUT keep <chord> <chord> ...`** (0.3.95): the desktop's own
     shortcuts, kept from programs. It replaces the sending session's whole
     set (an empty `INPUT keep` clears it) and is not answered; one chord
@@ -2767,6 +2776,7 @@ It speaks the frame channel above as a producer, with these additions.
   INPUT method <id> <name|-> [<options>]
                                        the current keyboard's input method
   INPUT busy <id> <ms|off>             when a program counts as busy
+  INPUT ime <id> cycle|back|teach <code>   the input method's key, pressed
   ```
   `INPUT method` (from 0.3.101, ADR 0233) follows each keymap, with no
   `frame`. It is the input method the current keyboard is: `arabizi` for
@@ -2787,6 +2797,16 @@ It speaks the frame channel above as a producer, with these additions.
   Leaving the program commits there. A program with a text input gets the
   keyboard when its window is activated, so its field is enabled before
   the first key.
+  `INPUT ime` (from 0.3.109, ADR 0233) is an event, with its frame, sent
+  instead of a key the desktop set with `INPUT imekeys` (below), in order
+  with the keys around it. With a word being typed, cycle and back step it
+  through its spellings (the first is the method's own; one picked is
+  remembered in the person's My Words when let go of), and teach asks the
+  desktop with `WINDOW teach <id> <latin> <arabic>`, the word held until
+  the desktop's `WINDOW teachdone <id> commit|cancel`: commit reads the
+  person's rules again (the desktop wrote the word) and commits the held
+  word as it now reads; cancel leaves it held. With nothing being typed the
+  key goes to the program as an ordinary press and release.
   `INPUT busy` (from 0.3.106, ADR 0235) is sent when the route goes live
   and whenever the pointer settings change it, with no `frame`: the
   `busy_after_ms` a ping may go unanswered, or `off` (`busy_pointer`

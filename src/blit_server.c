@@ -1161,6 +1161,12 @@ typedef struct {
     int keep_count;
     unsigned short keep_codes[BLIT_KEEP_MAX];
     unsigned char keep_mods[BLIT_KEEP_MAX];
+    /* The input method's keys (INPUT imekeys, ADR 0233): cycle, back and
+       teach, each a chord in keep's grammar, code 0 when unset. A press of
+       one goes to the focused route as `INPUT ime <id> <action> <code>`, in
+       key order, instead of the key. */
+    unsigned short imekey_codes[3];
+    unsigned char imekey_mods[3];
     unsigned long frame_input_dropped;  /* lines an INPUT sock route could not write */
     char frame_input_error[32];
     int frame_connections;

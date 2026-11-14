@@ -154,6 +154,11 @@ static void lines(void)
            l.activated && l.fullscreen, "flags in any order");
     EXPECT(bc_parse_line("WINDOW close 9\n", &l) == BC_LINE_CLOSE && l.id == 9, "close");
     EXPECT(bc_parse_line("WINDOW close 9 x", &l) == BC_LINE_UNKNOWN, "close with a tail");
+    EXPECT(bc_parse_line("WINDOW teachdone 9 commit\n", &l) == BC_LINE_TEACHDONE && l.id == 9 && l.on == 1,
+           "teachdone commit");
+    EXPECT(bc_parse_line("WINDOW teachdone 9 cancel", &l) == BC_LINE_TEACHDONE && l.on == 0, "teachdone cancel");
+    EXPECT(bc_parse_line("WINDOW teachdone 9 done", &l) == BC_LINE_UNKNOWN, "teachdone, an unknown answer");
+    EXPECT(bc_parse_line("WINDOW teachdone 0 commit", &l) == BC_LINE_UNKNOWN, "teachdone, id 0");
     EXPECT(bc_parse_line("WINDOW lock 4 on\n", &l) == BC_LINE_LOCK && l.id == 4 && l.on, "lock on");
     EXPECT(bc_parse_line("WINDOW lock 4 off", &l) == BC_LINE_LOCK && l.id == 4 && !l.on, "lock off");
     EXPECT(bc_parse_line("WINDOW lock 4 relative", &l) == BC_LINE_UNKNOWN, "lock relative is the compositor's");
@@ -235,6 +240,15 @@ static void input(void)
     EXPECT(bc_parse_input("INPUT busy 3 0", &in) == BC_INPUT_UNKNOWN, "busy 0");
     EXPECT(bc_parse_input("INPUT busy 3 60001", &in) == BC_INPUT_UNKNOWN, "busy, too long");
     EXPECT(bc_parse_input("INPUT busy 3 offx", &in) == BC_INPUT_UNKNOWN, "busy, extra");
+    /* ADR 0233: the input method's keys, as actions. */
+    EXPECT(bc_parse_input("INPUT ime 3 cycle 57\n", &in) == BC_INPUT_IME && in.action == 0 && in.code == 57,
+           "ime cycle");
+    EXPECT(bc_parse_input("INPUT ime 3 back 57", &in) == BC_INPUT_IME && in.action == 1, "ime back");
+    EXPECT(bc_parse_input("INPUT ime 3 teach 20", &in) == BC_INPUT_IME && in.action == 2 && in.code == 20,
+           "ime teach");
+    EXPECT(bc_parse_input("INPUT ime 3 spin 57", &in) == BC_INPUT_UNKNOWN, "ime, an unknown action");
+    EXPECT(bc_parse_input("INPUT ime 3 cycle", &in) == BC_INPUT_UNKNOWN, "ime, no code");
+    EXPECT(bc_parse_input("INPUT ime 3 cycle 57 x", &in) == BC_INPUT_UNKNOWN, "ime, extra");
 }
 
 static void convert(void)

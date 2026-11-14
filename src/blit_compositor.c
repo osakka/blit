@@ -470,6 +470,7 @@ struct bc_server {
         ImeEngine *engine;
         char *problem;          /* why the data did not load, logged once */
         unsigned char taken[0x300 / 8];
+        uint32_t teaching;      /* the window a `WINDOW teach` is open for, 0 none */
     } ime;
     struct wl_list text_inputs;       /* bc_text_input */
     struct wl_list relative_pointers; /* zwp_relative_pointer_v1 resources */
@@ -515,6 +516,7 @@ static struct bc_server *g_server;
 static void keyboard_send_keymap(struct bc_server *s, struct wl_resource *r);
 static void keyboard_send_modifiers(struct bc_server *s, int force);
 static void keyboard_focus(struct bc_server *s, struct bc_surface *surface);
+static struct bc_surface *keyboard_target(struct bc_server *s, struct bc_xdg *x);
 static void constraints_window_gone(struct bc_xdg *x);
 static void window_cursor_send(struct bc_xdg *x);
 static void window_busy_announce(struct bc_xdg *x);
@@ -4937,11 +4939,21 @@ static void ime_user_root(char *out, size_t size)
 static ImeEngine *ime_engine(struct bc_server *s)
 {
     if (s->ime.engine && s->ime.data && !ime_pending(s->ime.engine) && ime_stale(s->ime.data)) {
-        logf_("input method %s: the person's layer changed; read again", s->ime.name);
+        char *problem = NULL;
+        /* The person's rules re-read in place (well under a millisecond);
+           the engine made again, for a changed options file. Only when the
+           method cannot, the data loaded whole. */
         ime_engine_free(s->ime.engine);
         s->ime.engine = NULL;
-        ime_free(s->ime.data);
-        s->ime.data = NULL;
+        if (ime_reload(s->ime.data, &problem)) {
+            logf_("input method %s: the person's layer changed; their rules read again%s%s",
+                  s->ime.name, problem ? ": " : "", problem ? problem : "");
+        } else {
+            logf_("input method %s: the person's layer changed; read again whole", s->ime.name);
+            ime_free(s->ime.data);
+            s->ime.data = NULL;
+        }
+        ime_text_free(problem);
     }
     if (s->ime.engine) return s->ime.engine;
     if (s->ime.problem) return NULL;
@@ -5047,6 +5059,78 @@ static int ime_key(struct bc_server *s, uint32_t code, int pressed)
     if (passes) return 0;
     s->ime.taken[code / 8] |= bit;
     return 1;
+}
+
+/* A key the input method's shortcut did not need, given to the program
+   under keyboard focus as an ordinary press and release. */
+static void ime_plain_key(struct bc_server *s, struct bc_xdg *x, uint32_t code)
+{
+    struct wl_resource *r;
+    int k;
+    if (!window_is_toplevel(x) || x->surface == NULL) return;
+    keyboard_focus(s, keyboard_target(s, x));
+    if (s->kbd_focus == NULL) return;
+    for (k = 0; k < 2; ++k) {
+        uint32_t serial = wl_display_next_serial(s->display);
+        if (k == 0) s->key_serial = serial;
+        seat_for_client(r, &s->keyboards, s->kbd_focus)
+            wl_keyboard_send_key(r, serial, now_ms(), code,
+                                 k == 0 ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED);
+    }
+}
+
+/* ADR 0233: Blit's `INPUT ime <id> cycle|back|teach <code>`, the input
+   method's own keys, in key order. With a word being typed: cycle and back
+   step through its spellings (the first is the method's own); teach asks
+   the desktop to open its box on it (`WINDOW teach <id> <latin> <arabic>`),
+   the word held until `WINDOW teachdone`. With none, the key is the
+   program's. */
+static void ime_action(struct bc_server *s, struct bc_xdg *x, int action, uint32_t code)
+{
+    struct bc_text_input *t = ime_target(s);
+    ImeEngine *e = t ? ime_engine(s) : NULL;
+    if (s->ime.teaching != 0 && action != 2) return;   /* the box is open: nothing moves under it */
+    if (t == NULL || e == NULL || !ime_pending(e)) {
+        ime_plain_key(s, x, code);
+        return;
+    }
+    if (action == 0 || action == 1) {
+        char *pre = ime_cycle(e, action == 0 ? 1 : -1);
+        ime_text_free(pre);
+        ime_send(t, NULL);
+        return;
+    }
+    if (x == NULL || x->id == 0 || s->ime.teaching != 0) return;
+    {
+        char *latin = ime_word(e), *arabic = ime_preedit(e);
+        if (latin && latin[0] && arabic && arabic[0] && !strpbrk(latin, " \n") && !strpbrk(arabic, "\n")) {
+            s->ime.teaching = x->id;
+            bc_wire_line(&s->wire, "WINDOW teach %u %s %s", x->id, latin, arabic);
+        }
+        ime_text_free(latin);
+        ime_text_free(arabic);
+    }
+}
+
+/* The desktop's teach box ended: on commit the word is in the person's
+   rules, so they are read again and the held word committed as it now
+   reads; on cancel it stays held, as it was. */
+static void ime_teachdone(struct bc_server *s, uint32_t id, int commit)
+{
+    struct bc_text_input *t = ime_target(s);
+    if (s->ime.teaching == 0 || s->ime.teaching != id) {
+        logf_("input method: WINDOW teachdone for %u, which asked nothing", id);
+        return;
+    }
+    s->ime.teaching = 0;
+    if (!commit || s->ime.data == NULL) return;
+    if (ime_stale(s->ime.data)) {
+        char *problem = NULL;
+        if (!ime_reload(s->ime.data, &problem))
+            logf_("input method %s: taught, but the rules could not be read again in place", s->ime.name);
+        ime_text_free(problem);
+    }
+    ime_commit_held(s, t);
 }
 
 /* Blit's `INPUT method`: the method in use and its options, "" none. What
@@ -5787,6 +5871,10 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
     x = window_by_id(s, conn->id);
     if (!window_is_toplevel(x) || x->surface == NULL) return;  /* gone meanwhile */
     if (in.kind != BC_INPUT_FRAME) busy_poke(s, x);
+    if (in.kind == BC_INPUT_IME) {
+        ime_action(s, x, in.action, in.code);
+        return;
+    }
     switch (in.kind) {
     case BC_INPUT_KEY: {
         uint32_t bit = 1u << (in.code % 8);
@@ -9474,6 +9562,9 @@ static void handle_line(struct bc_server *s, const char *line)
         return;
     case BC_LINE_PRIMARY:
         layout_primary(s, l.name);
+        return;
+    case BC_LINE_TEACHDONE:
+        ime_teachdone(s, l.id, l.on);
         return;
     case BC_LINE_CLOSE:
         x = window_by_id(s, l.id);
