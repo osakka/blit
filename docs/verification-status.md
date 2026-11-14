@@ -9,6 +9,30 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-14: 0.3.109 Arabizi cycle or teach in programs' text fields
+
+- **What it is:** hibr-ime v0.1.5 (IME_API 3), agreed with Hibr.
+  - The desktop's chords come in as `INPUT imekeys` and reach the
+    compositor as `INPUT ime <id> cycle|back|teach <code>`, in key order.
+  - The compositor cycles with `ime_cycle`, and teaches through `WINDOW
+    teach` / `teachdone commit|cancel`. With nothing being typed, the key
+    is the program's.
+  - The person's rules are re-read in place (`ime_reload`).
+- **Gates on this host:** `all` 191 pass, 11 skip; `renderer` 85;
+  `renderer-gles` 65; no failures. compositor_gate's ime part runs with
+  ASan/UBSan.
+- **Arabizi on v0.1.5** (arabizi_gate and the re-score):
+  - public set: 97.1% of words as converted, 98.3% within two cycle
+    presses;
+  - the owner's own set: 70.0% as converted, **77.5% within two presses**.
+    The rest is Teach's.
+- **Live, the mini PC:** the pair update to 0.3.109 was verified, with
+  hibr-ime 0.1.5 installed. The keys need Hibr 0.99.528 (the mini PC has
+  0.99.527) and a Restart Desktop for the new compositor.
+- **Published** to hibr-apt (signature good). The mirror push to GitHub
+  went through at 19:48 with no error; this host couldn't resolve
+  github.com at the time, so the check went through Gitea's mirror status.
+
 ## 2026-11-14: 0.3.108 a sixel is paint
 
 - **The rule:** text written into a cell (the same character again
