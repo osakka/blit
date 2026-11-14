@@ -9,6 +9,22 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-14: 0.3.108 a sixel is paint
+
+- **The rule:** text written into a cell (the same character again
+  included), or an erase, takes the place of a sixel's pixels there, as on
+  every sixel terminal (Gitea #85). Kitty pictures are untouched.
+- **Gates:**
+  - `sixel_paint_gate` (new, native and gles; it fails on 0.3.107);
+  - this host: `all` 190 pass, 11 skip, with one failure:
+    `hibr_split_capture_gate`'s capture tool exited early once, and it
+    passed 3 of 3 alone (unrelated to sixels); `renderer` 85;
+    `renderer-gles` 65.
+- **Live, the mini PC:** the pair update to 0.3.108 was verified.
+- **Published** to hibr-apt (signature good, GitHub matches). longwire was
+  unreachable, so no HOLD was sent; the push went cleanly onto
+  origin/main.
+
 ## 2026-11-13: 0.3.107 a mouse's back and forward; button chords kept as shortcuts
 
 - **Further buttons** (X 8 to 11: BTN_SIDE, BTN_EXTRA, BTN_FORWARD,
