@@ -9495,6 +9495,64 @@ static int surface_cursor_within_margins(const BlitSurface *surface)
          surface->cursor_x <= surface->right_margin);
 }
 
+/* Gitea #85: a sixel is paint, not an object. Whatever is written into a
+   cell -- a character, the same one again, an erase -- takes the place of
+   the sixel's pixels in that cell, as on every sixel terminal (and in
+   Hibr's own model of one). The pixels there become transparent, kept as
+   an edit so a renderer refreshes only that rectangle. One written over
+   entirely shows nothing and goes as any sixel does: scrolled off, or when
+   the session's picture budget needs room (ADR 0226). Kitty pictures are
+   placed objects and are not touched. */
+static void terminal_sixel_punch(BlitSession *session, BlitSurface *surface,
+                                 int column, int row, int cells)
+{
+    int i;
+    int cw = session->terminal_cell_width > 0 ? session->terminal_cell_width : 8;
+    int ch = session->terminal_cell_height > 0 ? session->terminal_cell_height : 16;
+    int left = column * cw, top = row * ch, right = (column + cells) * cw, bottom = (row + 1) * ch;
+
+    for (i = 0; i < session->graphics_count; ++i) {
+        BlitGraphicsImage *image = session->graphics[i];
+        int x0, y0, x1, y1, px, py, w, h, r;
+        unsigned long long from;
+        if (!image->used || !image->complete || !image->visible || image->pixels == NULL ||
+            image->protocol[0] != 's' || strcmp(image->protocol, "sixel") != 0)
+            continue;
+        x0 = left > image->x ? left : image->x;
+        y0 = top > image->y ? top : image->y;
+        x1 = right < image->x + image->placement_width ? right : image->x + image->placement_width;
+        y1 = bottom < image->y + image->placement_height ? bottom : image->y + image->placement_height;
+        if (x1 <= x0 || y1 <= y0)
+            continue;
+        px = x0 - image->x + image->src_x;
+        py = y0 - image->y + image->src_y;
+        w = x1 - x0;
+        h = y1 - y0;
+        if (px < 0 || py < 0 || px + w > image->width || py + h > image->height)
+            continue;
+        for (r = 0; r < h; ++r)
+            memset(image->pixels + ((size_t)(py + r) * (size_t)image->width + (size_t)px) * 4U, 0,
+                   (size_t)w * 4U);
+        image->opaque = 0;
+        from = image->generation;
+        image->generation = next_graphics_generation();
+        if (image->edit_count == BLIT_GRAPHICS_EDIT_HISTORY) {
+            memmove(image->edits, image->edits + 1,
+                    sizeof(image->edits[0]) * (BLIT_GRAPHICS_EDIT_HISTORY - 1));
+            --image->edit_count;
+        }
+        image->edits[image->edit_count].from = from;
+        image->edits[image->edit_count].to = image->generation;
+        image->edits[image->edit_count].x = px;
+        image->edits[image->edit_count].y = py;
+        image->edits[image->edit_count].width = w;
+        image->edits[image->edit_count].height = h;
+        ++image->edit_count;
+        ++image->revision;
+        mark_graphics_damage(surface, x0, y0, w, h, cw, ch);
+    }
+}
+
 static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
                                 int x, int y)
 {
@@ -9502,6 +9560,8 @@ static void terminal_erase_cell(BlitSession *session, BlitSurface *surface,
     terminal_clear_cell(surface, x, y);
     if (x < 0 || y < 0 || x >= surface->width || y >= surface->height)
         return;
+    if (session->graphics_count > 0)
+        terminal_sixel_punch(session, surface, x, y, 1);
     /* The erase colour is a change of its own. terminal_clear_cell only
        damages a cell that was not already blank, so a blank cell erased to
        an explicit background was left undamaged: the screen kept what it
@@ -14831,6 +14891,10 @@ static void terminal_put_codepoint(BlitSession *session, BlitSurface *surface,
         blit_cell_cluster_init(&session->terminal_last_cluster, codepoint, NULL, 0, cell_width);
         session->terminal_cluster_active = blit_emoji_child(0, codepoint) != 0;
     }
+    /* Gitea #85: written over, a sixel's pixels in these cells go -- the
+       same character again included, which the shortcut below skips. */
+    if (session->graphics_count > 0)
+        terminal_sixel_punch(session, surface, surface->cursor_x, surface->cursor_y, cell_width);
     if (!session->terminal_insert_mode)
         unchanged = terminal_cell_matches(session, surface,
                                           surface->cursor_x,

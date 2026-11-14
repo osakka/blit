@@ -1959,6 +1959,13 @@ describe the primary font file, not the glyph stack's repertoire.
 
 ## Picture memory
 
+A sixel is paint, as on every sixel terminal (from 0.3.108, Gitea #85):
+a character written into a cell, the same one again included, or an erase
+takes the place of the sixel's pixels in that cell, and cells not written
+over keep it. A Kitty picture is a placed object and is not touched by
+text. A sixel that has scrolled off is freed; one written over entirely
+shows nothing and goes when the picture budget below needs room.
+
 A session's pictures -- Kitty and sixel images, API pixel frames and frames
 by descriptor alike -- are bounded by memory, not by count
 ([ADR 0226](adr/0226-pictures-bounded-by-memory-not-count.md)). Each session
