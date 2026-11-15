@@ -549,6 +549,8 @@ suite_renderer() {
     run_gate control_style_gate.rb ruby tools/tests/control_style_gate.rb
     run_gate sixel_slot_gate.rb ruby tools/tests/sixel_slot_gate.rb
     run_gate sixel_paint_gate.rb ruby tools/tests/sixel_paint_gate.rb
+    run_gate session_limit_gate.rb ruby tools/tests/session_limit_gate.rb
+    run_gate compositor_log_cap_gate.sh sh tools/tests/compositor_log_cap_gate.sh
     run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate gles_compositor_gate.rb ruby "$ROOT/tools/tests/gles_compositor_gate.rb"
     run_gate gles_compose_gate.sh sh "$ROOT/tools/tests/gles_compose_gate.sh"

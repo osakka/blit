@@ -536,6 +536,28 @@ static void x_pointer_over(struct bc_server *s, struct bc_surface *surface);
 static const char *x_cursor_of(struct bc_server *s, struct wl_client *client, int shown);
 static void x_pointer_entered(struct bc_server *s, struct bc_surface *surface);
 
+/* The log is capped (Gitea #156: one flood grew it to 155 MB): past
+   BC_LOG_MAX bytes it becomes <path>.1, replacing the one before, and a new
+   one starts, so the two hold at most twice that. Checked when the log is
+   opened and after every line. */
+#define BC_LOG_MAX (16L * 1024L * 1024L)
+static const char *g_log_path;
+
+static FILE *log_open(const char *path)
+{
+    FILE *f = fopen(path, "a");
+    char old[4096];
+    long size;
+    if (f == NULL) return NULL;
+    size = ftell(f);
+    if (size <= BC_LOG_MAX || snprintf(old, sizeof(old), "%s.1", path) >= (int)sizeof(old)) return f;
+    fclose(f);
+    if (rename(path, old) != 0) return fopen(path, "a");
+    f = fopen(path, "a");
+    if (f) fprintf(f, "blit-compositor log: the %ld bytes before are in %s\n", size, old);
+    return f;
+}
+
 static void logf_(const char *fmt, ...)
 {
     FILE *out = g_server && g_server->log ? g_server->log : stderr;
@@ -548,6 +570,12 @@ static void logf_(const char *fmt, ...)
     va_end(ap);
     fputc('\n', out);
     fflush(out);
+    if (out != stderr && g_log_path && ftell(out) > BC_LOG_MAX) {
+        FILE *next;
+        fclose(out);
+        next = log_open(g_log_path);
+        g_server->log = next;
+    }
 }
 
 static uint32_t now_ms(void)
@@ -10169,7 +10197,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "blit-compositor: --display %s %s\n", display_name, problem);
         return 2;
     }
-    if (log_path && (server.log = fopen(log_path, "a")) == NULL) {
+    g_log_path = log_path;
+    if (log_path && (server.log = log_open(log_path)) == NULL) {
         fprintf(stderr, "blit-compositor: --log %s: %s\n", log_path, strerror(errno));
         return 2;
     }

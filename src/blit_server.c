@@ -17522,6 +17522,11 @@ static int create_session(BlitRuntime *runtime, const char *json,
     size.ws_row = (unsigned short)height;
     size.ws_xpixel = (unsigned short)(width * runtime_terminal_cell_width(runtime));
     size.ws_ypixel = (unsigned short)(height * runtime_terminal_cell_height(runtime));
+    /* Gitea #157: a full table is refused before anything is started.
+       Started first, the command ran and was killed again when no slot
+       was found, and the answer blamed the command, the surface or the PTY. */
+    for (i = 0; i < BLIT_MAX_SESSIONS && runtime->sessions[i].used; ++i) {}
+    if (i == BLIT_MAX_SESSIONS) return -9;
     session_id = runtime->next_session_id;
     snprintf(session_token, sizeof(session_token), "%llu-%llu",
              (unsigned long long)runtime->started_us, session_id);
@@ -24730,6 +24735,21 @@ static void handle_request(int fd, BlitRuntime *runtime,
             return;
         }
         create_result = create_session(runtime, payload, &session, -1);
+        if (create_result == -9) {
+            /* Gitea #157: a session that has ended keeps its slot (its
+               output stays readable) until it is deleted, so say how many
+               of the full table have ended. */
+            char detail[200];
+            int ended = 0, k;
+            for (k = 0; k < BLIT_MAX_SESSIONS; ++k)
+                if (runtime->sessions[k].used && strcmp(runtime->sessions[k].state, "running") != 0)
+                    ++ended;
+            snprintf(detail, sizeof(detail),
+                     "All %d sessions are in use, %d of them ended; DELETE /v1/terminal-sessions/{id} "
+                     "for an ended one to start another.", BLIT_MAX_SESSIONS, ended);
+            send_problem(fd, 503, "Service Unavailable", "session_limit", detail);
+            return;
+        }
         if (create_result == -8) {
             send_problem(fd, 400, "Bad Request", "invalid_session_strings",
                          "arguments must be an array of at most 32 JSON strings and environment an object of at most 32 string values with non-empty names that contain no '='.");

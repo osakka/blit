@@ -1706,6 +1706,15 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '503':
+          description: >-
+            `session_limit`: all 16 sessions are in use (an ended session
+            keeps its slot until it is deleted); nothing was started, and
+            `detail` says how many have ended.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '409':
           description: >-
             The request would create a duplicate Hibr primary or an orphan

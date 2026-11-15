@@ -665,6 +665,15 @@ program's first output, so a silent program never showed `running`; #155.) Use `
 and input policy, `POST /v1/terminal-sessions/{id}/input` for terminal input,
 and `DELETE` to stop the process group and release its surface.
 
+The table holds 16 sessions. A session that has ended (`stopped` or
+`failed`) keeps its slot, so its output and surface stay readable, until it
+is deleted: a client that starts sessions deletes each when it has read it.
+A create while all 16 are in use is refused before anything is started,
+`503 session_limit`, and the problem's `detail` says how many of the 16 have
+ended (Gitea #157, 0.3.111). Up to 0.3.110 the command was started, then
+ended again when no slot was free, and the answer was `400
+session_create_failed`, blaming the command, the surface or the PTY.
+
 All mutable resources expose revisions. Send `If-Match` when a client has a
 known revision; a stale mutation is a typed conflict, not an implicit merge.
 Use `Idempotency-Key` when retrying a mutation whose duplicate application
@@ -2210,6 +2219,10 @@ It speaks the frame channel above as a producer, with these additions.
   socket owned by the desktop's user, and says its name (below); the
   desktop puts it in every program's environment as `WAYLAND_DISPLAY`,
   and the X display of its Xwayland, when there is one, as `DISPLAY`.
+  `blit-compositor --log <path>` appends its log there (else stderr). The
+  log is capped (0.3.111, Gitea #156): past 16 MiB it becomes
+  `<path>.1`, replacing the one before, and a new log starts with a line
+  saying where the old lines are.
   The desktop may pick the name, `blit-compositor --display <name>`, so it
   can export `WAYLAND_DISPLAY` before the compositor answers; without it
   the compositor takes the first free `blit-<n>`. A name is printable
