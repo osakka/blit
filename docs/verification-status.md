@@ -9,6 +9,28 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-15: 0.3.111 a full session table refused up front; the compositor's log capped
+
+- **What it is:**
+  - Gitea #157: with all 16 sessions in use, a create is refused before
+    anything starts, as `503 session_limit`, and the detail says how many
+    have ended. It used to start the command, kill it again, and answer
+    `400 session_create_failed`.
+  - Gitea #156, follow-up: blit-compositor's log rotates to `.1` past
+    16 MiB.
+  - The 820 `refused: ENOENT` sub-window frames were investigated and
+    need no Blit change: they are teardown races and an old stack's
+    burst, none in current runs.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` 87;
+  `renderer-gles` 67; no failures. The new `session_limit_gate` fails on
+  0.3.110, and `compositor_log_cap_gate` fails on 0.3.109.
+- **Release environment (Debian 13):** compositor_gate and xwayland_gate
+  with ASan/UBSan, the package gate, and update_pair (6 cases).
+- **Live, the mini PC:** the pair update to 0.3.111 was verified (blit and
+  blit-compositor 0.3.111-1). The compositor's log cap takes effect at the
+  owner's next Restart Desktop.
+- **Published** to hibr-apt (4ead296, signature good).
+
 ## 2026-11-15: 0.3.110 a program's windows keep updating across a display change
 
 - **What it is:** Gitea #156, found by auditing the owner's logs for zero
