@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -87,7 +87,8 @@
    enters and leaves (`STANDIN [child ]enter <name> <w>x<h>@<mHz>`).
 
    With --dmabuf, every buffer is a zwp_linux_dmabuf_v1 one: XRGB8888,
-   LINEAR, one plane. This host has no DRM device and no /dev/udmabuf, so
+   LINEAR, one plane (--modifier <hex> says another layout of the same
+   plane: a GPU's tiled one, which the compositor cannot copy). This host has no DRM device and no /dev/udmabuf, so
    the plane is a memfd -- descriptor passing and the wire are what is
    tested; a GPU's dmabuf is the live check. It prints each buffer's plane
    as `STANDIN dmabuf <w>x<h> file <dev>:<inode>`, what the default
@@ -173,6 +174,7 @@ struct standin {
     struct zwp_linux_dmabuf_v1 *dmabuf;
     struct zwp_linux_dmabuf_feedback_v1 *feedback;
     int use_dmabuf;
+    uint64_t modifier;            /* --modifier: the dmabuf's layout as said (0 LINEAR) */
     unsigned feedback_pairs, feedback_tranche;
     int feedback_xr24_linear;
     struct wp_presentation *presentation;
@@ -382,7 +384,8 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
         struct zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params(s->dmabuf);
         struct stat st;
         fstat(fd, &st);
-        zwp_linux_buffer_params_v1_add(params, fd, 0, 0, (uint32_t)stride, 0, 0);
+        zwp_linux_buffer_params_v1_add(params, fd, 0, 0, (uint32_t)stride, (uint32_t)(s->modifier >> 32),
+                                       (uint32_t)s->modifier);
         b->buffer = zwp_linux_buffer_params_v1_create_immed(params, w, h, FOURCC_XR24, 0);
         zwp_linux_buffer_params_v1_destroy(params);
         printf("STANDIN dmabuf %dx%d file %lu:%lu\n", w, h, (unsigned long)st.st_dev,
@@ -1651,6 +1654,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--xdg-output") == 0) s.xdg_mode = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
+        else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;
         else if (strcmp(argv[i], "--text-input-password") == 0) s.text_input = 2;

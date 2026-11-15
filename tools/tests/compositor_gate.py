@@ -200,18 +200,18 @@ class Desktop:
             os.close(fd)
         return sequence
 
-    def frm3(self, width, height, image_id, wait=5.0):
-        """An FRM3 of the stand-in's pattern, XRGB8888 LINEAR, one plane:
-        (sequence, (st_dev, st_ino) of its plane)."""
+    def frm3(self, width, height, image_id, wait=5.0, modifier=0):
+        """An FRM3 of the stand-in's pattern, XRGB8888, one plane, LINEAR or
+        the layout `modifier` says: (sequence, (st_dev, st_ino) of its plane)."""
         got = self.next(wait)
         check(got is not None and got[0] == 'frm3', 'got %r, expected a %dx%d FRM3' % (got, width, height))
-        (image, sequence, w, h, fourcc, planes, modifier, layout), fds = got[1], got[2]
+        (image, sequence, w, h, fourcc, planes, got_modifier, layout), fds = got[1], got[2]
         try:
             check(image == image_id and (w, h) == (width, height),
                   'FRM3 %d %dx%d, expected %d %dx%d' % (image, w, h, image_id, width, height))
-            check(fourcc == XR24 and planes == 1 and modifier == 0 and layout[:2] == (0, width * 4)
+            check(fourcc == XR24 and planes == 1 and got_modifier == modifier and layout[:2] == (0, width * 4)
                   and layout[2:] == (0,) * 6, 'FRM3 fourcc %#x planes %d modifier %#x layout %s'
-                  % (fourcc, planes, modifier, layout))
+                  % (fourcc, planes, got_modifier, layout))
             pixels = os.pread(fds[0], width * 4 * height, 0)
             rgb = pattern(width, height)
             expected = bytearray(width * height * 4)
@@ -1714,6 +1714,82 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
             % (x, y, order[0], order[1], ' '.join(order[2:])))
 
 
+def dmabuf_retry_part(compositor, standin, work):
+    """Gitea #156: Blit's ENOTSUP means now, not for ever. While Blit rebuilds
+    its outputs it cannot import, and a GPU's tiled frame cannot be copied:
+    the window's newest frame is kept (not dropped, not given back while
+    newest), FRM3 is tried again 250 ms later, refused again the wait
+    doubles, and once Blit takes a frame it is said once in the log. No frame
+    is logged as not shown. This host has no GPU: the stand-in says a tiled
+    modifier for its memfd plane."""
+    tiled = 0x20000001056bb03
+    runtime = os.path.join(work, 'run-retry')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-retry-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN,
+               XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-retry.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-retry.out'), 'w'))
+    client = None
+    try:
+        desk = Desktop(listener, b'OK dmabuf=1 fence=0 formats=XR24/0/%x window=1\n' % tiled)
+        desk.line('WINDOW display blit-0 -')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        out_path = os.path.join(work, 'standin-retry.out')
+        client = start([standin, '--dmabuf', '--modifier', '%x' % tiled, 'Tiled'], cenv, open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Tiled', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        seq0, _ = desk.frm3(256, 160, 1, modifier=tiled)
+        desk.send('FRAME release 1 %d' % seq0)
+        wait_for(lambda: 'STANDIN release 256x160' in printed(), 'FRAME release did not release the first buffer')
+        desk.send('WINDOW size 1 64 32')
+        desk.frm3(64, 32, 1, modifier=tiled)
+        # Blit cannot import now: the refused frame is kept, no FRM1 copy.
+        desk.send('FRAME error 1 ENOTSUP')
+        desk.nothing(0.15)
+        check('STANDIN release 64x32' not in printed(), 'the refused tiled frame was given back unshown')
+        # A newer frame meanwhile is kept in its place; the 64x32 goes back.
+        desk.send('WINDOW size 1 80 40')
+        wait_for(lambda: 'STANDIN release 64x32' in printed(), 'the kept frame was not replaced by the newer one')
+        # The try: the kept 80x40 as FRM3 again, unprompted.
+        desk.frm3(80, 40, 1, wait=2.0, modifier=tiled)
+        # Refused again: the wait doubles.
+        desk.send('FRAME error 1 ENOTSUP')
+        began = time.monotonic()
+        seq3, _ = desk.frm3(80, 40, 1, wait=3.0, modifier=tiled)
+        waited = time.monotonic() - began
+        check(0.4 <= waited < 1.5, 'the second try came after %.2f s, not about 0.5 s' % waited)
+        check('STANDIN release 80x40' not in printed(), 'the kept 80x40 was given back unshown')
+        # Taken: later frames are FRM3 at once, and Blit's release ends the refusals.
+        desk.send('WINDOW size 1 96 48')
+        desk.frm3(96, 48, 1, modifier=tiled)
+        desk.send('FRAME release 1 %d' % seq3)
+        wait_for(lambda: 'STANDIN release 80x40' in printed(), 'FRAME release did not release the 80x40')
+        desk.send('WINDOW close 1')
+        desk.line('WINDOW gone 1')
+        check(client.wait(5) == 0, 'the tiled stand-in failed: ' + printed())
+        quit_compositor(desk, comp)
+        text = open(log).read()
+        check(text.count('Blit cannot import dmabuf frames now (ENOTSUP)') == 1 and
+              text.count('Blit imports dmabuf frames again') == 1 and '2 refused meanwhile' in text,
+              'the refusals were not said once each way:\n' + text)
+        check('not shown' not in text, 'a frame was logged as not shown:\n' + text)
+        return ('ENOTSUP->kept(no-copy,no-release) newer->replaces-kept retry=250ms->FRM3 '
+                'again->%.1fs taken->FRM3+logged-once' % waited)
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -2467,6 +2543,7 @@ def main():
     try:
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
+        print('COMPOSITOR_DMABUF_RETRY_OK %s' % dmabuf_retry_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))

@@ -9,7 +9,8 @@
   its authentication and its ordering rules, unchanged),
   [ADR 0181](0181-gles-compositor-inside-native-kms.md) (the GPU compositor),
   [ADR 0066](0066-the-terminal-names-no-file-blit-opens.md) (no names)
-- Amended: lines in v5 grammar since 0.3.73 (ADR 0228)
+- Amended: lines in v5 grammar since 0.3.73 (ADR 0228); ENOTSUP is now,
+  not for ever, for blit-compositor (0.3.110, Gitea #156)
 
 ## Context
 
@@ -287,6 +288,42 @@ Blit's half is in 0.3.60, RGB only:
 
 This record stays proposed until a real producer (the Browser) sends
 dmabuf frames and the ADR 0202 measurement is repeated with it.
+
+## Amended 2026-11-15 (0.3.110): ENOTSUP is now, not for ever (Gitea #156)
+
+"The producer falls back to memfd" cannot be done by a producer whose
+buffers it cannot read: blit-compositor forwards its clients' own dmabufs,
+and a GPU's tiled or compressed layout (AMD's DCC modifiers, two or three
+planes) has no CPU copy. Blit also refuses `ENOTSUP` while it rebuilds its
+outputs after a display change, for a few hundred milliseconds, because an
+output has no GPU target yet. Before this amendment the compositor took one
+such refusal as permanent for the connection, copied what it could and
+dropped the rest: on the owner's AMD machine, four layout changes left a
+program's windows frozen until the compositor reconnected (Steam Big
+Picture for 8.4 hours, 1.09 million frames logged as not shown, a 155 MB
+log).
+
+The rule for blit-compositor is now:
+- A frame refused `ENOTSUP` is copied as `FRM1` when it can be (one linear
+  plane), and otherwise kept as its window's newest frame: not dropped,
+  and not given back while it is the newest. A newer frame replaces it (the
+  older is given back); frames Blit still holds stay held.
+- FRM3 is tried again 250 ms after the first refusal: every kept frame is
+  sent as `FRM3`, and later frames go as `FRM3` too. Refused again, the
+  wait doubles, up to 4 s. Blit's `FRAME release` of a frame sent after a
+  try ends the refusals, and the wait starts again at 250 ms next time.
+- The log says the refusals once when they begin and once when they end
+  (with the count), never once per frame.
+- A reconnect starts afresh, as before (the hello's answer).
+
+Blit's side is unchanged: it still refuses while an output is composed by
+the CPU, and a producer that can copy still may. A line telling producers
+that the offer is back (rather than their trying) was considered, and not
+chosen: Hibr relays the channel, so it would need Hibr's relay as well, and
+a try costs one refused frame per window at most every 4 s. Gated by
+`compositor_gate.py` (`COMPOSITOR_DMABUF_RETRY_OK`: a tiled stand-in,
+refused, kept, tried at 250 ms, refused again and tried at 500 ms, then
+taken), which fails on 0.3.109.
 
 ## Consequences
 

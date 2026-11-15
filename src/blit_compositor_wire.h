@@ -54,8 +54,11 @@
    hello's `formats=` list names are offered to clients (bc_formats_parse). A
    frame Blit refuses `FRAME error <id> ENOTSUP` (it cannot import now) is
    sent again as a copy, FRM1, when its one linear plane can be mapped, and
-   every later dmabuf frame on the connection is copied too (BcWire.refused,
-   a producer's rule, ADR 0223).
+   kept as its window's newest frame when it cannot (a GPU's tiled or
+   compressed layout). Later dmabuf frames are copied or kept the same way
+   until the next try, 250 ms later and doubling to 4 s, sends each kept
+   frame as FRM3 again: "now" is now, as across Blit's own rebuild of its
+   outputs (BcWire.refused, ADR 0223).
 
    Input comes straight from Blit (docs/api.md, "Input straight from
    Blit"): the compositor asks `INPUT sock <id> <path>` on the channel for
@@ -121,6 +124,9 @@
 #define BC_FOURCC_XB24 BC_FOURCC('X', 'B', '2', '4')
 #define BC_FOURCC_AB24 BC_FOURCC('A', 'B', '2', '4')
 #define BC_MODIFIER_LINEAR 0ull
+/* The wait before FRM3 is tried again after an ENOTSUP, doubling to the most. */
+#define BC_RETRY_FIRST_MS 250u
+#define BC_RETRY_MAX_MS 4000u
 /* ADR 0223: an FRM3 frame carries at most four planes; the hello lists at
    most 16 modifiers per format. */
 #define BC_PLANES_MAX 4
@@ -135,7 +141,11 @@ typedef struct {
     int fd;                 /* the frame socket, -1 when not connected */
     int window;             /* the peer answered window=1 */
     int dmabuf;             /* the peer answered dmabuf=1 with a formats= list */
-    int refused;            /* an FRM3 was refused ENOTSUP: dmabuf copied from now on */
+    int refused;            /* an FRM3 was refused ENOTSUP: dmabuf copied or kept until the next try */
+    uint32_t retry_ms;      /* the wait before that try: 250 ms, doubling to 4 s while refused */
+    uint64_t refused_us;    /* when the refusals began, 0 when FRM3 frames are taken */
+    uint64_t retry_sequence;  /* the last sequence before the latest try: a release after it ends them */
+    unsigned long refused_run;  /* the refusals since refused_us */
     char answer[128];       /* the hello's answer, for the log */
     BcFormat formats[BC_FORMATS_MAX];   /* the hello's formats= list */
     int format_count;
@@ -230,6 +240,10 @@ static int bc_wire_parse_hello(BcWire *w, const char *answer)
     w->window = 0;
     w->dmabuf = 0;
     w->refused = 0;
+    w->retry_ms = 0;
+    w->refused_us = 0;
+    w->retry_sequence = 0;
+    w->refused_run = 0;
     w->format_count = 0;
     n = strcspn(answer, "\n");
     if (n >= sizeof(w->answer)) n = sizeof(w->answer) - 1;

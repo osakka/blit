@@ -438,6 +438,7 @@ struct bc_server {
     int link;                         /* BC_LINK_UP, or BC_LINK_DOWN while reconnecting */
     int quit;                         /* WINDOW quit 0: ending at once, no reconnect */
     struct wl_event_source *redial;   /* the next attempt, or a hello's answer overdue */
+    struct wl_event_source *offer_retry;  /* FRM3 again after an ENOTSUP (BcWire.refused) */
     struct wl_event_source *dial_source;
     int dial_fd;                      /* a hello waiting for its answer, -1 none */
     uint64_t lost_us;                 /* when the channel was lost */
@@ -970,6 +971,28 @@ static int window_copy(struct bc_xdg *x, const void *pixels, uint32_t width, uin
     }
     kept_set(x, &c);
     return rc;
+}
+
+/* Whether dmabuf_copy can read it: one linear plane of an 8-bit RGB
+   format. A GPU's tiled or compressed layout cannot be read by the CPU. */
+static int dmabuf_copyable(const struct bc_dmabuf *b)
+{
+    if (b->planes != 1 || b->modifier != BC_MODIFIER_LINEAR) return 0;
+    return b->format == BC_FOURCC_XR24 || b->format == BC_FOURCC_AR24 ||
+           b->format == BC_FOURCC_XB24 || b->format == BC_FOURCC_AB24;
+}
+
+/* Hold `h` (an FRM3 Blit refused, or a new hold) as window `x`'s newest
+   frame, sequence 0, sent again at the next try or on a new channel; the
+   frame it replaces is the client's again. Frames Blit still holds stay
+   held: Blit may be drawing them. */
+static void keep_newest(struct bc_xdg *x, struct bc_hold *h)
+{
+    struct bc_hold *other, *next;
+    wl_list_for_each_safe(other, next, &x->server->holds, link)
+        if (other != h && other->id == x->id && other->sequence == 0) hold_end(other);
+    h->sequence = 0;
+    kept_set(x, NULL);
 }
 
 /* A dmabuf's pixels copied as FRM1, for a peer that cannot import it:
@@ -1596,6 +1619,19 @@ static int send_dmabuf(struct bc_xdg *x, struct bc_dmabuf *b)
         }
         free(h);
         logf_("window %u: FRM3 not sent (%s); copying", x->id, s->wire.last_error);
+    }
+    /* Refused now, and no copy can be made: the newest frame waits for the
+       next try (BcWire.refused), the one it replaces given back. */
+    if (s->wire.dmabuf && s->wire.refused && !dmabuf_copyable(b)) {
+        h = calloc(1, sizeof(*h));
+        if (h == NULL) return BC_SENT_NONE;
+        h->id = x->id;
+        h->buffer = b;
+        ++b->holds;
+        wl_list_insert(s->holds.prev, &h->link);
+        keep_newest(x, h);
+        frames_taken(x->surface);
+        return BC_SENT_HELD;
     }
     if (dmabuf_copy(x, b) != 0) {
         logf_("window %u: a dmabuf frame not shown: %s", x->id, s->wire.last_error);
@@ -9442,12 +9478,36 @@ static void x_finish(struct bc_server *s)
     x_sockets_close(s);
 }
 
+/* The next try after an ENOTSUP: each window's kept frame as FRM3 again,
+   and later frames FRM3 too. Refused again, the wait doubles (frame_refused);
+   taken, Blit's release of one ends the refusals (BC_LINE_RELEASE). */
+static int on_offer_retry(void *data)
+{
+    struct bc_server *s = data;
+    struct bc_xdg *x;
+    if (s->link != BC_LINK_UP || !s->wire.refused) return 0;
+    s->wire.refused = 0;
+    s->wire.retry_sequence = s->wire.sequence;
+    wl_list_for_each(x, &s->windows, link) {
+        struct bc_hold *h;
+        if (x->id == 0) continue;
+        wl_list_for_each(h, &s->holds, link)
+            if (h->id == x->id && h->sequence == 0) {
+                window_resend(x);
+                break;
+            }
+    }
+    return 0;
+}
+
 /* `FRAME error <id> <code>`. Replies come in the order frames are
    read and an accepted frame gets none, so a refusal is the newest frame
    of the picture -- an FRM3 still held, unless an FRM1 went after it
-   (a producer's rule, ADR 0223). ENOTSUP (Blit cannot import now) copies that
-   frame as FRM1 and every later dmabuf frame of the connection (ADR
-   0223); any other code gives the buffer back unshown. */
+   (a producer's rule, ADR 0223). ENOTSUP (Blit cannot import now, as while
+   it rebuilds its outputs) copies that frame as FRM1, or keeps it as the
+   window's newest frame when it cannot be copied, and every later dmabuf
+   frame the same way until the next try sends the kept ones as FRM3
+   again (on_offer_retry); any other code gives the buffer back unshown. */
 static void frame_refused(struct bc_server *s, uint32_t id, const char *code)
 {
     struct bc_hold *h, *newest = NULL;
@@ -9460,13 +9520,27 @@ static void frame_refused(struct bc_server *s, uint32_t id, const char *code)
     }
     ++s->wire.dmabuf_refused;
     if (strcmp(code, "ENOTSUP") == 0) {
-        if (!s->wire.refused)
-            logf_("Blit cannot import dmabuf frames now (ENOTSUP): copying them from here on");
-        s->wire.refused = 1;
-        if (x && newest->buffer) {
-            if (dmabuf_copy(x, newest->buffer) != 0)
-                logf_("window %u: the refused dmabuf frame is not shown: %s", id, s->wire.last_error);
+        ++s->wire.refused_run;
+        if (!s->wire.refused) {
+            if (s->wire.refused_us == 0) {
+                s->wire.refused_us = now_us();
+                s->wire.retry_ms = BC_RETRY_FIRST_MS;
+                logf_("Blit cannot import dmabuf frames now (ENOTSUP): copying or keeping each "
+                      "window's newest, FRM3 again in %u ms", s->wire.retry_ms);
+            } else if (s->wire.retry_ms < BC_RETRY_MAX_MS) {
+                s->wire.retry_ms = s->wire.retry_ms * 2 > BC_RETRY_MAX_MS ? BC_RETRY_MAX_MS
+                                                                         : s->wire.retry_ms * 2;
+            }
+            s->wire.refused = 1;
+            wl_event_source_timer_update(s->offer_retry, (int)s->wire.retry_ms);
         }
+        if (x && newest->buffer && !dmabuf_copyable(newest->buffer)) {
+            keep_newest(x, newest);
+            frames_taken(x->surface);
+            return;
+        }
+        if (x && newest->buffer && dmabuf_copy(x, newest->buffer) != 0)
+            logf_("window %u: the refused dmabuf frame is not shown: %s", id, s->wire.last_error);
     } else {
         logf_("window %u: a dmabuf frame was refused %s, not shown", id, code);
     }
@@ -9600,6 +9674,14 @@ static void handle_line(struct bc_server *s, const char *line)
             if (h->id == l.id && h->sequence == l.sequence) {
                 struct bc_hold *other;
                 ++s->wire.dmabuf_released;
+                if (s->wire.refused_us != 0 && !s->wire.refused && l.sequence > s->wire.retry_sequence) {
+                    logf_("Blit imports dmabuf frames again, %llu ms after it could not: %lu refused "
+                          "meanwhile, each window's newest kept and sent",
+                          (unsigned long long)((now_us() - s->wire.refused_us) / 1000), s->wire.refused_run);
+                    s->wire.refused_us = 0;
+                    s->wire.refused_run = 0;
+                    s->wire.retry_ms = 0;
+                }
                 hold_end(h);
                 /* Blit drew a newer frame of the window: it is taken. */
                 wl_list_for_each(other, &s->holds, link)
@@ -9778,6 +9860,8 @@ static void window_resend(struct bc_xdg *x)
             }
             logf_("window %u: its newest FRM3 not sent again (%s); copying", x->id, s->wire.last_error);
         }
+        /* Refused now and not copyable: kept for the next try. */
+        if (b && s->wire.dmabuf && s->wire.refused && !dmabuf_copyable(b)) return;
         if (b && dmabuf_copy(x, b) != 0)
             logf_("window %u: its newest dmabuf frame not shown again: %s", x->id, s->wire.last_error);
         hold_end(kept);
@@ -10227,6 +10311,7 @@ int main(int argc, char **argv)
     server.sigterm_source = wl_event_loop_add_signal(server.loop, SIGTERM, on_signal, &server);
     server.sigint_source = wl_event_loop_add_signal(server.loop, SIGINT, on_signal, &server);
     server.redial = wl_event_loop_add_timer(server.loop, on_redial, &server);
+    server.offer_retry = wl_event_loop_add_timer(server.loop, on_offer_retry, &server);
     logf_("listening on %s/%s", runtime, server.socket_name);
     /* X programs, when Xwayland is here (the X section): the display is
        said with the Wayland one. */
@@ -10252,6 +10337,7 @@ int main(int argc, char **argv)
     if (server.sigterm_source) wl_event_source_remove(server.sigterm_source);
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
     if (server.redial) wl_event_source_remove(server.redial);
+    if (server.offer_retry) wl_event_source_remove(server.offer_retry);
     dial_end(&server);
     /* The outputs before the display: their globals and timers are its. */
     while (!wl_list_empty(&server.outputs)) {

@@ -2311,11 +2311,18 @@ It speaks the frame channel above as a producer, with these additions.
   the id is given back, and Blit's later `FRAME release`s for them are stale).
   `zwp_linux_dmabuf_v1` (version 4, default feedback in one tranche) is
   offered only when the hello was answered `dmabuf=1` with a `formats=`
-  list, and offers exactly those formats and modifiers. A frame refused
-  `FRAME error <id> ENOTSUP` is sent again as an `FRM1` copy when its one linear
-  plane can be mapped, as is every later dmabuf frame of the connection;
-  any other refusal, or one that cannot be mapped, gives the buffer back
-  unshown and says so in the compositor's log. The feedback's main device
+  list, and offers exactly those formats and modifiers. `FRAME error <id>
+  ENOTSUP` means Blit cannot import *now* (as while it rebuilds its outputs
+  after a display change): the refused frame is sent again as an `FRM1`
+  copy when its one linear plane can be mapped, and is kept as the window's
+  newest frame when it cannot (a GPU's tiled or compressed layout). Later
+  dmabuf frames are copied or kept the same way until the next try, 250 ms
+  later and doubling to 4 s while Blit keeps refusing, sends each kept frame
+  as `FRM3` again; Blit's `FRAME release` of one ends the refusals (Gitea
+  #156: before 0.3.110 one ENOTSUP turned the connection to copies for
+  good, and a tiled program's windows stopped updating). The compositor's
+  log says the refusals once when they begin and once when they end. Any
+  other refusal gives the buffer back unshown and says so in its log. The feedback's main device
   is the first DRM render node: the hello does not name Blit's GPU.
 - **Pacing.** A program's frame callback is answered when Blit has taken
   the frame -- an `FRM1` when it is sent; an `FRM3` at once when it is the
