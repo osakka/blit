@@ -9,6 +9,31 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-15: 0.3.110 a program's windows keep updating across a display change
+
+- **What it is:** Gitea #156, found by auditing the owner's logs for zero
+  errors.
+  - While Blit rebuilds its outputs after a display change, it refuses
+    dmabuf frames `ENOTSUP`.
+  - blit-compositor used to take one such refusal as permanent: it copied
+    what it could and dropped every tiled frame. Four layout changes on the
+    owner's AMD mini PC froze Planetbase, Steam Big Picture (8.4 h, 1.09
+    million frames logged as not shown) and a fullscreen game.
+  - Now the newest frame is kept and FRM3 is tried again at 250 ms,
+    doubling to 4 s. The log says the refusals once when they begin and
+    once when they end. ADR 0223 amended.
+- **Gates on this host:** `all` 190 pass, 11 skip, plus one load flake;
+  `renderer` 85; `renderer-gles` 64, plus one load flake. The two flakes
+  (hibr_split_capture, presentation_effects on GLES) passed 3/3 alone.
+- **Release environment (Debian 13):** compositor_gate with ASan/UBSan
+  (its new dmabuf retry part included), xwayland_gate, the package gate,
+  and update_pair 6 cases. The retry part fails on 0.3.109's compositor.
+- **Live, the mini PC:** the pair update to 0.3.110 was verified (server
+  0.3.110; blit and blit-compositor 0.3.110-1 installed). The running
+  compositor is the old one until the owner's next Restart Desktop. That
+  boot's counters show no refusals so far (37,665 accepted, 0 refused).
+- **Published** to hibr-apt (a3123ec, signature good).
+
 ## 2026-11-14: 0.3.109 Arabizi cycle or teach in programs' text fields
 
 - **What it is:** hibr-ime v0.1.5 (IME_API 3), agreed with Hibr.
