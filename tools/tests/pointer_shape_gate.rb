@@ -159,7 +159,7 @@ Dir.mktmpdir('blit-pointer-shape') do |root|
       effective['pointer'] == { 'shape' => 'arrow', 'palette' => 'pearl', 'size_px' => 24, 'shadow' => true,
                                 'shake_to_find' => true, 'shake_max_px' => 160, 'shake_sensitivity' => 5,
                                 'shake_shrink_ms' => 900, 'busy_pointer' => true, 'busy_after_ms' => 2000,
-                                'busy_spin_ms' => 1000 }
+                                'busy_spin_ms' => 1000, 'busy_style' => 'wheel' }
     asked = data('GET', "/v1/terminal-sessions/#{b.fetch('id')}")['pointer_shape']
     raise "B's request is not published: #{asked.inspect}" unless asked == { 'requested' => 'text', 'depth' => 1 }
     move(*centre[1])

@@ -14,7 +14,8 @@ static int pointer_member_key_decode(char *key, size_t capacity)
    (ADR 0234): shake_to_find, shake_max_px (64..256), shake_sensitivity
    (1..10) and shake_shrink_ms (150..3000), kept apart from the appearance, which is the art's own key.
    When `busy` is given, the busy pointer (ADR 0235): busy_pointer,
-   busy_after_ms (500..10000) and busy_spin_ms (400..3000). */
+   busy_after_ms (500..10000), busy_spin_ms (400..3000) and busy_style
+   ("wheel", the default, or "spokes"). */
 static int pointer_config_parse(const char *document, BlitPointerConfig *config,
                                 BlitShakeConfig *shake, BlitBusyConfig *busy)
 {
@@ -55,7 +56,18 @@ static int pointer_config_parse(const char *document, BlitPointerConfig *config,
         length=strlen(value);
         while (length && (value[length-1]==' ' || value[length-1]=='\n' ||
                value[length-1]=='\r' || value[length-1]=='\t')) value[--length]='\0';
-        if (!strcmp(key, "shape") || !strcmp(key, "palette")) {
+        if (!strcmp(key, "busy_style")) {
+            /* ADR 0235 (0.3.113): the busy pointer's look, "wheel" or "spokes". */
+            size_t length = 0;
+            const char *end;
+            bit = 2048;
+            if (value[0] != '"') return 0;
+            end = json_unescape(value+1, text, sizeof(text), &length);
+            if (end == NULL || length == 0 || *end || strlen(text)!=length) return 0;
+            for (i = 0; i < 2 && strcmp(text,blit_pointer_busy_styles[i]); ++i) {}
+            if (i == 2) return 0;
+            config->busy_style = i;
+        } else if (!strcmp(key, "shape") || !strcmp(key, "palette")) {
             const char *const *names = !strcmp(key,"shape") ? blit_pointer_shapes : blit_pointer_palettes;
             int count = !strcmp(key,"shape") ? 3 : 4;
             size_t length = 0;

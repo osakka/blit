@@ -130,3 +130,31 @@ destroyed, or the busy pointer turned off.
   it never reads. With input for 4 s and a 1 s threshold, its window is
   never said busy, under ASan/UBSan as well. It fails on 0.3.111
   (`WINDOW busy 1 on`, `WINDOW cursor 1 wait`).
+
+## Amended 2026-11-16 (0.3.113): a colour wheel, the spokes a choice
+
+The owner found the ring of grey spokes dated, and asked for something
+much closer to the Mac's current wait cursor (a flat, bright colour disc
+since OS X 10.11). The busy pointer is now Blit's own colour wheel by
+default:
+- A disc of radius 12.5 in the art's 32-unit space, its colours sweeping
+  once round on a six-stop ramp, lighter toward the middle and from above,
+  inside a thin dark rim so it reads on any background, with the
+  pointer's shadow.
+- It turns by colour, clockwise, 10 degrees a phase: 36 phases a turn
+  (`BLIT_POINTER_PHASES`) where the spokes had 12. A phase recolours the
+  inside of the base art and mixes the colour into the rim's inner edge,
+  so alpha, geometry and the rim are kept, and it never re-rasters.
+- No libm, like the rest of the art: the angle is a polynomial atan2 (to
+  about 0.3 degrees), and the radius comes from three Newton steps.
+- The spokes stay, `"busy_style": "spokes"`, stepping a spoke every third
+  phase. The setting is `pointer.busy_style` (`wheel` or `spokes`), in
+  Blit Mouse as Busy Pointer Style (pane 0.1.37).
+
+The design is original: drawn here from the idea of a turning colour disc,
+with Apple's name and art in nothing shipped. `pointer_art_gate` checks
+that the wheel's colours differ round it, that a spin keeps every alpha
+and every pixel outside its edge, that the colour at 3 o'clock nine
+phases on is the one that was at 12, that 36 phases all differ, and that
+an unknown style builds nothing. `pointer_appearance_gate` checks the
+default and refuses bad values; `pointer_shape_gate` reports it.

@@ -1595,14 +1595,16 @@ a shake must be, 1 hard, 10 light; `shake_shrink_ms` (150–3000, default
 The busy pointer (ADR 0235): a program in a window (blit-compositor) that
 has not answered for `busy_after_ms` (500–10000, default 2000) shows the
 busy pointer over its windows until it answers; `busy_pointer` (default
-true) turns that off. The busy pointer is a ring of spokes going round,
-once each `busy_spin_ms` (400–3000, default 1000); it is also what a
+true) turns that off. The busy pointer goes round once each
+`busy_spin_ms` (400–3000, default 1000), in 36 steps; `busy_style` is its
+look: `wheel` (the default since 0.3.113), a colour disc whose colours go
+round, or `spokes`, a ring of spokes that dim in turn. It is also what a
 program asking `wait` or `progress` by OSC 22 gets.
 `effective.pointer_shown` adds `spin_phase` (-1 while the busy pointer is
 not shown) and `spin_frames`.
 
 ```json
-{"busy_pointer":true,"busy_after_ms":2000,"busy_spin_ms":1000}
+{"busy_pointer":true,"busy_after_ms":2000,"busy_spin_ms":1000,"busy_style":"wheel"}
 ``` `effective.pointer_shown` adds `size_px`
 (the size drawn now), `shake_scale` and `shake_sizes` (how many times the
 drawn size has changed).

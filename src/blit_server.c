@@ -22673,8 +22673,8 @@ static int pointer_spinning(const BlitRuntime *runtime)
 static int pointer_spin_phase_at(const BlitRuntime *runtime, uint64_t now)
 {
     uint64_t step = (uint64_t)(runtime->busy_spin_ms > 0 ? runtime->busy_spin_ms : 1000) * 1000ULL /
-        BLIT_POINTER_SPOKES;
-    return (int)((now / step) % BLIT_POINTER_SPOKES);
+        BLIT_POINTER_PHASES;
+    return (int)((now / step) % BLIT_POINTER_PHASES);
 }
 
 static void pointer_art_present(BlitRuntime *runtime)
@@ -22705,7 +22705,7 @@ static void pointer_spin_tick(BlitRuntime *runtime, uint64_t now)
         return;
     }
     step = (uint64_t)(runtime->busy_spin_ms > 0 ? runtime->busy_spin_ms : 1000) * 1000ULL /
-        BLIT_POINTER_SPOKES;
+        BLIT_POINTER_PHASES;
     phase = pointer_spin_phase_at(runtime, now);
     if (phase != runtime->pointer_spin_phase) {
         runtime->pointer_spin_phase = phase;
@@ -23964,7 +23964,8 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  "\"pointer\":{\"shape\":\"%s\",\"palette\":\"%s\","
                  "\"size_px\":%d,\"shadow\":%s,\"shake_to_find\":%s,"
                  "\"shake_max_px\":%d,\"shake_sensitivity\":%d,\"shake_shrink_ms\":%d,"
-                 "\"busy_pointer\":%s,\"busy_after_ms\":%d,\"busy_spin_ms\":%d},"
+                 "\"busy_pointer\":%s,\"busy_after_ms\":%d,\"busy_spin_ms\":%d,"
+                 "\"busy_style\":\"%s\"},"
                  "\"pointer_shown\":{\"shape\":\"%s\",\"hidden\":%s,"
                  "\"size_px\":%d,\"shake_scale\":%.2f,\"shake_sizes\":%llu,"
                  "\"spin_phase\":%d,\"spin_frames\":%llu},"
@@ -24002,6 +24003,7 @@ static void settings_json(BlitRuntime *runtime, char *body, size_t capacity)
                  runtime->shake_config.shrink_ms,
                  runtime->busy_config.enabled ? "true" : "false", runtime->busy_config.after_ms,
                  runtime->busy_config.spin_ms,
+                 blit_pointer_busy_styles[runtime->pointer_art.config.busy_style],
                  blit_pointer_shapes[runtime->pointer_shown_art.revision ?
                      runtime->pointer_shown_art.config.shape :
                      runtime->pointer_art.config.shape],

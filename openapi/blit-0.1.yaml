@@ -2993,6 +2993,13 @@ components:
           maximum: 3000
           default: 1000
           description: How long the busy pointer takes to go round once.
+        busy_style:
+          type: string
+          enum: [wheel, spokes]
+          default: wheel
+          description: >-
+            The busy pointer's look (0.3.113): a colour wheel whose colours
+            go round, or a ring of spokes that dim in turn.
     HudSettings:
       type: object
       description: >-

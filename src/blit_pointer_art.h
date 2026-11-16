@@ -11,6 +11,13 @@
 #define BLIT_POINTER_MAX 264   /* a shake grows the pointer to 256 px (ADR 0234) */
 #define BLIT_POINTER_SPOKES 12 /* the busy pointer's spokes (ADR 0235) */
 #define BLIT_POINTER_SHAPE_BUSY 4
+/* The busy pointer's phases a turn: 36, so the wheel turns 10 degrees a
+   step (the spokes step every third phase, one spoke). */
+#define BLIT_POINTER_PHASES 36
+/* The busy pointer's styles (ADR 0235, amended 0.3.113): a colour wheel
+   whose colours go round, or the ring of spokes that dim in turn. */
+#define BLIT_POINTER_BUSY_SPOKES 0
+#define BLIT_POINTER_BUSY_WHEEL 1
 /* The busy pointer's spokes, clockwise from 12 o'clock: unit directions
    (sin, -cos) of k * 30 degrees, constants so the art needs no libm. */
 static const float blit_pointer_spoke_dir[BLIT_POINTER_SPOKES][2] = {
@@ -23,6 +30,7 @@ typedef struct {
     int palette;               /* pearl, obsidian, neon, amber */
     int size;                  /* nominal24..64 physical pixels */
     int shadow;
+    int busy_style;            /* BLIT_POINTER_BUSY_WHEEL or _SPOKES */
 } BlitPointerConfig;
 typedef struct {
     BlitPointerConfig config;
@@ -41,6 +49,7 @@ static const char *const blit_pointer_shapes[] = {
 #define BLIT_POINTER_SHAPE_COUNT 11
 #define BLIT_POINTER_API_SHAPES 3
 static const char *const blit_pointer_palettes[] = {"pearl", "obsidian", "neon", "amber"};
+static const char *const blit_pointer_busy_styles[] = {"spokes", "wheel"};
 
 /* One sequence for every piece of pointer art, so two arts never share a
    revision: the display and the GLES texture cache take an equal revision
@@ -54,7 +63,7 @@ static unsigned long long blit_pointer_next_revision(void)
 
 static BlitPointerConfig blit_pointer_default(void)
 {
-    BlitPointerConfig config = {0, 0, 24, 1};
+    BlitPointerConfig config = {0, 0, 24, 1, BLIT_POINTER_BUSY_WHEEL};
     return config;
 }
 
@@ -194,6 +203,56 @@ static float blit_pointer_distance(int shape, float x, float y)
     return inside ? -d : d;
 }
 
+/* The wheel (ADR 0235, 0.3.113): a disc of radius 12.5 about (16, 16) in
+   the art's 32-unit space, its colours sweeping once round, lighter toward
+   the middle and from above, inside a thin dark rim so it reads on any
+   background. Blit's own drawing, no libm: the angle is an atan2 to about
+   0.3 degrees, the hue a six-segment ramp. */
+#define BLIT_POINTER_WHEEL_R 12.5f
+#define BLIT_POINTER_WHEEL_RIM 0.9f
+
+/* The angle of (dx, dy), clockwise from 12 o'clock, in turns (0 .. 1). */
+static float blit_pointer_turns(float dx, float dy)
+{
+    float ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy, a, s, r, t;
+    if (ax == 0 && ay == 0) return 0;
+    a = (ax < ay ? ax : ay) / (ax < ay ? ay : ax);
+    s = a * a;
+    r = ((-0.0464964749f * s + 0.15931422f) * s - 0.327622764f) * s * a + a;   /* atan(a), radians */
+    if (ax > ay) r = 1.57079637f - r;             /* the angle from the vertical axis */
+    t = r / 6.28318531f;                          /* 0 .. 0.25 within the quadrant */
+    if (dx >= 0 && dy < 0) return t;              /* top right */
+    if (dx >= 0) return 0.5f - t;                 /* bottom right */
+    if (dy >= 0) return 0.5f + t;                 /* bottom left */
+    return 1.0f - t;                              /* top left */
+}
+
+/* The wheel's colour at `turns` round and `r` (32-unit space) out. */
+static void blit_pointer_wheel_colour(float turns, float r, float vy, unsigned int colour[3])
+{
+    static const float stops[7][3] = {
+        {255, 72, 92}, {255, 168, 48}, {255, 226, 74}, {84, 214, 120},
+        {58, 160, 255}, {150, 98, 255}, {255, 72, 92}
+    };
+    float h, f, lift, light, rgb[3];
+    int k, c;
+    turns -= (float)(int)turns;
+    if (turns < 0) turns += 1;
+    h = turns * 6;
+    k = (int)h;
+    if (k > 5) k = 5;
+    f = h - k;
+    for (c = 0; c < 3; ++c) rgb[c] = stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f;
+    /* Lighter toward the middle, a little from above. */
+    lift = 1.0f - r / BLIT_POINTER_WHEEL_R;
+    lift = lift * lift * 0.45f;
+    light = 1.0f - (vy - 16.0f) * 0.010f;
+    for (c = 0; c < 3; ++c) {
+        float v = (rgb[c] + (255 - rgb[c]) * lift) * light;
+        colour[c] = v > 255 ? 255 : v < 0 ? 0 : (unsigned int)v;
+    }
+}
+
 /* One sample of the art at vector point (vx, vy): its alpha and colour, and
    its band -- 0 nothing, 1 the shadow, 2 the fill, 3 the outline -- the
    same band everywhere meaning the same alpha and a colour that varies only
@@ -208,6 +267,29 @@ static int blit_pointer_sample(const BlitPointerConfig *config, float vx, float 
     int c;
     colour[0] = colour[1] = colour[2] = 0;
     *a = 0;
+    if (config->shape == BLIT_POINTER_SHAPE_BUSY && config->busy_style == BLIT_POINTER_BUSY_WHEEL) {
+        float dx = vx - 16, dy = vy - 16, rr = dx * dx + dy * dy, r;
+        /* r by Newton from a first guess: sqrt without libm. */
+        r = rr > 0 ? (rr + BLIT_POINTER_WHEEL_R * BLIT_POINTER_WHEEL_R) / (2 * BLIT_POINTER_WHEEL_R) : 0;
+        if (rr > 0) { r = 0.5f * (r + rr / r); r = 0.5f * (r + rr / r); r = 0.5f * (r + rr / r); }
+        if (r <= BLIT_POINTER_WHEEL_R) {
+            *a = 255;
+            if (r >= BLIT_POINTER_WHEEL_R - BLIT_POINTER_WHEEL_RIM) {
+                colour[0] = 38; colour[1] = 40; colour[2] = 48;
+                return 3;
+            }
+            blit_pointer_wheel_colour(blit_pointer_turns(dx, dy), r, vy, colour);
+            return 2;
+        }
+        if (config->shadow) {
+            float sx = vx - 1.4f - 16, sy = vy - 2.2f - 16;
+            if (sx * sx + sy * sy <= (BLIT_POINTER_WHEEL_R + 1.0f) * (BLIT_POINTER_WHEEL_R + 1.0f)) {
+                *a = 75;
+                return 1;
+            }
+        }
+        return 0;
+    }
     if (d <= 0.8f) {
         *a = 255;
         for (c = 0; c < 3; ++c) {
@@ -238,7 +320,8 @@ static void blit_pointer_build(BlitPointerArt *art, BlitPointerConfig config)
     int x, y, sx, sy, c, w;
     float scale;
     if (config.shape < 0 || config.shape >= BLIT_POINTER_SHAPE_COUNT || config.palette < 0 ||
-        config.palette > 3 || config.size < 24 || config.size > BLIT_POINTER_MAX - 8) return;
+        config.palette > 3 || config.size < 24 || config.size > BLIT_POINTER_MAX - 8 ||
+        config.busy_style < 0 || config.busy_style > 1) return;
     scale = (float)config.size / 32.0f;
     memset(art, 0, sizeof(*art)); art->config = config; art->revision = revision;
     art->width = art->height = config.size + 6;
@@ -330,11 +413,14 @@ static uint32_t blit_pointer_blend(uint32_t background, const unsigned char *rgb
            (((rgba[1] * a + ((background >> 8) & 255) * inverse + 127) / 255) << 8) |
            ((rgba[2] * a + (background & 255) * inverse + 127) / 255);
 }
-/* ADR 0235: the busy pointer at `phase` (0 .. BLIT_POINTER_SPOKES - 1):
-   `base`, the ring with every spoke alike, with each spoke dimmed by how
-   far it trails the lit one, so successive phases go round clockwise.
-   Geometry, hotspot and config are base's; only alpha changes, so a phase
-   costs a pass over the pixels, never a raster. */
+/* ADR 0235: the busy pointer at `phase` (0 .. BLIT_POINTER_PHASES - 1).
+   The spokes: `base`, the ring with every spoke alike, with each spoke
+   dimmed by how far it trails the lit one (a spoke every third phase), so
+   successive phases go round clockwise; only alpha changes. The wheel:
+   `base`'s inside coloured again with its colours turned `phase` tenths
+   of 36 round, clockwise; the rim and the edge's alpha stay. Geometry,
+   hotspot and config are base's, so a phase costs a pass over the pixels,
+   never a raster. */
 static void blit_pointer_spin(BlitPointerArt *art, const BlitPointerArt *base, int phase)
 {
     static const unsigned char fade[BLIT_POINTER_SPOKES] = {
@@ -348,6 +434,33 @@ static void blit_pointer_spin(BlitPointerArt *art, const BlitPointerArt *base, i
     memcpy(art->rgba, base->rgba, (size_t)base->width * (size_t)base->height * 4);
     cx = 16.0f * scale + 1;
     cy = 16.0f * scale + 1;
+    phase = ((phase % BLIT_POINTER_PHASES) + BLIT_POINTER_PHASES) % BLIT_POINTER_PHASES;
+    if (base->config.busy_style == BLIT_POINTER_BUSY_WHEEL) {
+        /* The inside coloured again; a pixel across the rim's inner edge
+           mixes the new colour with the rim's by how much of it is inside,
+           so no ring of the old colours is left. The rim itself is kept. */
+        float edge = (BLIT_POINTER_WHEEL_R - BLIT_POINTER_WHEEL_RIM) * scale;
+        for (y = 0; y < art->height; ++y) for (x = 0; x < art->width; ++x) {
+            unsigned char *px = art->rgba + (y * art->width + x) * 4;
+            float dx = x + 0.5f - cx, dy = y + 0.5f - cy, rr = dx * dx + dy * dy, r, inside;
+            unsigned int colour[3];
+            int c;
+            if (px[3] == 0 || rr > (edge + 0.5f) * (edge + 0.5f)) continue;
+            r = rr > 0 ? (rr + edge * edge) / (2 * edge) : 0;
+            if (rr > 0) { r = 0.5f * (r + rr / r); r = 0.5f * (r + rr / r); r = 0.5f * (r + rr / r); }
+            inside = edge + 0.5f - r;
+            if (inside > 1) inside = 1;
+            blit_pointer_wheel_colour(blit_pointer_turns(dx, dy) - (float)phase / BLIT_POINTER_PHASES,
+                                      r / scale, (y + 0.5f - 1) / scale, colour);
+            {
+                static const unsigned char rim[3] = {38, 40, 48};
+                for (c = 0; c < 3; ++c)
+                    px[c] = (unsigned char)(colour[c] * inside + rim[c] * (1 - inside) + 0.5f);
+            }
+        }
+        return;
+    }
+    phase = phase * BLIT_POINTER_SPOKES / BLIT_POINTER_PHASES;
     for (y = 0; y < art->height; ++y) for (x = 0; x < art->width; ++x) {
         unsigned char *px = art->rgba + (y * art->width + x) * 4;
         float dx = x + 0.5f - cx, dy = y + 0.5f - cy, best = -1e30f;

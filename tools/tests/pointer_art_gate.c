@@ -51,26 +51,72 @@ int main(int argc, char **argv)
             sheet[k] = colour>>16;sheet[k+1]=colour>>8;sheet[k+2]=colour;
         }
     }
-    /* ADR 0235: the busy pointer goes round (every phase different, each
-       spoke lit in turn, geometry kept), and no two arts -- built, spun,
-       resampled -- ever share a revision, since the display takes an
-       equal revision for the same picture. */
+    /* ADR 0235: the busy pointer goes round (every phase different, geometry
+       kept), and no two arts -- built, spun, resampled -- ever share a
+       revision, since the display takes an equal revision for the same
+       picture. The spokes light a spoke every third of 36 phases; the
+       wheel's colours turn 10 degrees a phase, clockwise, its alpha and rim
+       kept. */
     {
-        static BlitPointerArt base, spun[BLIT_POINTER_SPOKES], master, grown;
-        unsigned long long seen[BLIT_POINTER_SPOKES + 3];
-        int p, q, n = 0;
-        config.shape = BLIT_POINTER_SHAPE_BUSY; config.palette = 1; config.size = 24;
-        blit_pointer_build(&base, config);
-        seen[n++] = base.revision;
-        for (p = 0; p < BLIT_POINTER_SPOKES; ++p) {
-            blit_pointer_spin(&spun[p], &base, p);
-            if (spun[p].width != base.width || spun[p].hotspot_x != base.hotspot_x ||
-                memcmp(&spun[p].config, &base.config, sizeof(base.config))) return 7;
-            for (q = 0; q < p; ++q)
-                if (!memcmp(spun[p].rgba, spun[q].rgba, (size_t)base.width * base.height * 4)) return 8;
-            seen[n++] = spun[p].revision;
+        static BlitPointerArt base, spun[BLIT_POINTER_PHASES], master, grown;
+        unsigned long long seen[BLIT_POINTER_PHASES * 2 + 6];
+        int p, q, n = 0, style;
+        for (style = 0; style < 2; ++style) {
+            int step = style == BLIT_POINTER_BUSY_SPOKES ? 3 : 1;
+            config.shape = BLIT_POINTER_SHAPE_BUSY; config.palette = 1; config.size = 24;
+            config.busy_style = style;
+            blit_pointer_build(&base, config);
+            if (!base.revision) return 10;
+            seen[n++] = base.revision;
+            for (p = 0; p < BLIT_POINTER_PHASES; p += step) {
+                blit_pointer_spin(&spun[p], &base, p);
+                if (spun[p].width != base.width || spun[p].hotspot_x != base.hotspot_x ||
+                    memcmp(&spun[p].config, &base.config, sizeof(base.config))) return 7;
+                for (q = 0; q < p; q += step)
+                    if (!memcmp(spun[p].rgba, spun[q].rgba, (size_t)base.width * base.height * 4)) return 8;
+                seen[n++] = spun[p].revision;
+            }
+            if (style == BLIT_POINTER_BUSY_WHEEL) {
+                /* At 56 px: colours differ round the wheel; a spin keeps every
+                   alpha and the rim; 9 phases on, the colour at 3 o'clock is
+                   the colour that was at 12. */
+                static BlitPointerArt big, turned;
+                int cx, cy, i2, k, top, right, bottom, rim, diff;
+                config.size = 56;
+                blit_pointer_build(&big, config);
+                blit_pointer_spin(&turned, &big, 9);
+                cx = big.hotspot_x; cy = big.hotspot_y;
+                top = ((cy - 15) * big.width + cx) * 4;
+                right = (cy * big.width + cx + 15) * 4;
+                bottom = ((cy + 15) * big.width + cx) * 4;
+                rim = ((cy - 21) * big.width + cx) * 4;
+                diff = 0;
+                for (k = 0; k < 3; ++k) diff += abs(big.rgba[top + k] - big.rgba[bottom + k]);
+                if (diff < 120) return 11;
+                for (i2 = 0; i2 < big.width * big.height; ++i2)
+                    if (big.rgba[i2 * 4 + 3] != turned.rgba[i2 * 4 + 3]) return 12;
+                (void)rim;
+                {
+                    /* Outside the spin's blend edge every pixel is kept; the
+                       rim is there, opaque and dark. */
+                    float sc = 56.0f / 32.0f, edge = (BLIT_POINTER_WHEEL_R - BLIT_POINTER_WHEEL_RIM) * sc;
+                    int dark = 0, xx, yy;
+                    for (yy = 0; yy < big.height; ++yy) for (xx = 0; xx < big.width; ++xx) {
+                        float ddx = xx + 0.5f - (16 * sc + 1), ddy = yy + 0.5f - (16 * sc + 1);
+                        int o = (yy * big.width + xx) * 4;
+                        if (ddx * ddx + ddy * ddy > (edge + 0.5f) * (edge + 0.5f) &&
+                            memcmp(big.rgba + o, turned.rgba + o, 4)) return 13;
+                        if (big.rgba[o + 3] == 255 && big.rgba[o] < 70 && big.rgba[o + 1] < 70 &&
+                            big.rgba[o + 2] < 70) ++dark;
+                    }
+                    if (dark < 40) return 16;
+                }
+                diff = 0;
+                for (k = 0; k < 3; ++k) diff += abs(turned.rgba[right + k] - big.rgba[top + k]);
+                if (diff > 24) return 14;
+            }
         }
-        config.size = 160;
+        config.busy_style = BLIT_POINTER_BUSY_WHEEL; config.size = 160;
         blit_pointer_build(&master, config);
         seen[n++] = master.revision;
         blit_pointer_resample(&grown, &master, 96);
@@ -78,12 +124,17 @@ int main(int argc, char **argv)
         for (p = 0; p < n; ++p)
             for (q = 0; q < p; ++q)
                 if (seen[p] == seen[q] || !seen[p]) return 9;
+        config.busy_style = 9;
+        memset(&base, 0, sizeof(base));
+        blit_pointer_build(&base, config);
+        if (base.revision) return 15;   /* an unknown style builds nothing */
+        config.busy_style = BLIT_POINTER_BUSY_WHEEL;
     }
     if (argc == 2) {
         FILE *file = fopen(argv[1],"wb"); if (!file) return 4;
         fprintf(file,"P6\n640 320\n255\n");fwrite(sheet,1,640*320*3,file);fclose(file);
     }
     free(sheet);
-    printf("POINTER_ART_PASS shapes=%d palettes=4 sizes=41 antialias=present hotspot=bounded alpha=exact preview=source-derived busy=12-phases revisions=unique\n", BLIT_POINTER_SHAPE_COUNT);
+    printf("POINTER_ART_PASS shapes=%d palettes=4 sizes=41 antialias=present hotspot=bounded alpha=exact preview=source-derived busy=wheel(36-phases,turns-clockwise,alpha+rim-kept)+spokes(12-of-36) revisions=unique\n", BLIT_POINTER_SHAPE_COUNT);
     return 0;
 }
