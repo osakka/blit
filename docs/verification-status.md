@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-16: 0.3.112 the busy pointer only for a program that really stops answering
+
+- **What it is:** a working Firefox showed the busy pointer when it opened,
+  once for 12.5 minutes. A Wayland trace of Firefox ESR 153 against
+  blit-compositor showed two `xdg_wm_base` bindings in one process; Blit
+  pinged the newest, which Firefox reads only now and then. Each window is
+  now pinged on the binding it was made from. The busy log names the
+  program, how long it went unanswered, and what ended it. ADR 0235
+  amended.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` and
+  `renderer-gles` pass except pointer_appearance and pointer_shape, which
+  had been edited mid-run for 0.3.113's `busy_style`; both passed on the
+  0.3.112 tree, on native and GLES. The new
+  `COMPOSITOR_BUSY_SECOND_WM_OK` fails on 0.3.111.
+- **Release environment (Debian 13):** compositor_gate (with the new part)
+  and xwayland_gate under ASan/UBSan, the package gate, and update_pair
+  (6 cases).
+- **Live, the mini PC:** the pair update to 0.3.112 was verified. The new
+  compositor takes over at the owner's next Restart Desktop.
+- **Published** to hibr-apt (460d9de, signature good).
+
 ## 2026-11-15: 0.3.111 a full session table refused up front; the compositor's log capped
 
 - **What it is:**
