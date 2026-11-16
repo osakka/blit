@@ -9,6 +9,20 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-16: 0.3.113 the busy pointer is a colour wheel
+
+- **What it is:** Blit's own colour wheel is the default busy pointer: a
+  bright disc whose colours turn, in 36 phases a turn, inside a thin dark
+  rim. The spokes remain as `pointer.busy_style: "spokes"`. The owner
+  approved a preview rendered from the code. ADR 0235 amended.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` 87;
+  `renderer-gles` 67; no failures. Blit pane 0.1.37's mouse gate (the
+  Busy Pointer Style row) passes against this server.
+- **Release environment (Debian 13):** compositor_gate and xwayland_gate
+  with ASan/UBSan, the package gate, and update_pair (6 cases).
+- **Live, the mini PC:** the pair update to 0.3.113 was verified.
+- **Published** to hibr-apt (72e2e3e, signature good).
+
 ## 2026-11-16: 0.3.112 the busy pointer only for a program that really stops answering
 
 - **What it is:** a working Firefox showed the busy pointer when it opened,
