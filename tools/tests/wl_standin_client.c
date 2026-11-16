@@ -242,6 +242,8 @@ struct standin {
     /* --cursor */
     int cursor;
     int hang;                         /* --hang: H stops it until SIGUSR1 (ADR 0235) */
+    int second_wm;                    /* --second-wm: a second xdg_wm_base nobody reads */
+    uint32_t wm_name;                 /* the xdg_wm_base global, for binding it again */
     struct wp_cursor_shape_manager_v1 *shape_manager;
     struct wp_cursor_shape_device_v1 *shape_device;
     struct wl_surface *cursor_surface;
@@ -1509,9 +1511,11 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->psm = wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1);
     else if (strcmp(interface, wl_shm_interface.name) == 0)
         s->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
-    else if (strcmp(interface, xdg_wm_base_interface.name) == 0)
+    else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
+        s->wm_name = name;
         s->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
                                       version < 5 ? version : 5);
+    }
     else if (strcmp(interface, zwp_text_input_manager_v3_interface.name) == 0 && s->text_input)
         s->ti_manager = wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1);
     else if (strcmp(interface, wl_seat_interface.name) == 0) {
@@ -1654,6 +1658,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
         else if (strcmp(argv[i], "--xdg-output") == 0) s.xdg_mode = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
+        else if (strcmp(argv[i], "--second-wm") == 0) s.second_wm = 1;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;
@@ -1718,6 +1723,19 @@ int main(int argc, char **argv)
     xdg_toplevel_set_title(s.toplevel, title);
     xdg_toplevel_set_app_id(s.toplevel, "blit.standin");
     xdg_toplevel_set_min_size(s.toplevel, 64, 48);
+    /* --second-wm (ADR 0235, as Firefox does): xdg_wm_base bound again,
+       after the window, on a queue never read, so a ping there is never
+       answered. The window was made from the first, which answers. */
+    if (s.second_wm) {
+        struct wl_event_queue *quiet = wl_display_create_queue(s.display);
+        struct wl_display *wrapped = wl_proxy_create_wrapper(s.display);
+        struct wl_registry *again;
+        wl_proxy_set_queue((struct wl_proxy *)wrapped, quiet);
+        again = wl_display_get_registry(wrapped);
+        wl_registry_bind(again, s.wm_name, &xdg_wm_base_interface, 1);
+        wl_proxy_wrapper_destroy(wrapped);
+        printf("STANDIN second wm_base\n");
+    }
     if (s.decoration_manager && !s.csd) {  /* --csd draws its own frame */
         s.decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(s.decoration_manager,
                                                                            s.toplevel);

@@ -1479,6 +1479,72 @@ def ime_part(compositor, standin, work):
     return ' '.join(results)
 
 
+def busy_second_wm_part(compositor, standin, work):
+    """ADR 0235: a window is pinged on the xdg_wm_base it was made from.
+    Firefox binds xdg_wm_base a second time on a registry it reads only
+    now and then; Blit pinged a program's newest binding, and a working
+    Firefox was shown busy for minutes. The stand-in (--second-wm) binds a
+    second one after its window, on a queue it never reads: with input
+    for 4 s and a 1 s threshold, its window is never said busy."""
+    runtime = os.path.join(work, 'run-busy2')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-busy2-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    env.pop('BLIT_SERVER_PORT', None)
+    log = os.path.join(work, 'compositor-busy2.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-busy2.out'), 'w'))
+    client = None
+    keymap = us_keymap()
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        out_path = os.path.join(work, 'standin-busy2.out')
+        client = start([standin, '--second-wm', 'Two'], dict(env, WAYLAND_DISPLAY='blit-0'), open(out_path, 'w'))
+        printed = lambda: open(out_path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Two', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.frame(256, 160)
+        wait_for(lambda: 'STANDIN second wm_base' in printed(), lambda: 'no second binding:\n' + printed())
+        desk.send('WINDOW size 1 120 80 activated')
+        desk.frame(120, 80)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.write(memfd, keymap + b'\0')
+        fcntl.fcntl(memfd, 1033, 0x0f)
+        socket.send_fds(route, [b'INPUT keymap 1 7 %d 30 250\n' % (len(keymap) + 1)], [memfd])
+        os.close(memfd)
+        route.sendall(b'INPUT busy 1 1000\n')
+        seen, end, i = [], time.time() + 4.0, 0
+        while time.time() < end:
+            i += 1
+            route.sendall(('INPUT ptr 1 %d 20\nINPUT frame 1 %d\n' % (10 + i % 50, i)).encode())
+            got = desk.next(0.2)
+            while got is not None:
+                if got[0] == 'line':
+                    seen.append(got[1])
+                elif got[0] == 'frame':
+                    os.close(got[2])
+                got = desk.next(0.01)
+        check(not any(l.startswith('WINDOW busy') for l in seen),
+              lambda: 'a program answering on its window\'s binding was said busy: %r' % seen)
+        quit_compositor(desk, comp)
+        text = open(log).read()
+        check('has not answered' not in text, lambda: 'the log says busy:\n' + text)
+        return 'two-bindings=window-binding-pinged,never-busy(4s,1000ms)'
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def busy_part(compositor, standin, work):
     """ADR 0235: a program that stops answering is busy. The gate plays the
     desktop and Blit's route, says `INPUT busy 1 1000`, and drives the
@@ -2547,6 +2613,7 @@ def main():
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))
+        print('COMPOSITOR_BUSY_SECOND_WM_OK %s' % busy_second_wm_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))

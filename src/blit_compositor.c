@@ -225,6 +225,8 @@ struct bc_positioner {
    A toplevel of either kind is announced, framed, routed and announced
    again by the same code (window_is_toplevel); what only a kind can do
    goes through window_configure, window_close and the keyboard's focus. */
+struct bc_wm;
+
 struct bc_xdg {
     /* A toplevel's own input socket, <display>-input-<id> (the input
        section): -1 until it is announced, closed when it goes. */
@@ -254,6 +256,7 @@ struct bc_xdg {
     char cursor[24];                  /* the pointer shape its program asked for, "" none yet */
     char cursor_sent[24];             /* the shape last sent (WINDOW cursor): `wait` while busy */
     int busy_sent;                    /* `WINDOW busy <id> on` said (ADR 0235) */
+    struct bc_wm *wm;                 /* the xdg_wm_base it was made from: the one pinged, NULL once gone */
     int32_t min_w, min_h, max_w, max_h;           /* committed */
     int32_t pmin_w, pmin_h, pmax_w, pmax_h;       /* pending */
     int limits_sent;
@@ -4465,6 +4468,8 @@ static void wm_create_positioner(struct wl_client *client, struct wl_resource *r
     wl_resource_set_implementation(r, &positioner_impl, p, positioner_destroyed);
 }
 
+static void xdg_wm_record(struct bc_xdg *x, struct wl_resource *wm_base);
+
 static void wm_get_xdg_surface(struct wl_client *client, struct wl_resource *resource, uint32_t id,
                                struct wl_resource *surface_resource)
 {
@@ -4490,6 +4495,7 @@ static void wm_get_xdg_surface(struct wl_client *client, struct wl_resource *res
     x->kept.fd = -1;
     surface->xdg = x;
     surface->role = BC_ROLE_XDG;
+    xdg_wm_record(x, resource);
     wl_list_insert(&x->server->windows, &x->link);
     wl_resource_set_implementation(x->resource, &xdg_surface_impl, x, xdg_surface_destroyed);
 }
@@ -5608,12 +5614,18 @@ struct bc_wm {
     int busy;
 };
 
-static struct bc_wm *client_wm(struct bc_server *s, struct wl_client *client)
+/* A program may bind xdg_wm_base more than once, and answer a ping only on
+   the binding its windows were made from: Firefox binds a second one on
+   another of its connections' registries, which it reads only now and
+   then, and a ping there went unanswered for minutes. So each window is
+   pinged on its own binding, and the busy state is that binding's. */
+
+/* The binding window x was made from (wm_get_xdg_surface). */
+static void xdg_wm_record(struct bc_xdg *x, struct wl_resource *wm_base)
 {
     struct bc_wm *w;
-    wl_list_for_each(w, &s->wms, link)
-        if (wl_resource_get_client(w->resource) == client) return w;
-    return NULL;
+    wl_list_for_each(w, &x->server->wms, link)
+        if (w->resource == wm_base) x->wm = w;
 }
 
 static int window_held(struct bc_server *s, struct bc_xdg *x)
@@ -5627,10 +5639,8 @@ static int window_held(struct bc_server *s, struct bc_xdg *x)
 /* Whether x's program is busy now and it may be shown so. */
 static int window_busy(struct bc_xdg *x)
 {
-    struct bc_wm *w;
     if (x->surface == NULL || x->id == 0) return 0;
-    w = client_wm(x->server, wl_resource_get_client(x->surface->resource));
-    return w && w->busy && !window_held(x->server, x);
+    return x->wm && x->wm->busy && !window_held(x->server, x);
 }
 
 /* The shape the desktop is told: `wait` while busy (unless the program
@@ -5656,26 +5666,34 @@ static void window_busy_announce(struct bc_xdg *x)
     bc_wire_line(&x->server->wire, "WINDOW busy %u %s", x->id, busy ? "on" : "off");
 }
 
-static void wm_busy_set(struct bc_wm *w, int busy)
+/* `how` says what ended it: "answered", or "its xdg_wm_base went". */
+static void wm_busy_set(struct bc_wm *w, int busy, const char *how)
 {
     struct bc_server *s = w->server;
-    struct wl_client *client = wl_resource_get_client(w->resource);
     struct bc_xdg *x;
+    const char *app = "a program";
+    pid_t pid = 0;
     if (w->busy == busy) return;
     w->busy = busy;
+    wl_client_get_credentials(wl_resource_get_client(w->resource), &pid, NULL, NULL);
     wl_list_for_each(x, &s->windows, link) {
-        if (x->toplevel == NULL || x->surface == NULL ||
-            wl_resource_get_client(x->surface->resource) != client) continue;
+        if (x->wm != w) continue;
+        if (x->appid[0] && strcmp(app, "a program") == 0) app = x->appid;
+        if (x->toplevel == NULL || x->surface == NULL) continue;
         window_busy_announce(x);
         window_cursor_send(x);
     }
-    logf_("busy: a program %s", busy ? "has not answered: busy" : "answered: no longer busy");
+    if (busy)
+        logf_("busy: %s (pid %d) has not answered for %u ms: busy", app, (int)pid, now_ms() - w->sent_ms);
+    else
+        logf_("busy: %s (pid %d) %s %u ms after the ping: no longer busy", app, (int)pid, how,
+              now_ms() - w->sent_ms);
 }
 
 static int wm_threshold(void *data)
 {
     struct bc_wm *w = data;
-    if (w->serial) wm_busy_set(w, 1);
+    if (w->serial) wm_busy_set(w, 1, "");
     return 0;
 }
 
@@ -5689,7 +5707,7 @@ static void wm_pong(struct wl_client *client, struct wl_resource *resource, uint
         if (serial != w->serial) return;
         w->serial = 0;
         if (w->timer) wl_event_source_timer_update(w->timer, 0);
-        wm_busy_set(w, 0);
+        wm_busy_set(w, 0, "answered");
         return;
     }
 }
@@ -5700,7 +5718,13 @@ static void wm_base_destroyed(struct wl_resource *resource)
     struct bc_wm *w, *next;
     wl_list_for_each_safe(w, next, &s->wms, link) {
         if (w->resource != resource) continue;
-        wm_busy_set(w, 0);
+        wm_busy_set(w, 0, "went (its xdg_wm_base destroyed)");
+        {
+            /* Its windows are pinged on nothing now: never shown busy. */
+            struct bc_xdg *x;
+            wl_list_for_each(x, &s->windows, link)
+                if (x->wm == w) x->wm = NULL;
+        }
         if (w->timer) wl_event_source_remove(w->timer);
         wl_list_remove(&w->link);
         free(w);
@@ -5727,7 +5751,7 @@ static void busy_poke(struct bc_server *s, struct bc_xdg *x)
     uint32_t now;
     if (s->busy_after_ms == 0 || x->surface == NULL) return;
     client = wl_resource_get_client(x->surface->resource);
-    if (client == s->x.client || (w = client_wm(s, client)) == NULL || w->serial || w->timer == NULL)
+    if (client == s->x.client || (w = x->wm) == NULL || w->serial || w->timer == NULL)
         return;
     now = now_ms();
     if (w->pinged && now - w->sent_ms < BC_BUSY_PING_GAP_MS) return;
@@ -5752,7 +5776,7 @@ static void busy_configure(struct bc_server *s, uint32_t after_ms)
     wl_list_for_each(w, &s->wms, link) {
         w->serial = 0;
         if (w->timer) wl_event_source_timer_update(w->timer, 0);
-        wm_busy_set(w, 0);
+        wm_busy_set(w, 0, "was let go (busy pointer off)");
     }
 }
 

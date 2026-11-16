@@ -103,3 +103,30 @@ Options 2 and 3, agreed with Hibr (2026-11-13).
 - Not gated: a locked or confined window kept from showing busy (code
   only), and Hibr's title and Force Quit (Hibr's).
 - Not yet: the owner's mini PC.
+
+## Amended 2026-11-16 (0.3.112): a window is pinged on its own xdg_wm_base
+
+On the owner's mini PC a working Firefox showed the busy pointer as soon as
+its window opened. In one case it stayed busy for 12.5 minutes, until the
+window closed. A Wayland trace of Firefox ESR 153 against blit-compositor
+showed why: one Firefox process binds `xdg_wm_base` twice on the same
+connection (registry #2 binds #21, registry #23 binds #30), and its window
+is made from the first (#21). Blit kept a program's bindings newest first
+and pinged the first it found for the client, which was #30. Firefox reads
+that registry's queue only now and then, so the ping went unanswered, and
+a working program was said busy. The "answered" lines in the log were
+often that binding being destroyed, not a pong.
+
+The rule is now per window. A window remembers the `xdg_wm_base` it was
+made from (`get_xdg_surface`). Input pings that binding, and only windows
+made from a binding are shown busy when it doesn't answer. A binding
+destroyed while busy ends it, and its windows are then pinged on nothing,
+so they are never shown busy. The log names the program (app id and pid),
+how long it went unanswered, and what ended it: an answer, the binding
+destroyed, or the busy pointer turned off.
+
+- `compositor_gate` part `COMPOSITOR_BUSY_SECOND_WM_OK`: the stand-in
+  (`--second-wm`) binds `xdg_wm_base` again after its window, on a queue
+  it never reads. With input for 4 s and a 1 s threshold, its window is
+  never said busy, under ASan/UBSan as well. It fails on 0.3.111
+  (`WINDOW busy 1 on`, `WINDOW cursor 1 wait`).
