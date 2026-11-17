@@ -99,6 +99,19 @@ def wait_for(predicate, why, seconds=8.0):
     fail(why() if callable(why) else why)
 
 
+
+def settled(path):
+    """The compositor's log as it is once it has stopped growing (40 ms
+    still, at most 1 s): since 0.3.116 a thread writes it (Gitea #158), so
+    a line lands just after what it tells of, not with it."""
+    text, still, end = open(path).read(), 0, time.monotonic() + 1.0
+    while still < 2 and time.monotonic() < end:
+        time.sleep(0.02)
+        again = open(path).read()
+        still = still + 1 if again == text else 0
+        text = again
+    return text
+
 def pattern(width, height):
     """The stand-in's picture as FRM1 format 24 (RGB) rows."""
     out = bytearray(width * height * 3)
@@ -322,7 +335,7 @@ def appmenu_part(desk, standin, env, display, work, log):
         desk.line('WINDOW appmenu 12 :1.42 /MenuBar/1')
         wait_for(lambda: 'STANDIN appmenu set' in printed(), lambda: 'no appmenu set:\n' + printed())
         desk.nothing(0.3)
-        check('appmenu: an address that is not D-Bus syntax is ignored' in open(log).read(),
+        check('appmenu: an address that is not D-Bus syntax is ignored' in settled(log),
               'the address that is not D-Bus syntax was not noted')
         # A new size (the same one is no configure since 0.3.87): the
         # stand-in releases its address at its next configure.
@@ -354,7 +367,7 @@ def layout_part(desk, standin, env, display, work, log):
     out_path = os.path.join(work, 'standin-layout.out')
     client = start([standin, '--xdg-output', 'Layout'], dict(env, WAYLAND_DISPLAY=display), open(out_path, 'w'))
     printed = lambda: open(out_path).read()
-    why = lambda: '%s\n%s' % (printed(), open(log).read())
+    why = lambda: '%s\n%s' % (printed(), settled(log))
 
     def send_set(*displays):
         for line in displays:
@@ -385,13 +398,13 @@ def layout_part(desk, standin, env, display, work, log):
                  lambda: 'the window did not enter DP-1:\n' + why())
         # The same set again (the desktop repeats it): nothing.
         said = len(printed())
-        logged = len(open(log).read())
+        logged = len(settled(log))
         desk.send('WINDOW primary HDMI-A-1')
         send_set('DP-1 0 0 1920 1080 60000', 'HDMI-A-1 1920 0 2560 1440 0')
         desk.nothing(0.5)
         check(printed()[said:] == '', lambda: 'a repeated layout changed something:\n' + printed()[said:])
-        check('display ' not in open(log).read()[logged:] and 'layout:' not in open(log).read()[logged:],
-              lambda: 'a repeated layout was applied:\n' + open(log).read()[logged:])
+        check('display ' not in settled(log)[logged:] and 'layout:' not in settled(log)[logged:],
+              lambda: 'a repeated layout was applied:\n' + settled(log)[logged:])
         # Moved and re-timed: told in place, no output added or removed.
         send_set('DP-1 2560 0 1920 1080 75000', 'HDMI-A-1 0 0 2560 1440 144000')
         for want in ('STANDIN layout DP-1 at 2560,0 mode 1920x1080@75000 logical 2560,0 1920x1080 DP-1\n',
@@ -405,15 +418,15 @@ def layout_part(desk, standin, env, display, work, log):
             wait_for(lambda: want in printed(), lambda: 'no %r:\n%s' % (want, why()))
         desk.send('WINDOW output 14 1920 1080 75000')
         wait_for(lambda: 'window 14: 2 displays are 1920x1080 at 75000 mHz (WINDOW output names a mode, not a '
-                 'display): on DP-1' in open(log).read(), lambda: 'the two displays of one mode:\n' + why())
+                 'display): on DP-1' in settled(log), lambda: 'the two displays of one mode:\n' + why())
         # Named (0.3.88's trailing <name>): the display of that name, of the
         # two of one mode.
         desk.send('WINDOW output 14 1920 1080 75000 DP-2')
-        wait_for(lambda: 'window 14: display DP-2' in open(log).read(), lambda: 'the named display:\n' + why())
+        wait_for(lambda: 'window 14: display DP-2' in settled(log), lambda: 'the named display:\n' + why())
         wait_for(lambda: 'STANDIN enter DP-2 1920x1080@75000' in printed(), lambda: 'not on DP-2:\n' + why())
         for want in ('display BLIT-1: gone', 'display HDMI-A-1: gone',
                      'display HDMI-A-1: 2560x1440 at 1920,0, 0 mHz (new)', 'layout: 2 displays, 6400x1080'):
-            check(want in open(log).read(), lambda: 'the log does not say %r:\n%s' % (want, open(log).read()))
+            check(want in settled(log), lambda: 'the log does not say %r:\n%s' % (want, settled(log)))
         # The removed globals destroyed (BC_OUTPUT_LINGER_MS) while the
         # stand-in still holds them: its release at exit is no error.
         time.sleep(max(0.0, removed_at + 5.5 - time.time()))
@@ -465,15 +478,15 @@ def activation_part(desk, standin, env, display, work, log):
         wait_for(lambda: 'STANDIN activation bad token' in printed(), lambda: 'no bad token:\n' + printed())
         desk.nothing(0.3)
         wait_for(lambda: 'activation: a token not issued here, used, or replaced by newer ones: nothing asked'
-                 in open(log).read(), 'the bad token was not logged')
+                 in settled(log), 'the bad token was not logged')
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[13])
         key(30)
         desk.line('WINDOW activate 13 xdg-activation')
         wait_for(lambda: 'STANDIN activation used 32' in printed(), lambda: 'no token used:\n' + printed())
         desk.nothing(0.3)
-        check('activation: a token issued (window 13, the serial of its newest press)' in open(log).read(),
-              'the token was not issued for the key press:\n' + open(log).read())
+        check('activation: a token issued (window 13, the serial of its newest press)' in settled(log),
+              'the token was not issued for the key press:\n' + settled(log))
         # Activated by the desktop, it has nothing to ask for.
         desk.send('WINDOW size 13 200 120 activated')
         desk.frame(200, 120, image_id=13)
@@ -530,7 +543,7 @@ def cursor_part(desk, standin, env, display, work, log):
         lines('btn %d 274 release')
         wait_for(lambda: 'STANDIN cursor image' in printed(), lambda: 'no cursor image:\n' + printed())
         desk.nothing(0.3)
-        check("a program's own cursor image is shown as the display's pointer" in open(log).read(),
+        check("a program's own cursor image is shown as the display's pointer" in settled(log),
               'the cursor image was not noted in the log')
         desk.send('WINDOW close 11')
         desk.line('WINDOW gone 11')
@@ -1001,7 +1014,7 @@ def input_part(server, compositor, standin, work):
         check(client.wait(5) == 0 and 'STANDIN gone' in printed(), 'the input stand-in failed:\n' + printed())
         route.close()
         quit_compositor(desk, comp)
-        text = open(log).read()
+        text = settled(log)
         check('keymap: %d bytes from Blit' % len(keymap) in text, 'the keymap was not installed:\n' + text)
         # Installed for the gate's route, then for the switch to Arabic and
         # back (ADR 0231 step 2): the keymap is the current keyboard's, one
@@ -1079,10 +1092,10 @@ def popup_tree_part(compositor, standin, work):
                 frames[image] = (w, h)
                 os.close(got[2])
         check(all(w in lines for w in wanted),
-              lambda: 'the popup tree\'s lines: %s, expected %s\n%s' % (lines, wanted, open(log).read()))
+              lambda: 'the popup tree\'s lines: %s, expected %s\n%s' % (lines, wanted, settled(log)))
         check(frames.get(2) == (80, 60) and frames.get(3) == (70, 50) and frames.get(4) == (40, 30),
               'the popup tree\'s frames: %s' % frames)
-        check('not shown' not in open(log).read(), 'a popup\'s subsurface was not shown:\n' + open(log).read())
+        check('not shown' not in settled(log), 'a popup\'s subsurface was not shown:\n' + settled(log))
         route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         route.connect(desk.input_socks[1])
         frame = [0]
@@ -1365,8 +1378,8 @@ def ime_part(compositor, standin, work):
                 keys(31, 30, 38, 30, 50, 57)     # s a l a m, space
                 wait_for(lambda: 'STANDIN ti commit صلامي ' in lines()[mark:],
                          lambda: 'the person\'s own word did not type:\n' + printed())
-                wait_for(lambda: 'not a rule' in open(log).read(),
-                         lambda: 'a line of theirs that is not a rule was not logged:\n' + open(log).read())
+                wait_for(lambda: 'not a rule' in settled(log),
+                         lambda: 'a line of theirs that is not a rule was not logged:\n' + settled(log))
                 # ADR 0233, hibr-ime IME_API 3: the input method's keys, as Blit
                 # sends them (INPUT ime). Cycle steps the held word to another
                 # spelling, kept in their own layer once let go of.
@@ -1511,10 +1524,10 @@ def viewport_part(compositor, standin, work):
                 desk.line(want)
             desk.frame(256, 160, image_id=n)
         check('STANDIN global wp_viewporter 1' in open(outs[0]).read(), 'wp_viewporter was not offered')
-        check('a viewport asks' not in open(log).read().split('Scales')[0],
-              lambda: 'a viewport its buffer\'s size was logged:\n' + open(log).read())
-        wait_for(lambda: open(log).read().count('a viewport asks a scale of a 256x160 buffer (to 512x320): shown as its pixels, unscaled') == 1,
-                 lambda: 'a scaling viewport was not said once:\n' + open(log).read())
+        check('a viewport asks' not in settled(log).split('Scales')[0],
+              lambda: 'a viewport its buffer\'s size was logged:\n' + settled(log))
+        wait_for(lambda: settled(log).count('a viewport asks a scale of a 256x160 buffer (to 512x320): shown as its pixels, unscaled') == 1,
+                 lambda: 'a scaling viewport was not said once:\n' + settled(log))
         # A bad value: the program's error; the compositor and the others go on.
         bad_path = os.path.join(work, 'standin-viewport-bad.out')
         bad = start([standin, '--viewport-bad', 'Bad'], cenv, open(bad_path, 'w'))
@@ -1639,7 +1652,7 @@ def drop_part(compositor, standin, work):
         desk.send('CLIP drop 10 1 5 5')
         desk.nothing(0.5)
         quit_compositor(desk, comp)
-        text = open(log).read()
+        text = settled(log)
         check('drop 7 on window 1: taken' in text and 'drop 9 on window 2: refused' in text,
               lambda: 'the log does not say the drops:\n' + text)
         check(text.count('an unknown line from the channel: CLIP drop 10') == 1,
@@ -1711,7 +1724,7 @@ def busy_second_wm_part(compositor, standin, work):
         check(not any(l.startswith('WINDOW busy') for l in seen),
               lambda: 'a program answering on its window\'s binding was said busy: %r' % seen)
         quit_compositor(desk, comp)
-        text = open(log).read()
+        text = settled(log)
         check('has not answered' not in text, lambda: 'the log says busy:\n' + text)
         return 'two-bindings=window-binding-pinged,never-busy(4s,1000ms)'
     finally:
@@ -1942,11 +1955,11 @@ def popup_end_to_end(desk, work, seen, keyboards, printed, mark):
                                        'current': 1})
     check(urllib.request.urlopen(BASE + '/v1/input/keymap', timeout=10).read() == texts[0],
           'the Arabizi keyboard is not typed on the US keys')
-    wait_for(lambda: 'input method: arabizi' in open(log).read(),
-             lambda: 'Arabizi did not reach the compositor as its method:\n' + open(log).read()[-2000:])
+    wait_for(lambda: 'input method: arabizi' in settled(log),
+             lambda: 'Arabizi did not reach the compositor as its method:\n' + settled(log)[-2000:])
     api('PUT', '/v1/input/keyboards', {'keyboards': [{'layout': 'us'}], 'current': 0})
-    wait_for(lambda: 'input method: none' in open(log).read(),
-             lambda: 'back to US, the method stayed:\n' + open(log).read()[-2000:])
+    wait_for(lambda: 'input method: none' in settled(log),
+             lambda: 'back to US, the method stayed:\n' + settled(log)[-2000:])
     order.append('arabizi=method-line,us-keys,none')
     mark[0] = len(printed().splitlines())
     ch.line('INPUT off 41\n')
@@ -2018,7 +2031,7 @@ def dmabuf_retry_part(compositor, standin, work):
         desk.line('WINDOW gone 1')
         check(client.wait(5) == 0, 'the tiled stand-in failed: ' + printed())
         quit_compositor(desk, comp)
-        text = open(log).read()
+        text = settled(log)
         check(text.count('Blit cannot import dmabuf frames now (ENOTSUP)') == 1 and
               text.count('Blit imports dmabuf frames again') == 1 and '2 refused meanwhile' in text,
               'the refusals were not said once each way:\n' + text)
@@ -2130,8 +2143,8 @@ def signal_part(compositor, work):
             status = comp.wait(5)
         except subprocess.TimeoutExpired:
             fail('blit-compositor did not end at SIGTERM')
-        check(status == 0, lambda: 'blit-compositor ended %d at SIGTERM, not a clean stop:\n%s' % (status, open(log).read()))
-        check('stopped:' in open(log).read(), lambda: 'the stop was not said:\n' + open(log).read())
+        check(status == 0, lambda: 'blit-compositor ended %d at SIGTERM, not a clean stop:\n%s' % (status, settled(log)))
+        check('stopped:' in settled(log), lambda: 'the stop was not said:\n' + settled(log))
         return 'SIGTERM->loop(signalfd)->clean stop, status 0, said'
     finally:
         if comp.poll() is None:
@@ -2267,7 +2280,7 @@ def dmabuf_part(compositor, standin, work):
                      'STANDIN done draws=4 releases=4 frames=4'):
             check(want in output, 'the dmabuf stand-in did not print %r:\n%s' % (want, output))
         quit_compositor(desk, comp)
-        text = open(log).read()
+        text = settled(log)
         check('dmabuf 9 sent, 6 released, 1 refused, 2 copied' in text,
               'the log does not count the dmabuf frames:\n' + text)
         check(text.count('an unknown line from the channel: RELEASE 1 ') == 1 and
@@ -2365,7 +2378,7 @@ def sub_restart_part(compositor, standin, work):
         route.close()
         quit_compositor(desk, comp)
         client.wait(5)
-        text = open(log).read()
+        text = settled(log)
         check('reconnect: 2 windows announced again, 2 frames sent again' in text,
               'the re-announcement in the log:\n' + text)
     finally:
@@ -2438,8 +2451,8 @@ def restart_part(compositor, standin, work):
             check(r.returncode == 2 and b'--x11 on|off' in r.stderr,
                   '--x11 %r: status %d, %r' % (arg, r.returncode, r.stderr))
         refused.append('x11-value')
-        check('X: X programs are off: turned off (--x11 off' in open(log).read(),
-              lambda: 'the log does not say --x11 off turned X off:\n' + open(log).read())
+        check('X: X programs are off: turned off (--x11 off' in settled(log),
+              lambda: 'the log does not say --x11 off turned X off:\n' + settled(log))
         cenv = dict(env, WAYLAND_DISPLAY=display)
 
         held_path = os.path.join(work, 'standin-restart-held.out')
@@ -2539,7 +2552,7 @@ def restart_part(compositor, standin, work):
         check(not os.path.exists(os.path.join(runtime, display)), 'the Wayland socket outlived quit')
         check(not [f for f in os.listdir(runtime) if '-input-' in f],
               'an input socket outlived quit: %s' % os.listdir(runtime))
-        text = open(log).read()
+        text = settled(log)
         check('reconnect: 3 windows announced again, 3 frames sent again' in text and
               'no desktop answered' not in text, 'the restart in the log:\n' + text)
         check(text.split('WINDOW quit 0')[1].count('reconnect:') == 0, 'a reconnect after quit:\n' + text)
@@ -2594,7 +2607,7 @@ def restart_part(compositor, standin, work):
         # sanitizers, the stand-in's leaks on that path abort it instead).
         check(gone.wait(5) != 0 and 'the connection ended before close' in open(gone_path).read(),
               'its program did not go with it:\n' + open(gone_path).read())
-        text = open(log2).read()
+        text = settled(log2)
         check('without window=1' in text and
               'no desktop answered with window=1 within 1500 ms of the frame channel\'s loss' in text,
               'the log does not say why it ended:\n' + text)
@@ -2755,7 +2768,7 @@ def desktop_part(compositor, standin, work):
             status = comp.wait(5)
         except subprocess.TimeoutExpired:
             fail('blit-compositor kept running after its channel closed')
-        text = open(log).read()
+        text = settled(log)
         check(status == 1 and 'the frame channel closed' in text and
               'no desktop answered with window=1 within 600 ms' in text,
               'blit-compositor exited %d after the channel closed:\n%s' % (status, text))
@@ -2857,11 +2870,11 @@ def blit_part(server, compositor, standin, work):
         client = start([standin], dict(cenv, WAYLAND_DISPLAY='blit-0'), open(client_out, 'w'))
         wait_for(lambda: 'committed, waiting' in open(client_out).read(), 'the stand-in did not start')
         time.sleep(0.5)
-        check(comp.poll() is None, 'blit-compositor exited against Blit: %s' % open(log).read())
+        check(comp.poll() is None, 'blit-compositor exited against Blit: %s' % settled(log))
         printed = open(client_out).read()
         check(printed.count('STANDIN configure') == 1 and 'STANDIN configure 0x0\n' in printed,
               'the client was not given exactly the initial 0x0 configure: %s' % printed)
-        text = open(log).read()
+        text = settled(log)
         check('OK dmabuf=0 window=0' in text and 'without window=1' in text,
               'the log does not say why nothing is shown:\n%s' % text)
         frames = api('GET', '/v1/terminal-sessions/%s' % session).get('frames') or {}

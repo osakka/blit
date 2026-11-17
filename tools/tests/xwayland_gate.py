@@ -316,6 +316,19 @@ def blit_keymap(server, work):
             blit.wait()
 
 
+def settled(path):
+    """The compositor's log as it is once it has stopped growing (40 ms
+    still, at most 1 s): since 0.3.116 a thread writes it (Gitea #158), so
+    a line lands just after what it tells of, not with it."""
+    text, still, end = open(path).read(), 0, time.monotonic() + 1.0
+    while still < 2 and time.monotonic() < end:
+        time.sleep(0.02)
+        again = open(path).read()
+        still = still + 1 if again == text else 0
+        text = again
+    return text
+
+
 def x_milestone_c(desk, lines_to, printed, log):
     """Milestone C, on the stand-in's window 1 (400x300, activated, at 0,0
     in X space): its menus as popups, a dialog with its parent and limits,
@@ -1477,12 +1490,12 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         check(got and got[0] == 'line', 'no first line: %r' % (got,))
         m = re.fullmatch(r'WINDOW display blit-0 :(\d+)', got[1])
         check(m, lambda: 'the first line is %r, not WINDOW display blit-0 :<n> (X off?):\n%s'
-              % (got[1], open(log).read()))
+              % (got[1], settled(log)))
         number = int(m.group(1))
         display = ':%d' % number
-        wait_for(lambda: 'X: Xwayland ready on %s' % display in open(log).read(),
-                 lambda: 'Xwayland did not get ready on %s:\n%s' % (display, open(log).read()), 30)
-        text = open(log).read()
+        wait_for(lambda: 'X: Xwayland ready on %s' % display in settled(log),
+                 lambda: 'Xwayland did not get ready on %s:\n%s' % (display, settled(log)), 30)
+        text = settled(log)
         xpid = int(re.search(r'X: Xwayland \S+ started on %s, pid (\d+)' % display, text).group(1))
         lock = '/tmp/.X%d-lock' % number
         check(os.path.exists('/tmp/.X11-unix/X%d' % number), 'no /tmp/.X11-unix/X%d' % number)
@@ -1518,15 +1531,15 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         route.connect(desk.input_socks[1])
         def send_keymap(text, revision):
             """Blit's keymap as Blit sends it: sealed, on the route."""
-            seen = open(log).read().count('keymap: %d bytes from Blit' % len(text))
+            seen = settled(log).count('keymap: %d bytes from Blit' % len(text))
             memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
             os.write(memfd, text + b'\0')
             fcntl.fcntl(memfd, 1033, 0x0f)  # F_ADD_SEALS: seal, shrink, grow, write
             socket.send_fds(route, [b'INPUT keymap %d %d %d %d %d\n' % (BLIT_PICTURE, revision, len(text) + 1,
                                                                           repeat[0], repeat[1])], [memfd])
             os.close(memfd)
-            wait_for(lambda: open(log).read().count('keymap: %d bytes from Blit' % len(text)) > seen,
-                     lambda: 'the compositor did not take Blit\'s keymap:\n' + open(log).read())
+            wait_for(lambda: settled(log).count('keymap: %d bytes from Blit' % len(text)) > seen,
+                     lambda: 'the compositor did not take Blit\'s keymap:\n' + settled(log))
 
         if keymap:
             send_keymap(keymap, 7)
@@ -1580,9 +1593,9 @@ def x_part(compositor, standin, server, work, wl_standin=None):
             elif got:
                 fail('got %r while the X client drew' % (got[:2],))
             measure = re.search(r'window 1: X commit to frame sent over its first 60 frames: '
-                                r'min (\d+) us, median (\d+) us', open(log).read())
+                                r'min (\d+) us, median (\d+) us', settled(log))
         check(measure, lambda: 'no measure of 60 frames (%d frames seen):\n%s\n%s'
-              % (frames, printed(), open(log).read()))
+              % (frames, printed(), settled(log)))
         wait_for(lambda: 'XSTANDIN animated 150' in printed(), lambda: 'the X client did not draw 150:\n' + printed())
 
         # Twice the AccessX timeout since the space bar's release, the last
@@ -1594,8 +1607,8 @@ def x_part(compositor, standin, server, work, wl_standin=None):
                 os.close(got[2])
             elif got:
                 check(not got[1].startswith('WINDOW gone'), lambda: 'the window went after the AccessX '
-                      'timeout:\n%s' % open(log).read())
-        text = open(log).read()
+                      'timeout:\n%s' % settled(log))
+        text = settled(log)
         check(os.path.exists('/proc/%d' % xpid) and 'X: Xwayland was killed' not in text and
               'X: Xwayland exited' not in text,
               lambda: 'Xwayland did not outlive its AccessX timeout (the keymap\'s indicators):\n' + text)
@@ -1609,7 +1622,7 @@ def x_part(compositor, standin, server, work, wl_standin=None):
             while True:
                 got = desk.next(max(0.1, deadline - time.time()))
                 check(got is not None, lambda: 'no WINDOW decor 1 %s after _MOTIF_WM_HINTS:\n%s\n%s'
-                      % (decor, printed(), open(log).read()))
+                      % (decor, printed(), settled(log)))
                 if got[0] == 'frame':
                     os.close(got[2])
                     continue
@@ -1622,11 +1635,11 @@ def x_part(compositor, standin, server, work, wl_standin=None):
             wait_for(lambda: 'XSTANDIN %s' % printed_word in printed(),
                      lambda: 'the X client did not say %s:\n%s' % (printed_word, printed()))
 
-        milestone_c = x_milestone_c(desk, lines_to, printed, lambda: open(log).read())
-        milestone_d = x_milestone_d(desk, lines_to, printed, lambda: open(log).read(), clip_dir, wl_standin,
+        milestone_c = x_milestone_c(desk, lines_to, printed, lambda: settled(log))
+        milestone_d = x_milestone_d(desk, lines_to, printed, lambda: settled(log), clip_dir, wl_standin,
                                     env, work, standin, cenv)
-        focus = x_focus_part(desk, lines_to, printed, lambda: open(log).read(), standin, cenv, work)
-        layout = x_layout_part(desk, lines_to, printed, lambda: open(log).read())
+        focus = x_focus_part(desk, lines_to, printed, lambda: settled(log), standin, cenv, work)
+        layout = x_layout_part(desk, lines_to, printed, lambda: settled(log))
 
         desk.send('WINDOW close 1')
         deadline = time.time() + 10
@@ -1644,16 +1657,16 @@ def x_part(compositor, standin, server, work, wl_standin=None):
             fail('the X client did not exit after WM_DELETE_WINDOW:\n' + printed())
         check(status == 0 and 'XSTANDIN delete' in printed(),
               lambda: 'the X client exited %d:\n%s' % (status, printed()))
-        check('window 1: WM_DELETE_WINDOW' in open(log).read(), 'the log does not say WM_DELETE_WINDOW')
+        check('window 1: WM_DELETE_WINDOW' in settled(log), 'the log does not say WM_DELETE_WINDOW')
         route.close()
-        xpid, restart = x_restart_part(desk, standin, cenv, clip_dir, lambda: open(log).read(), work, xpid)
+        xpid, restart = x_restart_part(desk, standin, cenv, clip_dir, lambda: settled(log), work, xpid)
 
         desk.send('WINDOW quit 0')
         try:
             status = comp.wait(10)
         except subprocess.TimeoutExpired:
             fail('blit-compositor kept running after WINDOW quit 0')
-        check(status == 0, lambda: 'blit-compositor ended %d:\n%s' % (status, open(log).read()))
+        check(status == 0, lambda: 'blit-compositor ended %d:\n%s' % (status, settled(log)))
         check(not os.path.exists('/proc/%d' % xpid) or
               open('/proc/%d/stat' % xpid).read().split(') ')[1][0] == 'Z',
               'Xwayland (pid %d) outlived the compositor' % xpid)
