@@ -1175,3 +1175,27 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
     a Wayland program's `set_fullscreen` naming an output is not passed
     to the desktop (the desktop chooses the display); Xwayland's own
     full-screen emulation of a mode change (its viewport) is untested.
+
+## Amended 2026-11-17 (0.3.115): wp_viewporter offered
+
+Listed above from the start, `wp_viewporter` was never offered. mpv found
+the gap: every one of its Wayland outputs (gpu, gpu-next, wlshm,
+dmabuf-wayland) requires it, so on the owner's machine mpv fell back to
+its legacy SDL output ("bad performance"), which also ignores dropped
+files. The compositor now offers `wp_viewporter` v1. Blit shows a
+program's buffer as its pixels, so the common use, a viewport the size of
+its buffer as mpv's GPU output sets at scale 1, is exactly what is shown.
+A viewport that crops or scales is shown as the buffer, unscaled, and said
+once in the log; real scaling is the HiDPI row of ADR 0229. The protocol's
+errors are kept: bad values, a non-integer source with no destination, a
+source outside the buffer, `viewport_exists`, and `no_surface` after its
+surface went.
+
+Evidence:
+- compositor_gate `COMPOSITOR_VIEWPORT_OK`, under ASan/UBSan too: offered
+  at v1; a viewport the buffer's size shows with nothing logged; a 2×
+  scale is shown unscaled and said once; a bad value is the program's
+  protocol error and the others go on.
+- mpv 0.40 on this host now runs `vo/gpu` on the compositor (software GL)
+  instead of SDL, and a file dropped on it through `CLIP drop` (0.3.114)
+  opened: its title became "dropped picture.ppm - mpv".

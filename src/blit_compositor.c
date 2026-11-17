@@ -95,6 +95,7 @@
 #include "xdg-activation-v1-server-protocol.h"
 #include "xdg-output-unstable-v1-server-protocol.h"
 #include "text-input-unstable-v3-server-protocol.h"
+#include "viewporter-server-protocol.h"
 #include "ime.h"
 #include "blit_ime_root.h"
 #include "blit_compositor_wire.h"
@@ -194,6 +195,12 @@ struct bc_surface {
     struct wl_event_source *pace;     /* the refresh timer for `due` */
     uint64_t last_done_us;            /* when frame callbacks were last answered */
     int scale_warned;
+    /* wp_viewport (0.3.115): pending and committed; a source width of -1
+       and a destination width of -1 are unset. */
+    struct wl_resource *viewport;
+    wl_fixed_t vp_pending_src[4], vp_src[4];
+    int32_t vp_pending_dst[2], vp_dst[2];
+    int vp_warned;
     int cursor_logged;                /* a cursor image from it was noted once */
     /* The global menu (org_kde_kwin_appmenu): where the program serves its
        menus over D-Bus, "" none. */
@@ -1735,6 +1742,16 @@ static int keep_buffer(struct bc_xdg *x, struct wl_shm_buffer *shm, struct bc_dm
     return BC_SENT_COPY;
 }
 
+/* A buffer's size in pixels: wl_shm or linux-dmabuf. 0 when neither. */
+static int vp_buffer_size(struct wl_resource *buffer, int32_t *w, int32_t *h)
+{
+    struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
+    struct bc_dmabuf *dmabuf = shm ? NULL : dmabuf_from_buffer(buffer);
+    if (shm) { *w = wl_shm_buffer_get_width(shm); *h = wl_shm_buffer_get_height(shm); return 1; }
+    if (dmabuf) { *w = dmabuf->width; *h = dmabuf->height; return 1; }
+    return 0;
+}
+
 /* The committed buffer as one frame of the window's picture: BC_SENT_HELD
    for an FRM3 Blit now holds, BC_SENT_COPY for a copy (the buffer is the
    client's again), BC_SENT_NONE when nothing was sent. */
@@ -1962,6 +1979,154 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
     subs_parent_applied(surface);
 }
 
+/* ---- wp_viewporter (0.3.115) ----
+
+   A surface's viewport: a source rectangle of its buffer and the size it
+   is shown at. Blit shows a program's buffer as its pixels, so the common
+   use -- a viewport the buffer's own size, as mpv's outputs set at scale
+   1 -- is exactly what it shows; one that crops or scales is shown as the
+   buffer, unscaled, and said once in the log. The protocol's errors are
+   kept: bad values, a source not a whole size with no destination, a
+   source outside the buffer, a viewport for a surface already gone. */
+
+static int vp_buffer_size(struct wl_resource *buffer, int32_t *w, int32_t *h);
+
+/* At commit: the pending viewport becomes the surface's, checked against
+   the buffer. 0 when that was a protocol error (posted). */
+static int viewport_commit(struct bc_surface *surface, struct wl_resource *buffer)
+{
+    int32_t bw = 0, bh = 0;
+    int i, crop, scaled;
+    for (i = 0; i < 4; ++i) surface->vp_src[i] = surface->vp_pending_src[i];
+    surface->vp_dst[0] = surface->vp_pending_dst[0];
+    surface->vp_dst[1] = surface->vp_pending_dst[1];
+    if (surface->vp_dst[0] == -1 && surface->vp_src[2] != wl_fixed_from_int(-1) &&
+        ((surface->vp_src[2] & 0xff) || (surface->vp_src[3] & 0xff))) {
+        wl_resource_post_error(surface->viewport, WP_VIEWPORT_ERROR_BAD_SIZE,
+                               "a source not a whole size, and no destination");
+        return 0;
+    }
+    if (buffer == NULL || !vp_buffer_size(buffer, &bw, &bh)) return 1;
+    crop = surface->vp_src[2] != wl_fixed_from_int(-1) &&
+        (surface->vp_src[0] != 0 || surface->vp_src[1] != 0 ||
+         surface->vp_src[2] != wl_fixed_from_int(bw) || surface->vp_src[3] != wl_fixed_from_int(bh));
+    if (surface->vp_src[2] != wl_fixed_from_int(-1) &&
+        (surface->vp_src[0] + surface->vp_src[2] > wl_fixed_from_int(bw) ||
+         surface->vp_src[1] + surface->vp_src[3] > wl_fixed_from_int(bh))) {
+        wl_resource_post_error(surface->viewport, WP_VIEWPORT_ERROR_OUT_OF_BUFFER,
+                               "the source is outside the %dx%d buffer", bw, bh);
+        return 0;
+    }
+    scaled = surface->vp_dst[0] != -1 && (surface->vp_dst[0] != bw || surface->vp_dst[1] != bh);
+    if ((crop || scaled) && !surface->vp_warned) {
+        surface->vp_warned = 1;
+        logf_("a viewport asks %s of a %dx%d buffer (to %dx%d): shown as its pixels, unscaled",
+              crop && scaled ? "a crop and a scale" : crop ? "a crop" : "a scale", bw, bh,
+              surface->vp_dst[0] != -1 ? surface->vp_dst[0] : bw, surface->vp_dst[1] != -1 ? surface->vp_dst[1] : bh);
+    }
+    return 1;
+}
+
+static void viewport_reset(struct bc_surface *surface)
+{
+    int i;
+    for (i = 0; i < 4; ++i) surface->vp_pending_src[i] = surface->vp_src[i] = wl_fixed_from_int(-1);
+    surface->vp_pending_dst[0] = surface->vp_pending_dst[1] = -1;
+    surface->vp_dst[0] = surface->vp_dst[1] = -1;
+}
+
+static void viewport_destroyed(struct wl_resource *resource)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(resource);
+    if (surface == NULL) return;
+    surface->viewport = NULL;
+    viewport_reset(surface);
+}
+
+static void viewport_set_source(struct wl_client *client, struct wl_resource *resource, wl_fixed_t x,
+                                wl_fixed_t y, wl_fixed_t w, wl_fixed_t h)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(resource);
+    wl_fixed_t none = wl_fixed_from_int(-1);
+    (void)client;
+    if (surface == NULL) {
+        wl_resource_post_error(resource, WP_VIEWPORT_ERROR_NO_SURFACE, "the surface is gone");
+        return;
+    }
+    if (x == none && y == none && w == none && h == none) {
+        surface->vp_pending_src[0] = surface->vp_pending_src[1] = none;
+        surface->vp_pending_src[2] = surface->vp_pending_src[3] = none;
+        return;
+    }
+    if (x < 0 || y < 0 || w <= 0 || h <= 0) {
+        wl_resource_post_error(resource, WP_VIEWPORT_ERROR_BAD_VALUE, "a source of a negative or empty size");
+        return;
+    }
+    surface->vp_pending_src[0] = x; surface->vp_pending_src[1] = y;
+    surface->vp_pending_src[2] = w; surface->vp_pending_src[3] = h;
+}
+
+static void viewport_set_destination(struct wl_client *client, struct wl_resource *resource, int32_t w,
+                                     int32_t h)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(resource);
+    (void)client;
+    if (surface == NULL) {
+        wl_resource_post_error(resource, WP_VIEWPORT_ERROR_NO_SURFACE, "the surface is gone");
+        return;
+    }
+    if (w == -1 && h == -1) {
+        surface->vp_pending_dst[0] = surface->vp_pending_dst[1] = -1;
+        return;
+    }
+    if (w <= 0 || h <= 0) {
+        wl_resource_post_error(resource, WP_VIEWPORT_ERROR_BAD_VALUE, "a destination of %dx%d", w, h);
+        return;
+    }
+    surface->vp_pending_dst[0] = w;
+    surface->vp_pending_dst[1] = h;
+}
+
+static const struct wp_viewport_interface viewport_impl = {
+    .destroy = bc_destroy_request,
+    .set_source = viewport_set_source,
+    .set_destination = viewport_set_destination,
+};
+
+static void viewporter_get_viewport(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                    struct wl_resource *surface_resource)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(surface_resource);
+    struct wl_resource *r;
+    if (surface->viewport) {
+        wl_resource_post_error(resource, WP_VIEWPORTER_ERROR_VIEWPORT_EXISTS, "the surface has a viewport");
+        return;
+    }
+    r = wl_resource_create(client, &wp_viewport_interface, wl_resource_get_version(resource), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &viewport_impl, surface, viewport_destroyed);
+    surface->viewport = r;
+    viewport_reset(surface);
+}
+
+static const struct wp_viewporter_interface viewporter_impl = {
+    .destroy = bc_destroy_request,
+    .get_viewport = viewporter_get_viewport,
+};
+
+static void bind_viewporter(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &wp_viewporter_interface, (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &viewporter_impl, data, NULL);
+}
+
 static void surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
@@ -1970,6 +2135,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
     int attached = surface->pending_attach;
     (void)client;
     surface->commit_us = now_us();
+    if (surface->viewport && !viewport_commit(surface, buffer)) return;
     set_pending_buffer(surface, NULL);
     surface->pending_attach = 0;
     /* An Xwayland surface's serial is applied with the commit, and may
@@ -2035,6 +2201,8 @@ static const struct wl_surface_interface surface_impl = {
 static void surface_destroyed(struct wl_resource *resource)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
+    /* Its viewport outlives it, inert (no_surface on use). */
+    if (surface->viewport) wl_resource_set_user_data(surface->viewport, NULL);
     set_pending_buffer(surface, NULL);
     callbacks_destroy(&surface->pending_frames);
     callbacks_destroy(&surface->frames);
@@ -10546,7 +10714,9 @@ int main(int argc, char **argv)
                           BC_VERSION(1, org_kde_kwin_appmenu_manager_interface), &server,
                           bind_appmenu_manager) ||
         !wl_global_create(server.display, &xdg_activation_v1_interface,
-                          BC_VERSION(1, xdg_activation_v1_interface), &server, bind_activation)) {
+                          BC_VERSION(1, xdg_activation_v1_interface), &server, bind_activation) ||
+        !wl_global_create(server.display, &wp_viewporter_interface,
+                          BC_VERSION(1, wp_viewporter_interface), &server, bind_viewporter)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;

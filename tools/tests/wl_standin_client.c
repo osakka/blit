@@ -150,6 +150,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
+#include "viewporter-client-protocol.h"
 #include "presentation-time-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "pointer-constraints-unstable-v1-client-protocol.h"
@@ -243,6 +244,9 @@ struct standin {
     int cursor;
     int hang;                         /* --hang: H stops it until SIGUSR1 (ADR 0235) */
     int second_wm;                    /* --second-wm: a second xdg_wm_base nobody reads */
+    int viewport_mode;                /* --viewport 1 (its buffer's size), --viewport-scale 2, --viewport-bad 3 */
+    struct wp_viewporter *viewporter;
+    struct wp_viewport *viewport;
     uint32_t wm_name;                 /* the xdg_wm_base global, for binding it again */
     struct wp_cursor_shape_manager_v1 *shape_manager;
     struct wp_cursor_shape_device_v1 *shape_device;
@@ -402,6 +406,12 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     close(fd);
     wl_buffer_add_listener(b->buffer, &buffer_listener, b);
     wl_surface_attach(surface, b->buffer, 0, 0);
+    /* --viewport: the main surface's viewport, set before each commit. */
+    if (s->viewport && surface == s->surface) {
+        if (s->viewport_mode == 1) wp_viewport_set_destination(s->viewport, w, h);
+        else if (s->viewport_mode == 2) wp_viewport_set_destination(s->viewport, w * 2, h * 2);
+        else wp_viewport_set_destination(s->viewport, 0, 5);
+    }
     wl_surface_damage_buffer(surface, 0, 0, w, h);
     cb = wl_surface_frame(surface);
     wl_callback_add_listener(cb, &frame_listener, s);
@@ -1569,6 +1579,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->psm = wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1);
     else if (strcmp(interface, wl_shm_interface.name) == 0)
         s->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+    else if (strcmp(interface, wp_viewporter_interface.name) == 0)
+        s->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
     else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
         s->wm_name = name;
         s->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
@@ -1718,6 +1730,9 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--second-wm") == 0) s.second_wm = 1;
         else if (strcmp(argv[i], "--drop") == 0) s.drop = 1;
+        else if (strcmp(argv[i], "--viewport") == 0) s.viewport_mode = 1;
+        else if (strcmp(argv[i], "--viewport-scale") == 0) s.viewport_mode = 2;
+        else if (strcmp(argv[i], "--viewport-bad") == 0) s.viewport_mode = 3;
         else if (strcmp(argv[i], "--drop-refuse") == 0) s.drop = 2;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
@@ -1783,6 +1798,12 @@ int main(int argc, char **argv)
     }
     xdg_wm_base_add_listener(s.wm_base, &wm_listener, &s);
     s.surface = wl_compositor_create_surface(s.compositor);
+    if (s.viewport_mode) {
+        if (s.viewporter == NULL) { fprintf(stderr, "STANDIN --viewport: no wp_viewporter\n"); return 1; }
+        s.viewport = wp_viewporter_get_viewport(s.viewporter, s.surface);
+        printf("STANDIN viewport made\n");
+        fflush(stdout);
+    }
     wl_surface_add_listener(s.surface, &surface_listener, &s);
     s.xdg_surface = xdg_wm_base_get_xdg_surface(s.wm_base, s.surface);
     xdg_surface_add_listener(s.xdg_surface, &xdg_surface_listener, &s);
@@ -1881,6 +1902,8 @@ int main(int argc, char **argv)
     if (s.ti) zwp_text_input_v3_destroy(s.ti);
     if (s.ti_manager) zwp_text_input_manager_v3_destroy(s.ti_manager);
     if (s.ddm) wl_data_device_manager_destroy(s.ddm);
+    if (s.viewport) wp_viewport_destroy(s.viewport);
+    if (s.viewporter) wp_viewporter_destroy(s.viewporter);
     if (s.psm) zwp_primary_selection_device_manager_v1_destroy(s.psm);
     if (s.subcompositor) wl_subcompositor_destroy(s.subcompositor);
     wl_compositor_destroy(s.compositor);

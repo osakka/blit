@@ -2339,6 +2339,10 @@ It speaks the frame channel above as a producer, with these additions.
   log says the refusals once when they begin and once when they end. Any
   other refusal gives the buffer back unshown and says so in its log. The feedback's main device
   is the first DRM render node: the hello does not name Blit's GPU.
+- **Viewports** (0.3.115): `wp_viewporter` v1 is offered. A viewport the
+  size of its buffer (mpv's outputs set one) is shown as any buffer; one
+  that crops or scales is shown as its pixels, unscaled, and said once in
+  the compositor's log. Bad values are the program's protocol errors.
 - **Pacing.** A program's frame callback is answered when Blit has taken
   the frame -- an `FRM1` when it is sent; an `FRM3` at once when it is the
   only frame of the window Blit holds, else at Blit's `FRAME release` of the

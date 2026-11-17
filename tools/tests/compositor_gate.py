@@ -1479,6 +1479,59 @@ def ime_part(compositor, standin, work):
     return ' '.join(results)
 
 
+def viewport_part(compositor, standin, work):
+    """wp_viewporter (0.3.115): the global is offered. A viewport the size of
+    its buffer (mpv's outputs set one at scale 1) shows as any window, with
+    nothing logged. One that scales is shown as its pixels, unscaled, and
+    said once. A bad value is the program's protocol error, and the
+    compositor carries on."""
+    runtime = os.path.join(work, 'run-viewport')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-viewport-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-viewport.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-viewport.out'), 'w'))
+    clients = []
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        outs = []
+        for n, (mode, title) in enumerate((('--viewport', 'Fits'), ('--viewport-scale', 'Scales')), 1):
+            path = os.path.join(work, 'standin-viewport-%d.out' % n)
+            outs.append(path)
+            clients.append(start([standin, mode, title], cenv, open(path, 'w')))
+            for want in ('WINDOW new %d 0' % n, 'WINDOW title %d %s' % (n, title), 'WINDOW appid %d blit.standin' % n,
+                         'WINDOW limits %d 64 48 0 0' % n, 'WINDOW decor %d server' % n):
+                desk.line(want)
+            desk.frame(256, 160, image_id=n)
+        check('STANDIN global wp_viewporter 1' in open(outs[0]).read(), 'wp_viewporter was not offered')
+        check('a viewport asks' not in open(log).read().split('Scales')[0],
+              lambda: 'a viewport its buffer\'s size was logged:\n' + open(log).read())
+        wait_for(lambda: open(log).read().count('a viewport asks a scale of a 256x160 buffer (to 512x320): shown as its pixels, unscaled') == 1,
+                 lambda: 'a scaling viewport was not said once:\n' + open(log).read())
+        # A bad value: the program's error; the compositor and the others go on.
+        bad_path = os.path.join(work, 'standin-viewport-bad.out')
+        bad = start([standin, '--viewport-bad', 'Bad'], cenv, open(bad_path, 'w'))
+        clients.append(bad)
+        check(bad.wait(5) != 0, 'a bad viewport did not end its program')
+        check('wp_viewport' in open(bad_path).read() and 'error' in open(bad_path).read().lower(),
+              lambda: 'the bad viewport\'s program saw no protocol error:\n' + open(bad_path).read())
+        check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
+        quit_compositor(desk, comp)
+        return 'offered=v1 fits=shown,nothing-logged scale=shown-unscaled,said-once bad-value=protocol-error,others-unharmed'
+    finally:
+        for p in clients + [comp]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def drop_part(compositor, standin, work):
     """ADR 0229 (0.3.114): a file drop from the desktop onto a program window.
     The gate plays the desktop. `CLIP drop <seq> <window> <x> <y> <types>`
@@ -2710,6 +2763,7 @@ def main():
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_SECOND_WM_OK %s' % busy_second_wm_part(compositor, standin, work))
         print('COMPOSITOR_DROP_OK %s' % drop_part(compositor, standin, work))
+        print('COMPOSITOR_VIEWPORT_OK %s' % viewport_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))

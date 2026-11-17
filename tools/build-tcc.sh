@@ -135,6 +135,7 @@ case "$target" in
                    "$protocols/staging/xdg-activation/xdg-activation-v1.xml" \
                    "$protocols/unstable/xdg-output/xdg-output-unstable-v1.xml" \
                    "$protocols/unstable/text-input/text-input-unstable-v3.xml" \
+                   "$protocols/stable/viewporter/viewporter.xml" \
                    "$plasma/appmenu.xml"; do
             base=$(basename "$xml" .xml)
             "$scanner" server-header "$xml" "$proto/$base-server-protocol.h"
