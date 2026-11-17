@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-17: 0.3.115 wp_viewporter for programs
+
+- **What it is:** `wp_viewporter` v1, planned in ADR 0228 but never
+  offered. mpv needs it for every Wayland output; without it, mpv ran its
+  slow SDL fallback, which ignores drops. A buffer-sized viewport is shown
+  as is; a crop or scale is shown unscaled and said once. ADR 0228
+  amended.
+- **Gates on this host:** `all` 192 pass, 11 skip, plus frame_input_gate
+  failing under load and passing 3/3 alone; `renderer` 87;
+  `renderer-gles` 67. The new `COMPOSITOR_VIEWPORT_OK` passes, with
+  ASan/UBSan too.
+- **Real program on this host:** mpv 0.40 runs vo/gpu (software GL) on the
+  compositor, and a file dropped on it opened.
+- **Release environment (Debian 13):** compositor_gate (with the viewport
+  part) and xwayland_gate under ASan/UBSan, the package gate, and
+  update_pair (6 cases).
+- **Live, the mini PC:** the pair update to 0.3.115 was verified.
+- **Published** to hibr-apt (signature good). With the repo maintainer's
+  session unreachable, the repository was checked clean and in sync with
+  origin first.
+
 ## 2026-11-17: 0.3.114 files dropped onto a program window
 
 - **What it is:** `CLIP drop` / `CLIP dropped` (ADR 0229, agreed with
