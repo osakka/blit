@@ -1907,6 +1907,7 @@ typedef struct {
     int settings_writer_stop;
     pthread_t settings_writer_thread;
     pthread_mutex_t settings_writer_lock;
+    int gles_guard_clear;           /* the writer removes the guard marker (#158) */
     pthread_cond_t settings_writer_wake;
     /* The job (owned by the writer while busy) and its result. */
     int settings_job_kind;              /* 0 none, 1 write, 2 remove */
@@ -2923,8 +2924,15 @@ static void gles_guard_check(BlitRuntime *runtime)
              info.flip_completions == 0))
             return;
     }
-    unlink(runtime->gles_guard_path);
     runtime->gles_guard_active = 0;
+    if (runtime->settings_writer_running) {
+        pthread_mutex_lock(&runtime->settings_writer_lock);
+        runtime->gles_guard_clear = 1;
+        pthread_cond_signal(&runtime->settings_writer_wake);
+        pthread_mutex_unlock(&runtime->settings_writer_lock);
+    } else {
+        unlink(runtime->gles_guard_path);
+    }
 }
 
 static int render_work_remains(const BlitRuntime *runtime)
@@ -23159,8 +23167,17 @@ static void *settings_writer(void *argument)
         char *text;
         size_t length;
         pthread_mutex_lock(&runtime->settings_writer_lock);
-        while (!runtime->settings_writer_stop && !runtime->settings_job_busy)
+        while (!runtime->settings_writer_stop && !runtime->settings_job_busy &&
+               !runtime->gles_guard_clear)
             pthread_cond_wait(&runtime->settings_writer_wake, &runtime->settings_writer_lock);
+        if (runtime->gles_guard_clear) {
+            /* The GPU start proved healthy: its marker goes, off the loop, as
+               every other write to the settings disk does (Gitea #158). */
+            runtime->gles_guard_clear = 0;
+            pthread_mutex_unlock(&runtime->settings_writer_lock);
+            unlink(runtime->gles_guard_path);
+            continue;
+        }
         if (!runtime->settings_job_busy) {
             pthread_mutex_unlock(&runtime->settings_writer_lock);
             break;

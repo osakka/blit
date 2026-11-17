@@ -237,3 +237,28 @@ Evidence:
   every Wayland output of mpv needs `wp_viewporter`, which the compositor
   does not offer yet, so mpv falls back to its SDL output, which ignores
   drops. wp_viewporter is the next row.
+
+## Amended 2026-11-17 (0.3.116): the drag ends once the data is there
+
+On the owner's machine the first file dropped on mpv 0.40 was "taken" only
+when the 5 s finish timeout passed, and the second drop ended mpv: SIGABRT on
+its `data_device_handle_enter: Assertion '!s->dnd_offer->offer'`, reproduced
+on the build host with the same mpv. mpv asks for the data at the drop and
+looks at its pipe once, without waiting, before the desktop has written; its
+loop then waits on the Wayland socket alone, so it reads only when another
+event comes. None came until the next drop's enter, with the first offer
+still held.
+
+A drop read is now relayed: the desktop's `CLIP read` gets a pipe of the
+compositor's, whose loop gathers what is written (at most 4 MiB) and passes
+it on to the program's pipe, so the compositor knows when the program has
+all it asked for. A read after the drop, all delivered, ends the drag with
+`wl_data_device.leave` -- as wlroots and Mutter send after a drop; the offer
+stays the program's to read, finish and destroy. That event is what wakes
+mpv: it reads, finishes (`taken` at once) and plays the file. A drop that
+ends otherwise (finish, timeout, a new drop) says its leave then, once.
+
+`compositor_gate`'s drop part adds a stand-in that reads as mpv does
+(`--drop-lazy`: one look at the drop, again only on an event; an enter while
+an offer is held aborts it): two drops in a row, each taken at once and read.
+0.3.115 fails it: taken after 5.00 s.

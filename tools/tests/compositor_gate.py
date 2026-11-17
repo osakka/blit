@@ -39,6 +39,7 @@ import array
 import fcntl
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -1608,6 +1609,32 @@ def drop_part(compositor, standin, work):
         wait_for(lambda: 'STANDIN drop enter 5 6 text/uri-list' in printed(1) and 'STANDIN drop leave' in printed(1),
                  lambda: 'the refusing program was not entered and left:\n' + printed(1))
         check('STANDIN drop got' not in printed(1), 'the refusing program read a drop')
+        # A program that looks at its pipe only when an event comes (mpv
+        # 0.40: once at the drop, before the data is there): the drag ends
+        # (leave) once what it asked for is in its pipe, so it reads, finishes
+        # and lets go -- taken at once, and a second drop finds no offer held
+        # (mpv's assertion, its abort, on 0.3.115).
+        lazy_path = os.path.join(work, 'standin-drop-lazy.out')
+        lazy = start([standin, '--drop-lazy', 'Lazy'], cenv, open(lazy_path, 'w'))
+        clients.append(lazy)
+        for want in ('WINDOW new 3 0', 'WINDOW title 3 Lazy', 'WINDOW appid 3 blit.standin',
+                     'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
+            said(want)
+        lazy_times = []
+        for seq, name in ((12, 'one'), (13, 'two')):
+            began = time.time()
+            desk.send('CLIP drop %d 3 40 50 text/uri-list text/plain;charset=utf-8' % seq)
+            check(said('CLIP read ') == 'CLIP read %d text/uri-list' % seq, 'the lazy program did not read drop %d' % seq)
+            fd = desk.clip_fds.pop(0)
+            os.write(fd, b'file:///home/me/' + name.encode() + b'.mkv\r\n')
+            os.close(fd)
+            check(said('CLIP dropped ') == 'CLIP dropped %d taken' % seq,
+                  lambda: 'the lazy program\'s drop %d was not taken:\n%s' % (seq, open(lazy_path).read()))
+            lazy_times.append(time.time() - began)
+            check(lazy_times[-1] < 1.0, 'drop %d taken after %.2f s, not at once' % (seq, lazy_times[-1]))
+            wait_for(lambda: 'STANDIN drop got file:///home/me/%s.mkv||' % name in open(lazy_path).read(),
+                     lambda: 'the lazy program did not get drop %d:\n%s' % (seq, open(lazy_path).read()))
+        check(lazy.poll() is None, lambda: 'the lazy program ended:\n' + open(lazy_path).read())
         # Naming no type is no drop.
         desk.send('CLIP drop 10 1 5 5')
         desk.nothing(0.5)
@@ -1618,7 +1645,9 @@ def drop_part(compositor, standin, work):
         check(text.count('an unknown line from the channel: CLIP drop 10') == 1,
               lambda: 'a drop with no type was not refused as a line:\n' + text)
         return ('taken=enter(20,30)+motion+read-before+accept+copy->drop->CLIP read text/uri-list->files read,CLIP dropped taken '
-                'no-window=refused-at-once refuse=left,refused-after-%.1fs no-type=unknown-line' % waited)
+                'no-window=refused-at-once refuse=left,refused-after-%.1fs no-type=unknown-line '
+                'lazy-reader(mpv)=leave-after-data,taken-in-%.2f/%.2fs,second-drop-no-abort'
+                % (waited, lazy_times[0], lazy_times[1]))
     finally:
         for p in clients + [comp]:
             if p and p.poll() is None:
@@ -2001,6 +2030,80 @@ def dmabuf_retry_part(compositor, standin, work):
             if p and p.poll() is None:
                 p.kill()
                 p.wait()
+        listener.close()
+
+
+def log_stall_part(compositor, standin, work):
+    """Gitea #158: the compositor's loop never waits on its log. The log is a
+    pipe nobody reads -- every write past its 64 KiB would block, as one to a
+    stalled disk does -- and 10000 lines that each log one arrive (730 KiB,
+    past the pipe and the queue's 256 KiB). A window
+    still opens and draws at the desktop's size at once; the lines past the
+    queue are dropped and said, once the log moves again."""
+    runtime = os.path.join(work, 'run-logstall')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-logstall-%d' % os.getpid()
+    listener = listen(name)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-logstall.fifo')
+    os.mkfifo(log)
+    held = os.open(log, os.O_RDWR | os.O_NONBLOCK)   # a reader that never reads
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-logstall.out'), 'w'))
+    client = None
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        began = time.monotonic()
+        try:
+            for _ in range(10000):
+                desk.send('WINDOW size 999 10 10')     # each one logs a line
+        except socket.timeout:
+            fail('the compositor stopped reading the desktop while its log was stalled')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        out_path = os.path.join(work, 'standin-logstall.out')
+        client = start([standin, 'Stalled'], cenv, open(out_path, 'w'))
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Stalled', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want, wait=3.0)
+        desk.frame(256, 160, wait=3.0)
+        desk.send('WINDOW size 1 96 48')
+        desk.frame(96, 48, wait=3.0)
+        took = time.monotonic() - began
+        check(comp.poll() is None, 'the compositor ended while its log was stalled')
+        # The log moves again: what was queued comes out, and the drops are said.
+        text = b''
+        until, quiet = time.monotonic() + 8, None
+        while time.monotonic() < until:
+            try:
+                got = os.read(held, 65536)
+            except BlockingIOError:
+                got = b''
+            if got:
+                text += got
+                quiet = None
+            elif b'lines dropped' in text:
+                quiet = quiet or time.monotonic()
+                if time.monotonic() - quiet > 0.5:
+                    break
+            if not got:
+                time.sleep(0.05)
+        text = text.decode(errors='replace')
+        drops = [int(n) for n in re.findall(r'log: (\d+) lines dropped, the log\'s disk too slow', text)]
+        check(drops, lambda: 'the dropped lines were not said; the log has %d bytes' % len(text))
+        logged = text.count('WINDOW size for 999')
+        # Every line is written or counted; the window's own lines may be among the dropped.
+        check(logged < 10000 and 10000 <= logged + sum(drops) <= 10000 + 20,
+              'logged %d and dropped %d of 10000 lines' % (logged, sum(drops)))
+        quit_compositor(desk, comp)
+        return ('log=pipe-never-read 10000-lines->loop-unblocked window+frames in %.2fs; '
+                '%d logged + %d dropped (said) once drained' % (took, logged, sum(drops)))
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        os.close(held)
         listener.close()
 
 
@@ -2758,6 +2861,7 @@ def main():
         desktop_part(compositor, standin, work)
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_DMABUF_RETRY_OK %s' % dmabuf_retry_part(compositor, standin, work))
+        print('COMPOSITOR_LOG_STALL_OK %s' % log_stall_part(compositor, standin, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))

@@ -58,6 +58,8 @@
    composite, xfixes, res and randr extensions. */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -459,7 +461,22 @@ struct bc_drop {
     int accepted, copy, dropped, received;
     int32_t x, y;                     /* the drop point, the window's own pixels */
     uint32_t began_ms;                /* when it entered */
+    int left;                         /* the drag's end (leave) said after the drop */
     struct wl_event_source *timer;
+};
+
+/* A drop read relayed through the compositor: the desktop writes into
+   `from`, the compositor into the program's pipe `to`, so it knows when what
+   the program asked for is all there (see drop_relay_done). */
+#define BC_DROP_RELAYS 8
+#define BC_DROP_RELAY_MAX (4 * 1024 * 1024)
+struct bc_relay {
+    struct bc_server *server;
+    uint32_t seq;                     /* 0: free */
+    int from, to;
+    struct wl_event_source *source;
+    char *buf;
+    size_t len, off;
 };
 
 struct bc_server {
@@ -517,6 +534,7 @@ struct bc_server {
     struct bc_selection sel[2];
     struct wl_list devices[2];        /* wl_data_device, zwp_primary_selection_device_v1 */
     struct bc_drop drop;              /* the desktop's file drop under way */
+    struct bc_relay relays[BC_DROP_RELAYS];   /* its reads, relayed */
     uint32_t clip_seq;                /* the offers made to the desktop */
     int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
@@ -594,24 +612,152 @@ static FILE *log_open(const char *path)
     return f;
 }
 
+/* Gitea #158: the event loop never writes to the disk. A line is put in a
+   bounded queue and a writer thread writes it, rotates the file, and is the
+   only one blocked when the disk stalls (a USB drive in the owner's volume
+   took 8-10 s a write). A full queue drops lines and counts them, said once
+   the disk has caught up; the loop -- every window's frames and input --
+   never waits. Before the writer starts (the first lines), lines go out
+   directly. */
+#define BC_LOGQ_BYTES (256 * 1024)
+#define BC_LOG_LINE 2048
+static struct {
+    pthread_mutex_t lock;
+    pthread_cond_t more, finished;
+    char ring[BC_LOGQ_BYTES];
+    size_t head, used;                /* the next byte out, and how many are queued */
+    unsigned long dropped;            /* lines not queued, the queue full */
+    int started, stop, done;
+    pthread_t thread;
+    FILE *out;                        /* the writer's: the log, or stderr */
+} g_logq = {.lock = PTHREAD_MUTEX_INITIALIZER, .more = PTHREAD_COND_INITIALIZER,
+            .finished = PTHREAD_COND_INITIALIZER};
+
+static void logq_write(FILE *out, const char *bytes, size_t n)
+{
+    if (n && fwrite(bytes, 1, n, out) != n) { /* the log is best effort */ }
+}
+
+static void *logq_writer(void *arg)
+{
+    static char chunk[64 * 1024];
+    (void)arg;
+    pthread_mutex_lock(&g_logq.lock);
+    for (;;) {
+        size_t n, first;
+        unsigned long dropped;
+        FILE *out;
+        while (g_logq.used == 0 && g_logq.dropped == 0 && !g_logq.stop)
+            pthread_cond_wait(&g_logq.more, &g_logq.lock);
+        if (g_logq.used == 0 && g_logq.dropped == 0 && g_logq.stop) break;
+        n = g_logq.used < sizeof(chunk) ? g_logq.used : sizeof(chunk);
+        first = BC_LOGQ_BYTES - g_logq.head < n ? BC_LOGQ_BYTES - g_logq.head : n;
+        memcpy(chunk, g_logq.ring + g_logq.head, first);
+        memcpy(chunk + first, g_logq.ring, n - first);
+        /* Whole lines only, so the drop note starts a line of its own:
+           every line ends in '\n' and is shorter than a chunk. */
+        while (n > 0 && chunk[n - 1] != '\n') --n;
+        g_logq.head = (g_logq.head + n) % BC_LOGQ_BYTES;
+        g_logq.used -= n;
+        dropped = g_logq.dropped;
+        g_logq.dropped = 0;
+        out = g_logq.out;
+        pthread_mutex_unlock(&g_logq.lock);
+        /* The disk's time is spent here, off the loop. */
+        logq_write(out, chunk, n);
+        if (dropped) fprintf(out, "blit-compositor log: %lu lines dropped, the log's disk too slow\n", dropped);
+        fflush(out);
+        if (out != stderr && g_log_path && ftell(out) > BC_LOG_MAX) {
+            FILE *next;
+            fclose(out);
+            next = log_open(g_log_path);
+            out = next ? next : stderr;
+        }
+        pthread_mutex_lock(&g_logq.lock);
+        g_logq.out = out;
+    }
+    g_logq.done = 1;
+    pthread_cond_broadcast(&g_logq.finished);
+    pthread_mutex_unlock(&g_logq.lock);
+    return NULL;
+}
+
+/* The writer, once the log is open. */
+static void logq_start(FILE *out)
+{
+    pthread_mutex_lock(&g_logq.lock);
+    g_logq.out = out ? out : stderr;
+    pthread_mutex_unlock(&g_logq.lock);
+    if (pthread_create(&g_logq.thread, NULL, logq_writer, NULL) == 0) g_logq.started = 1;
+}
+
+/* At exit: what is queued written, for up to 2 s (a stalled disk is not
+   waited out), then the log closed if the writer finished. */
+static void logq_stop(void)
+{
+    struct timespec until;
+    int done;
+    if (!g_logq.started) return;
+    clock_gettime(CLOCK_REALTIME, &until);
+    until.tv_sec += 2;
+    pthread_mutex_lock(&g_logq.lock);
+    g_logq.stop = 1;
+    pthread_cond_signal(&g_logq.more);
+    while (!g_logq.done && pthread_cond_timedwait(&g_logq.finished, &g_logq.lock, &until) == 0) {}
+    done = g_logq.done;
+    pthread_mutex_unlock(&g_logq.lock);
+    if (done) {
+        pthread_join(g_logq.thread, NULL);
+        if (g_logq.out && g_logq.out != stderr) fclose(g_logq.out);
+    } else {
+        pthread_detach(g_logq.thread);
+    }
+    g_logq.out = NULL;
+    g_logq.started = 0;
+}
+
+/* A descriptor of the log as it is now, for a child's stderr (Xwayland's);
+   -1 when there is none. The caller closes it. */
+static int logq_dup_fd(void)
+{
+    int fd = -1;
+    pthread_mutex_lock(&g_logq.lock);
+    if (g_logq.out && g_logq.out != stderr) fd = fcntl(fileno(g_logq.out), F_DUPFD_CLOEXEC, 0);
+    pthread_mutex_unlock(&g_logq.lock);
+    return fd;
+}
+
 static void logf_(const char *fmt, ...)
 {
-    FILE *out = g_server && g_server->log ? g_server->log : stderr;
+    char line[BC_LOG_LINE];
     struct timespec ts;
     va_list ap;
+    int n, k;
     clock_gettime(CLOCK_MONOTONIC, &ts);
-    fprintf(out, "blit-compositor %ld.%03ld ", (long)ts.tv_sec, ts.tv_nsec / 1000000);
+    n = snprintf(line, sizeof(line), "blit-compositor %ld.%03ld ", (long)ts.tv_sec, ts.tv_nsec / 1000000);
     va_start(ap, fmt);
-    vfprintf(out, fmt, ap);
+    k = vsnprintf(line + n, sizeof(line) - (size_t)n - 1, fmt, ap);
     va_end(ap);
-    fputc('\n', out);
-    fflush(out);
-    if (out != stderr && g_log_path && ftell(out) > BC_LOG_MAX) {
-        FILE *next;
-        fclose(out);
-        next = log_open(g_log_path);
-        g_server->log = next;
+    n = k < 0 ? n : n + k >= (int)sizeof(line) - 1 ? (int)sizeof(line) - 2 : n + k;
+    line[n++] = '\n';
+    if (!g_logq.started) {
+        FILE *out = g_server && g_server->log ? g_server->log : stderr;
+        logq_write(out, line, (size_t)n);
+        fflush(out);
+        return;
     }
+    pthread_mutex_lock(&g_logq.lock);
+    if (g_logq.used + (size_t)n > BC_LOGQ_BYTES) {
+        ++g_logq.dropped;
+    } else {
+        size_t tail = (g_logq.head + g_logq.used) % BC_LOGQ_BYTES;
+        size_t first = BC_LOGQ_BYTES - tail < (size_t)n ? BC_LOGQ_BYTES - tail : (size_t)n;
+        memcpy(g_logq.ring + tail, line, first);
+        memcpy(g_logq.ring, line + first, (size_t)n - first);
+        g_logq.used += (size_t)n;
+    }
+    pthread_cond_signal(&g_logq.more);
+    pthread_mutex_unlock(&g_logq.lock);
 }
 
 static uint32_t now_ms(void)
@@ -3113,7 +3259,24 @@ static int drop_device_live(struct bc_server *s, struct wl_resource *dev)
     return 0;
 }
 
-/* The drop over: left if it was never dropped, said to the desktop, and
+/* The drag's end, said once: leave. Before the drop it is the drag
+   leaving; after it, the end of the drag (wlroots and Mutter send it after
+   the drop too), sent once what the program read is all in its pipe. The
+   offer stays the program's to read, finish and destroy. It is also what
+   wakes a program that reads its pipe only when an event comes: mpv polls
+   it once at the drop, before the data is there, and then waits on the
+   Wayland socket alone -- and a second drop's enter while it still holds
+   the first offer is its assertion (`!s->dnd_offer->offer`), its end. */
+static void drop_leave(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    int i;
+    d->left = 1;
+    for (i = 0; i < d->ndevices; ++i)
+        if (d->devices[i] && drop_device_live(s, d->devices[i])) wl_data_device_send_leave(d->devices[i]);
+}
+
+/* The drop over: left if it was not yet, said to the desktop, and
    its offers made stale (the program destroys them). */
 static void drop_end(struct bc_server *s, int taken)
 {
@@ -3121,9 +3284,7 @@ static void drop_end(struct bc_server *s, int taken)
     uint32_t seq = d->seq;
     int i;
     if (seq == 0) return;
-    if (!d->dropped)
-        for (i = 0; i < d->ndevices; ++i)
-            if (d->devices[i] && drop_device_live(s, d->devices[i])) wl_data_device_send_leave(d->devices[i]);
+    if (!d->left) drop_leave(s);
     if (d->timer) wl_event_source_timer_update(d->timer, 0);
     d->seq = 0;
     d->ndevices = 0;
@@ -3187,19 +3348,128 @@ static int drop_timeout(void *data)
 /* The program reads the drop: the desktop writes it into the pipe. A
    program may read before the drop too, to decide whether to take it
    (Firefox reads text/uri-list on each motion). */
+/* A relay over: its descriptors closed, and, when it was the drop's read
+   after the drop, the drag's end said -- the program has all it asked for. */
+static void drop_relay_done(struct bc_relay *r, int whole)
+{
+    struct bc_server *s = r->server;
+    uint32_t seq = r->seq;
+    if (r->source) wl_event_source_remove(r->source);
+    if (r->from >= 0) close(r->from);
+    if (r->to >= 0) close(r->to);
+    free(r->buf);
+    memset(r, 0, sizeof(*r));
+    r->from = r->to = -1;
+    if (!whole) logf_("drop %u: a read not delivered whole", seq);
+    if (seq && seq == s->drop.seq && s->drop.dropped && !s->drop.left) drop_leave(s);
+}
+
+/* The program's pipe takes more: what the desktop wrote goes on. */
+static int drop_relay_writable(int fd, uint32_t mask, void *data)
+{
+    struct bc_relay *r = data;
+    (void)fd;
+    while (r->off < r->len) {
+        ssize_t n = write(r->to, r->buf + r->off, r->len - r->off);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK) && !(mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)))
+            return 0;
+        if (n <= 0) {
+            drop_relay_done(r, 0);
+            return 0;
+        }
+        r->off += (size_t)n;
+    }
+    drop_relay_done(r, 1);
+    return 0;
+}
+
+/* The desktop wrote: gathered until it closes (a file list is small, at
+   most BC_DROP_RELAY_MAX), then written to the program's pipe. */
+static int drop_relay_readable(int fd, uint32_t mask, void *data)
+{
+    struct bc_relay *r = data;
+    char chunk[65536];
+    (void)mask;
+    for (;;) {
+        ssize_t n = read(fd, chunk, sizeof(chunk));
+        char *more;
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return 0;
+        if (n < 0) {
+            drop_relay_done(r, 0);
+            return 0;
+        }
+        if (n == 0) break;
+        if (r->len + (size_t)n > BC_DROP_RELAY_MAX || (more = realloc(r->buf, r->len + (size_t)n)) == NULL) {
+            drop_relay_done(r, 0);
+            return 0;
+        }
+        r->buf = more;
+        memcpy(r->buf + r->len, chunk, (size_t)n);
+        r->len += (size_t)n;
+    }
+    /* All of it: now to the program, as its pipe takes it. */
+    wl_event_source_remove(r->source);
+    close(r->from);
+    r->from = -1;
+    r->source = wl_event_loop_add_fd(r->server->loop, r->to, WL_EVENT_WRITABLE, drop_relay_writable, r);
+    if (r->source == NULL) drop_relay_done(r, 0);
+    else drop_relay_writable(r->to, 0, r);
+    return 0;
+}
+
+static void drop_relays_end(struct bc_server *s)
+{
+    int i;
+    for (i = 0; i < BC_DROP_RELAYS; ++i)
+        if (s->relays[i].seq) {
+            s->relays[i].seq = 0;          /* no leave: the compositor is ending */
+            drop_relay_done(&s->relays[i], 1);
+        }
+}
+
 static void drop_receive(struct bc_server *s, const char *type, int fd)
 {
     struct bc_drop *d = &s->drop;
     char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
-    int offered = 0;
+    struct bc_relay *r;
+    int offered = 0, i, p[2];
     snprintf(types, sizeof(types), "%s", d->types);
     for (t = strtok_r(types, " ", &save); t; t = strtok_r(NULL, " ", &save))
         if (strcmp(t, type) == 0) offered = 1;
     if (!offered) return;
-    if (bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", d->seq, type) != 0) {
-        logf_("drop %u: its reading not asked: %s", d->seq, s->wire.last_error);
+    for (i = 0; i < BC_DROP_RELAYS && s->relays[i].seq; ++i) {}
+    if (i == BC_DROP_RELAYS) {
+        logf_("drop %u: a read not relayed: %d under way", d->seq, BC_DROP_RELAYS);
         return;
     }
+    r = &s->relays[i];
+    if (pipe2(p, O_CLOEXEC | O_NONBLOCK) != 0) {
+        logf_("drop %u: a read not relayed: pipe: %s", d->seq, strerror(errno));
+        return;
+    }
+    if (bc_wire_line_fd(&s->wire, p[1], "CLIP read %u %s", d->seq, type) != 0) {
+        logf_("drop %u: its reading not asked: %s", d->seq, s->wire.last_error);
+        close(p[0]);
+        close(p[1]);
+        return;
+    }
+    close(p[1]);
+    r->to = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (r->to >= 0) fcntl(r->to, F_SETFL, fcntl(r->to, F_GETFL) | O_NONBLOCK);
+    r->source = r->to >= 0 ? wl_event_loop_add_fd(s->loop, p[0], WL_EVENT_READABLE, drop_relay_readable, r) : NULL;
+    if (r->source == NULL) {
+        logf_("drop %u: a read not relayed", d->seq);
+        if (r->to >= 0) close(r->to);
+        close(p[0]);
+        return;
+    }
+    r->server = s;
+    r->seq = d->seq;
+    r->from = p[0];
+    r->buf = NULL;
+    r->len = r->off = 0;
     d->received = 1;
 }
 
@@ -3218,7 +3488,7 @@ static void drop_begin(struct bc_server *s, const BcLine *l)
     d->seq = l->id;
     d->window = l->target;
     d->ndevices = 0;
-    d->accepted = d->copy = d->dropped = d->received = 0;
+    d->accepted = d->copy = d->dropped = d->received = d->left = 0;
     d->x = l->x;
     d->y = l->y;
     d->began_ms = now_ms();
@@ -9674,6 +9944,7 @@ static int on_x_restart(void *data)
 static int x_launch(struct bc_server *s)
 {
     int wl[2] = { -1, -1 }, wm[2] = { -1, -1 }, ready[2] = { -1, -1 };
+    int log_fd = -1;                  /* the log, for Xwayland's stdout and stderr */
     pid_t pid;
     if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wl) != 0 ||
         socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, wm) != 0 || pipe2(ready, O_CLOEXEC) != 0) {
@@ -9689,6 +9960,8 @@ static int x_launch(struct bc_server *s)
     s->x.client_gone.notify = x_client_gone;
     wl_client_add_destroy_listener(s->x.client, &s->x.client_gone);
     s->x.started_us = now_us();
+    log_fd = logq_dup_fd();
+    if (log_fd < 0 && s->log) log_fd = fcntl(fileno(s->log), F_DUPFD_CLOEXEC, 0);
     pid = fork();
     if (pid < 0) {
         logf_("X: Xwayland not started: fork: %s", strerror(errno));
@@ -9704,9 +9977,9 @@ static int x_launch(struct bc_server *s)
         sigemptyset(&none);
         sigprocmask(SIG_SETMASK, &none, NULL);
         signal(SIGPIPE, SIG_DFL);
-        if (s->log) {
-            dup2(fileno(s->log), 1);
-            dup2(fileno(s->log), 2);
+        if (log_fd >= 0) {
+            dup2(log_fd, 1);
+            dup2(log_fd, 2);
         }
         given[0] = s->x.listen_fd[0];
         given[1] = s->x.listen_fd[1];
@@ -9729,6 +10002,7 @@ static int x_launch(struct bc_server *s)
     close(wl[1]);
     close(wm[1]);
     close(ready[1]);
+    if (log_fd >= 0) close(log_fd);
     s->x.pid = pid;
     s->x.wm_fd = wm[0];
     s->x.ready_fd = ready[0];
@@ -9742,6 +10016,7 @@ fail:
     if (wm[1] >= 0) close(wm[1]);
     if (ready[0] >= 0) close(ready[0]);
     if (ready[1] >= 0) close(ready[1]);
+    if (log_fd >= 0) close(log_fd);
     return -1;
 }
 
@@ -10619,6 +10894,12 @@ int main(int argc, char **argv)
         return 2;
     }
     signal(SIGPIPE, SIG_IGN);
+    /* From here the log is the writer thread's (Gitea #158). */
+    logq_start(server.log);
+    if (g_logq.started) {
+        server.log = NULL;
+        atexit(logq_stop);            /* every way out writes what is queued */
+    }
     logf_("version %s, libwayland %s", BLIT_BUILD_VERSION, WAYLAND_VERSION);
     if (!socket_env || !token || !runtime) {
         logf_("BLIT_FRAME_SOCKET, BLIT_FRAME_TOKEN and XDG_RUNTIME_DIR are required");
@@ -10645,6 +10926,7 @@ int main(int argc, char **argv)
                         : "is in use or cannot be created in $XDG_RUNTIME_DIR");
             logf_("--display %s: refused (%s)", display_name, strerror(e));
             wl_display_destroy(server.display);
+            logq_stop();
             if (server.log) fclose(server.log);
             return 2;
         }
@@ -10785,6 +11067,7 @@ int main(int argc, char **argv)
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
     if (server.redial) wl_event_source_remove(server.redial);
     if (server.offer_retry) wl_event_source_remove(server.offer_retry);
+    drop_relays_end(&server);
     if (server.drop.timer) wl_event_source_remove(server.drop.timer);
     dial_end(&server);
     /* The outputs before the display: their globals and timers are its. */
@@ -10816,6 +11099,7 @@ int main(int argc, char **argv)
           server.wire.lines_sent, server.wire.dmabuf_sent, server.wire.dmabuf_released,
           server.wire.dmabuf_refused, server.wire.dmabuf_copied);
     if (server.wire.fd >= 0) close(server.wire.fd);
+    logq_stop();
     if (server.log) fclose(server.log);
     return server.status;
 }

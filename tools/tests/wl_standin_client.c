@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -138,6 +138,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <signal.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -254,8 +255,10 @@ struct standin {
     uint32_t enter_serial;
     /* --clip */
     int clip;
-    int drop;                         /* --drop 1: takes text/uri-list; 2 (--drop-refuse): takes nothing */
+    int drop;                         /* --drop 1: takes text/uri-list; 2 (--drop-refuse): takes nothing;
+                                         3 (--drop-lazy): reads as mpv 0.40 does */
     struct wl_data_offer *drop_offer;
+    int drop_fd;                      /* --drop-lazy: the pipe asked for at the drop, not yet read */
     struct wl_data_device_manager *ddm;
     struct zwp_primary_selection_device_manager_v1 *psm;
     struct wl_data_device *data_device;
@@ -988,6 +991,12 @@ static void data_device_enter(void *data, struct wl_data_device *d, uint32_t ser
     (void)d; (void)sf;
     if (!s->drop || o == NULL) return;
     if (o == s->clip_pending) s->clip_pending = NULL;
+    if (s->drop == 3 && s->drop_offer) {
+        /* mpv: mp_assert(!s->dnd_offer->offer) -- its end. */
+        printf("STANDIN drop entered while the last drop's offer is held: abort\n");
+        fflush(stdout);
+        abort();
+    }
     s->drop_offer = o;
     printf("STANDIN drop enter %d %d %s\n", wl_fixed_to_int(x), wl_fixed_to_int(y), s->clip_types);
     fflush(stdout);
@@ -1011,9 +1020,43 @@ static void data_device_enter(void *data, struct wl_data_device *d, uint32_t ser
         if (wl_data_offer_get_version(o) >= 3)
             wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
                                       WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+    } else if (s->drop == 3) {
+        wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+                                  WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+        wl_data_offer_accept(o, serial, "text/uri-list");
     } else {
         wl_data_offer_accept(o, serial, NULL);
     }
+}
+
+/* --drop-lazy: as mpv 0.40 does, the pipe asked for at the drop is looked
+   at only when an event comes, once, without waiting: all there, it is
+   read, finished and let go; not yet, the offer stays held. */
+static void drop_lazy_check(struct standin *s)
+{
+    struct pollfd p;
+    char got[1024];
+    size_t used = 0;
+    ssize_t n;
+    if (s->drop_fd < 0) return;
+    p.fd = s->drop_fd;
+    p.events = POLLIN;
+    p.revents = 0;
+    if (poll(&p, 1, 0) <= 0) {
+        printf("STANDIN drop pipe empty when looked at\n");
+        fflush(stdout);
+        return;
+    }
+    while (used < sizeof(got) - 1 && (n = read(s->drop_fd, got + used, sizeof(got) - 1 - used)) > 0) used += (size_t)n;
+    close(s->drop_fd);
+    s->drop_fd = -1;
+    got[used] = '\0';
+    for (n = 0; n < (ssize_t)used; ++n) if (got[n] == '\r' || got[n] == '\n') got[n] = '|';
+    printf("STANDIN drop got %s\n", got);
+    fflush(stdout);
+    wl_data_offer_finish(s->drop_offer);
+    wl_data_offer_destroy(s->drop_offer);
+    s->drop_offer = NULL;
 }
 
 static void data_device_leave(void *data, struct wl_data_device *d)
@@ -1023,6 +1066,10 @@ static void data_device_leave(void *data, struct wl_data_device *d)
     if (!s->drop || s->drop_offer == NULL) return;
     printf("STANDIN drop leave\n");
     fflush(stdout);
+    if (s->drop == 3 && s->drop_fd >= 0) {
+        drop_lazy_check(s);          /* mpv keeps an offer it is reading */
+        return;
+    }
     wl_data_offer_destroy(s->drop_offer);
     s->drop_offer = NULL;
 }
@@ -1044,6 +1091,13 @@ static void data_device_drop(void *data, struct wl_data_device *d)
     if (!s->drop || s->drop_offer == NULL || pipe(fds) != 0) return;
     wl_data_offer_receive(s->drop_offer, "text/uri-list", fds[1]);
     close(fds[1]);
+    if (s->drop == 3) {
+        /* mpv: asked for, looked at once at once (empty yet), then left. */
+        s->drop_fd = fds[0];
+        wl_display_flush(s->display);
+        drop_lazy_check(s);
+        return;
+    }
     wl_display_flush(s->display);
     while (used < sizeof(got) - 1 && (n = read(fds[0], got + used, sizeof(got) - 1 - used)) > 0) used += (size_t)n;
     close(fds[0]);
@@ -1706,6 +1760,7 @@ int main(int argc, char **argv)
     int i;
 
     memset(&s, 0, sizeof(s));
+    s.drop_fd = -1;
     for (i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--popup-move") == 0) s.want_popup = s.popup_move = 1;
@@ -1734,6 +1789,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--viewport-scale") == 0) s.viewport_mode = 2;
         else if (strcmp(argv[i], "--viewport-bad") == 0) s.viewport_mode = 3;
         else if (strcmp(argv[i], "--drop-refuse") == 0) s.drop = 2;
+        else if (strcmp(argv[i], "--drop-lazy") == 0) s.drop = 3;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;

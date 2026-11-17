@@ -2224,7 +2224,12 @@ It speaks the frame channel above as a producer, with these additions.
   `blit-compositor --log <path>` appends its log there (else stderr). The
   log is capped (0.3.111, Gitea #156): past 16 MiB it becomes
   `<path>.1`, replacing the one before, and a new log starts with a line
-  saying where the old lines are.
+  saying where the old lines are. Since 0.3.116 (Gitea #158) a thread
+  writes the log, never the compositor's loop: a disk that stalls holds
+  the log back, not the programs' frames or input. Up to 256 KiB of lines
+  wait for it; past that, lines are dropped and counted, and the log says
+  `blit-compositor log: <n> lines dropped, the log's disk too slow` once
+  it moves again.
   The desktop may pick the name, `blit-compositor --display <name>`, so it
   can export `WAYLAND_DISPLAY` before the compositor answers; without it
   the compositor takes the first free `blit-<n>`. A name is printable
@@ -2980,7 +2985,13 @@ It speaks the frame channel above as a producer, with these additions.
   version 3, a copy among its actions, the drop follows. Every `receive`
   the program makes, before the drop too (Firefox reads `text/uri-list` on
   each motion to decide), is the desktop's `CLIP read <seq> <type>` with
-  the program's pipe. `CLIP dropped <seq> taken` follows the program's
+  a pipe of the compositor's, which passes what the desktop writes on to
+  the program's pipe (since 0.3.116). Once a read after the drop is all in
+  the program's pipe, the drag ends: `leave`, as wlroots and Mutter send it
+  after a drop. A program that looks at its pipe only when an event comes
+  (mpv) reads then; before 0.3.116 mpv slept on it, and the next drop's
+  enter, while it still held the offer, was its abort.
+  `CLIP dropped <seq> taken` follows the program's
   finish (or, below version 3, its offer let go) when it read the drop;
   `refused` when it accepted nothing within 1 s (it is then left), took no
   reading within 5 s of the drop, the window is an X program's (XDND is a

@@ -325,6 +325,30 @@ a try costs one refused frame per window at most every 4 s. Gated by
 refused, kept, tried at 250 ms, refused again and tried at 500 ms, then
 taken), which fails on 0.3.109.
 
+## Amended 2026-11-17 (0.3.116): the loop never writes the log (Gitea #158)
+
+On the owner's machine the root volume spans a USB flash drive whose single
+writes took 8-10 s. Every log line was written and flushed from the event
+loop, so one slow write held every program window's frames and input for as
+long. Now `logf_` formats the line and puts it in a 256 KiB queue; a writer
+thread writes, flushes and rotates (the 16 MiB cap of 0.3.111 unchanged),
+and it is the only one that waits on the disk. A full queue drops lines and
+counts them; the count is written, as a line of its own, once the log moves.
+Xwayland's stdout and stderr get a descriptor of the log as it is when it
+starts. At exit, by any path (atexit), what is queued is written, waited
+for at most 2 s.
+
+blit-server had one write left on its loop: removing the GPU start's guard
+marker once the GPU proved healthy. The settings writer thread (ADR 0189)
+removes it now. Its stderr goes to the journal, a socket, with only rare
+lines (devices coming and going).
+
+`compositor_gate`'s log-stall part logs into a pipe nobody reads (each write
+past its 64 KiB blocks, as a stalled disk does) while 10000 lines that each
+log arrive: a window still opens and draws at the desktop's size, and every
+line is written or counted. 0.3.115 fails it: its loop stops reading the
+desktop.
+
 ## Consequences
 
 - One channel, one set of rules: version 3 adds a frame type and a release
