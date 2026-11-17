@@ -423,11 +423,36 @@ struct bc_selection {
     uint32_t generation;              /* bumped at every change: offers made before are stale */
 };
 
-/* A wl_data_offer or zwp_primary_selection_offer_v1 made to a program. */
+/* A wl_data_offer or zwp_primary_selection_offer_v1 made to a program:
+   a selection's, or a drop's (`drop` its seq). */
 struct bc_offer {
     struct bc_server *server;
     int primary;
     uint32_t generation;
+    uint32_t drop;
+};
+
+/* A file drop from the desktop onto a program's window (ADR 0229, 0.3.114):
+   `CLIP drop <seq> <window> <x> <y> <types>` makes an offer of those types
+   on the window's client's data devices and enters its surface there; the
+   program's accept (and, from version 3, a copy among its actions) lets it
+   drop, its receive is the desktop's `CLIP read <seq> <type>`, and the end
+   is said `CLIP dropped <seq> taken|refused`. One at a time. */
+#define BC_DROP_DEVICES 4
+#define BC_DROP_ACCEPT_MS 1000   /* the program's answer to the enter */
+#define BC_DROP_MOTION_MS 150    /* the pointer "moves" at the drop point this often meanwhile */
+#define BC_DROP_FINISH_MS 5000   /* its reading after the drop */
+struct bc_drop {
+    uint32_t seq;                     /* 0: no drop */
+    uint32_t window;
+    struct wl_client *client;
+    struct wl_resource *devices[BC_DROP_DEVICES], *offers[BC_DROP_DEVICES];
+    int ndevices;
+    char types[BC_TEXT_BYTES + 1];
+    int accepted, copy, dropped, received;
+    int32_t x, y;                     /* the drop point, the window's own pixels */
+    uint32_t began_ms;                /* when it entered */
+    struct wl_event_source *timer;
 };
 
 struct bc_server {
@@ -484,6 +509,7 @@ struct bc_server {
     /* the clipboard (ADR 0229): [0] Ctrl-C/V, [1] the primary selection */
     struct bc_selection sel[2];
     struct wl_list devices[2];        /* wl_data_device, zwp_primary_selection_device_v1 */
+    struct bc_drop drop;              /* the desktop's file drop under way */
     uint32_t clip_seq;                /* the offers made to the desktop */
     int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
@@ -2558,22 +2584,43 @@ static int clip_read(struct bc_server *s, int k, const char *type, int fd)
     return -1;
 }
 
+static void drop_receive(struct bc_server *s, const char *type, int fd);
+static void drop_answered(struct bc_server *s);
+static void drop_end(struct bc_server *s, int taken);
+
 static void offer_receive(struct bc_offer *o, const char *type, int fd)
 {
     struct bc_server *s = o->server;
-    if (o->generation == s->sel[o->primary].generation) clip_read(s, o->primary, type, fd);
+    if (o->drop) {
+        if (o->drop == s->drop.seq) drop_receive(s, type, fd);
+    } else if (o->generation == s->sel[o->primary].generation) clip_read(s, o->primary, type, fd);
     close(fd);
 }
 
 static void offer_destroyed(struct wl_resource *resource)
 {
-    free(wl_resource_get_user_data(resource));
+    struct bc_offer *o = wl_resource_get_user_data(resource);
+    struct bc_server *s = o->server;
+    int i;
+    if (o->drop && o->drop == s->drop.seq) {
+        for (i = 0; i < s->drop.ndevices; ++i)
+            if (s->drop.offers[i] == resource) s->drop.offers[i] = NULL;
+        /* Dropped and read, then let go: taken (a version 1 or 2 program
+           says no finish). Let go before the drop: it took nothing. */
+        if (s->drop.dropped) drop_end(s, s->drop.received);
+    }
+    free(o);
 }
 
 static void data_offer_accept(struct wl_client *client, struct wl_resource *resource, uint32_t serial,
                               const char *type)
 {
-    (void)client; (void)resource; (void)serial; (void)type;
+    struct bc_offer *o = wl_resource_get_user_data(resource);
+    struct bc_server *s = o->server;
+    (void)client; (void)serial;
+    if (!o->drop || o->drop != s->drop.seq || s->drop.dropped) return;
+    s->drop.accepted = type != NULL;
+    drop_answered(s);
 }
 
 static void data_offer_receive(struct wl_client *client, struct wl_resource *resource, const char *type,
@@ -2585,13 +2632,25 @@ static void data_offer_receive(struct wl_client *client, struct wl_resource *res
 
 static void data_offer_finish(struct wl_client *client, struct wl_resource *resource)
 {
-    (void)client; (void)resource;
+    struct bc_offer *o = wl_resource_get_user_data(resource);
+    (void)client;
+    /* Finished: taken when it read what was dropped. */
+    if (o->drop && o->drop == o->server->drop.seq && o->server->drop.dropped)
+        drop_end(o->server, o->server->drop.received);
 }
 
 static void data_offer_set_actions(struct wl_client *client, struct wl_resource *resource,
                                    uint32_t actions, uint32_t preferred)
 {
-    (void)client; (void)resource; (void)actions; (void)preferred;
+    struct bc_offer *o = wl_resource_get_user_data(resource);
+    struct bc_server *s = o->server;
+    (void)client; (void)preferred;
+    if (!o->drop || o->drop != s->drop.seq || s->drop.dropped) return;
+    /* A drop from the desktop is a copy: the files stay where they are. */
+    s->drop.copy = (actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) != 0;
+    wl_data_offer_send_action(resource, s->drop.copy ? WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY
+                                                     : WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE);
+    drop_answered(s);
 }
 
 static const struct wl_data_offer_interface data_offer_impl = {
@@ -2872,9 +2931,173 @@ static void bind_primary_manager(struct wl_client *client, void *data, uint32_t 
 }
 
 /* The desktop's lines. */
+/* ---- file drops from the desktop (ADR 0229, 0.3.114) ---- */
+
+static struct bc_xdg *window_by_id(struct bc_server *s, uint32_t id);
+
+/* Whether `dev` is still one of the data devices (a drop keeps only the
+   pointers it entered on, checked before each use). */
+static int drop_device_live(struct bc_server *s, struct wl_resource *dev)
+{
+    struct wl_resource *r;
+    wl_resource_for_each(r, &s->devices[0])
+        if (r == dev) return 1;
+    return 0;
+}
+
+/* The drop over: left if it was never dropped, said to the desktop, and
+   its offers made stale (the program destroys them). */
+static void drop_end(struct bc_server *s, int taken)
+{
+    struct bc_drop *d = &s->drop;
+    uint32_t seq = d->seq;
+    int i;
+    if (seq == 0) return;
+    if (!d->dropped)
+        for (i = 0; i < d->ndevices; ++i)
+            if (d->devices[i] && drop_device_live(s, d->devices[i])) wl_data_device_send_leave(d->devices[i]);
+    if (d->timer) wl_event_source_timer_update(d->timer, 0);
+    d->seq = 0;
+    d->ndevices = 0;
+    logf_("drop %u on window %u: %s", seq, d->window, taken ? "taken" : "refused");
+    bc_wire_line(&s->wire, "CLIP dropped %u %s", seq, taken ? "taken" : "refused");
+}
+
+/* The program has said what it takes: drop, now that it accepts a type and
+   (from version 3) a copy. */
+static void drop_go(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    int i;
+    d->dropped = 1;
+    for (i = 0; i < d->ndevices; ++i)
+        if (d->devices[i] && drop_device_live(s, d->devices[i])) wl_data_device_send_drop(d->devices[i]);
+    wl_event_source_timer_update(d->timer, BC_DROP_FINISH_MS);
+}
+
+static int drop_ready(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    int i, v3 = 0;
+    for (i = 0; i < d->ndevices; ++i)
+        if (d->offers[i] && wl_resource_get_version(d->offers[i]) >= 3) v3 = 1;
+    return d->accepted && (!v3 || d->copy);
+}
+
+static void drop_answered(struct bc_server *s)
+{
+    if (s->drop.seq && !s->drop.dropped && drop_ready(s)) drop_go(s);
+}
+
+/* The pointer at the drop point again: a toolkit decides on a motion (GTK
+   accepts nothing on the enter alone), as on a drag held still there. */
+static void drop_motion(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    int i;
+    for (i = 0; i < d->ndevices; ++i)
+        if (d->devices[i] && drop_device_live(s, d->devices[i]))
+            wl_data_device_send_motion(d->devices[i], now_ms(), wl_fixed_from_int(d->x), wl_fixed_from_int(d->y));
+}
+
+/* Before the drop: another motion while the program has not answered, and
+   refused when its second is up. After: no reading in time. */
+static int drop_timeout(void *data)
+{
+    struct bc_server *s = data;
+    struct bc_drop *d = &s->drop;
+    if (d->seq == 0) return 0;
+    if (!d->dropped && now_ms() - d->began_ms < BC_DROP_ACCEPT_MS) {
+        drop_motion(s);
+        wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
+        return 0;
+    }
+    drop_end(s, d->dropped && d->received);
+    return 0;
+}
+
+/* The program reads the drop: the desktop writes it into the pipe. A
+   program may read before the drop too, to decide whether to take it
+   (Firefox reads text/uri-list on each motion). */
+static void drop_receive(struct bc_server *s, const char *type, int fd)
+{
+    struct bc_drop *d = &s->drop;
+    char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
+    int offered = 0;
+    snprintf(types, sizeof(types), "%s", d->types);
+    for (t = strtok_r(types, " ", &save); t; t = strtok_r(NULL, " ", &save))
+        if (strcmp(t, type) == 0) offered = 1;
+    if (!offered) return;
+    if (bc_wire_line_fd(&s->wire, fd, "CLIP read %u %s", d->seq, type) != 0) {
+        logf_("drop %u: its reading not asked: %s", d->seq, s->wire.last_error);
+        return;
+    }
+    d->received = 1;
+}
+
+/* `CLIP drop`: the desktop let go of files over window `target`. */
+static void drop_begin(struct bc_server *s, const BcLine *l)
+{
+    struct bc_drop *d = &s->drop;
+    struct bc_xdg *x = window_by_id(s, l->target);
+    struct wl_client *client;
+    struct wl_resource *dev;
+    uint32_t serial;
+    if (d->seq) drop_end(s, 0);   /* one at a time: a new drop ends the last */
+    if (d->timer == NULL) d->timer = wl_event_loop_add_timer(s->loop, drop_timeout, s);
+    memset(d->devices, 0, sizeof(d->devices));
+    memset(d->offers, 0, sizeof(d->offers));
+    d->seq = l->id;
+    d->window = l->target;
+    d->ndevices = 0;
+    d->accepted = d->copy = d->dropped = d->received = 0;
+    d->x = l->x;
+    d->y = l->y;
+    d->began_ms = now_ms();
+    snprintf(d->types, sizeof(d->types), "%s", l->types);
+    /* An X program takes drops by XDND, a later row; a window not here, or
+       a client with no data device, takes nothing. */
+    if (x == NULL || x->surface == NULL || x->toplevel == NULL || d->timer == NULL) { drop_end(s, 0); return; }
+    client = wl_resource_get_client(x->surface->resource);
+    if (client == s->x.client) { drop_end(s, 0); return; }
+    d->client = client;
+    serial = wl_display_next_serial(s->display);
+    wl_resource_for_each(dev, &s->devices[0]) {
+        struct wl_resource *offer;
+        struct bc_offer *o;
+        char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
+        if (wl_resource_get_client(dev) != client || d->ndevices == BC_DROP_DEVICES) continue;
+        if ((o = calloc(1, sizeof(*o))) == NULL) continue;
+        o->server = s;
+        o->drop = d->seq;
+        offer = wl_resource_create(client, &wl_data_offer_interface, wl_resource_get_version(dev), 0);
+        if (offer == NULL) { free(o); wl_client_post_no_memory(client); continue; }
+        wl_resource_set_implementation(offer, &data_offer_impl, o, offer_destroyed);
+        wl_data_device_send_data_offer(dev, offer);
+        snprintf(types, sizeof(types), "%s", d->types);
+        for (t = strtok_r(types, " ", &save); t; t = strtok_r(NULL, " ", &save))
+            wl_data_offer_send_offer(offer, t);
+        if (wl_resource_get_version(offer) >= 3)
+            wl_data_offer_send_source_actions(offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+        wl_data_device_send_enter(dev, serial, x->surface->resource, wl_fixed_from_int(l->x),
+                                  wl_fixed_from_int(l->y), offer);
+        d->devices[d->ndevices] = dev;
+        d->offers[d->ndevices] = offer;
+        ++d->ndevices;
+    }
+    if (d->ndevices == 0) { drop_end(s, 0); return; }
+    logf_("drop %u on window %u at %d,%d: %s", d->seq, d->window, l->x, l->y, d->types);
+    drop_motion(s);
+    wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
+}
+
 static void clip_desktop_line(struct bc_server *s, const BcLine *l)
 {
     int k;
+    if (l->kind == BC_LINE_CLIP_DROP) {
+        drop_begin(s, l);
+        return;
+    }
     if (l->kind == BC_LINE_CLIP_OFFER) {
         struct bc_selection *sel = &s->sel[l->primary];
         char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
@@ -9756,6 +9979,7 @@ static void handle_line(struct bc_server *s, const char *line)
     case BC_LINE_CLIP_OFFER:
     case BC_LINE_CLIP_READ:
     case BC_LINE_CLIP_CLEAR:
+    case BC_LINE_CLIP_DROP:
         clip_desktop_line(s, &l);
         return;
     default:
@@ -10391,6 +10615,7 @@ int main(int argc, char **argv)
     if (server.sigint_source) wl_event_source_remove(server.sigint_source);
     if (server.redial) wl_event_source_remove(server.redial);
     if (server.offer_retry) wl_event_source_remove(server.offer_retry);
+    if (server.drop.timer) wl_event_source_remove(server.drop.timer);
     dial_end(&server);
     /* The outputs before the display: their globals and timers are its. */
     while (!wl_list_empty(&server.outputs)) {

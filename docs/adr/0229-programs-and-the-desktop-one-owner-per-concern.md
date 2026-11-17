@@ -61,7 +61,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Cursor shape | the program names, Blit's pointer art draws (one source: OSC 22's names), Hibr relays | `WINDOW cursor <id> <name>` (wp_cursor_shape_v1); `none` hides | 0.3.76 |
 | Cursor images (wl_pointer.set_cursor surfaces) | none: never drawn, the display's own pointer (`default`) | -- | decided (owner: the same cursors we already have) |
 | The global menu (programs' menus in Hibr's bar) | the program serves them (D-Bus, `com.canonical.dbusmenu`), Hibr shows them | `WINDOW appmenu <id> <service> <path>` (org_kde_kwin_appmenu); `- -` none | 0.3.77 (owner confirmed, Hibr #500) |
-| Drag and drop | Hibr | `CLIP` extended with a drag | later |
+| Drag and drop | Hibr | `CLIP` extended with a drag: a drop onto a Wayland program (`CLIP drop`, `CLIP dropped`) in 0.3.114; hover feedback, X programs (XDND) and dragging out later | 0.3.114 (drop) |
 | Activation: a program asks for its window's focus (xdg_activation's token; an X program's `_NET_ACTIVE_WINDOW`, or X's focus taken itself and put back) | program asks, Hibr decides (its focus-stealing setting) | `WINDOW activate <id> x-focus\|x-active\|xdg-activation`; granted with `WINDOW size ... activated` | 0.3.86 |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |
 | Text input and input methods | Hibr (the desktop's fields); the engine itself is hibr-arabizi's, also run by Blit while a program window has the keys (ADR 0233, amended 2026-11-13) | zwp_text_input_v3 in blit-compositor for program windows | later |
@@ -196,3 +196,44 @@ release half-implements one of them.
   protocol needs wayland-protocols 1.32: the build's minimum rose
   (ADR 0230), and a host below it skips the compositor gate with the
   reason.
+
+## Amended 2026-11-17 (0.3.114): a file drop onto a program window
+
+The owner dropped a file from Files onto mpv (a Wayland program) and was
+told "does not take files": the compositor cancelled every drag, and the
+desktop had no way to hand a program a drop. Agreed with Hibr: the desktop
+sends `CLIP drop <seq> <window> <x> <y> <types>` at the release (the window
+and the point in its own pixels, from its hit test), and its frames module
+answers the compositor's `CLIP read` from what it holds, as a paste is
+answered. The compositor runs the program's side of a Wayland drag at that
+point and says `CLIP dropped <seq> taken|refused`, so "does not take files"
+is the program's own answer, not a guess.
+
+Two things learned from real programs, both kept:
+- **A motion at the drop point.** GTK accepts nothing on the enter alone;
+  it decides on a motion. The compositor sends one at the drop point
+  right after the enter, and again every 150 ms until the program answers
+  or its second is up.
+- **Reads before the drop.** Firefox reads `text/uri-list` on each motion,
+  to decide whether to take it, and turns down a drop whose early read
+  came back empty. Every `receive` from the enter on is forwarded as a
+  `CLIP read`.
+
+A drop is a copy: the files stay where they are. One at a time. Not yet:
+hover feedback while the drag is still moving (`CLIP drag`), X programs
+(XDND), and a program dragging out to the desktop.
+
+Evidence:
+- compositor_gate `COMPOSITOR_DROP_OK`, under ASan/UBSan too: a stand-in
+  that reads on the enter and again at the drop gets the files; one that
+  accepts nothing is left and refused after about 1 s; a drop on no window
+  is refused at once; a drop naming no type is no line.
+- A real GTK3 window (Python GObject, `drag_dest_add_uri_targets`) on the
+  compositor received the dropped `file://` URI.
+- Firefox ESR 153 read the drop twice, accepted the copy and finished
+  (taken). It did not open the file in that test profile, which is its
+  own handling, still to be seen on the owner's desktop.
+- mpv 0.40 took the drop at the protocol level but did not open the file:
+  every Wayland output of mpv needs `wp_viewporter`, which the compositor
+  does not offer yet, so mpv falls back to its SDL output, which ignores
+  drops. wp_viewporter is the next row.

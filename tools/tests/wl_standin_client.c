@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -250,6 +250,8 @@ struct standin {
     uint32_t enter_serial;
     /* --clip */
     int clip;
+    int drop;                         /* --drop 1: takes text/uri-list; 2 (--drop-refuse): takes nothing */
+    struct wl_data_offer *drop_offer;
     struct wl_data_device_manager *ddm;
     struct zwp_primary_selection_device_manager_v1 *psm;
     struct wl_data_device *data_device;
@@ -967,15 +969,52 @@ static void data_device_data_offer(void *data, struct wl_data_device *d, struct 
     wl_data_offer_add_listener(o, &data_offer_listener, s->clip_types);
 }
 
+/* --drop: a drag entering is the offer made just before (clip_pending,
+   its types collected); it is taken as a drop's, not a selection's. */
 static void data_device_enter(void *data, struct wl_data_device *d, uint32_t serial, struct wl_surface *sf,
                               wl_fixed_t x, wl_fixed_t y, struct wl_data_offer *o)
 {
-    (void)data; (void)d; (void)serial; (void)sf; (void)x; (void)y; (void)o;
+    struct standin *s = data;
+    (void)d; (void)sf;
+    if (!s->drop || o == NULL) return;
+    if (o == s->clip_pending) s->clip_pending = NULL;
+    s->drop_offer = o;
+    printf("STANDIN drop enter %d %d %s\n", wl_fixed_to_int(x), wl_fixed_to_int(y), s->clip_types);
+    fflush(stdout);
+    if (s->drop == 1) {
+        /* As Firefox does: read it on the enter, to decide; then take it. */
+        int fds[2];
+        if (pipe(fds) == 0) {
+            char peek[256];
+            size_t used = 0;
+            ssize_t n;
+            wl_data_offer_receive(o, "text/uri-list", fds[1]);
+            close(fds[1]);
+            wl_display_flush(s->display);
+            while (used < sizeof(peek) - 1 && (n = read(fds[0], peek + used, sizeof(peek) - 1 - used)) > 0)
+                used += (size_t)n;
+            close(fds[0]);
+            printf("STANDIN drop peeked %zu bytes\n", used);
+            fflush(stdout);
+        }
+        wl_data_offer_accept(o, serial, "text/uri-list");
+        if (wl_data_offer_get_version(o) >= 3)
+            wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+                                      WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+    } else {
+        wl_data_offer_accept(o, serial, NULL);
+    }
 }
 
 static void data_device_leave(void *data, struct wl_data_device *d)
 {
-    (void)data; (void)d;
+    struct standin *s = data;
+    (void)d;
+    if (!s->drop || s->drop_offer == NULL) return;
+    printf("STANDIN drop leave\n");
+    fflush(stdout);
+    wl_data_offer_destroy(s->drop_offer);
+    s->drop_offer = NULL;
 }
 
 static void data_device_motion(void *data, struct wl_data_device *d, uint32_t t, wl_fixed_t x, wl_fixed_t y)
@@ -983,9 +1022,28 @@ static void data_device_motion(void *data, struct wl_data_device *d, uint32_t t,
     (void)data; (void)d; (void)t; (void)x; (void)y;
 }
 
+/* --drop: read what was dropped, as text/uri-list, and say it. */
 static void data_device_drop(void *data, struct wl_data_device *d)
 {
-    (void)data; (void)d;
+    struct standin *s = data;
+    char got[1024];
+    size_t used = 0;
+    ssize_t n;
+    int fds[2];
+    (void)d;
+    if (!s->drop || s->drop_offer == NULL || pipe(fds) != 0) return;
+    wl_data_offer_receive(s->drop_offer, "text/uri-list", fds[1]);
+    close(fds[1]);
+    wl_display_flush(s->display);
+    while (used < sizeof(got) - 1 && (n = read(fds[0], got + used, sizeof(got) - 1 - used)) > 0) used += (size_t)n;
+    close(fds[0]);
+    got[used] = '\0';
+    for (n = 0; n < (ssize_t)used; ++n) if (got[n] == '\r' || got[n] == '\n') got[n] = '|';
+    printf("STANDIN drop got %s\n", got);
+    fflush(stdout);
+    if (wl_data_offer_get_version(s->drop_offer) >= 3) wl_data_offer_finish(s->drop_offer);
+    wl_data_offer_destroy(s->drop_offer);
+    s->drop_offer = NULL;
 }
 
 static void data_device_selection(void *data, struct wl_data_device *d, struct wl_data_offer *o)
@@ -1659,6 +1717,8 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--xdg-output") == 0) s.xdg_mode = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--second-wm") == 0) s.second_wm = 1;
+        else if (strcmp(argv[i], "--drop") == 0) s.drop = 1;
+        else if (strcmp(argv[i], "--drop-refuse") == 0) s.drop = 2;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;
@@ -1686,6 +1746,14 @@ int main(int argc, char **argv)
         s.ti = zwp_text_input_manager_v3_get_text_input(s.ti_manager, s.seat);
         zwp_text_input_v3_add_listener(s.ti, &ti_listener, &s);
         printf("STANDIN ti made\n");
+    }
+    if (s.drop && !s.clip) {
+        if (s.ddm == NULL || s.seat == NULL) {
+            fprintf(stderr, "STANDIN --drop: no data device manager\n");
+            return 1;
+        }
+        s.data_device = wl_data_device_manager_get_data_device(s.ddm, s.seat);
+        wl_data_device_add_listener(s.data_device, &data_device_listener, &s);
     }
     if (s.clip) {
         if (s.ddm == NULL || s.psm == NULL || s.seat == NULL) {

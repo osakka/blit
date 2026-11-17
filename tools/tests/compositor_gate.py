@@ -1479,6 +1479,101 @@ def ime_part(compositor, standin, work):
     return ' '.join(results)
 
 
+def drop_part(compositor, standin, work):
+    """ADR 0229 (0.3.114): a file drop from the desktop onto a program window.
+    The gate plays the desktop. `CLIP drop <seq> <window> <x> <y> <types>`
+    enters the program's surface at (x, y) with an offer of those types; the
+    stand-in (--drop) accepts text/uri-list with a copy, the compositor drops,
+    the program's receive is the desktop's `CLIP read`, and `CLIP dropped
+    <seq> taken` follows. A program that accepts nothing (--drop-refuse) is
+    left after 1 s and the drop is `refused`; so is a window not there; a
+    drop naming no type is no line at all."""
+    runtime = os.path.join(work, 'run-drop')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-drop-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-drop.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-drop.out'), 'w'))
+    clients = []
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        outs = []
+        for i, (mode, title) in enumerate((('--drop', 'Takes'), ('--drop-refuse', 'Refuses'))):
+            path = os.path.join(work, 'standin-drop-%d.out' % i)
+            outs.append(path)
+            clients.append(start([standin, mode, title], cenv, open(path, 'w')))
+            n = i + 1
+            for want in ('WINDOW new %d 0' % n, 'WINDOW title %d %s' % (n, title), 'WINDOW appid %d blit.standin' % n,
+                         'WINDOW limits %d 64 48 0 0' % n, 'WINDOW decor %d server' % n):
+                desk.line(want)
+            desk.frame(256, 160, image_id=n)
+        printed = lambda i: open(outs[i]).read()
+
+        def said(prefix, wait=5.0):
+            end = time.time() + wait
+            while time.time() < end:
+                got = desk.next(0.2)
+                if got is None:
+                    continue
+                if got[0] == 'frame':
+                    os.close(got[2])
+                elif got[0] == 'line' and got[1].startswith(prefix):
+                    return got[1]
+            fail('no line %r' % prefix)
+
+        uris = b'file:///home/me/a%20b.txt\r\nfile:///home/me/c.mkv\r\n'
+        desk.send('CLIP drop 7 1 20 30 text/uri-list text/plain;charset=utf-8')
+        wait_for(lambda: 'STANDIN drop enter 20 30 text/uri-list,text/plain;charset=utf-8' in printed(0),
+                 lambda: 'the program was not entered:\n' + printed(0))
+        # Read twice, as Firefox does: on the enter, to decide, and at the drop.
+        for _ in range(2):
+            check(said('CLIP read ') == 'CLIP read 7 text/uri-list', 'the drop was not read as text/uri-list')
+            fd = desk.clip_fds.pop(0)
+            os.write(fd, uris)
+            os.close(fd)
+        check(said('CLIP dropped ') == 'CLIP dropped 7 taken', 'the taken drop was not said taken')
+        check('STANDIN drop peeked %d bytes' % len(uris) in printed(0), lambda: 'no read before the drop:\n' + printed(0))
+        wait_for(lambda: 'STANDIN drop got file:///home/me/a%20b.txt||file:///home/me/c.mkv||' in printed(0),
+                 lambda: 'the program did not get the files:\n' + printed(0))
+        # Not there: refused at once.
+        began = time.time()
+        desk.send('CLIP drop 8 99 1 1 text/uri-list')
+        check(said('CLIP dropped ') == 'CLIP dropped 8 refused' and time.time() - began < 0.5,
+              'a drop on no window was not refused at once')
+        # A program that takes nothing: left, and refused after its second.
+        began = time.time()
+        desk.send('CLIP drop 9 2 5 6 text/uri-list')
+        check(said('CLIP dropped ') == 'CLIP dropped 9 refused', 'a refused drop was not said refused')
+        waited = time.time() - began
+        check(0.8 <= waited < 2.5, 'the refusal came after %.2f s, not about 1 s' % waited)
+        wait_for(lambda: 'STANDIN drop enter 5 6 text/uri-list' in printed(1) and 'STANDIN drop leave' in printed(1),
+                 lambda: 'the refusing program was not entered and left:\n' + printed(1))
+        check('STANDIN drop got' not in printed(1), 'the refusing program read a drop')
+        # Naming no type is no drop.
+        desk.send('CLIP drop 10 1 5 5')
+        desk.nothing(0.5)
+        quit_compositor(desk, comp)
+        text = open(log).read()
+        check('drop 7 on window 1: taken' in text and 'drop 9 on window 2: refused' in text,
+              lambda: 'the log does not say the drops:\n' + text)
+        check(text.count('an unknown line from the channel: CLIP drop 10') == 1,
+              lambda: 'a drop with no type was not refused as a line:\n' + text)
+        return ('taken=enter(20,30)+motion+read-before+accept+copy->drop->CLIP read text/uri-list->files read,CLIP dropped taken '
+                'no-window=refused-at-once refuse=left,refused-after-%.1fs no-type=unknown-line' % waited)
+    finally:
+        for p in clients + [comp]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def busy_second_wm_part(compositor, standin, work):
     """ADR 0235: a window is pinged on the xdg_wm_base it was made from.
     Firefox binds xdg_wm_base a second time on a registry it reads only
@@ -2614,6 +2709,7 @@ def main():
         print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_SECOND_WM_OK %s' % busy_second_wm_part(compositor, standin, work))
+        print('COMPOSITOR_DROP_OK %s' % drop_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))

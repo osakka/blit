@@ -2963,7 +2963,26 @@ It speaks the frame channel above as a producer, with these additions.
   CLIP offer <seq> clipboard|primary [<type> ...]   the selection is now this offer
   CLIP read <seq> <type>                            with a pipe's write end: the owner writes, closes
   CLIP clear <seq>                                  the offer is withdrawn
+  CLIP drop <seq> <window> <x> <y> <type> [<type> ...]   desktop: files let go over a window
+  CLIP dropped <seq> taken|refused                  compositor: what the program did with it
   ```
+  **A drop** (0.3.114): the desktop let go of something (files, as
+  `text/uri-list`) over program window `<window>`, at `(<x>, <y>)` in that
+  window's own pixels. The compositor offers those types on the window's
+  client's data devices, enters its surface there (source action copy,
+  from version 3), and sends a motion at the same point every 150 ms
+  until the program answers, since a toolkit decides on a motion (GTK
+  accepts nothing on the enter alone). When it accepts a type and, from
+  version 3, a copy among its actions, the drop follows. Every `receive`
+  the program makes, before the drop too (Firefox reads `text/uri-list` on
+  each motion to decide), is the desktop's `CLIP read <seq> <type>` with
+  the program's pipe. `CLIP dropped <seq> taken` follows the program's
+  finish (or, below version 3, its offer let go) when it read the drop;
+  `refused` when it accepted nothing within 1 s (it is then left), took no
+  reading within 5 s of the drop, the window is an X program's (XDND is a
+  later row) or is not there, or its client has no data device. One drop
+  at a time: a new one ends the last, refused. A `CLIP drop` naming no type
+  is no line.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`
