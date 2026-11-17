@@ -2994,10 +2994,22 @@ It speaks the frame channel above as a producer, with these additions.
   `CLIP dropped <seq> taken` follows the program's
   finish (or, below version 3, its offer let go) when it read the drop;
   `refused` when it accepted nothing within 1 s (it is then left), took no
-  reading within 5 s of the drop, the window is an X program's (XDND is a
-  later row) or is not there, or its client has no data device. One drop
-  at a time: a new one ends the last, refused. A `CLIP drop` naming no type
-  is no line.
+  reading within 5 s of the drop, the window is not there, or its client
+  has no data device. One drop at a time: a new one ends the last,
+  refused. A `CLIP drop` naming no type is no line.
+  An X program's window (since 0.3.117) takes the drop by XDND, the
+  compositor the drag's source: the window must be XdndAware (version 3
+  or later; through its XdndProxy when that names itself), or the drop is
+  refused at once and said. It is entered with the types (XdndTypeList as
+  well), given XdndPosition at the drop point in root coordinates with
+  XdndActionCopy -- again every 150 ms, each after its XdndStatus, until it
+  accepts -- and then XdndDrop. Its conversions of XdndSelection are the
+  desktop's `CLIP read <seq> <type>`: a type of the drop by its name, and
+  UTF8_STRING, TEXT, STRING (Latin-1) and text/plain from
+  text/plain;charset=utf-8. Its XdndFinished is `taken` when it read the
+  drop (at version 5, and says it accepted). The same timeouts as a
+  Wayland program's; not accepted in 1 s, XdndLeave. Menus and other
+  override-redirect windows take no drops.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`

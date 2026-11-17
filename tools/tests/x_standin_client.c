@@ -956,6 +956,135 @@ static void clip_key(uint8_t code, xcb_timestamp_t time)
     }
 }
 
+/* Drops (XDND, Blit 0.3.117): with $XSTANDIN_DND `accept` or `refuse` the
+   top-level is XdndAware (version 5). It says each message -- "dnd enter
+   <version> <types>", "dnd position <x>,<y>", "dnd leave", "dnd drop" --
+   and answers each position with XdndStatus, accepting a copy or not. At
+   the drop it converts XdndSelection to text/uri-list (at the drop's time),
+   says "dnd got <data>" (CR and LF as |) and sends XdndFinished, accepted. */
+static int dnd_mode;                  /* 0 off, 1 accept, 2 refuse */
+static xcb_atom_t xdnd_aware, xdnd_enter, xdnd_position, xdnd_status, xdnd_leave, xdnd_drop, xdnd_finished,
+    xdnd_selection, xdnd_action_copy, xdnd_type_list, uri_list_atom, dnd_property;
+static xcb_window_t dnd_source;
+
+static void dnd_start(void)
+{
+    const char *mode = getenv("XSTANDIN_DND");
+    uint32_t version = 5;
+    if (mode == NULL) return;
+    dnd_mode = strcmp(mode, "refuse") == 0 ? 2 : 1;
+    xdnd_aware = atom("XdndAware");
+    xdnd_enter = atom("XdndEnter");
+    xdnd_position = atom("XdndPosition");
+    xdnd_status = atom("XdndStatus");
+    xdnd_leave = atom("XdndLeave");
+    xdnd_drop = atom("XdndDrop");
+    xdnd_finished = atom("XdndFinished");
+    xdnd_selection = atom("XdndSelection");
+    xdnd_action_copy = atom("XdndActionCopy");
+    xdnd_type_list = atom("XdndTypeList");
+    uri_list_atom = atom("text/uri-list");
+    dnd_property = atom("XSTANDIN_DND");
+    xcb_change_property(conn, XCB_PROP_MODE_REPLACE, window, xdnd_aware, XCB_ATOM_ATOM, 32, 1, &version);
+}
+
+static void dnd_send(xcb_atom_t type, uint32_t l1, uint32_t l2, uint32_t l3, uint32_t l4)
+{
+    union {
+        xcb_client_message_event_t ev;
+        char bytes[32];
+    } u;
+    memset(&u, 0, sizeof(u));
+    u.ev.response_type = XCB_CLIENT_MESSAGE;
+    u.ev.format = 32;
+    u.ev.window = dnd_source;
+    u.ev.type = type;
+    u.ev.data.data32[0] = window;
+    u.ev.data.data32[1] = l1;
+    u.ev.data.data32[2] = l2;
+    u.ev.data.data32[3] = l3;
+    u.ev.data.data32[4] = l4;
+    xcb_send_event(conn, 0, dnd_source, XCB_EVENT_MASK_NO_EVENT, u.bytes);
+    xcb_flush(conn);
+}
+
+static void dnd_atom_names(const uint32_t *a, int n, char *out, size_t size)
+{
+    int i;
+    out[0] = '\0';
+    for (i = 0; i < n; ++i) {
+        xcb_get_atom_name_reply_t *name;
+        if (a[i] == 0) continue;
+        name = xcb_get_atom_name_reply(conn, xcb_get_atom_name(conn, a[i]), NULL);
+        if (name == NULL) continue;
+        if (out[0]) strncat(out, ",", size - strlen(out) - 1);
+        strncat(out, xcb_get_atom_name_name(name),
+                (size_t)xcb_get_atom_name_name_length(name) < size - strlen(out) - 1
+                    ? (size_t)xcb_get_atom_name_name_length(name) : size - strlen(out) - 1);
+        free(name);
+    }
+}
+
+/* A message of the drag's source; 1 when it was one. */
+static int dnd_message(const xcb_client_message_event_t *m)
+{
+    char types[512];
+    if (!dnd_mode || m->format != 32 || m->window != window) return 0;
+    if (m->type == xdnd_enter) {
+        dnd_source = m->data.data32[0];
+        if (m->data.data32[1] & 1) {
+            xcb_get_property_reply_t *r = xcb_get_property_reply(
+                conn, xcb_get_property(conn, 0, dnd_source, xdnd_type_list, XCB_ATOM_ATOM, 0, 64), NULL);
+            if (r) dnd_atom_names(xcb_get_property_value(r), xcb_get_property_value_length(r) / 4, types, sizeof(types));
+            else types[0] = '\0';
+            free(r);
+        } else {
+            dnd_atom_names(&m->data.data32[2], 3, types, sizeof(types));
+        }
+        say("dnd enter %u %s", (unsigned)(m->data.data32[1] >> 24), types);
+    } else if (m->type == xdnd_position) {
+        uint32_t at = m->data.data32[2];
+        say("dnd position %u,%u%s", (unsigned)(at >> 16), (unsigned)(at & 0xffff),
+            m->data.data32[4] == xdnd_action_copy ? " copy" : "");
+        dnd_send(xdnd_status, dnd_mode == 1 ? 1u : 0u, 0, 0, dnd_mode == 1 ? xdnd_action_copy : 0);
+    } else if (m->type == xdnd_leave) {
+        say("dnd leave");
+    } else if (m->type == xdnd_drop) {
+        say("dnd drop");
+        xcb_convert_selection(conn, window, xdnd_selection, uri_list_atom, dnd_property, m->data.data32[2]);
+        xcb_flush(conn);
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+/* The drop's data came (or none): said, and finished. */
+static int dnd_notify(const xcb_selection_notify_event_t *ev)
+{
+    char got[1024];
+    size_t n = 0, i;
+    if (!dnd_mode || ev->selection != xdnd_selection) return 0;
+    got[0] = '\0';
+    if (ev->property != XCB_ATOM_NONE) {
+        xcb_get_property_reply_t *r = xcb_get_property_reply(
+            conn, xcb_get_property(conn, 1, window, dnd_property, XCB_GET_PROPERTY_TYPE_ANY, 0, 256), NULL);
+        if (r) {
+            n = (size_t)xcb_get_property_value_length(r);
+            if (n > sizeof(got) - 1) n = sizeof(got) - 1;
+            memcpy(got, xcb_get_property_value(r), n);
+            got[n] = '\0';
+        }
+        free(r);
+        for (i = 0; i < n; ++i) if (got[i] == '\r' || got[i] == '\n') got[i] = '|';
+        say("dnd got %s", got);
+    } else {
+        say("dnd got none");
+    }
+    dnd_send(xdnd_finished, ev->property != XCB_ATOM_NONE ? 1u : 0u, xdnd_action_copy, 0, 0);
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *title = argc > 1 ? argv[1] : "Blit X stand-in";
@@ -1046,6 +1175,7 @@ int main(int argc, char **argv)
                                                   XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
         }
     }
+    dnd_start();
     xcb_map_window(conn, window);
     xcb_flush(conn);
 
@@ -1133,6 +1263,7 @@ int main(int argc, char **argv)
                 clip_request((xcb_selection_request_event_t *)ev);
                 break;
             case XCB_SELECTION_NOTIFY:
+                if (dnd_notify((xcb_selection_notify_event_t *)ev)) break;
                 paste_notify((xcb_selection_notify_event_t *)ev);
                 break;
             case XCB_SELECTION_CLEAR: {
@@ -1265,6 +1396,7 @@ int main(int argc, char **argv)
             }
             case XCB_CLIENT_MESSAGE: {
                 xcb_client_message_event_t *m = (xcb_client_message_event_t *)ev;
+                if (dnd_message(m)) break;
                 if (m->type == protocols && m->format == 32 && m->data.data32[0] == delete_window) {
                     if (dialog && m->window == dialog) {
                         say("dialog-delete");

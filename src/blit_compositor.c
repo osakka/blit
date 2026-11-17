@@ -332,6 +332,10 @@ enum {
     /* the selections (milestone D) */
     BC_ATOM_CLIPBOARD, BC_ATOM_TARGETS, BC_ATOM_TIMESTAMP, BC_ATOM_INCR, BC_ATOM_TEXT, BC_ATOM_TEXT_UTF8,
     BC_ATOM_SECRET, BC_ATOM_BLIT_SELECTION,
+    /* drops onto X programs (XDND, 0.3.117) */
+    BC_ATOM_XDND_AWARE, BC_ATOM_XDND_PROXY, BC_ATOM_XDND_ENTER, BC_ATOM_XDND_POSITION, BC_ATOM_XDND_STATUS,
+    BC_ATOM_XDND_LEAVE, BC_ATOM_XDND_DROP, BC_ATOM_XDND_FINISHED, BC_ATOM_XDND_SELECTION,
+    BC_ATOM_XDND_TYPE_LIST, BC_ATOM_XDND_ACTION_COPY, BC_ATOM_BLIT_XDND_TIME,
     BC_ATOMS
 };
 
@@ -394,6 +398,7 @@ struct bc_x {
        selection's X state, and the transfers going. */
     uint8_t xfixes_first;
     xcb_window_t sel_window;
+    xcb_window_t dnd_window;          /* the source of drops onto X windows (XDND), its own */
     struct bc_xsel {
         xcb_window_t owner;           /* X's owner as XFixes last said, None none */
         xcb_timestamp_t owner_time;   /* its selection time */
@@ -463,7 +468,17 @@ struct bc_drop {
     uint32_t began_ms;                /* when it entered */
     int left;                         /* the drag's end (leave) said after the drop */
     struct wl_event_source *timer;
+    /* An X program's window (XDND, 0.3.117): its top-level, where its
+       messages go (itself or its XdndProxy), the version both speak, and
+       the drop's server time (the selection's, the position's, the drop's). */
+    int xstate;                       /* BC_XDND_*; 0: a Wayland program's drop, or none */
+    uint32_t xwin, xto;               /* xcb_window_t */
+    uint32_t xversion, xtime;
+    int xwaiting;                     /* a position sent, its XdndStatus not back */
+    uint32_t xtypes[8];               /* the types as atoms, XdndTypeList */
+    int nxtypes;
 };
+enum { BC_XDND_NONE, BC_XDND_TIME, BC_XDND_ENTERED, BC_XDND_DROPPED };
 
 /* A drop read relayed through the compositor: the desktop writes into
    `from`, the compositor into the program's pipe `to`, so it knows when what
@@ -2910,6 +2925,9 @@ static int clip_read(struct bc_server *s, int k, const char *type, int fd)
 }
 
 static void drop_receive(struct bc_server *s, const char *type, int fd);
+static int xdnd_begin(struct bc_server *s, struct bc_xwin *w);
+static void xdnd_tick(struct bc_server *s);
+static void xdnd_end(struct bc_server *s);
 static void drop_answered(struct bc_server *s);
 static void drop_end(struct bc_server *s, int taken);
 
@@ -3293,8 +3311,8 @@ static void drop_end(struct bc_server *s, int taken)
 {
     struct bc_drop *d = &s->drop;
     uint32_t seq = d->seq;
-    int i;
     if (seq == 0) return;
+    if (d->xstate) xdnd_end(s);
     if (!d->left) drop_leave(s);
     if (d->timer) wl_event_source_timer_update(d->timer, 0);
     d->seq = 0;
@@ -3348,7 +3366,8 @@ static int drop_timeout(void *data)
     struct bc_drop *d = &s->drop;
     if (d->seq == 0) return 0;
     if (!d->dropped && now_ms() - d->began_ms < BC_DROP_ACCEPT_MS) {
-        drop_motion(s);
+        if (d->xstate) xdnd_tick(s);
+        else drop_motion(s);
         wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
         return 0;
     }
@@ -3500,12 +3519,19 @@ static void drop_begin(struct bc_server *s, const BcLine *l)
     d->window = l->target;
     d->ndevices = 0;
     d->accepted = d->copy = d->dropped = d->received = d->left = 0;
+    d->xstate = BC_XDND_NONE;
+    d->xwin = d->xto = XCB_WINDOW_NONE;
     d->x = l->x;
     d->y = l->y;
     d->began_ms = now_ms();
     snprintf(d->types, sizeof(d->types), "%s", l->types);
-    /* An X program takes drops by XDND, a later row; a window not here, or
-       a client with no data device, takes nothing. */
+    /* An X program's window takes it by XDND (0.3.117); its menus and
+       other override-redirect windows take none. */
+    if (x != NULL && x->xwin != NULL && d->timer != NULL) {
+        if (x->xpopup || !xdnd_begin(s, x->xwin)) drop_end(s, 0);
+        return;
+    }
+    /* A window not here, or a client with no data device, takes nothing. */
     if (x == NULL || x->surface == NULL || x->toplevel == NULL || d->timer == NULL) { drop_end(s, 0); return; }
     client = wl_resource_get_client(x->surface->resource);
     if (client == s->x.client) { drop_end(s, 0); return; }
@@ -7055,6 +7081,8 @@ static const char *const bc_atom_names[BC_ATOMS] = {
     "_NET_WM_STATE_FOCUSED",
     "CLIPBOARD", "TARGETS", "TIMESTAMP", "INCR", "TEXT", "text/plain;charset=utf-8",
     "x-kde-passwordManagerHint", "_BLIT_SELECTION",
+    "XdndAware", "XdndProxy", "XdndEnter", "XdndPosition", "XdndStatus", "XdndLeave", "XdndDrop",
+    "XdndFinished", "XdndSelection", "XdndTypeList", "XdndActionCopy", "_BLIT_XDND_TIME",
 };
 
 /* One child of the root: an X top-level, from its CreateNotify to its
@@ -8005,8 +8033,11 @@ static void x_serial_message(struct bc_server *s, xcb_client_message_event_t *ev
         }
 }
 
+static void xdnd_gone(struct bc_server *s, xcb_window_t window);
+
 static void x_window_free(struct bc_server *s, struct bc_xwin *w)
 {
+    xdnd_gone(s, w->window);
     x_unmatch(s, w);
     if (s->x.focus == w->window) s->x.focus = XCB_WINDOW_NONE;
     wl_list_remove(&w->link);
@@ -8104,6 +8135,7 @@ struct bc_xfer {
     xcb_selection_request_event_t req;
     xcb_atom_t property, type;
     int notified, waiting;            /* SelectionNotify sent; a chunk waits for the requestor's delete */
+    int drop;                         /* OUT: XdndSelection's, the desktop's drop (not selection k's) */
 };
 
 static int x_sel_index(struct bc_server *s, xcb_atom_t atom)
@@ -8677,6 +8709,9 @@ static int out_readable(int fd, uint32_t mask, void *data)
 
 /* A request for selection k's data: its owner asked through a pipe, as a
    Wayland program's paste is. Returns -1 when nobody was asked. */
+static int x_out_begin(struct bc_server *s, int k, int drop, const xcb_selection_request_event_t *req,
+                       xcb_atom_t property, xcb_atom_t type, int latin1, const char *want);
+
 static int x_out_start(struct bc_server *s, int k, const xcb_selection_request_event_t *req, xcb_atom_t property)
 {
     const struct bc_selection *sel = &s->sel[k];
@@ -8684,8 +8719,7 @@ static int x_out_start(struct bc_server *s, int k, const xcb_selection_request_e
     xcb_atom_t target = req->target, type = target;
     char name[BC_CLIP_TYPE_BYTES + 1];
     const char *want = NULL;
-    int latin1 = 0, p[2];
-    struct bc_xfer *t, *next;
+    int latin1 = 0;
     if (target == atoms[BC_ATOM_UTF8_STRING] || target == atoms[BC_ATOM_TEXT_UTF8] ||
         target == atoms[BC_ATOM_TEXT] || target == XCB_ATOM_STRING) {
         want = sel->source ? source_text_type(sel->source) : sel->desk_text ? BC_TEXT_TYPE : NULL;
@@ -8702,8 +8736,27 @@ static int x_out_start(struct bc_server *s, int k, const xcb_selection_request_e
         }
         free(reply);
     }
+    return x_out_begin(s, k, 0, req, property, type, latin1, want);
+}
+
+/* An OUT transfer of `want`, asked of selection k's owner -- or, `drop`,
+   of the desktop's drop (`CLIP read <seq> <want>`) -- into the requestor's
+   property as `type`. Returns -1 when nobody was asked. */
+static int x_out_begin(struct bc_server *s, int k, int drop, const xcb_selection_request_event_t *req,
+                       xcb_atom_t property, xcb_atom_t type, int latin1, const char *want)
+{
+    struct bc_xfer *t, *next;
+    int p[2];
     if (want == NULL || pipe2(p, O_CLOEXEC) != 0) return -1;
-    if (clip_read(s, k, want, p[1]) != 0) {
+    if (drop) {
+        if (bc_wire_line_fd(&s->wire, p[1], "CLIP read %u %s", s->drop.seq, want) != 0) {
+            logf_("drop %u: its reading not asked: %s", s->drop.seq, s->wire.last_error);
+            close(p[0]);
+            close(p[1]);
+            return -1;
+        }
+        s->drop.received = 1;
+    } else if (clip_read(s, k, want, p[1]) != 0) {
         close(p[0]);
         close(p[1]);
         return -1;
@@ -8726,6 +8779,7 @@ static int x_out_start(struct bc_server *s, int k, const xcb_selection_request_e
     t->property = property;
     t->type = type;
     t->latin1 = latin1;
+    t->drop = drop;
     t->fd = p[0];
     t->fd_source = wl_event_loop_add_fd(s->loop, p[0], WL_EVENT_READABLE, out_readable, t);
     if (t->fd_source == NULL) {
@@ -8735,6 +8789,238 @@ static int x_out_start(struct bc_server *s, int k, const xcb_selection_request_e
     return 0;
 }
 
+/* ---- files dropped onto an X program's window (XDND, 0.3.117) ----
+
+   The desktop's `CLIP drop` on an X program's window: the compositor is the
+   drag's source, by the XDND protocol (version 3 to 5), from a window of
+   its own (bc_x.dnd_window), as a Wayland drop's is its data offer.
+   - The window must say it takes drops: XdndAware on its top-level (its
+     version; 3 at least), its messages to its XdndProxy when that window
+     names itself. None: refused at once, said.
+   - The drop's server time first (a property changed on our window, its
+     PropertyNotify's time): XdndSelection owned at it, then XdndEnter (the
+     types, XdndTypeList too) and XdndPosition at the drop point in root
+     coordinates, with XdndActionCopy. Another position only after its
+     XdndStatus came back, every 150 ms until it accepts; not within 1 s:
+     XdndLeave, refused.
+   - Accepted: XdndDrop at the drop's time. Its ConvertSelection of
+     XdndSelection is answered from the desktop -- `CLIP read <seq> <type>`
+     into an OUT transfer, as an X paste of the desktop's selection is (INCR,
+     the idle timeout): its MIME type by name, and the text aliases
+     (UTF8_STRING, TEXT, STRING Latin-1, text/plain) from
+     text/plain;charset=utf-8.
+   - XdndFinished: taken when it read the drop (and, at version 5, says it
+     accepted). No finish within 5 s: as a Wayland drop's.
+   - The window destroyed, or Xwayland gone, mid-drop: refused. */
+
+#define BC_XDND_VERSION 5
+
+/* One 32-bit value of `window`'s property, 1 when there is one. */
+static int x_prop32(struct bc_server *s, xcb_window_t window, xcb_atom_t property, xcb_atom_t type, uint32_t *out)
+{
+    xcb_get_property_reply_t *r = xcb_get_property_reply(
+        s->x.conn, xcb_get_property(s->x.conn, 0, window, property, type, 0, 1), NULL);
+    int ok = r && r->format == 32 && xcb_get_property_value_length(r) >= 4;
+    if (ok) memcpy(out, xcb_get_property_value(r), 4);
+    free(r);
+    return ok;
+}
+
+static void xdnd_send(struct bc_server *s, xcb_atom_t type, uint32_t l1, uint32_t l2, uint32_t l3, uint32_t l4)
+{
+    union {
+        xcb_client_message_event_t ev;
+        char bytes[32];
+    } u;
+    memset(&u, 0, sizeof(u));
+    u.ev.response_type = XCB_CLIENT_MESSAGE;
+    u.ev.format = 32;
+    u.ev.window = s->drop.xwin;
+    u.ev.type = type;
+    u.ev.data.data32[0] = s->x.dnd_window;
+    u.ev.data.data32[1] = l1;
+    u.ev.data.data32[2] = l2;
+    u.ev.data.data32[3] = l3;
+    u.ev.data.data32[4] = l4;
+    xcb_send_event(s->x.conn, 0, s->drop.xto, XCB_EVENT_MASK_NO_EVENT, u.bytes);
+    xcb_flush(s->x.conn);
+}
+
+static int xdnd_begin(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_drop *d = &s->drop;
+    const xcb_atom_t *atoms = s->x.atoms;
+    char types[BC_TEXT_BYTES + 1], *t, *save = NULL;
+    uint32_t version, proxy, self;
+    if (s->x.conn == NULL || s->x.dnd_window == XCB_WINDOW_NONE) {
+        logf_("drop %u on window %u: X is not up", d->seq, d->window);
+        return 0;
+    }
+    if (!x_prop32(s, w->window, atoms[BC_ATOM_XDND_AWARE], XCB_ATOM_ATOM, &version) || version < 3) {
+        logf_("drop %u on window %u: X window 0x%x takes no drops (%s)", d->seq, d->window, (unsigned)w->window,
+              x_prop32(s, w->window, atoms[BC_ATOM_XDND_AWARE], XCB_ATOM_ATOM, &version) ? "XDND older than 3"
+                                                                                       : "no XdndAware");
+        return 0;
+    }
+    d->xwin = d->xto = w->window;
+    /* XdndProxy counts when the proxy names itself (the spec's check). */
+    if (x_prop32(s, w->window, atoms[BC_ATOM_XDND_PROXY], XCB_ATOM_WINDOW, &proxy) && proxy != 0 &&
+        x_prop32(s, proxy, atoms[BC_ATOM_XDND_PROXY], XCB_ATOM_WINDOW, &self) && self == proxy)
+        d->xto = proxy;
+    d->xversion = version < BC_XDND_VERSION ? version : BC_XDND_VERSION;
+    d->nxtypes = 0;
+    snprintf(types, sizeof(types), "%s", d->types);
+    for (t = strtok_r(types, " ", &save); t && d->nxtypes < 8; t = strtok_r(NULL, " ", &save)) {
+        xcb_intern_atom_reply_t *r = xcb_intern_atom_reply(
+            s->x.conn, xcb_intern_atom(s->x.conn, 0, (uint16_t)strlen(t), t), NULL);
+        if (r) d->xtypes[d->nxtypes++] = r->atom;
+        free(r);
+    }
+    xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, s->x.dnd_window, atoms[BC_ATOM_XDND_TYPE_LIST],
+                        XCB_ATOM_ATOM, 32, (uint32_t)d->nxtypes, d->xtypes);
+    /* The server's time: a change of a property of ours, its notify's time. */
+    xcb_change_property(s->x.conn, XCB_PROP_MODE_APPEND, s->x.dnd_window, atoms[BC_ATOM_BLIT_XDND_TIME],
+                        XCB_ATOM_INTEGER, 32, 0, NULL);
+    xcb_flush(s->x.conn);
+    d->xstate = BC_XDND_TIME;
+    d->xwaiting = 0;
+    logf_("drop %u on window %u at %d,%d: %s (X window 0x%x, XDND %u%s)", d->seq, d->window, d->x, d->y,
+          d->types, (unsigned)w->window, (unsigned)d->xversion, d->xto != d->xwin ? ", by its proxy" : "");
+    wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
+    return 1;
+}
+
+static void xdnd_position(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    struct bc_xwin *w = x_window(s, d->xwin);
+    int32_t rx, ry;
+    if (w == NULL) return;
+    rx = w->x + d->x;
+    ry = w->y + d->y;
+    xdnd_send(s, s->x.atoms[BC_ATOM_XDND_POSITION], 0, ((uint32_t)(rx & 0xffff) << 16) | (uint32_t)(ry & 0xffff),
+              d->xtime, s->x.atoms[BC_ATOM_XDND_ACTION_COPY]);
+    d->xwaiting = 1;
+}
+
+/* The drop's time came: XdndSelection ours at it, enter, the position. */
+static void xdnd_time(struct bc_server *s, xcb_timestamp_t time)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->seq == 0 || d->xstate != BC_XDND_TIME) return;
+    d->xtime = time;
+    xcb_set_selection_owner(s->x.conn, s->x.dnd_window, s->x.atoms[BC_ATOM_XDND_SELECTION], time);
+    xdnd_send(s, s->x.atoms[BC_ATOM_XDND_ENTER], (d->xversion << 24) | (d->nxtypes > 3 ? 1u : 0u),
+              d->nxtypes > 0 ? d->xtypes[0] : 0, d->nxtypes > 1 ? d->xtypes[1] : 0, d->nxtypes > 2 ? d->xtypes[2] : 0);
+    d->xstate = BC_XDND_ENTERED;
+    xdnd_position(s);
+}
+
+/* The 150 ms tick before it accepts: another position, once the last was answered. */
+static void xdnd_tick(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->xstate == BC_XDND_ENTERED && !d->xwaiting && !d->dropped) xdnd_position(s);
+}
+
+static void xdnd_status(struct bc_server *s, const xcb_client_message_event_t *ev)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->seq == 0 || d->xstate != BC_XDND_ENTERED || ev->data.data32[0] != d->xwin) return;
+    d->xwaiting = 0;
+    if (!(ev->data.data32[1] & 1) || d->dropped) return;
+    d->accepted = 1;
+    d->dropped = 1;
+    d->xstate = BC_XDND_DROPPED;
+    xdnd_send(s, s->x.atoms[BC_ATOM_XDND_DROP], 0, d->xtime, 0, 0);
+    wl_event_source_timer_update(d->timer, BC_DROP_FINISH_MS);
+}
+
+static void xdnd_finished(struct bc_server *s, const xcb_client_message_event_t *ev)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->seq == 0 || d->xstate != BC_XDND_DROPPED || ev->data.data32[0] != d->xwin) return;
+    drop_end(s, d->received && (d->xversion < 5 || (ev->data.data32[1] & 1)));
+}
+
+/* The drop over (drop_end): left when it was entered and not dropped, and
+   XdndSelection given up at its time. */
+static void xdnd_end(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->xstate == BC_XDND_ENTERED) xdnd_send(s, s->x.atoms[BC_ATOM_XDND_LEAVE], 0, 0, 0, 0);
+    if (d->xstate >= BC_XDND_ENTERED && s->x.conn) {
+        xcb_set_selection_owner(s->x.conn, XCB_WINDOW_NONE, s->x.atoms[BC_ATOM_XDND_SELECTION], d->xtime);
+        xcb_flush(s->x.conn);
+    }
+    d->xstate = BC_XDND_NONE;
+    d->xwin = d->xto = XCB_WINDOW_NONE;
+}
+
+/* The window or X going mid-drop: refused, with nothing more sent to it. */
+static void xdnd_gone(struct bc_server *s, xcb_window_t window)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->seq == 0 || d->xstate == BC_XDND_NONE || (window != XCB_WINDOW_NONE && window != d->xwin)) return;
+    d->xstate = BC_XDND_NONE;
+    drop_end(s, 0);
+}
+
+/* A ConvertSelection of XdndSelection: the drop's types, from the desktop. */
+static int xdnd_request(struct bc_server *s, const xcb_selection_request_event_t *req, xcb_atom_t property)
+{
+    struct bc_drop *d = &s->drop;
+    const xcb_atom_t *atoms = s->x.atoms;
+    xcb_atom_t target = req->target, type = target;
+    char name[BC_CLIP_TYPE_BYTES + 1], types[BC_TEXT_BYTES + 2];
+    const char *want = NULL;
+    int latin1 = 0;
+    if (d->seq == 0 || d->xstate < BC_XDND_ENTERED || req->owner != s->x.dnd_window) return 0;
+    if (target == atoms[BC_ATOM_TARGETS]) {
+        xcb_atom_t list[10];
+        int n = 0, i;
+        for (i = 0; i < d->nxtypes; ++i) list[n++] = d->xtypes[i];
+        list[n++] = atoms[BC_ATOM_TARGETS];
+        list[n++] = atoms[BC_ATOM_TIMESTAMP];
+        xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_ATOM, 32,
+                            (uint32_t)n, list);
+        x_sel_notify(s, req, property);
+        return 1;
+    }
+    if (target == atoms[BC_ATOM_TIMESTAMP]) {
+        xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, req->requestor, property, XCB_ATOM_INTEGER, 32, 1,
+                            &d->xtime);
+        x_sel_notify(s, req, property);
+        return 1;
+    }
+    {
+        xcb_get_atom_name_reply_t *reply =
+            xcb_get_atom_name_reply(s->x.conn, xcb_get_atom_name(s->x.conn, target), NULL);
+        int len = reply ? xcb_get_atom_name_name_length(reply) : 0;
+        name[0] = '\0';
+        if (reply && len > 0 && len <= BC_CLIP_TYPE_BYTES) {
+            memcpy(name, xcb_get_atom_name_name(reply), (size_t)len);
+            name[len] = '\0';
+        }
+        free(reply);
+    }
+    snprintf(types, sizeof(types), " %s ", d->types);
+    {
+        char key[BC_CLIP_TYPE_BYTES + 3];
+        snprintf(key, sizeof(key), " %s ", name);
+        if (name[0] && strstr(types, key)) want = name;
+    }
+    if (want == NULL && strstr(types, " " BC_TEXT_TYPE " ") &&
+        (target == atoms[BC_ATOM_UTF8_STRING] || target == atoms[BC_ATOM_TEXT] || target == XCB_ATOM_STRING ||
+         strcmp(name, "text/plain") == 0)) {
+        want = BC_TEXT_TYPE;
+        if (target == atoms[BC_ATOM_TEXT]) type = atoms[BC_ATOM_UTF8_STRING];
+        latin1 = target == XCB_ATOM_STRING;
+    }
+    if (want == NULL) return 0;
+    return x_out_begin(s, 0, 1, req, property, type, latin1, want) == 0;
+}
+
 /* A SelectionRequest: the window manager's selections answered, every
    other refused. */
 static void x_selection_request(struct bc_server *s, xcb_selection_request_event_t *req)
@@ -8742,6 +9028,11 @@ static void x_selection_request(struct bc_server *s, xcb_selection_request_event
     int k = x_sel_index(s, req->selection);
     xcb_atom_t property = req->property != XCB_ATOM_NONE ? req->property : req->target;  /* ICCCM 2.2, obsolete */
     const xcb_atom_t *atoms = s->x.atoms;
+    if (req->selection == atoms[BC_ATOM_XDND_SELECTION]) {
+        /* The drop's, not the keyboard's: read while the desktop has it. */
+        if (!xdnd_request(s, req, property)) x_sel_notify(s, req, XCB_ATOM_NONE);
+        return;
+    }
     if (k < 0 || req->owner != s->x.sel_window || !x_should_own(s, k) || x_own_window(s, req->requestor)) {
         x_sel_notify(s, req, XCB_ATOM_NONE);
         return;
@@ -8846,7 +9137,7 @@ static int xfer_deadline(void *data)
 {
     struct bc_xfer *t = data;
     struct bc_server *s = t->server;
-    const char *name = x_sel_name(t->k);
+    const char *name = t->drop ? "XdndSelection" : x_sel_name(t->k);
     if (t->kind == BC_XFER_TARGETS) {
         logf_("X: %s's owner 0x%x did not answer TARGETS in %d ms", name, (unsigned)t->owner, BC_XSEL_IDLE_MS);
         x_targets_answered(s, t, NULL);
@@ -8901,6 +9192,14 @@ static void x_selections_start(struct bc_server *s)
     int k;
     memset(s->x.xsel, 0, sizeof(s->x.xsel));
     s->x.sel_window = XCB_WINDOW_NONE;
+    {
+        /* The drag source of drops onto X windows: its property changes
+           give the drop its server time. */
+        uint32_t mask = XCB_EVENT_MASK_PROPERTY_CHANGE;
+        s->x.dnd_window = xcb_generate_id(s->x.conn);
+        xcb_create_window(s->x.conn, 0, s->x.dnd_window, s->x.wm_window, 0, 0, 1, 1, 0,
+                          XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT, XCB_CW_EVENT_MASK, &mask);
+    }
     if (s->x.xfixes_first == 0) {
         logf_("X: no XFixes: X programs' selections are not the clipboard's");
         return;
@@ -8926,7 +9225,9 @@ static void x_selections_stop(struct bc_server *s)
     }
     memset(s->x.xsel, 0, sizeof(s->x.xsel));
     s->x.sel_window = XCB_WINDOW_NONE;
+    s->x.dnd_window = XCB_WINDOW_NONE;
     s->x.xfixes_first = 0;
+    xdnd_gone(s, XCB_WINDOW_NONE);
 }
 
 /* Xwayland gone: an X program's selection ended with it. */
@@ -9242,9 +9543,18 @@ static void x_moveresize_request(struct bc_server *s, xcb_client_message_event_t
     else window_resize(w->pic, edges[direction]);
 }
 
+static void xdnd_status(struct bc_server *s, const xcb_client_message_event_t *ev);
+static void xdnd_finished(struct bc_server *s, const xcb_client_message_event_t *ev);
+
 static void x_client_message(struct bc_server *s, xcb_client_message_event_t *ev)
 {
     xcb_atom_t *atoms = s->x.atoms;
+    if (ev->format == 32 && ev->window == s->x.dnd_window && s->x.dnd_window != XCB_WINDOW_NONE &&
+        (ev->type == atoms[BC_ATOM_XDND_STATUS] || ev->type == atoms[BC_ATOM_XDND_FINISHED])) {
+        if (ev->type == atoms[BC_ATOM_XDND_STATUS]) xdnd_status(s, ev);
+        else xdnd_finished(s, ev);
+        return;
+    }
     if (ev->type == atoms[BC_ATOM_WL_SURFACE_SERIAL] && ev->format == 32) {
         x_serial_message(s, ev);
     } else if (ev->type == atoms[BC_ATOM_WL_SURFACE_ID]) {
@@ -9477,6 +9787,11 @@ static void x_event(struct bc_server *s, xcb_generic_event_t *ev)
         x_configure_notify(s, (xcb_configure_notify_event_t *)ev);
         return;
     case XCB_PROPERTY_NOTIFY:
+        if (((xcb_property_notify_event_t *)ev)->window == s->x.dnd_window &&
+            ((xcb_property_notify_event_t *)ev)->atom == s->x.atoms[BC_ATOM_BLIT_XDND_TIME]) {
+            xdnd_time(s, ((xcb_property_notify_event_t *)ev)->time);
+            return;
+        }
         if (!x_xfer_property(s, (xcb_property_notify_event_t *)ev))
             x_property_notify(s, (xcb_property_notify_event_t *)ev);
         return;

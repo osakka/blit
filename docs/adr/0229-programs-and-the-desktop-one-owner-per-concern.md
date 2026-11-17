@@ -61,7 +61,7 @@ origin once; Blit maps the pointer through source rectangles already.
 | Cursor shape | the program names, Blit's pointer art draws (one source: OSC 22's names), Hibr relays | `WINDOW cursor <id> <name>` (wp_cursor_shape_v1); `none` hides | 0.3.76 |
 | Cursor images (wl_pointer.set_cursor surfaces) | none: never drawn, the display's own pointer (`default`) | -- | decided (owner: the same cursors we already have) |
 | The global menu (programs' menus in Hibr's bar) | the program serves them (D-Bus, `com.canonical.dbusmenu`), Hibr shows them | `WINDOW appmenu <id> <service> <path>` (org_kde_kwin_appmenu); `- -` none | 0.3.77 (owner confirmed, Hibr #500) |
-| Drag and drop | Hibr | `CLIP` extended with a drag: a drop onto a Wayland program (`CLIP drop`, `CLIP dropped`) in 0.3.114; hover feedback, X programs (XDND) and dragging out later | 0.3.114 (drop) |
+| Drag and drop | Hibr | `CLIP` extended with a drag: a drop onto a Wayland program (`CLIP drop`, `CLIP dropped`) in 0.3.114, onto an X program (XDND) in 0.3.117; hover feedback and dragging out later | 0.3.114 (drop), 0.3.117 (X) |
 | Activation: a program asks for its window's focus (xdg_activation's token; an X program's `_NET_ACTIVE_WINDOW`, or X's focus taken itself and put back) | program asks, Hibr decides (its focus-stealing setting) | `WINDOW activate <id> x-focus\|x-active\|xdg-activation`; granted with `WINDOW size ... activated` | 0.3.86 |
 | Idle inhibit (video keeps the screen saver off) | Hibr | `WINDOW idle <id> on\|off` | later |
 | Text input and input methods | Hibr (the desktop's fields); the engine itself is hibr-arabizi's, also run by Blit while a program window has the keys (ADR 0233, amended 2026-11-13) | zwp_text_input_v3 in blit-compositor for program windows | later |
@@ -262,3 +262,37 @@ ends otherwise (finish, timeout, a new drop) says its leave then, once.
 (`--drop-lazy`: one look at the drop, again only on an event; an enter while
 an offer is held aborts it): two drops in a row, each taken at once and read.
 0.3.115 fails it: taken after 5.00 s.
+
+## Amended 2026-11-17 (0.3.117): drops onto X programs (XDND)
+
+A drop onto an X program's window had been refused. The compositor is now
+the drag's source by XDND (versions 3 to 5), from a window of its own; no
+change to the desktop's side, which sends `CLIP drop` for any program
+window and reads `CLIP dropped`.
+
+- The target is the window's top-level, XdndAware (or its XdndProxy when
+  the proxy names itself); not aware, refused at once, with the reason in
+  the log.
+- The drop's server time comes from a property change on the source
+  window (its PropertyNotify), not CurrentTime: XdndSelection is owned at
+  it and XdndPosition and XdndDrop carry it. No synchronous wait on the X
+  server, which is itself one of the compositor's Wayland clients.
+- XdndPosition (root coordinates: the window's position plus the drop
+  point) is sent again only after the last one's XdndStatus, every 150 ms,
+  until it accepts; 1 s with no acceptance is XdndLeave and `refused`.
+- Its ConvertSelection of XdndSelection is answered by the X selection
+  transfer of milestone D (INCR, the idle timeout), fed by the desktop's
+  `CLIP read`; the keyboard rule of X pastes does not apply (the desktop
+  holds the keyboard during its drag). Text aliases map to
+  text/plain;charset=utf-8.
+- XdndFinished is `taken` when the drop was read (and, at version 5, it says
+  it accepted); the window destroyed or Xwayland gone mid-drop is
+  `refused`, with nothing more sent.
+
+Evidence: xwayland_gate's drop part (an XdndAware stand-in: enter at
+version 5 with the types, position with a copy, drop, read, finish,
+`taken`; a refusing one left and `refused` after 1.1 s; an unaware one
+refused at once and said), plain and under ASan/UBSan, in the Debian 13
+release environment; and a real GTK3 window under Xwayland
+(`GDK_BACKEND=x11`, `drag_dest_add_uri_targets`) in a throwaway container
+of that environment: two drops in a row, both taken, both lists received.

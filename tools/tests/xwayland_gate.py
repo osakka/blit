@@ -1234,6 +1234,94 @@ def x_focus_part(desk, lines_to, printed, log, standin, xenv, work):
             % (tid, did, pid, kid))
 
 
+def x_drop_part(desk, standin, env, log, work):
+    """Files dropped onto X programs' windows (XDND, 0.3.117): the
+    compositor is the drag's source. An XdndAware window (the stand-in with
+    XSTANDIN_DND=accept) is entered with the drop's types, given the position
+    at the drop point in root coordinates with a copy, and -- having
+    accepted -- the drop; its conversion of XdndSelection to text/uri-list
+    is the desktop's `CLIP read`, and its XdndFinished makes it `taken`. One
+    that refuses (XSTANDIN_DND=refuse) is left after 1 s, `refused`; one not
+    XdndAware is refused at once, and said."""
+    def until(pattern, wait=10):
+        deadline = time.time() + wait
+        while True:
+            got = desk.next(max(0.1, deadline - time.time()))
+            check(got is not None, lambda: 'no line matching %r:\n%s' % (pattern, log()))
+            if got[0] == 'frame':
+                os.close(got[2])
+                continue
+            if got[0] == 'frm3':
+                for fd in got[2]:
+                    os.close(fd)
+                continue
+            m = re.fullmatch(pattern, got[1])
+            if m:
+                return m
+
+    def start(name, mode):
+        out_path = os.path.join(work, name)
+        more = {'XSTANDIN_DND': mode} if mode else {}
+        client = cg.start([standin, 'Drop ' + (mode or 'unaware')], dict(env, **more), open(out_path, 'w'))
+        wid = int(until(r'WINDOW new (\d+) 0', 20).group(1))
+        desk.send('WINDOW size %d 400 300' % wid)
+        printed = lambda: open(out_path).read()
+        wait_for(lambda: 'XSTANDIN configure 400x300' in printed(), lambda: 'not configured:\n' + printed())
+        return client, wid, printed
+
+    clients = []
+    try:
+        uris = b'file:///home/me/a%20b.txt\r\nfile:///home/me/c.mkv\r\n'
+        client, wid, printed = start('xstandin-drop.out', 'accept')
+        clients.append(client)
+        began = time.time()
+        desk.send('CLIP drop 51 %d 30 40 text/uri-list text/plain;charset=utf-8' % wid)
+        until(r'CLIP read 51 text/uri-list')
+        fd = desk.desk.clip_fds.pop(0)
+        os.write(fd, uris)
+        os.close(fd)
+        until(r'CLIP dropped 51 taken')
+        took = time.time() - began
+        wait_for(lambda: 'XSTANDIN dnd got file:///home/me/a%20b.txt||file:///home/me/c.mkv||' in printed(),
+                 lambda: 'the X program did not get the files:\n' + printed())
+        out = printed()
+        check('XSTANDIN dnd enter 5 text/uri-list,text/plain;charset=utf-8' in out,
+              lambda: 'not entered with the types at version 5:\n' + out)
+        position = re.search(r'XSTANDIN dnd position (\d+),(\d+) copy', out)
+        check(position is not None and 'XSTANDIN dnd drop' in out, lambda: 'no position and drop:\n' + out)
+        check('XSTANDIN dnd leave' not in out, lambda: 'a taken drop was left:\n' + out)
+        # Refused by the program: left, refused after its second.
+        client2, wid2, printed2 = start('xstandin-drop-refuse.out', 'refuse')
+        clients.append(client2)
+        began = time.time()
+        desk.send('CLIP drop 52 %d 10 10 text/uri-list' % wid2)
+        until(r'CLIP dropped 52 refused')
+        waited = time.time() - began
+        check(0.8 <= waited < 2.5, 'the refusal came after %.2f s, not about 1 s' % waited)
+        wait_for(lambda: 'XSTANDIN dnd leave' in printed2(), lambda: 'the refusing program was not left:\n' + printed2())
+        check('XSTANDIN dnd got' not in printed2(), lambda: 'the refusing program read:\n' + printed2())
+        # Not XdndAware: refused at once, said.
+        client3, wid3, printed3 = start('xstandin-drop-unaware.out', None)
+        clients.append(client3)
+        began = time.time()
+        desk.send('CLIP drop 53 %d 10 10 text/uri-list' % wid3)
+        until(r'CLIP dropped 53 refused')
+        check(time.time() - began < 0.5, 'a window not XdndAware was not refused at once')
+        wait_for(lambda: 'drop 53 on window %d: X window 0x' % wid3 in log() and 'takes no drops (no XdndAware)' in log(),
+                 lambda: 'the refusal was not said:\n' + log())
+        for c, w in ((client, wid), (client2, wid2), (client3, wid3)):
+            desk.send('WINDOW close %d' % w)
+            until(r'WINDOW gone %d' % w)
+        return ('xdnd: aware=enter(v5,types)+position(root %s,%s,copy)->status->drop->XdndSelection=CLIP read->'
+                'finished->taken in %.2fs refuse=left,refused-after-%.1fs unaware=refused-at-once,said'
+                % (position.group(1), position.group(2), took, waited))
+    finally:
+        for c in clients:
+            if c.poll() is None:
+                c.kill()
+                c.wait()
+
+
 def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
     """Xwayland killed while an X program owns PRIMARY and the desktop
     CLIPBOARD: its offer cleared with its window, and the next Xwayland's
@@ -1660,6 +1748,7 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         check('window 1: WM_DELETE_WINDOW' in settled(log), 'the log does not say WM_DELETE_WINDOW')
         route.close()
         xpid, restart = x_restart_part(desk, standin, cenv, clip_dir, lambda: settled(log), work, xpid)
+        print('XWAYLAND_GATE_DROP_OK %s' % x_drop_part(desk, standin, cenv, lambda: settled(log), work))
 
         desk.send('WINDOW quit 0')
         try:
