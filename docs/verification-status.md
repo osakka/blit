@@ -9,6 +9,31 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-17: 0.3.117 files dropped onto X programs (XDND)
+
+- **What it is:** a desktop drop onto an X program's window was refused.
+  The compositor is now the XDND source: the window must be XdndAware, the
+  drop's time comes from a PropertyNotify, and positions are paced by
+  XdndStatus. XdndSelection is answered from the desktop's `CLIP read`, and
+  XdndFinished means `taken`. Nothing changes on the desktop's side. ADR
+  0229 amended (Gitea #160, row 2).
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer-gles` 67;
+  `renderer` 86 with kms_frame_timing_gate failing under load (55.5 fps)
+  and passing 3/3 alone.
+- **Release environment (Debian 13):**
+  - xwayland_gate's new drop part, plain and under ASan/UBSan. An accepting
+    X stand-in gets the files (enter v5, position with a copy, drop,
+    finish). A refusing one is left after 1.1 s. An unaware one is refused
+    at once, and that is said in the log.
+  - Also compositor_gate, the package gate and update_pair (6 cases).
+- **Real program:** a GTK3 window under Xwayland (`GDK_BACKEND=x11`), in a
+  throwaway container of the release environment, took two drops in a row
+  and received both lists.
+- **Live, the mini PC:** the pair update to 0.3.117 was verified. A drop
+  onto a real X program there is the owner's to try.
+- **Published** to hibr-apt (signature good). The repository was checked
+  clean and in sync first; the maintainer's session was unreachable.
+
 ## 2026-11-17: 0.3.116 drops reach mpv; the compositor's log is off its loop
 
 - **What it is:**
