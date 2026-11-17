@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-17: 0.3.114 files dropped onto a program window
+
+- **What it is:** `CLIP drop` / `CLIP dropped` (ADR 0229, agreed with
+  Hibr). The compositor runs the program's side of a Wayland drop: an
+  offer, the enter, a motion at the drop point every 150 ms until the
+  program answers, and every read (before the drop too) answered through
+  `CLIP read`. Hibr's half follows, floored on this version.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` 87;
+  `renderer-gles` 67; no failures. The new `COMPOSITOR_DROP_OK` passes,
+  with ASan/UBSan too.
+- **Real programs on this host:** a GTK3 window received the file; Firefox
+  ESR 153 read, accepted and finished the drop; mpv needs wp_viewporter
+  first (the next row).
+- **Release environment (Debian 13):** compositor_gate (with the drop part)
+  and xwayland_gate under ASan/UBSan, the package gate, and update_pair
+  (6 cases).
+- **Live, the mini PC:** the pair update to 0.3.114 was verified.
+- **Published** to hibr-apt (signature good). The repo maintainer's session
+  was offline, so in place of HOLD/Done the repository was checked clean
+  and in sync with origin first.
+
 ## 2026-11-16: 0.3.113 the busy pointer is a colour wheel
 
 - **What it is:** Blit's own colour wheel is the default busy pointer: a
