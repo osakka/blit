@@ -335,7 +335,12 @@ thread writes, flushes and rotates (the 16 MiB cap of 0.3.111 unchanged),
 and it is the only one that waits on the disk. A full queue drops lines and
 counts them; the count is written, as a line of its own, once the log moves.
 Xwayland's stdout and stderr get a descriptor of the log as it is when it
-starts. At exit, by any path (atexit), what is queued is written, waited
+starts. The writer is made with every signal blocked: the loop takes SIGCHLD,
+SIGTERM and SIGINT by signalfd, which needs every thread to block them, and a
+writer left open took them itself (SIGTERM killed the process uncleanly,
+SIGCHLD was dropped and a dead Xwayland never restarted; caught by
+xwayland_gate in the release build, and now by compositor_gate's signal
+part on every host). At exit, by any path (atexit), what is queued is written, waited
 for at most 2 s.
 
 blit-server had one write left on its loop: removing the GPU start's guard

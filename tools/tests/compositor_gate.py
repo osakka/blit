@@ -2107,6 +2107,39 @@ def log_stall_part(compositor, standin, work):
         listener.close()
 
 
+def signal_part(compositor, work):
+    """The loop's signals reach it with the log's writer thread running
+    (0.3.116): SIGTERM and SIGCHLD come by signalfd, which needs every
+    thread to block them. A writer that left them open took SIGTERM itself
+    -- the process killed, no clean stop -- and dropped SIGCHLD, so an
+    Xwayland that died was never started again (xwayland_gate). SIGTERM
+    here: a clean stop, status 0, said in the log."""
+    runtime = os.path.join(work, 'run-signal')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-signal-%d' % os.getpid()
+    listener = listen(name)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-signal.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-signal.out'), 'w'))
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        comp.send_signal(signal.SIGTERM)
+        try:
+            status = comp.wait(5)
+        except subprocess.TimeoutExpired:
+            fail('blit-compositor did not end at SIGTERM')
+        check(status == 0, lambda: 'blit-compositor ended %d at SIGTERM, not a clean stop:\n%s' % (status, open(log).read()))
+        check('stopped:' in open(log).read(), lambda: 'the stop was not said:\n' + open(log).read())
+        return 'SIGTERM->loop(signalfd)->clean stop, status 0, said'
+    finally:
+        if comp.poll() is None:
+            comp.kill()
+            comp.wait()
+        listener.close()
+
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -2862,6 +2895,7 @@ def main():
         print('COMPOSITOR_DMABUF_OK %s' % dmabuf_part(compositor, standin, work))
         print('COMPOSITOR_DMABUF_RETRY_OK %s' % dmabuf_retry_part(compositor, standin, work))
         print('COMPOSITOR_LOG_STALL_OK %s' % log_stall_part(compositor, standin, work))
+        print('COMPOSITOR_SIGNAL_OK %s' % signal_part(compositor, work))
         print('COMPOSITOR_LOCK_OK %s' % lock_part(compositor, standin, work))
         print('COMPOSITOR_IME_OK %s' % ime_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))

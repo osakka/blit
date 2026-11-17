@@ -688,7 +688,18 @@ static void logq_start(FILE *out)
     pthread_mutex_lock(&g_logq.lock);
     g_logq.out = out ? out : stderr;
     pthread_mutex_unlock(&g_logq.lock);
-    if (pthread_create(&g_logq.thread, NULL, logq_writer, NULL) == 0) g_logq.started = 1;
+    {
+        /* The writer takes no signal: the loop's signals come by signalfd
+           (SIGCHLD for Xwayland, SIGTERM, SIGINT), which needs every thread
+           to block them -- one left open here took SIGCHLD and dropped it,
+           and an Xwayland that died was never started again. A new thread
+           has its creator's mask, so it is made with everything blocked. */
+        sigset_t all, before;
+        sigfillset(&all);
+        pthread_sigmask(SIG_SETMASK, &all, &before);
+        if (pthread_create(&g_logq.thread, NULL, logq_writer, NULL) == 0) g_logq.started = 1;
+        pthread_sigmask(SIG_SETMASK, &before, NULL);
+    }
 }
 
 /* At exit: what is queued written, for up to 2 s (a stalled disk is not
