@@ -9,6 +9,40 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-17: 0.3.116 drops reach mpv; the compositor's log is off its loop
+
+- **What it is:**
+  - **mpv aborted on a second file dropped onto it.** On the owner's
+    machine it got SIGABRT on `data_device_handle_enter: Assertion
+    '!s->dnd_offer->offer'`, reproduced on this host with mpv 0.40. mpv
+    looks at its drop pipe once, before the data is written, then sleeps on
+    the Wayland socket. Drop reads are now relayed through the compositor,
+    which ends the drag (`leave`, as wlroots does) once the data is in the
+    program's pipe. ADR 0229 amended.
+  - **The log is off the loop (Gitea #158).** blit-compositor's log is
+    written by a thread from a 256 KiB queue; overflow is dropped, counted
+    and said. blit-server's last loop write (the GLES guard marker) moved to
+    its settings writer. ADR 0223 amended.
+- **Caught by the release build:** the writer thread first left signals
+  unblocked, so it took SIGCHLD (a killed Xwayland never restarted) and
+  SIGTERM (an unclean kill). It now blocks every signal. Gate reads of the
+  compositor log now wait for it to settle.
+- **Gates on this host, before the signal fix:** `all` 193 pass, 11 skip;
+  `renderer` 87; `renderer-gles` 67.
+- **Gates after the signal fix:** compositor_gate with ASan/UBSan passes,
+  including its new parts:
+  - log stall: fails on 0.3.115;
+  - lazy-reader drop: 0.3.115 takes 5.00 s;
+  - SIGTERM clean stop: the pre-fix build ends -15.
+- **Real program on this host:** mpv 0.40 (pseudo-gui, idle) opened two
+  dropped files in a row and stayed up.
+- **Release environment (Debian 13):** compositor_gate and xwayland_gate
+  under ASan/UBSan, the package gate, and update_pair (6 cases).
+- **Live, the mini PC:** the pair update to 0.3.116 was verified.
+- **Published** to hibr-apt (signature good). With the repo maintainer's
+  session unreachable, the repository was checked clean and in sync with
+  origin first.
+
 ## 2026-11-17: 0.3.115 wp_viewporter for programs
 
 - **What it is:** `wp_viewporter` v1, planned in ADR 0228 but never
