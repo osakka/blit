@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-18: 0.3.120 a program's drag only for a desktop that runs it
+
+- **What it is:** a fix for 0.3.119, found in review before any desktop
+  ran it. 0.3.119 withheld a dragging program's pointer until the desktop's
+  `CLIP dragend`, but no Hibr released so far handles `CLIP dragout`. The
+  compositor now carries a program's drag only when the desktop's hello
+  answer says `drag=1` (agreed with Hibr); otherwise the drag is cancelled
+  at once, as before 0.3.119. ADR 0229 amended.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` 87;
+  `renderer-gles` 67. compositor_gate's new no-drag=1 case fails on the
+  released 0.3.119 compositor ("the drag was not cancelled") and passes
+  here.
+- **Release environment (Debian 13):** compositor_gate and xwayland_gate
+  under ASan/UBSan, the package gate and update_pair.
+- **Live, the mini PC:**
+  - 0.3.119 was replaced by 0.3.118 as soon as the problem was found (it
+    had not reached the running compositor).
+  - The pair update to 0.3.120 was then verified.
+- **Published** to hibr-apt, replacing 0.3.119 as the newest. The
+  repository was checked clean and in sync first.
+
 ## 2026-11-18: 0.3.119 a program drags out
 
 - **What it is:** row 3 of Gitea #160, agreed with Hibr.
