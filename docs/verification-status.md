@@ -9,6 +9,31 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-18: 0.3.118 hovering: the program's answer before the drop
+
+- **What it is:** row 1 of Gitea #160, agreed with Hibr.
+  - `CLIP drag` enters a program window and moves within it; `CLIP leave`
+    ends the hover.
+  - `CLIP hover copy|none` reports the program's answer once its request
+    batch is in, so a Wayland program never shows none-then-copy. An X
+    program's answer is its XdndStatus.
+  - A drop over the hovered window happens at once when the answer was
+    copy. ADR 0229 amended.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` 87;
+  `renderer-gles` 67. compositor_gate's drop part, with its new hover
+  cases, also passes under ASan/UBSan.
+- **Real program:** a GTK3 window on the compositor answered copy once and
+  stayed quiet while the drag moved; the drop was taken and the file
+  received.
+- **Release environment (Debian 13):** compositor_gate and xwayland_gate
+  (X hover: copy from XdndStatus, moves as positions, the drop taken, none
+  and XdndLeave), plain and under ASan/UBSan, plus the package gate and
+  update_pair.
+- **Live, the mini PC:** the pair update to 0.3.118 was verified. Hibr's
+  side, which sends `CLIP drag` and `CLIP leave`, comes next.
+- **Published** to hibr-apt. The repository was checked clean and in sync
+  first.
+
 ## 2026-11-17: 0.3.117 files dropped onto X programs (XDND)
 
 - **What it is:** a desktop drop onto an X program's window was refused.
