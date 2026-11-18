@@ -9,6 +9,34 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-18: 0.3.119 a program drags out
+
+- **What it is:** row 3 of Gitea #160, agreed with Hibr.
+  - A Wayland program's start_drag (with a press the compositor delivered)
+    is `CLIP dragout o<n>`, and the desktop runs the drag. The program's
+    pointer leaves and it gets no input until the end.
+  - The desktop reads the drop with `CLIP read o<n>`. On a program window,
+    the source program writes the target's reads directly.
+  - `CLIP dragend o<n>` ends it as copy, move or cancelled. ADR 0229
+    amended.
+- **Gates on this host:**
+  - `renderer-gles` 67 passed in full.
+  - `all` (191) and `renderer` (86) passed except three timing gates
+    (frame_input, frame_rate, under_text_picture). They failed while
+    another session's ASan suite held the load at 7. On a quiet host
+    (load under 2) each passed 3 of 3.
+  - xwayland_gate passed in the release environment.
+- **Real program:** a GTK3 drag source's drag was announced, the desktop
+  read its file URI, and `dragend copy` ended it in GTK as a successful
+  drag.
+- **Release environment (Debian 13):** compositor_gate (with the dragout
+  part) and xwayland_gate under ASan/UBSan, the package gate and
+  update_pair.
+- **Live, the mini PC:** the pair update to 0.3.119 was verified. Hibr's
+  side of row 3 comes next.
+- **Published** to hibr-apt. The repository was checked clean and in sync
+  first.
+
 ## 2026-11-18: 0.3.118 hovering: the program's answer before the drop
 
 - **What it is:** row 1 of Gitea #160, agreed with Hibr.
