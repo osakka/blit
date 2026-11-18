@@ -358,3 +358,15 @@ cancelled) with ASan/UBSan; the wire unit test (o-seqs, dragend); a real
 GTK3 drag source (drag_source_set, uri targets): its drag announced, the
 desktop read its file URI, and `dragend copy` ended it in GTK as a
 successful drag.
+
+## Amended 2026-11-18 (0.3.120): a drag out only for a desktop that runs it
+
+0.3.119 took the program's pointer from the start of its drag until the
+desktop's `CLIP dragend`; every Hibr then released ignored `CLIP dragout`,
+so a tab or text drag inside a Wayland program would leave its window
+without the pointer. The desktop now says it runs drags with `drag=1` in its
+hello answer (next to `window=1`); without it the compositor cancels the
+drag at once, as before 0.3.119, and says so once. compositor_gate's
+dragout part runs with drag=1; a second case without it shows the drag
+cancelled and the window keeping its pointer -- 0.3.119 fails it (the drag
+not cancelled). The mini PC was put back on 0.3.118 until this release.

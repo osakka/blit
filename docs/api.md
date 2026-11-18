@@ -3022,7 +3022,10 @@ It speaks the frame channel above as a producer, with these additions.
   nothing answered. `CLIP drop` on the window the drag is over drops there
   with no new enter: at once when its answer was copy, else after its
   second to accept, as above. Reads come during hovering too.
-  A program dragging out (since 0.3.119): its `start_drag`, with a button
+  A program dragging out (since 0.3.119; since 0.3.120 only when the
+  desktop's hello answer says `drag=1` -- otherwise the drag is cancelled at
+  once, said once, as a desktop that does not run it would never end it):
+  its `start_drag`, with a button
   the compositor delivered still down on the window it starts on and that
   press's serial, is `CLIP dragout o<n> <window> copy|move|copy,move
   <type>+` -- `o<n>` its own count, never the desktop's. The desktop runs

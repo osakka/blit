@@ -567,6 +567,7 @@ struct bc_server {
         struct bc_xdg *window;
     } dragout;
     uint32_t dragouts;                /* the o<n> count */
+    int drag_said;                    /* "the desktop does not run drags" logged */
     uint32_t clip_seq;                /* the offers made to the desktop */
     int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
@@ -3234,6 +3235,15 @@ static void data_device_start_drag(struct wl_client *client, struct wl_resource 
     (void)client; (void)icon;
     if (src == NULL) {
         logf_("a drag with no source (inside its program's windows) is not carried");
+        return;
+    }
+    if (!s->wire.drag) {
+        /* A desktop that does not say drag=1 would never end it, and the
+           window would take no pointer input until then: cancelled, as
+           before 0.3.119. Said once per desktop. */
+        if (!s->drag_said) logf_("a program's drag is cancelled: the desktop does not run drags (no drag=1)");
+        s->drag_said = 1;
+        wl_data_source_send_cancelled(source);
         return;
     }
     if (x == NULL || x->id == 0 || s->link != BC_LINK_UP || !s->wire.window || s->buttons_down == 0 ||

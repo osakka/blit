@@ -2203,6 +2203,50 @@ def signal_part(compositor, work):
         listener.close()
 
 
+def dragout_unsaid_part(compositor, standin, work):
+    """A desktop that does not answer drag=1 (every Hibr before its row 3)
+    would never end a program's drag: the drag is cancelled at once, as
+    before 0.3.119, said once, and the window keeps its pointer."""
+    runtime = os.path.join(work, 'run-dragout-unsaid')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-dragout-unsaid-%d' % os.getpid()
+    listener = listen(name)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-dragout-unsaid.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env,
+                 open(os.path.join(work, 'compositor-dragout-unsaid.out'), 'w'))
+    client = route = None
+    try:
+        desk = Desktop(listener)                  # OK dmabuf=0 window=1: no drag=1
+        desk.line('WINDOW display blit-0 -')
+        path = os.path.join(work, 'standin-dragout-unsaid.out')
+        client = start([standin, '--drag-out', 'Source'], dict(env, WAYLAND_DISPLAY='blit-0'), open(path, 'w'))
+        printed = lambda: open(path).read()
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Source', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=1)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        route.sendall(b'INPUT ptr %d 20.00 20.00\nINPUT frame %d 1\nINPUT btn %d 272 press\nINPUT frame %d 2\n'
+                      % (BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE))
+        wait_for(lambda: 'STANDIN drag cancelled' in printed(), lambda: 'the drag was not cancelled:\n' + printed())
+        route.sendall(b'INPUT btn %d 272 release\nINPUT frame %d 3\n' % (BLIT_PICTURE, BLIT_PICTURE))
+        wait_for(lambda: 'STANDIN button 272 0' in printed(), lambda: 'the window lost its pointer:\n' + printed())
+        check(settled(log).count('the desktop does not run drags (no drag=1)') == 1, 'the refusal was not said once')
+        quit_compositor(desk, comp)
+        return 'no-drag=1->cancelled,said-once,pointer-kept'
+    finally:
+        if route:
+            route.close()
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def dragout_part(compositor, standin, work):
     """ADR 0229 row 3 (0.3.119): a program drags out. Its start_drag, with
     the press the compositor delivered, is `CLIP dragout o<n> <window>
@@ -2223,7 +2267,7 @@ def dragout_part(compositor, standin, work):
     clients = []
     route = None
     try:
-        desk = Desktop(listener)
+        desk = Desktop(listener, b'OK dmabuf=0 window=1 drag=1\n')
         desk.line('WINDOW display blit-0 -')
         cenv = dict(env, WAYLAND_DISPLAY='blit-0')
         outs = []
@@ -2325,7 +2369,7 @@ def dragout_part(compositor, standin, work):
               lambda: 'the log does not say the drags:\n' + text)
         return ('dragout=CLIP dragout o<n>(copy,move,types) pointer-left,no-input-meanwhile desktop-read+dragend move->'
                 'action,performed,finished onto-program=hover o2 copy,dropped o2 taken,source-wrote-target '
-                'dragend none->cancelled')
+                'dragend none->cancelled; %s' % dragout_unsaid_part(compositor, standin, work))
     finally:
         if route:
             route.close()
