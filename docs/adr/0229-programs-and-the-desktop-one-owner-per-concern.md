@@ -324,3 +324,37 @@ one drag from window to window) with ASan/UBSan; xwayland_gate's drop part
 XdndLeave on leave) in the release environment; a real GTK3 window on the
 compositor: hover copy once, motions quiet, the drop taken and the file
 received.
+
+## Amended 2026-11-18 (0.3.119): a program drags out
+
+Row 3 of Gitea #160, as agreed with Hibr. A Wayland program's
+`wl_data_device.start_drag`, held to the rule of moves (a press the
+compositor delivered on that window, its serial), becomes `CLIP dragout
+o<n> <window> <actions> <type>+`. The `o` keeps the program's drags apart
+from the desktop's drop sequence on the wire (Hibr's catch: the two counts
+can be equal). The desktop runs it: the compositor takes the program's
+pointer focus away (a leave) and gives that window no pointer input until
+`CLIP dragend`, as a compositor's drag grab does.
+- Onto the desktop: the desktop reads `CLIP read o<n> <type>` from the
+  program's source.
+- Onto a program window (the same program's too): the desktop's `CLIP
+  drag|drop o<n>` there run the target side of row 1, and the target's
+  reads -- a Wayland target's receive, an X target's XdndSelection
+  conversion -- are written by the source directly, not through the
+  desktop.
+- `CLIP dragend o<n> copy|move` sends the source `action`,
+  `dnd_drop_performed` and `dnd_finished` (version 3); `none` sends
+  `cancelled`. The source destroyed mid-drag is `CLIP clear o<n>`; the
+  channel lost cancels.
+- Not yet: a program's own drag icon (the desktop draws its own), X
+  programs as drag sources, and moves that delete (the source decides on
+  `move`, as GTK's drag-data-delete).
+
+Evidence: compositor_gate's dragout part (a stand-in dragging out:
+announced with copy,move and its types; its pointer left and no input
+meanwhile; read by the desktop then `dragend move` performed/finished/move;
+onto another program, hover and taken, the target fed by the source; `none`
+cancelled) with ASan/UBSan; the wire unit test (o-seqs, dragend); a real
+GTK3 drag source (drag_source_set, uri targets): its drag announced, the
+desktop read its file URI, and `dragend copy` ended it in GTK as a
+successful drag.

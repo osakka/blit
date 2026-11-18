@@ -666,6 +666,7 @@ enum {
     BC_LINE_CLIP_DROP,      /* CLIP drop <seq> <window> <x> <y> <type> [<type> ...] */
     BC_LINE_CLIP_DRAG,      /* CLIP drag <seq> <window> <x> <y> <type> [<type> ...]: hovering (0.3.118) */
     BC_LINE_CLIP_LEAVE,     /* CLIP leave <seq>: the drag left program windows, or ended */
+    BC_LINE_CLIP_DRAGEND,   /* CLIP dragend o<n> copy|move|none: a program's drag out over (0.3.119) */
     BC_LINE_TEACHDONE       /* WINDOW teachdone <id> commit|cancel: the desktop's teach box ended (ADR 0233) */
 };
 
@@ -695,6 +696,8 @@ typedef struct {
     uint32_t target;        /* CLIP drop: the window dropped on (x, y its own pixels) */
     char types[BC_TEXT_BYTES + 1];  /* CLIP offer: its types, one space apart; read: the type */
     int ntypes;
+    int out;                /* CLIP read|drag|drop|leave|dragend: the seq is `o<n>`, a program's drag out */
+    int action;             /* CLIP dragend: 0 none, 1 copy, 2 move */
 } BcLine;
 
 /* One media type word at *p into out (BC_CLIP_TYPE_BYTES + 1); advances. */
@@ -911,9 +914,23 @@ static int bc_parse_line(const char *line, BcLine *out)
         else if (strncmp(p, "drop ", 5) == 0) { kind = BC_LINE_CLIP_DROP; p += 5; }
         else if (strncmp(p, "drag ", 5) == 0) { kind = BC_LINE_CLIP_DRAG; p += 5; }
         else if (strncmp(p, "leave ", 6) == 0) { kind = BC_LINE_CLIP_LEAVE; p += 6; }
+        else if (strncmp(p, "dragend ", 8) == 0) { kind = BC_LINE_CLIP_DRAGEND; p += 8; }
         else return out->kind = BC_LINE_UNKNOWN;
+        /* A program's drag out is `o<n>`, a space of its own (offers are never). */
+        if (*p == 'o' && kind != BC_LINE_CLIP_OFFER && kind != BC_LINE_CLIP_CLEAR) {
+            out->out = 1;
+            ++p;
+        }
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0)
             return out->kind = BC_LINE_UNKNOWN;
+        if (kind == BC_LINE_CLIP_DRAGEND) {
+            if (!out->out) return out->kind = BC_LINE_UNKNOWN;
+            if (strcmp(p, " copy") == 0 || strcmp(p, " copy\n") == 0) out->action = 1;
+            else if (strcmp(p, " move") == 0 || strcmp(p, " move\n") == 0) out->action = 2;
+            else if (strcmp(p, " none") == 0 || strcmp(p, " none\n") == 0) out->action = 0;
+            else return out->kind = BC_LINE_UNKNOWN;
+            return out->kind = kind;
+        }
         if (kind == BC_LINE_CLIP_OFFER || kind == BC_LINE_CLIP_DROP || kind == BC_LINE_CLIP_DRAG) {
             size_t used = 0;
             if (kind == BC_LINE_CLIP_DROP || kind == BC_LINE_CLIP_DRAG) {

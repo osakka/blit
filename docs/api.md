@@ -3022,6 +3022,22 @@ It speaks the frame channel above as a producer, with these additions.
   nothing answered. `CLIP drop` on the window the drag is over drops there
   with no new enter: at once when its answer was copy, else after its
   second to accept, as above. Reads come during hovering too.
+  A program dragging out (since 0.3.119): its `start_drag`, with a button
+  the compositor delivered still down on the window it starts on and that
+  press's serial, is `CLIP dragout o<n> <window> copy|move|copy,move
+  <type>+` -- `o<n>` its own count, never the desktop's. The desktop runs
+  the drag from there, as `WINDOW move`: the program's pointer leaves and
+  it takes no pointer input until the end. Dropped on the desktop: the
+  desktop reads it with `CLIP read o<n> <type>` and a pipe, as a program's
+  selection. Over a program window: `CLIP drag|drop|leave o<n> ...` as
+  above, the target's reads written by the dragging program itself, and
+  `CLIP hover|dropped o<n>` back. The end is the desktop's `CLIP dragend
+  o<n> copy|move|none`: copy or move is the program's drop performed and
+  finished with that action, none its drag cancelled. The program letting
+  its drag go first is `CLIP clear o<n>`; the channel lost cancels it. A
+  drag with no source (inside the program's own windows) is not carried;
+  one without the press, or with no type, is cancelled at once. X
+  programs dragging out (XDND as the target) are a later row.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`

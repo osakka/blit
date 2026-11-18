@@ -425,6 +425,8 @@ struct bc_source {
     xcb_atom_t xtargets[BC_CLIP_TYPES];
     xcb_window_t xowner;
     xcb_timestamp_t xtime;
+    uint32_t dnd_actions;             /* wl_data_source.set_actions: what its drag allows */
+    int dragging;                     /* the source of the program's drag out (s->dragout) */
 };
 
 /* One selection, the clipboard's or the primary: a program's source, or the
@@ -470,6 +472,7 @@ struct bc_drop {
     /* Hovering (`CLIP drag`, 0.3.118): the desktop's drag is over the
        window, not let go; the program's answer said as `CLIP hover`. */
     int hover;
+    int out;                          /* the seq is `o<n>`: a program's drag out, its reads its source's */
     int hover_said;                   /* -1 nothing yet, 0 none, 1 copy */
     int xpending;                     /* X: a newer point waits for the last XdndStatus */
     struct wl_event_source *hover_idle;   /* the answer said once its requests are all in */
@@ -556,6 +559,14 @@ struct bc_server {
     struct wl_list devices[2];        /* wl_data_device, zwp_primary_selection_device_v1 */
     struct bc_drop drop;              /* the desktop's file drop under way */
     struct bc_relay relays[BC_DROP_RELAYS];   /* its reads, relayed */
+    /* A program's drag out (ADR 0229 row 3, 0.3.119): `CLIP dragout o<n>`,
+       the desktop's from then on until its `CLIP dragend o<n>`. */
+    struct {
+        uint32_t n;                   /* 0: none */
+        struct bc_source *src;
+        struct bc_xdg *window;
+    } dragout;
+    uint32_t dragouts;                /* the o<n> count */
     uint32_t clip_seq;                /* the offers made to the desktop */
     int line_fd;                      /* a descriptor passed with the line being handled, -1 */
     struct xkb_context *xkb;
@@ -3118,6 +3129,12 @@ static void source_destroyed(struct wl_resource *resource)
 {
     struct bc_source *src = wl_resource_get_user_data(resource);
     struct bc_server *s = src->server;
+    if (src->dragging && s->dragout.src == src) {
+        /* The program let its drag go: the desktop's drag of it ends. */
+        logf_("drag out o%u: its program let it go", s->dragout.n);
+        bc_wire_line(&s->wire, "CLIP clear o%u", s->dragout.n);
+        memset(&s->dragout, 0, sizeof(s->dragout));
+    }
     if (s->sel[src->primary].source == src) clip_source_gone(s, src->primary);
     source_free_types(src);
     free(src);
@@ -3126,7 +3143,9 @@ static void source_destroyed(struct wl_resource *resource)
 static void data_source_set_actions(struct wl_client *client, struct wl_resource *resource,
                                     uint32_t actions)
 {
-    (void)client; (void)resource; (void)actions;
+    struct bc_source *src = wl_resource_get_user_data(resource);
+    (void)client;
+    src->dnd_actions = actions;
 }
 
 static const struct wl_data_source_interface data_source_impl = {
@@ -3172,13 +3191,82 @@ static void device_set_selection(struct wl_resource *device, struct wl_resource 
     clip_set_source(s, k, source ? wl_resource_get_user_data(source) : NULL);
 }
 
+static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly);
+
+/* The program's drag out over: told as the desktop says -- dropped with
+   that action (performed, then finished), or cancelled. */
+static void dragout_end(struct bc_server *s, int action)
+{
+    struct bc_source *src = s->dragout.src;
+    uint32_t n = s->dragout.n;
+    if (n == 0) return;
+    memset(&s->dragout, 0, sizeof(s->dragout));
+    if (src == NULL) return;
+    src->dragging = 0;
+    if (action == 0) {
+        wl_data_source_send_cancelled(src->resource);
+    } else if (wl_resource_get_version(src->resource) >= 3) {
+        wl_data_source_send_action(src->resource, action == 2 ? WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE
+                                                              : WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+        wl_data_source_send_dnd_drop_performed(src->resource);
+        wl_data_source_send_dnd_finished(src->resource);
+    }
+    logf_("drag out o%u: %s", n, action == 2 ? "moved" : action == 1 ? "copied" : "cancelled");
+}
+
+/* A program starts a drag (ADR 0229 row 3): with a button down that the
+   compositor delivered to the window it starts on, named by that press's
+   serial -- as a move is. The desktop runs it from here, as `WINDOW move`:
+   the program's pointer leaves and gets nothing more until it ends. A drag
+   with no source (inside the program's own windows) is not carried. */
 static void data_device_start_drag(struct wl_client *client, struct wl_resource *resource,
                                    struct wl_resource *source, struct wl_resource *origin,
                                    struct wl_resource *icon, uint32_t serial)
 {
-    /* Drag and drop is ADR 0229's later row: the drag ends at once. */
-    (void)client; (void)resource; (void)origin; (void)icon; (void)serial;
-    if (source) wl_data_source_send_cancelled(source);
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_source *src = source ? wl_resource_get_user_data(source) : NULL;
+    struct bc_surface *sf = origin ? wl_resource_get_user_data(origin) : NULL;
+    struct bc_xdg *x = sf ? surface_window(sf) : NULL;
+    char types[BC_TEXT_BYTES + 1];
+    size_t used = 0;
+    uint32_t a;
+    int i;
+    (void)client; (void)icon;
+    if (src == NULL) {
+        logf_("a drag with no source (inside its program's windows) is not carried");
+        return;
+    }
+    if (x == NULL || x->id == 0 || s->link != BC_LINK_UP || !s->wire.window || s->buttons_down == 0 ||
+        serial != s->button_serial || surface_window(s->ptr_focus) != x || src->ntypes == 0) {
+        logf_("window %u: a drag without a press on it, or of nothing, is cancelled", x ? x->id : 0);
+        wl_data_source_send_cancelled(source);
+        return;
+    }
+    if (s->dragout.n) dragout_end(s, 0);
+    types[0] = '\0';
+    for (i = 0; i < src->ntypes; ++i) {
+        size_t n = strlen(src->types[i]);
+        if (strchr(src->types[i], ' ') || used + n + 2 > sizeof(types)) continue;
+        if (used) types[used++] = ' ';
+        memcpy(types + used, src->types[i], n + 1);
+        used += n;
+    }
+    a = wl_resource_get_version(source) >= 3 ? src->dnd_actions : WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+    if (!(a & (WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)) || used == 0) {
+        logf_("window %u: a drag that allows neither copy nor move is cancelled", x->id);
+        wl_data_source_send_cancelled(source);
+        return;
+    }
+    s->dragout.n = ++s->dragouts;
+    s->dragout.src = src;
+    s->dragout.window = x;
+    src->dragging = 1;
+    pointer_focus(s, NULL, 0, 0);
+    bc_wire_line(&s->wire, "CLIP dragout o%u %u %s %s", s->dragout.n, x->id,
+                 (a & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) && (a & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)
+                     ? "copy,move" : (a & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE) ? "move" : "copy",
+                 types);
+    logf_("drag out o%u from window %u: %s", s->dragout.n, x->id, types);
 }
 
 static void data_device_set_selection(struct wl_client *client, struct wl_resource *resource,
@@ -3333,8 +3421,8 @@ static void drop_end(struct bc_server *s, int taken)
         logf_("drag %u over window %u: left", seq, d->window);
         return;
     }
-    logf_("drop %u on window %u: %s", seq, d->window, taken ? "taken" : "refused");
-    bc_wire_line(&s->wire, "CLIP dropped %u %s", seq, taken ? "taken" : "refused");
+    logf_("drop %s%u on window %u: %s", d->out ? "o" : "", seq, d->window, taken ? "taken" : "refused");
+    bc_wire_line(&s->wire, "CLIP dropped %s%u %s", d->out ? "o" : "", seq, taken ? "taken" : "refused");
 }
 
 /* The program has said what it takes: drop, now that it accepts a type and
@@ -3365,7 +3453,7 @@ static void hover_say(struct bc_server *s, int ok)
     ok = ok ? 1 : 0;
     if (d->hover_said == ok) return;
     d->hover_said = ok;
-    bc_wire_line(&s->wire, "CLIP hover %u %s", d->seq, ok ? "copy" : "none");
+    bc_wire_line(&s->wire, "CLIP hover %s%u %s", d->out ? "o" : "", d->seq, ok ? "copy" : "none");
 }
 
 /* A program answers in several requests (accept, set_actions): said when
@@ -3513,6 +3601,14 @@ static void drop_receive(struct bc_server *s, const char *type, int fd)
     for (t = strtok_r(types, " ", &save); t; t = strtok_r(NULL, " ", &save))
         if (strcmp(t, type) == 0) offered = 1;
     if (!offered) return;
+    if (d->out) {
+        /* A program's drag out dropped on a program: its source writes. */
+        if (s->dragout.n == d->seq && s->dragout.src && source_has(s->dragout.src, type)) {
+            source_send(s->dragout.src, type, fd);
+            d->received = 1;
+        }
+        return;
+    }
     for (i = 0; i < BC_DROP_RELAYS && s->relays[i].seq; ++i) {}
     if (i == BC_DROP_RELAYS) {
         logf_("drop %u: a read not relayed: %d under way", d->seq, BC_DROP_RELAYS);
@@ -3566,6 +3662,7 @@ static void drop_begin(struct bc_server *s, const BcLine *l, int hover)
     d->xstate = BC_XDND_NONE;
     d->xwin = d->xto = XCB_WINDOW_NONE;
     d->hover = hover;
+    d->out = l->out;
     d->hover_said = -1;
     d->xpending = 0;
     d->x = l->x;
@@ -3622,7 +3719,7 @@ static void xdnd_point(struct bc_server *s);
 static void drag_line(struct bc_server *s, const BcLine *l)
 {
     struct bc_drop *d = &s->drop;
-    if (d->seq == l->id && d->hover && d->window == l->target) {
+    if (d->seq == l->id && d->out == l->out && d->hover && d->window == l->target) {
         d->x = l->x;
         d->y = l->y;
         if (d->xstate) xdnd_point(s);
@@ -3637,7 +3734,7 @@ static void drag_line(struct bc_server *s, const BcLine *l)
 static void drop_line(struct bc_server *s, const BcLine *l)
 {
     struct bc_drop *d = &s->drop;
-    if (!(d->seq == l->id && d->hover && d->window == l->target)) {
+    if (!(d->seq == l->id && d->out == l->out && d->hover && d->window == l->target)) {
         drop_begin(s, l, 0);
         return;
     }
@@ -3669,7 +3766,11 @@ static void clip_desktop_line(struct bc_server *s, const BcLine *l)
         return;
     }
     if (l->kind == BC_LINE_CLIP_LEAVE) {
-        if (s->drop.seq == l->id && s->drop.hover) drop_end(s, 0);
+        if (s->drop.seq == l->id && s->drop.out == l->out && s->drop.hover) drop_end(s, 0);
+        return;
+    }
+    if (l->kind == BC_LINE_CLIP_DRAGEND) {
+        if (s->dragout.n == l->id) dragout_end(s, l->action);
         return;
     }
     if (l->kind == BC_LINE_CLIP_OFFER) {
@@ -3706,6 +3807,13 @@ static void clip_desktop_line(struct bc_server *s, const BcLine *l)
             logf_("clipboard: CLIP read %u came with no pipe", l->id);
             return;
         }
+        if (l->out) {
+            /* The desktop reads a program's drag out (dropped on it). */
+            struct bc_source *src = s->dragout.n == l->id ? s->dragout.src : NULL;
+            if (src && source_has(src, l->types)) source_send(src, l->types, fd);
+            close(fd);
+            return;
+        }
         for (k = 0; k < 2; ++k) {
             struct bc_source *src = s->sel[k].source;
             const char *type;
@@ -3720,9 +3828,12 @@ static void clip_desktop_line(struct bc_server *s, const BcLine *l)
 
 /* The channel lost: the desktop's offers lapse with it. A new one: the
    programs' selections are offered again. */
+static void dragout_end(struct bc_server *s, int action);
+
 static void clip_channel(struct bc_server *s, int up)
 {
     int k;
+    if (!up) dragout_end(s, 0);       /* the desktop running it is gone */
     for (k = 0; k < 2; ++k) {
         if (up) clip_offer_to_desktop(s, k);
         else if (s->sel[k].desk_seq) {
@@ -6787,6 +6898,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
     case BC_INPUT_PTR: {
         double lx, ly, ox, oy;
         struct bc_surface *target;
+        if (s->dragout.n && s->dragout.window == x) return;   /* the desktop's drag of it */
         /* A locked pointer does not move: only relative motion. */
         if (window_locked(s, x)) return;
         if (s->buttons_down && s->ptr_focus) {
@@ -6815,7 +6927,7 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         if (in.code < 0x110 || in.code >= 0x110 + 32) return;
         if (in.pressed) s->buttons_down |= 1u << (in.code - 0x110);
         else s->buttons_down &= ~(1u << (in.code - 0x110));
-        if (s->ptr_focus == NULL) return;
+        if (s->ptr_focus == NULL || (s->dragout.n && s->dragout.window == x)) return;
         {
             /* One serial for the event: a press's is what a move, resize or
                menu request must name (WINDOW move). */
@@ -8847,7 +8959,15 @@ static int x_out_begin(struct bc_server *s, int k, int drop, const xcb_selection
     struct bc_xfer *t, *next;
     int p[2];
     if (want == NULL || pipe2(p, O_CLOEXEC) != 0) return -1;
-    if (drop) {
+    if (drop && s->drop.out) {
+        if (!(s->dragout.n == s->drop.seq && s->dragout.src && source_has(s->dragout.src, want))) {
+            close(p[0]);
+            close(p[1]);
+            return -1;
+        }
+        source_send(s->dragout.src, want, p[1]);
+        s->drop.received = 1;
+    } else if (drop) {
         if (bc_wire_line_fd(&s->wire, p[1], "CLIP read %u %s", s->drop.seq, want) != 0) {
             logf_("drop %u: its reading not asked: %s", s->drop.seq, s->wire.last_error);
             close(p[0]);
@@ -10872,6 +10992,7 @@ static void handle_line(struct bc_server *s, const char *line)
     case BC_LINE_CLIP_DROP:
     case BC_LINE_CLIP_DRAG:
     case BC_LINE_CLIP_LEAVE:
+    case BC_LINE_CLIP_DRAGEND:
         clip_desktop_line(s, &l);
         return;
     default:

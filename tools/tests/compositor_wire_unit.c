@@ -97,6 +97,17 @@ static void lines(void)
     EXPECT(bc_parse_line("CLIP drag 9 3 40 50", &l) == BC_LINE_UNKNOWN, "clip drag, no type");
     EXPECT(bc_parse_line("CLIP leave 9", &l) == BC_LINE_CLIP_LEAVE && l.id == 9, "clip leave");
     EXPECT(bc_parse_line("CLIP leave 9 3", &l) == BC_LINE_UNKNOWN, "clip leave, a window");
+    EXPECT(bc_parse_line("CLIP read o17 text/uri-list", &l) == BC_LINE_CLIP_READ && l.out && l.id == 17,
+           "clip read of a drag out");
+    EXPECT(bc_parse_line("CLIP drop o17 3 1 2 text/uri-list", &l) == BC_LINE_CLIP_DROP && l.out && l.id == 17 &&
+               l.target == 3, "clip drop of a drag out");
+    EXPECT(bc_parse_line("CLIP drop 17 3 1 2 text/uri-list", &l) == BC_LINE_CLIP_DROP && !l.out, "the desktop's");
+    EXPECT(bc_parse_line("CLIP dragend o17 move\n", &l) == BC_LINE_CLIP_DRAGEND && l.out && l.id == 17 &&
+               l.action == 2, "clip dragend");
+    EXPECT(bc_parse_line("CLIP dragend o17 none", &l) == BC_LINE_CLIP_DRAGEND && l.action == 0, "dragend none");
+    EXPECT(bc_parse_line("CLIP dragend 17 copy", &l) == BC_LINE_UNKNOWN, "dragend of the desktop's seq");
+    EXPECT(bc_parse_line("CLIP dragend o17 fling", &l) == BC_LINE_UNKNOWN, "dragend, no such action");
+    EXPECT(bc_parse_line("CLIP offer o3 clipboard text/plain", &l) == BC_LINE_UNKNOWN, "an offer is never o");
     EXPECT(bc_parse_line("CLIP clear 7", &l) == BC_LINE_CLIP_CLEAR && l.id == 7, "clip clear");
     EXPECT(bc_parse_line("CLIP clear", &l) == BC_LINE_UNKNOWN, "clip clear, no seq");
     EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-left tiled-top", &l) == BC_LINE_SIZE &&

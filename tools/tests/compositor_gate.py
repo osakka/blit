@@ -2203,6 +2203,139 @@ def signal_part(compositor, work):
         listener.close()
 
 
+def dragout_part(compositor, standin, work):
+    """ADR 0229 row 3 (0.3.119): a program drags out. Its start_drag, with
+    the press the compositor delivered, is `CLIP dragout o<n> <window>
+    <actions> <type>+`; its pointer leaves and takes nothing until the end.
+    Dropped on the desktop: the desktop reads it (`CLIP read o<n>`), and
+    `CLIP dragend o<n> move` is the program's performed, finished, move.
+    Over another program: `CLIP drag|drop o<n>` there, the target's reads
+    written by the dragging program's source, `CLIP hover|dropped o<n>`
+    back. `dragend none` cancels it."""
+    runtime = os.path.join(work, 'run-dragout')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-dragout-%d' % os.getpid()
+    listener = listen(name)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-dragout.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-dragout.out'), 'w'))
+    clients = []
+    route = None
+    try:
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        outs = []
+        for n, (mode, title) in enumerate((('--drag-out', 'Source'), ('--drop', 'Target')), 1):
+            path = os.path.join(work, 'standin-dragout-%d.out' % n)
+            outs.append(path)
+            clients.append(start([standin, mode, title], cenv, open(path, 'w')))
+            for want in ('WINDOW new %d 0' % n, 'WINDOW title %d %s' % (n, title), 'WINDOW appid %d blit.standin' % n,
+                         'WINDOW limits %d 64 48 0 0' % n, 'WINDOW decor %d server' % n):
+                desk.line(want)
+            desk.frame(256, 160, image_id=n)
+        src = lambda: open(outs[0]).read()
+        dst = lambda: open(outs[1]).read()
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        frame = [0]
+
+        def send(*lines):
+            text = ''
+            for line in lines:
+                frame[0] += 1
+                text += '%s\nINPUT frame %d %d\n' % (line % BLIT_PICTURE, BLIT_PICTURE, frame[0])
+            route.sendall(text.encode())
+
+        def until(prefix, wait=5.0, answer=None):
+            end = time.time() + wait
+            while time.time() < end:
+                got = desk.next(0.2)
+                if got is None:
+                    continue
+                if got[0] == 'frame':
+                    os.close(got[2])
+                    continue
+                if got[0] == 'line' and got[1].startswith('CLIP read ') and answer is not None:
+                    fd = desk.clip_fds.pop(0)
+                    os.write(fd, answer)
+                    os.close(fd)
+                    continue
+                if got[0] == 'line' and got[1].startswith(prefix):
+                    return got[1]
+            fail('no line %r' % prefix)
+
+        def desktop_reads(seq, type_):
+            r, w = os.pipe()
+            socket.send_fds(desk.sock, [('CLIP read %s %s\n' % (seq, type_)).encode()], [w])
+            os.close(w)
+            out = b''
+            while True:
+                chunk = os.read(r, 4096)
+                if not chunk:
+                    break
+                out += chunk
+            os.close(r)
+            return out
+
+        def drag(n):
+            send('INPUT ptr %d 20.00 20.00')
+            send('INPUT btn %d 272 press')
+            line = until('CLIP dragout ')
+            check(line == 'CLIP dragout o%d 1 copy,move text/uri-list text/plain;charset=utf-8' % n,
+                  'the drag out was %r' % line)
+            wait_for(lambda: src().count('STANDIN drag started') == n, lambda: 'no drag started:\n' + src())
+
+        # 1. Dropped on the desktop.
+        drag(1)
+        wait_for(lambda: 'STANDIN pointer leave' in src(), lambda: 'the pointer did not leave:\n' + src())
+        before = src().count('STANDIN pointer enter')
+        send('INPUT ptr %d 40.00 40.00', 'INPUT btn %d 272 release')
+        desk.nothing(0.3)
+        check(src().count('STANDIN pointer enter') == before and src().count('STANDIN button 272 0') == 0,
+              lambda: 'the program took input during its drag:\n' + src())
+        got = desktop_reads('o1', 'text/uri-list')
+        check(got == b'file:///home/me/out%20one.txt\r\n', 'the desktop read %r' % got)
+        check(desktop_reads('o1', 'image/png') == b'', 'a type it does not offer was answered')
+        desk.send('CLIP dragend o1 move')
+        wait_for(lambda: 'STANDIN drag action move\nSTANDIN drag performed\nSTANDIN drag finished' in src(),
+                 lambda: 'not performed, finished, move:\n' + src())
+        # 2. Over another program's window, and dropped there.
+        drag(2)
+        send('INPUT btn %d 272 release')
+        desk.send('CLIP drag o2 2 30 30 text/uri-list text/plain;charset=utf-8')
+        check(until('CLIP hover ') == 'CLIP hover o2 copy', 'the target did not answer copy')
+        desk.send('CLIP drop o2 2 30 30 text/uri-list text/plain;charset=utf-8')
+        check(until('CLIP dropped ') == 'CLIP dropped o2 taken', 'the drop on the program was not taken')
+        wait_for(lambda: 'STANDIN drop got file:///home/me/out%20one.txt||' in dst(),
+                 lambda: 'the target did not get the source\'s data:\n' + dst())
+        check(desk.clip_fds == [], 'the desktop was asked to write a program\'s drag')
+        desk.send('CLIP dragend o2 copy')
+        wait_for(lambda: src().count('STANDIN drag finished') == 2 and 'STANDIN drag action copy' in src(),
+                 lambda: 'the second drag did not finish as copy:\n' + src())
+        # 3. Cancelled.
+        drag(3)
+        desk.send('CLIP dragend o3 none')
+        wait_for(lambda: 'STANDIN drag cancelled' in src(), lambda: 'not cancelled:\n' + src())
+        send('INPUT btn %d 272 release')
+        quit_compositor(desk, comp)
+        text = settled(log)
+        check('drag out o1 from window 1' in text and 'drag out o1: moved' in text and 'drag out o3: cancelled' in text,
+              lambda: 'the log does not say the drags:\n' + text)
+        return ('dragout=CLIP dragout o<n>(copy,move,types) pointer-left,no-input-meanwhile desktop-read+dragend move->'
+                'action,performed,finished onto-program=hover o2 copy,dropped o2 taken,source-wrote-target '
+                'dragend none->cancelled')
+    finally:
+        if route:
+            route.close()
+        for p in clients + [comp]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -2964,6 +3097,7 @@ def main():
         print('COMPOSITOR_BUSY_OK %s' % busy_part(compositor, standin, work))
         print('COMPOSITOR_BUSY_SECOND_WM_OK %s' % busy_second_wm_part(compositor, standin, work))
         print('COMPOSITOR_DROP_OK %s' % drop_part(compositor, standin, work))
+        print('COMPOSITOR_DRAGOUT_OK %s' % dragout_part(compositor, standin, work))
         print('COMPOSITOR_VIEWPORT_OK %s' % viewport_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))

@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -259,6 +259,7 @@ struct standin {
                                          3 (--drop-lazy): reads as mpv 0.40 does */
     struct wl_data_offer *drop_offer;
     int drop_fd;                      /* --drop-lazy: the pipe asked for at the drop, not yet read */
+    int dragout;                      /* --drag-out: a left press starts a drag of a file */
     struct wl_data_device_manager *ddm;
     struct zwp_primary_selection_device_manager_v1 *psm;
     struct wl_data_device *data_device;
@@ -1201,6 +1202,61 @@ static void data_source_action(void *data, struct wl_data_source *src, uint32_t 
     (void)data; (void)src; (void)a;
 }
 
+/* --drag-out: the drag's source -- a file's address, as a file manager's;
+   each event said. */
+static void drag_source_target(void *data, struct wl_data_source *src, const char *type)
+{
+    (void)data; (void)src;
+    printf("STANDIN drag target %s\n", type ? type : "none");
+    fflush(stdout);
+}
+
+static void drag_source_send(void *data, struct wl_data_source *src, const char *type, int32_t fd)
+{
+    const char *text = strcmp(type, "text/uri-list") == 0 ? "file:///home/me/out%20one.txt\r\n" : "/home/me/out one.txt";
+    (void)data; (void)src;
+    if (write(fd, text, strlen(text)) < 0) perror("STANDIN drag write");
+    close(fd);
+    printf("STANDIN drag sent %s\n", type);
+    fflush(stdout);
+}
+
+static void drag_source_cancelled(void *data, struct wl_data_source *src)
+{
+    (void)data;
+    printf("STANDIN drag cancelled\n");
+    fflush(stdout);
+    wl_data_source_destroy(src);
+}
+
+static void drag_source_performed(void *data, struct wl_data_source *src)
+{
+    (void)data; (void)src;
+    printf("STANDIN drag performed\n");
+    fflush(stdout);
+}
+
+static void drag_source_finished(void *data, struct wl_data_source *src)
+{
+    (void)data;
+    printf("STANDIN drag finished\n");
+    fflush(stdout);
+    wl_data_source_destroy(src);
+}
+
+static void drag_source_action(void *data, struct wl_data_source *src, uint32_t a)
+{
+    (void)data; (void)src;
+    printf("STANDIN drag action %s\n", a == WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE ? "move"
+                                    : a == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY ? "copy" : "none");
+    fflush(stdout);
+}
+
+static const struct wl_data_source_listener drag_source_listener = {
+    drag_source_target, drag_source_send, drag_source_cancelled, drag_source_performed, drag_source_finished,
+    drag_source_action,
+};
+
 static const struct wl_data_source_listener data_source_listener = {
     data_source_target, data_source_send, data_source_cancelled, data_source_dnd, data_source_dnd,
     data_source_action,
@@ -1334,6 +1390,17 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
     struct standin *s = data;
     (void)p; (void)time;
     printf("STANDIN button %u %u\n", button, state);
+    if (s->dragout && state == WL_POINTER_BUTTON_STATE_PRESSED && button == 0x110 && s->data_device) {
+        struct wl_data_source *src = wl_data_device_manager_create_data_source(s->ddm);
+        wl_data_source_add_listener(src, &drag_source_listener, s);
+        wl_data_source_offer(src, "text/uri-list");
+        wl_data_source_offer(src, "text/plain;charset=utf-8");
+        if (wl_data_source_get_version(src) >= 3)
+            wl_data_source_set_actions(src, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY |
+                                                WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
+        wl_data_device_start_drag(s->data_device, src, s->surface, NULL, serial);
+        printf("STANDIN drag started\n");
+    }
     /* --cursor: a shape named, the pointer hidden, an image of its own. */
     if (s->cursor && state == WL_POINTER_BUTTON_STATE_PRESSED) {
         if (button == 0x110 && s->shape_device) {
@@ -1790,6 +1857,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--viewport-bad") == 0) s.viewport_mode = 3;
         else if (strcmp(argv[i], "--drop-refuse") == 0) s.drop = 2;
         else if (strcmp(argv[i], "--drop-lazy") == 0) s.drop = 3;
+        else if (strcmp(argv[i], "--drag-out") == 0) s.dragout = 1;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;
@@ -1818,7 +1886,7 @@ int main(int argc, char **argv)
         zwp_text_input_v3_add_listener(s.ti, &ti_listener, &s);
         printf("STANDIN ti made\n");
     }
-    if (s.drop && !s.clip) {
+    if ((s.drop || s.dragout) && !s.clip) {
         if (s.ddm == NULL || s.seat == NULL) {
             fprintf(stderr, "STANDIN --drop: no data device manager\n");
             return 1;
