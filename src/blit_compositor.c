@@ -467,6 +467,12 @@ struct bc_drop {
     int32_t x, y;                     /* the drop point, the window's own pixels */
     uint32_t began_ms;                /* when it entered */
     int left;                         /* the drag's end (leave) said after the drop */
+    /* Hovering (`CLIP drag`, 0.3.118): the desktop's drag is over the
+       window, not let go; the program's answer said as `CLIP hover`. */
+    int hover;
+    int hover_said;                   /* -1 nothing yet, 0 none, 1 copy */
+    int xpending;                     /* X: a newer point waits for the last XdndStatus */
+    struct wl_event_source *hover_idle;   /* the answer said once its requests are all in */
     struct wl_event_source *timer;
     /* An X program's window (XDND, 0.3.117): its top-level, where its
        messages go (itself or its XdndProxy), the version both speak, and
@@ -3313,10 +3319,20 @@ static void drop_end(struct bc_server *s, int taken)
     uint32_t seq = d->seq;
     if (seq == 0) return;
     if (d->xstate) xdnd_end(s);
+    if (d->hover_idle) {
+        wl_event_source_remove(d->hover_idle);
+        d->hover_idle = NULL;
+    }
     if (!d->left) drop_leave(s);
     if (d->timer) wl_event_source_timer_update(d->timer, 0);
     d->seq = 0;
     d->ndevices = 0;
+    if (d->hover) {
+        /* Never let go here: left, nothing to answer. */
+        d->hover = 0;
+        logf_("drag %u over window %u: left", seq, d->window);
+        return;
+    }
     logf_("drop %u on window %u: %s", seq, d->window, taken ? "taken" : "refused");
     bc_wire_line(&s->wire, "CLIP dropped %u %s", seq, taken ? "taken" : "refused");
 }
@@ -3342,9 +3358,37 @@ static int drop_ready(struct bc_server *s)
     return d->accepted && (!v3 || d->copy);
 }
 
+/* While hovering: the program's answer, said when it changes. */
+static void hover_say(struct bc_server *s, int ok)
+{
+    struct bc_drop *d = &s->drop;
+    ok = ok ? 1 : 0;
+    if (d->hover_said == ok) return;
+    d->hover_said = ok;
+    bc_wire_line(&s->wire, "CLIP hover %u %s", d->seq, ok ? "copy" : "none");
+}
+
+/* A program answers in several requests (accept, set_actions): said when
+   the batch they came in is done, so it never flickers none-then-copy. */
+static void hover_idle(void *data)
+{
+    struct bc_server *s = data;
+    struct bc_drop *d = &s->drop;
+    d->hover_idle = NULL;
+    if (d->seq && d->hover) hover_say(s, d->xstate ? d->accepted : drop_ready(s));
+}
+
+static void hover_changed(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->hover_idle == NULL) d->hover_idle = wl_event_loop_add_idle(s->loop, hover_idle, s);
+}
+
 static void drop_answered(struct bc_server *s)
 {
-    if (s->drop.seq && !s->drop.dropped && drop_ready(s)) drop_go(s);
+    if (!s->drop.seq || s->drop.dropped) return;
+    if (s->drop.hover) hover_changed(s);
+    else if (drop_ready(s)) drop_go(s);
 }
 
 /* The pointer at the drop point again: a toolkit decides on a motion (GTK
@@ -3364,7 +3408,7 @@ static int drop_timeout(void *data)
 {
     struct bc_server *s = data;
     struct bc_drop *d = &s->drop;
-    if (d->seq == 0) return 0;
+    if (d->seq == 0 || d->hover) return 0;    /* hovering: the desktop's motions, no clock */
     if (!d->dropped && now_ms() - d->began_ms < BC_DROP_ACCEPT_MS) {
         if (d->xstate) xdnd_tick(s);
         else drop_motion(s);
@@ -3504,7 +3548,7 @@ static void drop_receive(struct bc_server *s, const char *type, int fd)
 }
 
 /* `CLIP drop`: the desktop let go of files over window `target`. */
-static void drop_begin(struct bc_server *s, const BcLine *l)
+static void drop_begin(struct bc_server *s, const BcLine *l, int hover)
 {
     struct bc_drop *d = &s->drop;
     struct bc_xdg *x = window_by_id(s, l->target);
@@ -3521,6 +3565,9 @@ static void drop_begin(struct bc_server *s, const BcLine *l)
     d->accepted = d->copy = d->dropped = d->received = d->left = 0;
     d->xstate = BC_XDND_NONE;
     d->xwin = d->xto = XCB_WINDOW_NONE;
+    d->hover = hover;
+    d->hover_said = -1;
+    d->xpending = 0;
     d->x = l->x;
     d->y = l->y;
     d->began_ms = now_ms();
@@ -3561,8 +3608,52 @@ static void drop_begin(struct bc_server *s, const BcLine *l)
         ++d->ndevices;
     }
     if (d->ndevices == 0) { drop_end(s, 0); return; }
-    logf_("drop %u on window %u at %d,%d: %s", d->seq, d->window, l->x, l->y, d->types);
+    logf_("%s %u %s window %u at %d,%d: %s", hover ? "drag" : "drop", d->seq, hover ? "over" : "on", d->window,
+          l->x, l->y, d->types);
     drop_motion(s);
+    if (!hover) wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
+}
+
+/* X: the point now, or when the last XdndStatus is back. */
+static void xdnd_point(struct bc_server *s);
+
+/* `CLIP drag`: the desktop's drag over window `target` -- entered, or moved
+   within it. Another window: the last left, this one entered. */
+static void drag_line(struct bc_server *s, const BcLine *l)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->seq == l->id && d->hover && d->window == l->target) {
+        d->x = l->x;
+        d->y = l->y;
+        if (d->xstate) xdnd_point(s);
+        else drop_motion(s);
+        return;
+    }
+    drop_begin(s, l, 1);
+}
+
+/* `CLIP drop`: let go. Over the window it hovers: dropped there -- at once
+   when the program has said it takes it, else after its second to say so. */
+static void drop_line(struct bc_server *s, const BcLine *l)
+{
+    struct bc_drop *d = &s->drop;
+    if (!(d->seq == l->id && d->hover && d->window == l->target)) {
+        drop_begin(s, l, 0);
+        return;
+    }
+    d->hover = 0;
+    d->x = l->x;
+    d->y = l->y;
+    d->began_ms = now_ms();
+    if (d->xstate) {
+        xdnd_point(s);                /* its next XdndStatus drops, accepting */
+    } else {
+        drop_motion(s);
+        if (drop_ready(s)) {
+            drop_go(s);
+            return;
+        }
+    }
     wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
 }
 
@@ -3570,7 +3661,15 @@ static void clip_desktop_line(struct bc_server *s, const BcLine *l)
 {
     int k;
     if (l->kind == BC_LINE_CLIP_DROP) {
-        drop_begin(s, l);
+        drop_line(s, l);
+        return;
+    }
+    if (l->kind == BC_LINE_CLIP_DRAG) {
+        drag_line(s, l);
+        return;
+    }
+    if (l->kind == BC_LINE_CLIP_LEAVE) {
+        if (s->drop.seq == l->id && s->drop.hover) drop_end(s, 0);
         return;
     }
     if (l->kind == BC_LINE_CLIP_OFFER) {
@@ -8903,6 +9002,18 @@ static void xdnd_position(struct bc_server *s)
     d->xwaiting = 1;
 }
 
+static void xdnd_point(struct bc_server *s)
+{
+    struct bc_drop *d = &s->drop;
+    if (d->xstate != BC_XDND_ENTERED) return;   /* the time not yet come: it positions then */
+    if (d->xwaiting) {
+        d->xpending = 1;
+        return;
+    }
+    d->xpending = 0;
+    xdnd_position(s);
+}
+
 /* The drop's time came: XdndSelection ours at it, enter, the position. */
 static void xdnd_time(struct bc_server *s, xcb_timestamp_t time)
 {
@@ -8928,6 +9039,16 @@ static void xdnd_status(struct bc_server *s, const xcb_client_message_event_t *e
     struct bc_drop *d = &s->drop;
     if (d->seq == 0 || d->xstate != BC_XDND_ENTERED || ev->data.data32[0] != d->xwin) return;
     d->xwaiting = 0;
+    if (d->hover) {
+        d->accepted = (ev->data.data32[1] & 1) != 0;
+        hover_changed(s);
+        if (d->xpending) xdnd_point(s);
+        return;
+    }
+    if (d->xpending) {
+        xdnd_point(s);                /* the drop's own point first: its answer decides */
+        return;
+    }
     if (!(ev->data.data32[1] & 1) || d->dropped) return;
     d->accepted = 1;
     d->dropped = 1;
@@ -10749,6 +10870,8 @@ static void handle_line(struct bc_server *s, const char *line)
     case BC_LINE_CLIP_READ:
     case BC_LINE_CLIP_CLEAR:
     case BC_LINE_CLIP_DROP:
+    case BC_LINE_CLIP_DRAG:
+    case BC_LINE_CLIP_LEAVE:
         clip_desktop_line(s, &l);
         return;
     default:

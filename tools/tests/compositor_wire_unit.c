@@ -91,6 +91,12 @@ static void lines(void)
            strcmp(l.types, "text/plain;charset=utf-8") == 0, "clip read");
     EXPECT(bc_parse_line("CLIP read 7", &l) == BC_LINE_UNKNOWN, "clip read, no type");
     EXPECT(bc_parse_line("CLIP read 7 a b", &l) == BC_LINE_UNKNOWN, "clip read, two types");
+    EXPECT(bc_parse_line("CLIP drag 9 3 40 50 text/uri-list text/plain;charset=utf-8", &l) == BC_LINE_CLIP_DRAG &&
+               l.id == 9 && l.target == 3 && l.x == 40 && l.y == 50 && l.ntypes == 2,
+           "clip drag");
+    EXPECT(bc_parse_line("CLIP drag 9 3 40 50", &l) == BC_LINE_UNKNOWN, "clip drag, no type");
+    EXPECT(bc_parse_line("CLIP leave 9", &l) == BC_LINE_CLIP_LEAVE && l.id == 9, "clip leave");
+    EXPECT(bc_parse_line("CLIP leave 9 3", &l) == BC_LINE_UNKNOWN, "clip leave, a window");
     EXPECT(bc_parse_line("CLIP clear 7", &l) == BC_LINE_CLIP_CLEAR && l.id == 7, "clip clear");
     EXPECT(bc_parse_line("CLIP clear", &l) == BC_LINE_UNKNOWN, "clip clear, no seq");
     EXPECT(bc_parse_line("WINDOW size 3 200 120 tiled-left tiled-top", &l) == BC_LINE_SIZE &&

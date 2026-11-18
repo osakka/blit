@@ -1648,6 +1648,55 @@ def drop_part(compositor, standin, work):
             wait_for(lambda: 'STANDIN drop got file:///home/me/%s.mkv||' % name in open(lazy_path).read(),
                      lambda: 'the lazy program did not get drop %d:\n%s' % (seq, open(lazy_path).read()))
         check(lazy.poll() is None, lambda: 'the lazy program ended:\n' + open(lazy_path).read())
+        # Hovering (0.3.118): `CLIP drag` enters and moves; the program's
+        # answer is `CLIP hover <seq> copy|none`, said when it changes; a
+        # drop over the window it hovers is at once when it accepted;
+        # `CLIP leave` leaves with nothing answered.
+        def answer_reads(seq, until_prefix, wait=5.0):
+            end = time.time() + wait
+            while time.time() < end:
+                got = desk.next(0.2)
+                if got is None:
+                    continue
+                if got[0] == 'frame':
+                    os.close(got[2])
+                    continue
+                if got[0] != 'line':
+                    continue
+                if got[1] == 'CLIP read %d text/uri-list' % seq:
+                    fd = desk.clip_fds.pop(0)
+                    os.write(fd, uris)
+                    os.close(fd)
+                    continue
+                if got[1].startswith(until_prefix):
+                    return got[1]
+            fail('no line %r' % until_prefix)
+        desk.send('CLIP drag 20 1 10 12 text/uri-list text/plain;charset=utf-8')
+        check(answer_reads(20, 'CLIP hover ') == 'CLIP hover 20 copy', 'the accepting program\'s hover was not copy')
+        wait_for(lambda: 'STANDIN drop enter 10 12 ' in printed(0), lambda: 'the hover did not enter:\n' + printed(0))
+        desk.send('CLIP drag 20 1 30 34 text/uri-list text/plain;charset=utf-8')
+        desk.nothing(0.3)                 # moved, the same answer: no line
+        began = time.time()
+        desk.send('CLIP drop 20 1 30 34 text/uri-list text/plain;charset=utf-8')
+        check(answer_reads(20, 'CLIP dropped ') == 'CLIP dropped 20 taken', 'the hovered drop was not taken')
+        hover_drop = time.time() - began
+        check(hover_drop < 0.5, 'the hovered drop took %.2f s, not at once' % hover_drop)
+        check(printed(0).count('STANDIN drop enter 10 12 ') == 1 and 'STANDIN drop enter 30 34' not in printed(0),
+              lambda: 'the drop entered again:\n' + printed(0))
+        desk.send('CLIP drag 21 2 5 6 text/uri-list')
+        check(answer_reads(21, 'CLIP hover ') == 'CLIP hover 21 none', 'the refusing program\'s hover was not none')
+        desk.send('CLIP leave 21')
+        wait_for(lambda: printed(1).count('STANDIN drop leave') >= 2, lambda: 'the hover was not left:\n' + printed(1))
+        desk.nothing(0.5)                 # left: no CLIP dropped
+        # One drag from window 2 to window 1: left there, entered here.
+        desk.send('CLIP drag 22 2 5 6 text/uri-list')
+        check(answer_reads(22, 'CLIP hover ') == 'CLIP hover 22 none', 'no answer over window 2')
+        desk.send('CLIP drag 22 1 50 60 text/uri-list')
+        check(answer_reads(22, 'CLIP hover ') == 'CLIP hover 22 copy', 'no answer over window 1 after window 2')
+        wait_for(lambda: 'STANDIN drop enter 50 60 ' in printed(0) and printed(1).count('STANDIN drop leave') >= 3,
+                 lambda: 'window 2 not left or window 1 not entered:\n%s\n%s' % (printed(0), printed(1)))
+        desk.send('CLIP leave 22')
+        desk.nothing(0.5)
         # Naming no type is no drop.
         desk.send('CLIP drop 10 1 5 5')
         desk.nothing(0.5)
@@ -1659,8 +1708,9 @@ def drop_part(compositor, standin, work):
               lambda: 'a drop with no type was not refused as a line:\n' + text)
         return ('taken=enter(20,30)+motion+read-before+accept+copy->drop->CLIP read text/uri-list->files read,CLIP dropped taken '
                 'no-window=refused-at-once refuse=left,refused-after-%.1fs no-type=unknown-line '
-                'lazy-reader(mpv)=leave-after-data,taken-in-%.2f/%.2fs,second-drop-no-abort'
-                % (waited, lazy_times[0], lazy_times[1]))
+                'lazy-reader(mpv)=leave-after-data,taken-in-%.2f/%.2fs,second-drop-no-abort '
+                'hover=copy/none,said-on-change,drop-over-hover-in-%.2fs,leave=no-answer,window-to-window'
+                % (waited, lazy_times[0], lazy_times[1], hover_drop))
     finally:
         for p in clients + [comp]:
             if p and p.poll() is None:

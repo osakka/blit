@@ -3010,6 +3010,18 @@ It speaks the frame channel above as a producer, with these additions.
   drop (at version 5, and says it accepted). The same timeouts as a
   Wayland program's; not accepted in 1 s, XdndLeave. Menus and other
   override-redirect windows take no drops.
+  Hovering (since 0.3.118): while the desktop's drag is over a program
+  window, before it is let go, `CLIP drag <seq> <window> <x> <y> <type>+`
+  -- the first for a window enters it, the next ones move in it (about one
+  a frame); another window leaves the last and enters that one. The
+  compositor says the program's answer as `CLIP hover <seq> copy|none`
+  whenever it changes (once all the requests it came in are in, so a
+  Wayland program's accept and set_actions are one answer; an X program's
+  is its XdndStatus). No `CLIP hover` yet: it has not answered. `CLIP leave
+  <seq>`: the drag left program windows or ended (Escape, cancelled), with
+  nothing answered. `CLIP drop` on the window the drag is over drops there
+  with no new enter: at once when its answer was copy, else after its
+  second to accept, as above. Reads come during hovering too.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`

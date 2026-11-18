@@ -1300,6 +1300,25 @@ def x_drop_part(desk, standin, env, log, work):
         check(0.8 <= waited < 2.5, 'the refusal came after %.2f s, not about 1 s' % waited)
         wait_for(lambda: 'XSTANDIN dnd leave' in printed2(), lambda: 'the refusing program was not left:\n' + printed2())
         check('XSTANDIN dnd got' not in printed2(), lambda: 'the refusing program read:\n' + printed2())
+        # Hovering (0.3.118): `CLIP hover` from its XdndStatus; a move is a
+        # new XdndPosition; the drop over it is taken.
+        desk.send('CLIP drag 54 %d 30 40 text/uri-list text/plain;charset=utf-8' % wid)
+        until(r'CLIP hover 54 copy')
+        desk.send('CLIP drag 54 %d 60 70 text/uri-list text/plain;charset=utf-8' % wid)
+        wait_for(lambda: 'XSTANDIN dnd position 60,70 copy' in printed(),
+                 lambda: 'the move was not a position:\n' + printed())
+        desk.send('CLIP drop 54 %d 60 70 text/uri-list text/plain;charset=utf-8' % wid)
+        until(r'CLIP read 54 text/uri-list')
+        fd = desk.desk.clip_fds.pop(0)
+        os.write(fd, b'file:///home/me/hovered.txt\r\n')
+        os.close(fd)
+        until(r'CLIP dropped 54 taken')
+        wait_for(lambda: 'XSTANDIN dnd got file:///home/me/hovered.txt||' in printed(),
+                 lambda: 'the hovered drop was not read:\n' + printed())
+        desk.send('CLIP drag 55 %d 10 10 text/uri-list' % wid2)
+        until(r'CLIP hover 55 none')
+        desk.send('CLIP leave 55')
+        wait_for(lambda: printed2().count('XSTANDIN dnd leave') >= 2, lambda: 'the hover was not left:\n' + printed2())
         # Not XdndAware: refused at once, said.
         client3, wid3, printed3 = start('xstandin-drop-unaware.out', None)
         clients.append(client3)
@@ -1313,7 +1332,8 @@ def x_drop_part(desk, standin, env, log, work):
             desk.send('WINDOW close %d' % w)
             until(r'WINDOW gone %d' % w)
         return ('xdnd: aware=enter(v5,types)+position(root %s,%s,copy)->status->drop->XdndSelection=CLIP read->'
-                'finished->taken in %.2fs refuse=left,refused-after-%.1fs unaware=refused-at-once,said'
+                'finished->taken in %.2fs refuse=left,refused-after-%.1fs unaware=refused-at-once,said '
+                'hover=XdndStatus->copy/none,move->position,drop-over-hover->taken,leave->XdndLeave'
                 % (position.group(1), position.group(2), took, waited))
     finally:
         for c in clients:

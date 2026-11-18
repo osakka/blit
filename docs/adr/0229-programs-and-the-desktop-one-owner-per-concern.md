@@ -296,3 +296,31 @@ refused at once and said), plain and under ASan/UBSan, in the Debian 13
 release environment; and a real GTK3 window under Xwayland
 (`GDK_BACKEND=x11`, `drag_dest_add_uri_targets`) in a throwaway container
 of that environment: two drops in a row, both taken, both lists received.
+
+## Amended 2026-11-18 (0.3.118): hovering -- the program's answer before the drop
+
+Agreed with Hibr (row 1 of Gitea #160). The desktop says its drag over a
+program window as `CLIP drag <seq> <window> <x> <y> <type>+` (enter, then
+motion; another window leaves the last), and `CLIP leave <seq>` when it
+leaves program windows or ends; the compositor answers `CLIP hover <seq>
+copy|none` when the program's answer changes, which the desktop shows on
+its drag pointer. A Wayland program answers in several requests (accept,
+then set_actions); the answer is said from an idle callback, once the batch
+is in, so it never shows none-then-copy. An X program's is its XdndStatus;
+a move while the last position is unanswered waits for that answer. A
+`CLIP drop` over the hovered window drops there at once when the answer was
+copy (as wlroots drops at the release when the source was accepted), with no
+second enter. Hover has no clock: the desktop's lines drive it.
+
+Row 3 (a program dragging out) is agreed too: `CLIP dragout o<n> <window>
+<actions> <type>+`, the `o` keeping its sequence apart from the desktop's,
+echoed in `CLIP drag|drop|read|dragend o<n>`.
+
+Evidence: compositor_gate's drop part (hover copy over an accepting
+stand-in, said once; moving says nothing new; the drop over it taken at
+once with no second enter; none over a refusing one; leave with no answer;
+one drag from window to window) with ASan/UBSan; xwayland_gate's drop part
+(copy from XdndStatus, a move a new XdndPosition, the drop taken, none and
+XdndLeave on leave) in the release environment; a real GTK3 window on the
+compositor: hover copy once, motions quiet, the drop taken and the file
+received.

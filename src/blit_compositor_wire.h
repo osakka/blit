@@ -664,6 +664,8 @@ enum {
     BC_LINE_CLIP_READ,      /* CLIP read <seq> <type>, a pipe's write end with it */
     BC_LINE_CLIP_CLEAR,     /* CLIP clear <seq> */
     BC_LINE_CLIP_DROP,      /* CLIP drop <seq> <window> <x> <y> <type> [<type> ...] */
+    BC_LINE_CLIP_DRAG,      /* CLIP drag <seq> <window> <x> <y> <type> [<type> ...]: hovering (0.3.118) */
+    BC_LINE_CLIP_LEAVE,     /* CLIP leave <seq>: the drag left program windows, or ended */
     BC_LINE_TEACHDONE       /* WINDOW teachdone <id> commit|cancel: the desktop's teach box ended (ADR 0233) */
 };
 
@@ -907,12 +909,14 @@ static int bc_parse_line(const char *line, BcLine *out)
         else if (strncmp(p, "read ", 5) == 0) { kind = BC_LINE_CLIP_READ; p += 5; }
         else if (strncmp(p, "clear ", 6) == 0) { kind = BC_LINE_CLIP_CLEAR; p += 6; }
         else if (strncmp(p, "drop ", 5) == 0) { kind = BC_LINE_CLIP_DROP; p += 5; }
+        else if (strncmp(p, "drag ", 5) == 0) { kind = BC_LINE_CLIP_DRAG; p += 5; }
+        else if (strncmp(p, "leave ", 6) == 0) { kind = BC_LINE_CLIP_LEAVE; p += 6; }
         else return out->kind = BC_LINE_UNKNOWN;
         if (bc_read_u32(&p, 0xffffffffUL, &out->id) != 0 || out->id == 0)
             return out->kind = BC_LINE_UNKNOWN;
-        if (kind == BC_LINE_CLIP_OFFER || kind == BC_LINE_CLIP_DROP) {
+        if (kind == BC_LINE_CLIP_OFFER || kind == BC_LINE_CLIP_DROP || kind == BC_LINE_CLIP_DRAG) {
             size_t used = 0;
-            if (kind == BC_LINE_CLIP_DROP) {
+            if (kind == BC_LINE_CLIP_DROP || kind == BC_LINE_CLIP_DRAG) {
                 if (*p++ != ' ' || bc_read_u32(&p, 0xffffffffUL, &out->target) != 0 || out->target == 0 ||
                     *p++ != ' ' || bc_read_u32(&p, BC_SIZE_MAX, &a) != 0 || *p++ != ' ' ||
                     bc_read_u32(&p, BC_SIZE_MAX, &b) != 0 || *p != ' ')
@@ -935,7 +939,8 @@ static int bc_parse_line(const char *line, BcLine *out)
                 out->types[used] = '\0';
                 ++out->ntypes;
             }
-            if (kind == BC_LINE_CLIP_DROP && out->ntypes == 0) return out->kind = BC_LINE_UNKNOWN;
+            if ((kind == BC_LINE_CLIP_DROP || kind == BC_LINE_CLIP_DRAG) && out->ntypes == 0)
+                return out->kind = BC_LINE_UNKNOWN;
         } else if (kind == BC_LINE_CLIP_READ) {
             if (*p++ != ' ' || bc_read_type(&p, type) != 0) return out->kind = BC_LINE_UNKNOWN;
             snprintf(out->types, sizeof(out->types), "%s", type);
