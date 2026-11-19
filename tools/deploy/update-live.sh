@@ -20,6 +20,7 @@ package=$2
 test -f "$package" || { echo "update refused: package not found: $package" >&2; exit 2; }
 command -v curl >/dev/null 2>&1 || { echo "update refused: curl is required" >&2; exit 2; }
 command -v dpkg-deb >/dev/null 2>&1 || { echo "update refused: dpkg-deb is required" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "update refused: python3 is required (the smoke check)" >&2; exit 2; }
 
 if [ "${BLIT_UPDATE_TOKEN:-}" != "" ]; then
     update_token=$BLIT_UPDATE_TOKEN
@@ -82,6 +83,25 @@ curl_auth() {
     fi
 }
 
+# Gitea #27: the box as it is, for the smoke check after the update:
+# "<displays ready> <display count> <panes showing a surface> <frames>".
+smoke_state() {
+    server=$(curl_auth --max-time 8 --fail "$base_url/v1/server") || return 1
+    topology=$(curl_auth --max-time 8 --fail "$base_url/v1/topology") || return 1
+    runtime=$(curl_auth --max-time 8 --fail "$base_url/v1/diagnostics/runtime") || return 1
+    printf '%s\n%s\n%s\n' "$server" "$topology" "$runtime" | python3 -c '
+import json, sys
+server, topology, runtime = (json.loads(line) for line in sys.stdin.read().splitlines()[:3])
+attached = sum(1 for p in topology.get("panes", []) if p.get("surface_id"))
+print("%d %d %d %d" % (server["display_backend"]["ready"], server["display_count"], attached,
+                       runtime["performance"]["frames"]))'
+}
+
+before=$(smoke_state) || {
+    echo "update refused: could not read the box's state (server, topology, runtime) for the smoke check" >&2
+    exit 1
+}
+
 status=$(curl_auth --max-time 8 --fail "$base_url/v1/control/update/status") || {
     echo "update refused: could not read update status from $base_url" >&2
     exit 1
@@ -141,11 +161,45 @@ while [ "$i" -lt 60 ]; do
         if live_version=$(curl_auth --max-time 8 --fail "$base_url/v1/version"); then
             echo "$live_version" | grep -q "\"server_version\":\"$version\"" && {
                 echo "update verified: Blit $version"
-                exit 0
+                break
             }
         fi
     fi
     i=$((i + 1))
 done
-echo "update failed: timed out waiting for Blit $version; inspect update status and diagnostics" >&2
+[ "$i" -lt 60 ] || {
+    echo "update failed: timed out waiting for Blit $version; inspect update status and diagnostics" >&2
+    exit 1
+}
+
+# The smoke check (Gitea #27): within 60 s the box is as it was -- the same
+# displays up, a surface in as many panes (the desktop came back), and its
+# frames advancing when it has displays.
+set -- $before
+b_ready=$1 b_displays=$2 b_attached=$3
+i=0
+while [ "$i" -lt 60 ]; do
+    if now=$(smoke_state); then
+        set -- $now
+        first_frames=$4
+        if [ "$1" = "$b_ready" ] && [ "$2" = "$b_displays" ] && [ "$3" -ge "$b_attached" ]; then
+            if [ "$b_ready" = 0 ]; then
+                echo "smoke passed: API only, as before; $3 panes showing a surface"
+                exit 0
+            fi
+            sleep 1
+            if later=$(smoke_state); then
+                set -- $later
+                [ "$4" -gt "$first_frames" ] && {
+                    echo "smoke passed: $2 displays up, $3 panes showing a surface (before $b_attached), frames advancing ($first_frames -> $4)"
+                    exit 0
+                }
+            fi
+        fi
+    fi
+    sleep 1
+    i=$((i + 1))
+done
+echo "smoke failed: installed Blit $version, but the box is not as it was within 60 s:" \
+     "before (ready displays panes-with-surface frames) $before, now ${now:-unreadable}" >&2
 exit 1
