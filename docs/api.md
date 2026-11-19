@@ -261,7 +261,11 @@ GLES again. The saved setting is never rewritten.
 The rest of the display start is guarded too (since 0.3.124, Gitea #162).
 `<settings path>.display-starting` holds the phase the start is in while it
 runs -- `drm` (opening the display device), `gles` (the GPU start, above),
-`outputs` (setting the outputs up) -- and goes once every display has flipped.
+`outputs` (setting the outputs up) -- and goes once every display has
+flipped, or the loop has run 30 s (a display that never flips is not a
+start that hangs), or Blit stops in order (from 0.3.125: a stop or update
+while the displays were still starting left it, and the next start came up
+without displays).
 A start that hangs is ended by the console watchdog after 10 s; the next start
 finds the marker. Left in `drm` or `outputs`, that start serves the API with
 no displays: `/v1/server` `display_backend.ready` is false and its `error`

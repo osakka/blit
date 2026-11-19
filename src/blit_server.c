@@ -1429,6 +1429,7 @@ typedef struct {
        "drm" or "outputs" serves the API with no displays. */
     char display_guard_path[300];
     int display_guard_active, display_guard_skip, display_guard_clear;
+    unsigned long long display_guard_since_us;
     char display_guard_phase[16];
     int gles_guard_active;
     uint64_t gles_guard_since_us;
@@ -2935,19 +2936,26 @@ static void display_guard_start(BlitRuntime *runtime)
         }
     }
     runtime->display_guard_active = 1;
+    runtime->display_guard_since_us = monotonic_us();
     display_guard_set(runtime, "drm");
 }
 
-/* Healthy: every display has flipped (or there are none). */
+/* Healthy: every display has flipped (or there are none), or the loop has
+   run 30 s -- a display that never flips is not a start that hangs, and its
+   marker must not cost the next start its displays. Tests can hold it. */
 static void display_guard_check(BlitRuntime *runtime)
 {
     int i;
     if (!runtime->display_guard_active) return;
-    for (i = 0; i < runtime->display_count && runtime->kms; ++i) {
-        BlitKmsDisplayInfo info;
-        if (blit_kms_display_info(runtime->kms, i, &info) != 0) continue;
-        if (info.flip_completions == 0) return;
-    }
+    if (getenv("BLIT_TEST_DISPLAY_GUARD_HOLD") != NULL && getenv("BLIT_TEST_MODE") != NULL &&
+        strcmp(getenv("BLIT_TEST_MODE"), "1") == 0)
+        return;
+    if (monotonic_us() - runtime->display_guard_since_us < 30000000ULL)
+        for (i = 0; i < runtime->display_count && runtime->kms; ++i) {
+            BlitKmsDisplayInfo info;
+            if (blit_kms_display_info(runtime->kms, i, &info) != 0) continue;
+            if (info.flip_completions == 0) return;
+        }
     runtime->display_guard_active = 0;
     if (runtime->settings_writer_running) {
         pthread_mutex_lock(&runtime->settings_writer_lock);
@@ -33323,6 +33331,9 @@ int main(int argc, char **argv)
        and is no evidence against GLES: it must not cost the next start the
        GPU. */
     if (runtime.gles_guard_active) unlink(runtime.gles_guard_path);
+    /* The same for the display start's marker (Gitea #162): a stop in order
+       is not a start that hung. */
+    if (runtime.display_guard_active) unlink(runtime.display_guard_path);
     blit_font_free(&runtime.font);
     blit_font_free(&runtime.hud_font);
     {

@@ -233,9 +233,24 @@ Dir.mktmpdir('blit-gles-setting') do |root|
       abort "GLES_COMPOSITOR_FAIL a healthy start left its display marker"
     end
   end
+
+  # 9. Stopped in order while its displays were still starting (held here
+  #    by a test hook: no flip yet, or a display that never flips): not a
+  #    hang -- no marker left, and the next start has its displays.
+  FileUtils.rm_f([marker, display_marker])
+  server(port, env.merge('BLIT_TEST_MODE' => '1', 'BLIT_TEST_DISPLAY_GUARD_HOLD' => '1')) do |_base|
+    abort 'GLES_COMPOSITOR_FAIL no display marker while the displays were starting' unless
+      File.exist?(display_marker) && File.read(display_marker) == 'outputs'
+  end
+  abort 'GLES_COMPOSITOR_FAIL an orderly stop left the display marker' if File.exist?(display_marker)
+  server(port, env) do |base|
+    backend = JSON.parse(Net::HTTP.get(base + '/v1/server')).fetch('display_backend')
+    abort "GLES_COMPOSITOR_FAIL the start after an orderly stop had no displays: #{backend.inspect}" unless
+      backend['ready'] == true
+  end
 end
 
 puts "GLES_COMPOSITOR_PASS #{frame_line.sub('GLES_FRAME_PASS ', 'frame=')} " \
      'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried ' \
      'orderly_stop=not_a_crash hung_start=cpu_next_then_gpu hung_drm=api_only_next_then_displays ' \
-     'hung_outputs=api_only_next_then_displays healthy=marker_cleared'
+     'hung_outputs=api_only_next_then_displays healthy=marker_cleared orderly_stop_while_starting=displays_next'

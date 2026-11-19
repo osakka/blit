@@ -396,6 +396,12 @@ With
 makes opening the display device, or setting up the outputs, hang this many
 milliseconds, to test that the next start serves the API without displays.
 .TP
+.B BLIT_TEST_DISPLAY_GUARD_HOLD
+With
+.BR BLIT_TEST_MODE=1 ,
+keeps the display start's marker as if the displays were still starting,
+to test that an orderly stop removes it.
+.TP
 .B BLIT_TEST_GLES_CPU_CONNECTOR
 With
 .BR BLIT_TEST_MODE=1 ,
