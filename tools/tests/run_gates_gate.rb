@@ -220,9 +220,9 @@ check(!serving?(server_port), "port #{server_port} is still served after the tim
 # which waits for the parallel lane under any JOBS), the running gate and
 # what it started are gone, and the runner's scratch directory is removed.
 
-def cancel_run(dir, jobs, signal, to_group)
-  tag = "#{signal.downcase}-#{jobs}-#{Process.pid}"
-  sleeper = "7#{Process.pid}#{jobs}#{signal == 'INT' ? 1 : 2}" # an unlikely sleep, in seconds
+def cancel_run(dir, jobs, signal, to_group, round = 0)
+  tag = "#{signal.downcase}-#{jobs}-#{round}-#{Process.pid}"
+  sleeper = "7#{Process.pid}#{jobs}#{signal == 'INT' ? 1 : 2}#{round}" # an unlikely sleep, in seconds
   marks = File.join(dir, "cancel-#{tag}")
   scratch = File.join(dir, "tmp-#{tag}")
   FileUtils.mkdir_p([marks, scratch])
@@ -257,7 +257,10 @@ def cancel_run(dir, jobs, signal, to_group)
   "#{signal.downcase}/jobs#{jobs}=#{want}"
 end
 
+# TERM with two jobs three times: relayed only through the scheduler's and a
+# worker's traps, it left the gate running in about half the runs.
 cancelled = [cancel_run(dir, 1, 'INT', true), cancel_run(dir, 2, 'INT', true),
-             cancel_run(dir, 1, 'TERM', false), cancel_run(dir, 2, 'TERM', false)]
+             cancel_run(dir, 1, 'TERM', false)] +
+            (1..3).map { |n| cancel_run(dir, 2, 'TERM', false, n) }.uniq
 
 puts "RUN_GATES_GATE_PASS offsets=distinct timeout=reported_no_orphan jobs1=jobs4 timing_lane=alone cancel=#{cancelled.join(',')}"
