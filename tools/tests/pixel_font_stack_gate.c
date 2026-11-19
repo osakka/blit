@@ -17,11 +17,18 @@ static int inked(const BlitRasterGlyph *g)
     return ink;
 }
 
+/* A space Hibr's UI uses (U+3000 among them) is drawn, with nothing to ink. */
+static int is_space(unsigned cp)
+{
+    return cp == 0xa0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200a) || cp == 0x202f || cp == 0x205f ||
+           cp == 0x3000;
+}
+
 int main(int argc, char **argv)
 {
     BlitFont font;
     int size = 0, kept = 0, drawn = 0, ui_kept = 0, ui_drawn = 0, count = 0, i;
-    unsigned cp = 0, required[128];
+    unsigned cp = 0, required[512];
     /* Icons and symbols a console font lacks, and the Blit originals. */
     static const unsigned borrowed[] = { 0xf07b, 0xf015, 0xe0b0, 0x23fb, 0x27f6, 0x1f600,
                                          0x100000, 0x100005, 0x100013, 0x100018, 0x10001a };
@@ -29,9 +36,10 @@ int main(int argc, char **argv)
     if (argc != 4) return 2;
     input = fopen(argv[3], "r");
     if (!input) return 2;
-    while (count < 128 && fscanf(input, "%x", &cp) == 1) required[count++] = cp;
+    while (count < 512 && fscanf(input, "%x", &cp) == 1) required[count++] = cp;
     fclose(input);
-    CHECK(count == 101);
+    /* The snapshot is generated from Hibr (Gitea #118): its size follows Hibr. */
+    CHECK(count > 0 && count < 512);
     memset(&font, 0, sizeof(font));
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
@@ -63,11 +71,13 @@ int main(int argc, char **argv)
         /* Every glyph Hibr's UI uses: the font's own, or drawn. */
         for (i = 0; i < count; ++i) {
             cp = required[i];
-            if (blit_font_has_glyph(&font, cp)) {
+            /* Blit's own icons -- plane 16 and the pen at U+270E (ADR 0195) --
+               are drawn over whatever the font has there. */
+            if (blit_font_has_glyph(&font, cp) && cp < 0x100000 && cp != 0x270e) {
                 CHECK(!blit_raster_get(r, cp, 1, 0, &g));
                 if (size == 16) ++ui_kept;
             } else {
-                CHECK(blit_raster_get(r, cp, 1, 0, &g) && !g.fallback && inked(&g));
+                CHECK(blit_raster_get(r, cp, 1, 0, &g) && !g.fallback && (inked(&g) || is_space(cp)));
                 if (size == 16) ++ui_drawn;
             }
         }

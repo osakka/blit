@@ -14,8 +14,8 @@
 #include <string.h>
 #include <stdio.h>
 
-#define RASTER_SETS 128
-#define RASTER_WAYS 4
+#define RASTER_SETS BLIT_RASTER_CACHE_SETS
+#define RASTER_WAYS BLIT_RASTER_CACHE_WAYS
 #define RASTER_SLOTS (RASTER_SETS * RASTER_WAYS)
 #define RASTER_MAX_BYTES (4U * 1024U * 1024U)
 
@@ -1546,7 +1546,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
     }
     slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS);
     set = &raster->cache[slot * RASTER_WAYS];
-    /* Four bounded full-key comparisons; collisions may coexist. Ages are
+    /* RASTER_WAYS bounded full-key comparisons; collisions may coexist. Ages are
        per-set ranks, not an ever-growing clock. Failure leaves the set alone. */
     for (way = 0; way < RASTER_WAYS; ++way) {
         entry = &set[way];

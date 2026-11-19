@@ -66,3 +66,19 @@ unchanged re-rasterized pixels at every size 8..64. Emoji gates retain full
 cluster collision checks; Arabic, colour, native-KMS and SDL composition gates
 remain required. Existing correctness tests must pass before deployment.
 Actual live CPU/latency gains require a subsequent matched workload run.
+
+## Amended 2026-11-19 (0.3.124): eight ways (Gitea #118)
+
+The Hibr UI snapshot is now generated from Hibr (0.99.552: 150 scalars, from
+101). ASCII plus it is 245 keys, and at four ways some of the 128 sets held
+more than four: `font_cache_workload.rb --check` counted 1400 repeat
+rasterizations over 200 warm passes (7 a pass) in both profiles. The cache
+is now 128 sets of eight ways, its shape in `blit_raster.h`
+(`BLIT_RASTER_CACHE_SETS`, `BLIT_RASTER_CACHE_WAYS`). Measured: 256x4,
+128x8, 512x4 and 256x8 all give zero; 128 sets is kept so the documented
+colliding keys (A, U+FEC1, U+1F341; `'A' + 128 * k`) still share a set and
+the replacement tests keep their teeth. Metadata goes from 512 to 1024
+entries (144 bytes each, 74 KiB to 147 KiB); the 4 MiB pixel budget is
+unchanged; a lookup compares at most eight full keys in its set.
+`font_raster_gate` fills a set to its ways from the header, touches A,
+forces an eviction and checks A survives and the oldest is rendered again.

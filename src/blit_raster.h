@@ -1,6 +1,11 @@
 #ifndef BLIT_RASTER_H
 #define BLIT_RASTER_H
 
+/* The shared raster cache's shape (ADR 0176, amended for Gitea #118): sets
+   of ways, a key in the set its cluster hash picks, LRU within the set. */
+#define BLIT_RASTER_CACHE_SETS 128
+#define BLIT_RASTER_CACHE_WAYS 8
+
 #include "blit_font.h"
 
 /* Backend-independent cell rasters. No DRM or terminal state here.

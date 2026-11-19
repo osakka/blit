@@ -87,7 +87,8 @@ int main(int argc, char **argv)
             BlitCellCluster first, colliding;
             CHECK(blit_cell_cluster_init(&first, 'A', NULL, 0, 1));
             CHECK(blit_cell_cluster_init(&colliding, 'A' + 128, NULL, 0, 1));
-            CHECK(blit_cell_cluster_hash(&first) % 128 == blit_cell_cluster_hash(&colliding) % 128);
+            CHECK(blit_cell_cluster_hash(&first) % BLIT_RASTER_CACHE_SETS ==
+                  blit_cell_cluster_hash(&colliding) % BLIT_RASTER_CACHE_SETS);
             memcpy(saved, a.pixels, a.stride * a.height);
             CHECK(blit_raster_get(raster, 'A' + 128, 1, 0, &again));
             CHECK(blit_raster_render_count(raster) == count + 1);
@@ -95,11 +96,16 @@ int main(int argc, char **argv)
             CHECK(blit_raster_render_count(raster) == count + 1);
             CHECK(!memcmp(saved, again.pixels, again.stride * again.height));
             /* Fill the remaining ways, touch A, then force an LRU eviction.
-               All five keys collide; the recently touched A must survive. */
-            CHECK(blit_raster_get(raster, 'A' + 256, 1, 0, &again));
-            CHECK(blit_raster_get(raster, 'A' + 384, 1, 0, &again));
+               All WAYS + 1 keys collide; the recently touched A must survive. */
+            for (int way = 2; way < BLIT_RASTER_CACHE_WAYS; ++way) {
+                BlitCellCluster more;
+                CHECK(blit_cell_cluster_init(&more, 'A' + 128 * way, NULL, 0, 1));
+                CHECK(blit_cell_cluster_hash(&first) % BLIT_RASTER_CACHE_SETS ==
+                      blit_cell_cluster_hash(&more) % BLIT_RASTER_CACHE_SETS);
+                CHECK(blit_raster_get(raster, 'A' + 128 * way, 1, 0, &again));
+            }
             CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
-            CHECK(blit_raster_get(raster, 'A' + 512, 1, 0, &again));
+            CHECK(blit_raster_get(raster, 'A' + 128 * BLIT_RASTER_CACHE_WAYS, 1, 0, &again));
             count = blit_raster_render_count(raster);
             CHECK(blit_raster_get(raster, 'A', 1, 0, &again));
             CHECK(blit_raster_render_count(raster) == count);
