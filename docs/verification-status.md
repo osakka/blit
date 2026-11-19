@@ -9,6 +9,53 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-19: 0.3.124 display start guard, crops and scales shown, eight-way raster cache
+
+- **Display start guard (Gitea #162):** a start that hangs opening the
+  display device or setting up the outputs is followed by one that serves
+  the API without displays and says why; the restart after starts the
+  displays again. A GPU-start hang keeps its CPU fallback.
+  gles_compositor_gate cases 7 and 8 cover it with test-only hangs.
+- **Crops and scales shown (Gitea #159):** `WINDOW view` carries a
+  program's wp_viewporter crop and scale and its buffer scale, for every
+  picture kind; sizes and hit tests follow the shown size; drag icons are
+  cropped and scaled too. compositor_gate's viewport and drag-icon cases
+  pass, plain and ASan/UBSan. Hibr draws the view from its side (#159
+  stays open for it); an older Hibr ignores the line.
+- **Rectangle copies counted (Gitea #120):** `rectangle_copies` and
+  `rectangle_copy_cells` in `/v1/diagnostics/runtime`. They read 0 0 on
+  the mini PC after the update. A real solid drag through hold is the
+  measurement still to take.
+- **`/v1/input/devices` `pending` (Gitea #124):** with input_device_config_gate
+  waiting on it.
+- **Fonts (Gitea #118):**
+  - The Hibr UI snapshot is generated from Hibr: 150 characters at
+    0.99.552, checked by hibr_ui_glyphs_gate. BlitIcons rebuilds byte for
+    byte with the pinned fontTools.
+  - The release gates found two consequences, both fixed here. The raster
+    cache went from four ways to eight: at four, ASCII plus the 150 were
+    re-rendered 7 glyphs a pass (ADR 0176 amended). pixel_font_stack_gate
+    assumed 101 characters and a font-kept U+270E (Blit's pen, by ADR
+    0195).
+- **run-gates (Gitea #106):** a TERM to the runner with two jobs left the
+  gate running in about half the runs. The runner now signals recorded
+  gates itself. Its gate repeats the case: the old runner failed 2 of 3,
+  the new one passed 6 of 6.
+- **update-live (Gitea #27):** a smoke check after the update. It ran on
+  this deploy: 1 display up, 2 panes showing a surface, frames advancing.
+- **Gates on this host:**
+  - `all` passed 195 with 11 skipped. The first run failed
+    pixel_font_stack_gate, font_cache_workload (the #118 consequences above)
+    and frame_rate_gate (load 13 from another session). Its second run
+    failed run_gates_gate (the race above).
+  - `renderer` passed 87 with 1 skipped; `renderer-gles` passed 67.
+  - The font suite passed 50 after the cache change.
+- **Release environment (Debian 13):** compositor_gate and xwayland_gate,
+  plain and ASan/UBSan, plus the package gate and update_pair.
+- **Live, the mini PC:** the pair update to 0.3.124 was verified, with the
+  smoke check passing.
+- **Published** to hibr-apt (59bf4b9) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-19: 0.3.123 a program's own drag icon
 
 - **What it is:** `WINDOW dragicon <id> o<n> <dx> <dy>` (agreed with Hibr),
