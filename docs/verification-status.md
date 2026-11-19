@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-19: 0.3.122 X onto X, relayed
+
+- **What it is:** an X program's drag onto an X window is relayed instead
+  of refused. The window is told the drop window is the source, reads the
+  dragging program's own XdndSelection, and its answers become `CLIP
+  hover`/`CLIP dropped`. Nobody's selection is taken. ADR 0229 amended.
+- **Gates on this host:**
+  - `renderer` 87 and `renderer-gles` 67 passed in full.
+  - `all` passed 191, with under_text_picture and frame_rate failing at
+    load 5.5. On a quieter host under_text_picture passed 3/3, and
+    frame_rate passed 7/8 (one missed refresh deadline at load 1.7), then
+    5/5 at load 2.1.
+  - frame_rate_gate measures blit-server's own drawing, which this release
+    does not change.
+- **Release environment (Debian 13):**
+  - xwayland_gate passed plain and under ASan/UBSan. Its dragout part now
+    drags onto a second X stand-in (hover copy, taken, read from the
+    source, source finished), and its drop part drops on a window on a
+    second display (root 1953,44).
+  - compositor_gate, the package gate and update_pair passed.
+- **Real programs:** a GTK3 X drag source onto a GTK3 X drop target:
+  hover copy, taken, the file received, the source's drag a success.
+- **Live, the mini PC:** the pair update to 0.3.122 was verified.
+- **Published** to hibr-apt under HOLD/done with my-vpn-ea. The
+  repository was clean and in sync, and its history is one commit.
+
 ## 2026-11-19: 0.3.121 X programs drag out
 
 - **What it is:** an X program dragging out reaches the desktop as the same
