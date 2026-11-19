@@ -9,6 +9,48 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-19: 0.3.125 display modes, views through the pointer, the start guard on orderly stop
+
+- **Display modes (Gitea #60, ADR 0236):** `configuration.mode`, a listed
+  mode or `auto`.
+  - Tried, and reverted by itself after 15 s unless kept. A mode the
+    monitor refuses is put back at once. A kept mode is saved and used at
+    start in one modeset.
+  - The output is rebuilt through the hot-plug path; the display keeps its
+    place, and its panes and sessions follow.
+  - display_mode_gate on the DRM mock passes on the CPU and GLES
+    compositors.
+  - **Not tried live:** hibr's holdpix check found that windows are not
+    pulled inside a shrunk display. hibr fixes that first; held until it
+    ships.
+- **Views (Gitea #159):**
+  - Blit maps the pointer through a picture's view, relayed by the desktop
+    as `INPUT view` (frame_input_gate: buffer scale 2, a crop, dropped, the
+    route's own).
+  - A picture unmapped and mapped again under a new id says its view again
+    (compositor_gate: fails without the fix).
+  - Hibr draws and relays views from its side.
+  - Real mpv cannot exercise this on the build host: its dmabuf output
+    needs a DRM device the host lacks, and its shm output sets no view.
+- **Display start guard (Gitea #162):** the marker now goes on an orderly
+  stop and after 30 s running, so an update right after a start no longer
+  comes up without displays (gles_compositor_gate case 9: fails without
+  the fix). The mini PC had no marker left.
+- **Gates now record what they tested (Gitea #27):** the manifest carries
+  `gates_all`, `gates_renderer` and `gates_renderer-gles`, all passes of
+  5288cc7, the shipped commit.
+  - The first `all` run failed only kms_frame_timing_gate, at 50 fps under
+    load. It then passed 3 of 3 alone at load 5-7, and `all` passed 196/11
+    on a quiet host.
+  - `renderer` passed 88/1 and `renderer-gles` 68/0.
+- **Fonts (Gitea #118):** hibr_ui_glyphs_gate fails only on characters the
+  snapshot lacks.
+- **Release environment (Debian 13):** compositor_gate, xwayland_gate and
+  update_pair pass.
+- **Live, the mini PC:** the update was verified and the smoke check passed
+  (1 display, 2 panes with a surface, frames advancing).
+- **Published** to hibr-apt (3b97dd6) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-19: 0.3.124 display start guard, crops and scales shown, eight-way raster cache
 
 - **Display start guard (Gitea #162):** a start that hangs opening the
