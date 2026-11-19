@@ -157,8 +157,24 @@ Dir.mktmpdir('blit-under-text-picture') do |root|
   step.call('place')
   wait_until('the image was not stored') { get("/v1/terminal-sessions/#{session}")['graphics'].length == 1 }
   # All of it but the few pixels of the pointer, parked at the bottom left.
-  wait_until('default-background cells do not show the image') do
-    cells.call(screenshot, 0, columns)[RED].to_i >= rows * columns * CELL_W * CELL_H - 64
+  # On failure, what was there instead: the colours, and the server's view
+  # of the pointer and the picture (a suite-only failure, 0.3.126, said only
+  # that it timed out).
+  seen = nil
+  begin
+    Timeout.timeout(30) do
+      loop do
+        seen = cells.call(screenshot, 0, columns)
+        break if seen[RED].to_i >= rows * columns * CELL_W * CELL_H - 64
+        sleep 0.05
+      end
+    end
+  rescue Timeout::Error
+    pointer = (get('/v1/diagnostics')['input'] rescue {}).to_h.slice('pointer_x', 'pointer_y', 'pointer_visible')
+    pictures = (get("/v1/terminal-sessions/#{session}")['graphics'] rescue nil)
+    check(false, "default-background cells do not show the image: red #{seen && seen[RED].to_i} of " \
+                 "#{rows * columns * CELL_W * CELL_H - 64} needed; top colours #{seen && seen.sort_by { |_, n| -n }.first(4)}; " \
+                 "pointer #{pointer}; pictures #{pictures.inspect[0, 300]}")
   end
   step.call('opaque')
   before = cells.call(screenshot, 0, columns)
