@@ -4,13 +4,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int is_space(unsigned cp)
+{
+    return cp == 0x00a0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200a) || cp == 0x202f || cp == 0x205f ||
+           cp == 0x3000;
+}
+
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "CUSTOM_ICON_FAIL line=%d size=%d cp=%x\n", __LINE__, size, cp); return 1; } } while (0)
 
 int main(int argc, char **argv)
 {
     BlitFont font;
     int size = 0, samples = 0;
-    unsigned cp = 0, required[128], distinct[512], live[1024], retired[1024];
+    unsigned cp = 0, required[512], distinct[512], live[1024], retired[1024];
     int required_count = 0, distinct_count = 0, live_count = 0, retired_count = 0,
         ui_samples = 0, script_samples = 0, at;
     /* ADR 0195: what the glyph stack adds to any font -- an overhanging
@@ -21,10 +27,11 @@ int main(int argc, char **argv)
     if (argc != 8) return 2;
     input = fopen(argv[4], "r");
     if (!input) return 2;
-    while (required_count < 128 && fscanf(input, "%x", &cp) == 1)
+    while (required_count < 512 && fscanf(input, "%x", &cp) == 1)
         required[required_count++] = cp;
     fclose(input);
-    CHECK(required_count == 101);
+    /* The count is fonts.source.json's, checked by custom_icon_gate.rb. */
+    CHECK(required_count > 0 && required_count < 512);
     /* One left-half codepoint per distinct file drawing (ADR 0201). */
     input = fopen(argv[5], "r");
     if (!input) return 2;
@@ -64,7 +71,9 @@ int main(int argc, char **argv)
                 for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
                     ink += g.pixels[y * g.stride + x * (int)g.format +
                         (g.format == BLIT_RASTER_RGBA_PREMULTIPLIED ? 3 : 0)] != 0;
-                CHECK(ink);
+                /* A space (Unicode Zs: U+3000 Hibr uses as a wide blank) is
+                   drawn as nothing by design; it only must not fall back. */
+                CHECK(ink || is_space(cp));
                 ++ui_samples;
             }
         }

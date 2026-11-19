@@ -430,6 +430,8 @@ suite_font() {
     run_gate hibr_font_manifest_gate.py python3 tools/tests/hibr_font_manifest_gate.py
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate font_assets_gate.rb ruby tools/tests/font_assets_gate.rb
+    run_gate blit_icons_rebuild_gate.sh sh tools/tests/blit_icons_rebuild_gate.sh
+    run_gate hibr_ui_glyphs_gate.sh sh tools/tests/hibr_ui_glyphs_gate.sh
     run_gate font_discovery_gate.rb ruby tools/tests/font_discovery_gate.rb
     run_gate spleen_master_gate.rb ruby tools/tests/spleen_master_gate.rb
     run_gate font_reference_gate.rb ruby tools/tests/font_reference_gate.rb

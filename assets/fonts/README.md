@@ -58,7 +58,8 @@ upstream URL and licence. `font_assets_gate.rb` checks it, and that `text/`
 holds nothing unpinned. To rebuild Blit's icon font:
 
 ```sh
-PYTHONPATH=<fontTools4.60.1> python3 tools/fonts/build-blit-icons.py assets/fonts/BlitIcons-Regular.ttf
+PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-blit-icons.py assets/fonts/BlitIcons-Regular.ttf
+sh tools/tests/blit_icons_rebuild_gate.sh       # the committed font is what its sources make, byte for byte
 ruby tools/tests/outline_catalogue_gate.rb   # full Nerd catalogue, every text font, 57 sizes
 ruby tools/tests/custom_icon_gate.rb         # Blit icons and Hibr's UI glyphs, every text font
 ```

@@ -510,13 +510,16 @@ or physical conformance guarantees; internal issue #110 tracks the rest.
 - [Font provenance](../assets/fonts/fonts.source.json),
   [Arabic provenance](../assets/fonts/arabic-fonts.source.json),
   [Emoji corpus](../assets/unicode/emoji-18.0/source.json), and
-  [Hibr UI snapshot](../assets/fonts/hibr-ui-glyphs.json). The latter is a
-  versioned 101-scalar snapshot, not every application.
+  [Hibr UI snapshot](../assets/fonts/hibr-ui-glyphs.json). The latter is
+  generated from a Hibr release's wm/glyphs.hibr by
+  `tools/fonts/snapshot-hibr-ui.py` (the release and the file's hash
+  recorded in it; `hibr_ui_glyphs_gate.sh` checks it against the newest
+  Hibr release), not every application.
 
 The tables are generated, not another editable glyph registry:
 
 ```sh
-# Use the same isolated fontTools 4.60.1 environment as the font builders.
+# The pinned fontTools 4.60.1 the font builders use: PYTHONPATH=$(tools/fonts/fonttools.sh)
 python3 tools/fonts/build-reference.py
 python3 tools/fonts/build-reference.py --check
 ruby tools/tests/font_reference_gate.rb
