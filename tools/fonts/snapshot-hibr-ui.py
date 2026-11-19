@@ -2,7 +2,7 @@
 """The characters Hibr's desktop draws, from its wm/glyphs.hibr (Gitea #118).
 
     snapshot-hibr-ui.py <hibr checkout> <tag>            write assets/fonts/hibr-ui-glyphs.json
-    snapshot-hibr-ui.py --check <hibr checkout> [<tag>]  exit 1 when the snapshot differs
+    snapshot-hibr-ui.py --check <hibr checkout> [<tag>]  exit 1 when Hibr draws what it lacks
 
 Every scalar above ASCII that glyphs.hibr names -- as a literal character, a
 \\uXXXX or \\UXXXXXXXX escape, or a run of \\xHH UTF-8 bytes -- sorted. The
@@ -81,14 +81,22 @@ def main(argv):
         print('%s: %d scalars from Hibr %s' % (OUT, len(want['scalars']), tag))
         return 0
     have = json.load(open(OUT, encoding='utf-8'))
-    if have.get('source_sha256') == want['source_sha256'] and have.get('scalars') == want['scalars']:
-        print('HIBR_UI_GLYPHS_PASS %d scalars, Hibr %s' % (len(want['scalars']), tag))
-        return 0
     new = sorted(set(want['scalars']) - set(have.get('scalars', [])))
     gone = sorted(set(have.get('scalars', [])) - set(want['scalars']))
-    print('HIBR_UI_GLYPHS_FAIL the snapshot is Hibr %s, not %s: %d new (%s), %d gone (%s); '
+    # What must not happen is Hibr drawing a character the icon gates do not
+    # cover. A Hibr release that only edits the file, or stops drawing
+    # something, is said, not failed: the snapshot still covers it.
+    if not new:
+        same = have.get('source_sha256') == want['source_sha256']
+        print('HIBR_UI_GLYPHS_PASS %d scalars cover Hibr %s%s' % (
+            len(have.get('scalars', [])), tag,
+            '' if same and not gone else
+            ' (the snapshot is Hibr %s: %d no longer drawn%s; regenerate at leisure)' % (
+                have.get('hibr', 'unrecorded'), len(gone), '' if same else ', the file changed')))
+        return 0
+    print('HIBR_UI_GLYPHS_FAIL Hibr %s draws %d characters the snapshot (Hibr %s) lacks: %s; '
           'regenerate with tools/fonts/snapshot-hibr-ui.py <hibr> %s and update fonts.source.json'
-          % (have.get('hibr', 'unrecorded'), tag, len(new), ' '.join(new[:12]), len(gone), ' '.join(gone[:12]), tag))
+          % (tag, len(new), have.get('hibr', 'unrecorded'), ' '.join(new[:12]), tag))
     return 1
 
 
