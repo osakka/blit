@@ -1290,6 +1290,28 @@ def x_drop_part(desk, standin, env, log, work):
         position = re.search(r'XSTANDIN dnd position (\d+),(\d+) copy', out)
         check(position is not None and 'XSTANDIN dnd drop' in out, lambda: 'no position and drop:\n' + out)
         check('XSTANDIN dnd leave' not in out, lambda: 'a taken drop was left:\n' + out)
+        # Off the root's origin (the owner's desktop has several displays):
+        # the window on a second display, its XdndPosition the drop point
+        # plus where X put it.
+        desk.send('WINDOW layout DP-1 0 0 1920 1080 0')
+        desk.send('WINDOW layout HDMI-A-1 1920 0 2560 1440 144000')
+        desk.send('WINDOW layout end')
+        desk.send('WINDOW output %d 2560 1440 144000' % wid)
+        placed = re.compile(r'window %d: X window 0x[0-9a-f]+ on display HDMI-A-1 at (-?\d+),(-?\d+)' % wid)
+        wait_for(lambda: placed.search(log()), lambda: 'the window did not go to HDMI-A-1:\n' + log(), 15)
+        px, py = (int(v) for v in placed.findall(log())[-1])
+        check(px >= 1920, 'the window is at %d,%d, not on the second display' % (px, py))
+        desk.send('CLIP drop 56 %d 33 44 text/uri-list' % wid)
+        until(r'CLIP read 56 text/uri-list')
+        fd = desk.desk.clip_fds.pop(0)
+        os.write(fd, b'file:///home/me/far.txt\r\n')
+        os.close(fd)
+        until(r'CLIP dropped 56 taken')
+        wait_for(lambda: 'XSTANDIN dnd position %d,%d copy' % (px + 33, py + 44) in printed(),
+                 lambda: 'the position was not %d,%d:\n%s' % (px + 33, py + 44, printed()))
+        off_origin = '%d,%d' % (px + 33, py + 44)
+        desk.send('WINDOW layout DP-1 0 0 1920 1080 0')
+        desk.send('WINDOW layout end')
         # Refused by the program: left, refused after its second.
         client2, wid2, printed2 = start('xstandin-drop-refuse.out', 'refuse')
         clients.append(client2)
@@ -1332,9 +1354,10 @@ def x_drop_part(desk, standin, env, log, work):
             desk.send('WINDOW close %d' % w)
             until(r'WINDOW gone %d' % w)
         return ('xdnd: aware=enter(v5,types)+position(root %s,%s,copy)->status->drop->XdndSelection=CLIP read->'
-                'finished->taken in %.2fs refuse=left,refused-after-%.1fs unaware=refused-at-once,said '
+                'finished->taken in %.2fs off-origin=position(root %s) refuse=left,refused-after-%.1fs '
+                'unaware=refused-at-once,said '
                 'hover=XdndStatus->copy/none,move->position,drop-over-hover->taken,leave->XdndLeave'
-                % (position.group(1), position.group(2), took, waited))
+                % (position.group(1), position.group(2), took, off_origin, waited))
     finally:
         for c in clients:
             if c.poll() is None:
