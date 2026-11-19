@@ -336,6 +336,7 @@ enum {
     BC_ATOM_XDND_AWARE, BC_ATOM_XDND_PROXY, BC_ATOM_XDND_ENTER, BC_ATOM_XDND_POSITION, BC_ATOM_XDND_STATUS,
     BC_ATOM_XDND_LEAVE, BC_ATOM_XDND_DROP, BC_ATOM_XDND_FINISHED, BC_ATOM_XDND_SELECTION,
     BC_ATOM_XDND_TYPE_LIST, BC_ATOM_XDND_ACTION_COPY, BC_ATOM_BLIT_XDND_TIME,
+    BC_ATOM_XDND_ACTION_MOVE,
     BC_ATOMS
 };
 
@@ -399,6 +400,22 @@ struct bc_x {
     uint8_t xfixes_first;
     xcb_window_t sel_window;
     xcb_window_t dnd_window;          /* the source of drops onto X windows (XDND), its own */
+    /* An X program's drag out (0.3.121): the compositor its XDND target,
+       through a drop window over the whole root while a button is down. */
+    struct {
+        xcb_window_t proxy;           /* XdndAware, override-redirect, the root's size; 0 none */
+        int armed;                    /* mapped: an X program owns XdndSelection with a button down */
+        struct bc_xdg *from;          /* the window it started on */
+        xcb_window_t source;          /* its XdndEnter's source window */
+        uint32_t version;
+        xcb_atom_t types[BC_CLIP_TYPES];
+        int ntypes;
+        int announced;                /* `CLIP dragout` said: s->dragout holds it */
+        int ended;                    /* the desktop's dragend given: waiting for its drop or leave */
+        xcb_atom_t action;            /* the action given at the end (copy, move, none) */
+        struct bc_source *src;        /* the reads' source: XdndSelection at its position's time */
+        struct wl_event_source *timer;
+    } xdrag;
     struct bc_xsel {
         xcb_window_t owner;           /* X's owner as XFixes last said, None none */
         xcb_timestamp_t owner_time;   /* its selection time */
@@ -565,6 +582,8 @@ struct bc_server {
         uint32_t n;                   /* 0: none */
         struct bc_source *src;
         struct bc_xdg *window;
+        int x;                        /* an X program's (XDND): the compositor its target */
+        uint32_t xheld;               /* its buttons released meanwhile, given at the end */
     } dragout;
     uint32_t dragouts;                /* the o<n> count */
     int drag_said;                    /* "the desktop does not run drags" logged */
@@ -3193,6 +3212,7 @@ static void device_set_selection(struct wl_resource *device, struct wl_resource 
 }
 
 static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly);
+static void xdrag_dragend(struct bc_server *s, int action, uint32_t held);
 
 /* The program's drag out over: told as the desktop says -- dropped with
    that action (performed, then finished), or cancelled. */
@@ -3200,8 +3220,15 @@ static void dragout_end(struct bc_server *s, int action)
 {
     struct bc_source *src = s->dragout.src;
     uint32_t n = s->dragout.n;
+    uint32_t held = s->dragout.xheld;
+    int x = s->dragout.x;
     if (n == 0) return;
     memset(&s->dragout, 0, sizeof(s->dragout));
+    if (x) {
+        xdrag_dragend(s, action, held);
+        logf_("drag out o%u (X): %s", n, action == 2 ? "moved" : action == 1 ? "copied" : "cancelled");
+        return;
+    }
     if (src == NULL) return;
     src->dragging = 0;
     if (action == 0) {
@@ -3682,6 +3709,14 @@ static void drop_begin(struct bc_server *s, const BcLine *l, int hover)
     /* An X program's window takes it by XDND (0.3.117); its menus and
        other override-redirect windows take none. */
     if (x != NULL && x->xwin != NULL && d->timer != NULL) {
+        if (d->out && s->dragout.n == d->seq && s->dragout.x) {
+            /* An X program's drag onto an X window: the compositor cannot be
+               its source too (it would take XdndSelection from the program
+               dragging, and end that drag). Refused, for now. */
+            logf_("drop o%u on window %u: an X program's drag onto an X window is not carried", d->seq, d->window);
+            drop_end(s, 0);
+            return;
+        }
         if (x->xpopup || !xdnd_begin(s, x->xwin)) drop_end(s, 0);
         return;
     }
@@ -6937,7 +6972,13 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         if (in.code < 0x110 || in.code >= 0x110 + 32) return;
         if (in.pressed) s->buttons_down |= 1u << (in.code - 0x110);
         else s->buttons_down &= ~(1u << (in.code - 0x110));
-        if (s->ptr_focus == NULL || (s->dragout.n && s->dragout.window == x)) return;
+        if (s->dragout.n && s->dragout.window == x) {
+            /* The desktop's drag of it: an X program's release is given at
+               the end (it drops or leaves on it, XDND). */
+            if (s->dragout.x && !in.pressed) s->dragout.xheld |= 1u << (in.code - 0x110);
+            return;
+        }
+        if (s->ptr_focus == NULL) return;
         {
             /* One serial for the event: a press's is what a move, resize or
                menu request must name (WINDOW move). */
@@ -7304,6 +7345,7 @@ static const char *const bc_atom_names[BC_ATOMS] = {
     "x-kde-passwordManagerHint", "_BLIT_SELECTION",
     "XdndAware", "XdndProxy", "XdndEnter", "XdndPosition", "XdndStatus", "XdndLeave", "XdndDrop",
     "XdndFinished", "XdndSelection", "XdndTypeList", "XdndActionCopy", "_BLIT_XDND_TIME",
+    "XdndActionMove",
 };
 
 /* One child of the root: an X top-level, from its CreateNotify to its
@@ -8367,14 +8409,16 @@ static int x_sel_index(struct bc_server *s, xcb_atom_t atom)
     return -1;
 }
 
+/* k: 0 CLIPBOARD, 1 PRIMARY, and 2 XdndSelection -- an X program's drag
+   out, read as its selection (only by OUT/IN transfers; never s->sel[2]). */
 static xcb_atom_t x_sel_atom(struct bc_server *s, int k)
 {
-    return k ? XCB_ATOM_PRIMARY : s->x.atoms[BC_ATOM_CLIPBOARD];
+    return k == 2 ? s->x.atoms[BC_ATOM_XDND_SELECTION] : k ? XCB_ATOM_PRIMARY : s->x.atoms[BC_ATOM_CLIPBOARD];
 }
 
 static const char *x_sel_name(int k)
 {
-    return k ? "PRIMARY" : "CLIPBOARD";
+    return k == 2 ? "XdndSelection" : k ? "PRIMARY" : "CLIPBOARD";
 }
 
 /* The X client of a window: its id without the resource bits (the X
@@ -9272,6 +9316,265 @@ static int xdnd_request(struct bc_server *s, const xcb_selection_request_event_t
     return x_out_begin(s, 0, 1, req, property, type, latin1, want) == 0;
 }
 
+/* ---- an X program dragging out (XDND, the compositor its target; 0.3.121) ----
+
+   Agreed with Hibr (ADR 0229 row 3, X sources): the same `CLIP dragout`.
+   - An X program owns XdndSelection while a button the compositor gave it
+     is down on its window (and the desktop runs drags, drag=1): a drop
+     window is mapped over the whole root, on top, XdndAware, so the
+     program's drag talks to the compositor wherever the pointer is.
+   - Its XdndEnter names its types (XdndTypeList past three), its first
+     XdndPosition the action: `CLIP dragout o<n> <window> copy|move|copy,move
+     <type>+`, and from then the desktop runs it; the window takes no pointer
+     input, its releases held.
+   - Reads (the desktop's `CLIP read o<n>`, a Wayland program's receive
+     when dropped there) convert XdndSelection at its position's time, as an
+     X paste is read -- XDND lets the target read before the drop.
+   - `CLIP dragend o<n> copy|move`: XdndStatus accepting that action, then
+     the held release; it sends XdndDrop, answered XdndFinished.
+     `none`: XdndStatus refusing, the release; it leaves.
+   - Onto another X window: refused (drop_begin). Its selection or window
+     gone, or Xwayland: `CLIP clear o<n>`.
+   - Nothing seen from it in 2 s after arming, or its button up first: the
+     drop window goes again (its drag stays X's own). */
+
+#define BC_XDRAG_ARM_MS 2000
+
+static void xdrag_disarm(struct bc_server *s)
+{
+    if (s->x.xdrag.armed && s->x.conn && s->x.xdrag.proxy) {
+        xcb_unmap_window(s->x.conn, s->x.xdrag.proxy);
+        xcb_flush(s->x.conn);
+    }
+    if (s->x.xdrag.timer) wl_event_source_timer_update(s->x.xdrag.timer, 0);
+    if (s->x.xdrag.src) {
+        source_free_types(s->x.xdrag.src);
+        free(s->x.xdrag.src);
+    }
+    s->x.xdrag.src = NULL;
+    s->x.xdrag.armed = s->x.xdrag.announced = s->x.xdrag.ended = 0;
+    s->x.xdrag.source = XCB_WINDOW_NONE;
+    s->x.xdrag.from = NULL;
+    s->x.xdrag.ntypes = 0;
+}
+
+/* The program's drag gone under the desktop: said, and the desktop's drag of it ended. */
+static void xdrag_lost(struct bc_server *s, const char *why)
+{
+    if (s->x.xdrag.announced && s->dragout.n && s->dragout.x) {
+        logf_("drag out o%u (X): %s", s->dragout.n, why);
+        bc_wire_line(&s->wire, "CLIP clear o%u", s->dragout.n);
+        memset(&s->dragout, 0, sizeof(s->dragout));
+    }
+    xdrag_disarm(s);
+}
+
+static int xdrag_timeout(void *data)
+{
+    struct bc_server *s = data;
+    if (s->x.xdrag.armed && !s->x.xdrag.announced) xdrag_disarm(s);
+    else if (s->x.xdrag.ended) xdrag_disarm(s);      /* no drop nor leave after the end */
+    return 0;
+}
+
+static void xdrag_gone(struct bc_server *s)
+{
+    if (s->x.xdrag.announced && s->dragout.n && s->dragout.x) {
+        bc_wire_line(&s->wire, "CLIP clear o%u", s->dragout.n);
+        memset(&s->dragout, 0, sizeof(s->dragout));
+    }
+    s->x.xdrag.armed = 0;                             /* its windows are gone with it */
+    s->x.xdrag.proxy = XCB_WINDOW_NONE;
+    xdrag_disarm(s);
+}
+
+/* XFixes: XdndSelection's owner changed. An X program's (a window not the
+   compositor's) with a button down on its window: armed. */
+static void xdrag_owner(struct bc_server *s, xcb_window_t owner)
+{
+    struct bc_xdg *from = s->ptr_focus ? surface_window(s->ptr_focus) : NULL;
+    xcb_get_geometry_reply_t *root;
+    uint32_t v[2];
+    if (owner == XCB_WINDOW_NONE || x_own_window(s, owner)) {
+        if (s->x.xdrag.armed && owner == XCB_WINDOW_NONE) xdrag_lost(s, "its program let it go");
+        return;
+    }
+    if (s->x.xdrag.armed) {
+        if (s->x.xdrag.announced) xdrag_lost(s, "another took XdndSelection");
+        else xdrag_disarm(s);
+    }
+    if (!s->wire.drag || s->link != BC_LINK_UP || s->buttons_down == 0 || from == NULL || from->xwin == NULL ||
+        s->dragout.n) {
+        logf_("X window 0x%x owns XdndSelection: not a drag out (%s)", (unsigned)owner,
+              !s->wire.drag ? "the desktop does not run drags" : s->buttons_down == 0 ? "no button down"
+              : from == NULL || from->xwin == NULL ? "the pointer is on no X window" : "a drag out is under way");
+        return;
+    }
+    root = xcb_get_geometry_reply(s->x.conn, xcb_get_geometry(s->x.conn, s->x.screen->root), NULL);
+    if (root == NULL) return;
+    if (s->x.xdrag.proxy == XCB_WINDOW_NONE) {
+        uint32_t version = 5, attrs[2] = {1, 0};      /* override-redirect; no event mask */
+        s->x.xdrag.proxy = xcb_generate_id(s->x.conn);
+        xcb_create_window(s->x.conn, 0, s->x.xdrag.proxy, s->x.screen->root, 0, 0, root->width, root->height, 0,
+                          XCB_WINDOW_CLASS_INPUT_ONLY, XCB_COPY_FROM_PARENT,
+                          XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, attrs);
+        xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, s->x.xdrag.proxy, s->x.atoms[BC_ATOM_XDND_AWARE],
+                            XCB_ATOM_ATOM, 32, 1, &version);
+    } else {
+        v[0] = root->width;
+        v[1] = root->height;
+        xcb_configure_window(s->x.conn, s->x.xdrag.proxy, XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT, v);
+    }
+    free(root);
+    v[0] = XCB_STACK_MODE_ABOVE;
+    xcb_map_window(s->x.conn, s->x.xdrag.proxy);
+    xcb_configure_window(s->x.conn, s->x.xdrag.proxy, XCB_CONFIG_WINDOW_STACK_MODE, v);
+    xcb_flush(s->x.conn);
+    s->x.xdrag.armed = 1;
+    s->x.xdrag.from = from;
+    logf_("X window 0x%x owns XdndSelection with a button down on window %u: its drag talks to the compositor",
+          (unsigned)owner, from->id);
+    if (s->x.xdrag.timer == NULL) s->x.xdrag.timer = wl_event_loop_add_timer(s->loop, xdrag_timeout, s);
+    if (s->x.xdrag.timer) wl_event_source_timer_update(s->x.xdrag.timer, BC_XDRAG_ARM_MS);
+}
+
+static void xdrag_reply(struct bc_server *s, xcb_atom_t type, uint32_t l1, uint32_t l2, uint32_t l3, uint32_t l4)
+{
+    union {
+        xcb_client_message_event_t ev;
+        char bytes[32];
+    } u;
+    memset(&u, 0, sizeof(u));
+    u.ev.response_type = XCB_CLIENT_MESSAGE;
+    u.ev.format = 32;
+    u.ev.window = s->x.xdrag.source;
+    u.ev.type = type;
+    u.ev.data.data32[0] = s->x.xdrag.proxy;
+    u.ev.data.data32[1] = l1;
+    u.ev.data.data32[2] = l2;
+    u.ev.data.data32[3] = l3;
+    u.ev.data.data32[4] = l4;
+    xcb_send_event(s->x.conn, 0, s->x.xdrag.source, XCB_EVENT_MASK_NO_EVENT, u.bytes);
+    xcb_flush(s->x.conn);
+}
+
+/* Its first position: announced to the desktop. */
+static void xdrag_announce(struct bc_server *s, xcb_atom_t action, xcb_timestamp_t time)
+{
+    const xcb_atom_t *atoms = s->x.atoms;
+    struct bc_source *src;
+    char types[BC_TEXT_BYTES + 1], name[BC_CLIP_TYPE_BYTES + 1];
+    size_t used = 0;
+    int i;
+    if (s->dragout.n) return;
+    if ((src = calloc(1, sizeof(*src))) == NULL) return;
+    src->server = s;
+    src->x = 1;
+    src->primary = 2;                                 /* x_sel_atom 2: XdndSelection */
+    src->xowner = s->x.xdrag.source;
+    src->xtime = time;
+    types[0] = '\0';
+    for (i = 0; i < s->x.xdrag.ntypes; ++i) {
+        xcb_get_atom_name_reply_t *r =
+            xcb_get_atom_name_reply(s->x.conn, xcb_get_atom_name(s->x.conn, s->x.xdrag.types[i]), NULL);
+        int len = r ? xcb_get_atom_name_name_length(r) : 0;
+        if (r && len > 0 && len <= BC_CLIP_TYPE_BYTES) {
+            memcpy(name, xcb_get_atom_name_name(r), (size_t)len);
+            name[len] = '\0';
+            if (!strchr(name, ' ') && used + (size_t)len + 2 <= sizeof(types)) {
+                x_source_add(src, name, s->x.xdrag.types[i]);
+                if (used) types[used++] = ' ';
+                memcpy(types + used, name, (size_t)len + 1);
+                used += (size_t)len;
+            }
+        }
+        free(r);
+    }
+    if (used == 0) {
+        free(src);
+        logf_("X window 0x%x: a drag of nothing named is not carried", (unsigned)s->x.xdrag.source);
+        return;
+    }
+    s->x.xdrag.src = src;
+    s->x.xdrag.announced = 1;
+    if (s->x.xdrag.timer) wl_event_source_timer_update(s->x.xdrag.timer, 0);
+    s->dragout.n = ++s->dragouts;
+    s->dragout.src = src;
+    s->dragout.window = s->x.xdrag.from;
+    s->dragout.x = 1;
+    s->dragout.xheld = 0;
+    bc_wire_line(&s->wire, "CLIP dragout o%u %u %s %s", s->dragout.n, s->x.xdrag.from->id,
+                 action == atoms[BC_ATOM_XDND_ACTION_COPY] ? "copy"
+                 : action == atoms[BC_ATOM_XDND_ACTION_MOVE] ? "move" : "copy,move", types);
+    logf_("drag out o%u from window %u (X window 0x%x, XDND %u): %s", s->dragout.n, s->x.xdrag.from->id,
+          (unsigned)s->x.xdrag.source, (unsigned)s->x.xdrag.version, types);
+}
+
+static void xdrag_message(struct bc_server *s, const xcb_client_message_event_t *ev)
+{
+    const xcb_atom_t *atoms = s->x.atoms;
+    const uint32_t *l = ev->data.data32;
+    if (!s->x.xdrag.armed) return;
+    if (ev->type == atoms[BC_ATOM_XDND_ENTER]) {
+        int i;
+        s->x.xdrag.source = l[0];
+        s->x.xdrag.version = l[1] >> 24;
+        s->x.xdrag.ntypes = 0;
+        if (l[1] & 1) {
+            xcb_get_property_reply_t *r = xcb_get_property_reply(
+                s->x.conn, xcb_get_property(s->x.conn, 0, l[0], atoms[BC_ATOM_XDND_TYPE_LIST], XCB_ATOM_ATOM, 0,
+                                            BC_CLIP_TYPES), NULL);
+            int n = r && r->format == 32 ? xcb_get_property_value_length(r) / 4 : 0;
+            for (i = 0; i < n && i < BC_CLIP_TYPES; ++i)
+                s->x.xdrag.types[s->x.xdrag.ntypes++] = ((const xcb_atom_t *)xcb_get_property_value(r))[i];
+            free(r);
+        } else {
+            for (i = 2; i < 5; ++i) if (l[i]) s->x.xdrag.types[s->x.xdrag.ntypes++] = l[i];
+        }
+    } else if (ev->type == atoms[BC_ATOM_XDND_POSITION] && l[0] == s->x.xdrag.source) {
+        if (!s->x.xdrag.announced) xdrag_announce(s, l[4], l[3]);
+        else if (s->x.xdrag.src && !s->x.xdrag.ended) s->x.xdrag.src->xtime = l[3];
+        /* Undecided until the desktop's end: not accepted, positions wanted. */
+        if (!s->x.xdrag.ended) xdrag_reply(s, atoms[BC_ATOM_XDND_STATUS], 2, 0, 0, XCB_ATOM_NONE);
+    } else if (ev->type == atoms[BC_ATOM_XDND_DROP] && l[0] == s->x.xdrag.source) {
+        int ok = s->x.xdrag.ended && s->x.xdrag.action != XCB_ATOM_NONE;
+        xdrag_reply(s, atoms[BC_ATOM_XDND_FINISHED], ok ? 1 : 0, ok ? s->x.xdrag.action : XCB_ATOM_NONE, 0, 0);
+        xdrag_disarm(s);
+    } else if (ev->type == atoms[BC_ATOM_XDND_LEAVE] && l[0] == s->x.xdrag.source) {
+        if (s->x.xdrag.ended) xdrag_disarm(s);
+        else xdrag_lost(s, "it left");
+    }
+}
+
+/* The desktop's `CLIP dragend`: the program told accepted (copy, move) or
+   refused, then given its held release -- it drops or leaves on it. */
+static void xdrag_dragend(struct bc_server *s, int action, uint32_t held)
+{
+    const xcb_atom_t *atoms = s->x.atoms;
+    struct wl_resource *r;
+    uint32_t b;
+    if (!s->x.xdrag.armed || s->x.conn == NULL) return;
+    s->x.xdrag.ended = 1;
+    s->x.xdrag.action = action == 2 ? atoms[BC_ATOM_XDND_ACTION_MOVE]
+                      : action == 1 ? atoms[BC_ATOM_XDND_ACTION_COPY] : XCB_ATOM_NONE;
+    xdrag_reply(s, atoms[BC_ATOM_XDND_STATUS], action ? 1 : 0, 0, 0, s->x.xdrag.action);
+    /* The status before the release: they reach X by two roads (this
+       connection, and Xwayland's Wayland seat), so one round trip first --
+       X has sent the status once it answers. (Xwayland answers this
+       without asking the compositor anything.) */
+    free(xcb_get_input_focus_reply(s->x.conn, xcb_get_input_focus(s->x.conn), NULL));
+    s->dragout.src = NULL;
+    for (b = 0; b < 32; ++b)
+        if ((held & (1u << b)) && s->ptr_focus) {
+            uint32_t serial = wl_display_next_serial(s->display);
+            seat_for_client(r, &s->pointers, s->ptr_focus) {
+                wl_pointer_send_button(r, serial, now_ms(), 0x110 + b, WL_POINTER_BUTTON_STATE_RELEASED);
+                if (wl_resource_get_version(r) >= WL_POINTER_FRAME_SINCE_VERSION) wl_pointer_send_frame(r);
+            }
+        }
+    if (s->x.xdrag.timer) wl_event_source_timer_update(s->x.xdrag.timer, BC_XDRAG_ARM_MS);
+}
+
 /* A SelectionRequest: the window manager's selections answered, every
    other refused. */
 static void x_selection_request(struct bc_server *s, xcb_selection_request_event_t *req)
@@ -9311,12 +9614,18 @@ static void x_selection_request(struct bc_server *s, xcb_selection_request_event
 }
 
 /* XFixes: X's owner of a selection changed. */
+static void xdrag_owner(struct bc_server *s, xcb_window_t owner);
+
 static void x_selection_owner(struct bc_server *s, xcb_xfixes_selection_notify_event_t *ev)
 {
     int k = x_sel_index(s, ev->selection);
     struct bc_xsel *x;
     struct bc_selection *sel;
     xcb_window_t owner;
+    if (ev->selection == s->x.atoms[BC_ATOM_XDND_SELECTION]) {
+        xdrag_owner(s, ev->subtype == XCB_XFIXES_SELECTION_EVENT_SET_SELECTION_OWNER ? ev->owner : XCB_WINDOW_NONE);
+        return;
+    }
     if (k < 0) return;
     x = &s->x.xsel[k];
     sel = &s->sel[k];
@@ -9465,6 +9774,11 @@ static void x_selections_start(struct bc_server *s)
                                           XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
         if (x_should_own(s, k)) x_sel_claim(s, k);
     }
+    /* An X program's drag out starts with its owning XdndSelection. */
+    xcb_xfixes_select_selection_input(s->x.conn, s->x.sel_window, s->x.atoms[BC_ATOM_XDND_SELECTION],
+                                      XCB_XFIXES_SELECTION_EVENT_MASK_SET_SELECTION_OWNER |
+                                      XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_WINDOW_DESTROY |
+                                      XCB_XFIXES_SELECTION_EVENT_MASK_SELECTION_CLIENT_CLOSE);
 }
 
 /* The connection going: every transfer dropped (the X side with it). */
@@ -9479,6 +9793,7 @@ static void x_selections_stop(struct bc_server *s)
     s->x.dnd_window = XCB_WINDOW_NONE;
     s->x.xfixes_first = 0;
     xdnd_gone(s, XCB_WINDOW_NONE);
+    xdrag_gone(s);
 }
 
 /* Xwayland gone: an X program's selection ended with it. */
@@ -9586,7 +9901,7 @@ static struct bc_xwin *x_window_new(struct bc_server *s, xcb_window_t window, in
 
 static void x_create_notify(struct bc_server *s, xcb_create_notify_event_t *ev)
 {
-    if (ev->parent == s->x.screen->root)
+    if (ev->parent == s->x.screen->root && ev->window != s->x.xdrag.proxy)
         x_window_new(s, ev->window, ev->x, ev->y, ev->width, ev->height, ev->override_redirect);
 }
 
@@ -9796,10 +10111,15 @@ static void x_moveresize_request(struct bc_server *s, xcb_client_message_event_t
 
 static void xdnd_status(struct bc_server *s, const xcb_client_message_event_t *ev);
 static void xdnd_finished(struct bc_server *s, const xcb_client_message_event_t *ev);
+static void xdrag_message(struct bc_server *s, const xcb_client_message_event_t *ev);
 
 static void x_client_message(struct bc_server *s, xcb_client_message_event_t *ev)
 {
     xcb_atom_t *atoms = s->x.atoms;
+    if (ev->format == 32 && ev->window == s->x.xdrag.proxy && s->x.xdrag.proxy != XCB_WINDOW_NONE) {
+        xdrag_message(s, ev);
+        return;
+    }
     if (ev->format == 32 && ev->window == s->x.dnd_window && s->x.dnd_window != XCB_WINDOW_NONE &&
         (ev->type == atoms[BC_ATOM_XDND_STATUS] || ev->type == atoms[BC_ATOM_XDND_FINISHED])) {
         if (ev->type == atoms[BC_ATOM_XDND_STATUS]) xdnd_status(s, ev);
@@ -11649,6 +11969,12 @@ int main(int argc, char **argv)
     if (server.offer_retry) wl_event_source_remove(server.offer_retry);
     drop_relays_end(&server);
     if (server.drop.timer) wl_event_source_remove(server.drop.timer);
+    if (server.x.xdrag.src) {
+        source_free_types(server.x.xdrag.src);
+        free(server.x.xdrag.src);
+        server.x.xdrag.src = NULL;
+    }
+    if (server.x.xdrag.timer) wl_event_source_remove(server.x.xdrag.timer);
     dial_end(&server);
     /* The outputs before the display: their globals and timers are its. */
     while (!wl_list_empty(&server.outputs)) {

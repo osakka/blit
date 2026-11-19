@@ -1085,6 +1085,155 @@ static int dnd_notify(const xcb_selection_notify_event_t *ev)
     return 1;
 }
 
+/* Dragging out (XDND source, Blit 0.3.121): with $XSTANDIN_DRAG_OUT a left
+   press on the top-level starts a drag as a toolkit does -- XdndSelection
+   owned at the press's time, the pointer grabbed; each motion finds the
+   XdndAware window under the pointer (the root's child there) and gives it
+   XdndEnter (text/uri-list, text/plain;charset=utf-8) and XdndPosition with
+   XdndActionCopy, one at a time after its XdndStatus; the release drops
+   when the last status accepted, else leaves. It answers XdndSelection's
+   conversion with "file:///home/me/x%20out.txt\r\n" and says each step:
+   "dragout owner", "dragout enter 0x.." , "dragout status accept|refuse",
+   "dragout drop", "dragout leave", "dragout sent <target>", "dragout
+   finished <accepted> <action>". */
+static int dragout_mode, dragout_on, dragout_waiting, dragout_accepted;
+static xcb_window_t dragout_target;
+static xcb_timestamp_t dragout_time;
+static xcb_atom_t xa_aware, xa_enter, xa_position, xa_status, xa_leave, xa_drop, xa_finished, xa_selection,
+    xa_copy, xa_uri, xa_text;
+
+static void dragout_init(void)
+{
+    if (getenv("XSTANDIN_DRAG_OUT") == NULL) return;
+    dragout_mode = 1;
+    xa_aware = atom("XdndAware");
+    xa_enter = atom("XdndEnter");
+    xa_position = atom("XdndPosition");
+    xa_status = atom("XdndStatus");
+    xa_leave = atom("XdndLeave");
+    xa_drop = atom("XdndDrop");
+    xa_finished = atom("XdndFinished");
+    xa_selection = atom("XdndSelection");
+    xa_copy = atom("XdndActionCopy");
+    xa_uri = atom("text/uri-list");
+    xa_text = atom("text/plain;charset=utf-8");
+}
+
+static void dragout_send(xcb_window_t to, xcb_atom_t type, uint32_t l1, uint32_t l2, uint32_t l3, uint32_t l4)
+{
+    union {
+        xcb_client_message_event_t ev;
+        char bytes[32];
+    } u;
+    memset(&u, 0, sizeof(u));
+    u.ev.response_type = XCB_CLIENT_MESSAGE;
+    u.ev.format = 32;
+    u.ev.window = to;
+    u.ev.type = type;
+    u.ev.data.data32[0] = window;
+    u.ev.data.data32[1] = l1;
+    u.ev.data.data32[2] = l2;
+    u.ev.data.data32[3] = l3;
+    u.ev.data.data32[4] = l4;
+    xcb_send_event(conn, 0, to, XCB_EVENT_MASK_NO_EVENT, u.bytes);
+    xcb_flush(conn);
+}
+
+static void dragout_press(const xcb_button_press_event_t *b)
+{
+    xcb_grab_pointer_reply_t *g;
+    dragout_time = b->time;
+    xcb_set_selection_owner(conn, window, xa_selection, b->time);
+    g = xcb_grab_pointer_reply(conn, xcb_grab_pointer(conn, 0, window,
+                                                      XCB_EVENT_MASK_POINTER_MOTION | XCB_EVENT_MASK_BUTTON_RELEASE,
+                                                      XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, XCB_WINDOW_NONE,
+                                                      XCB_CURSOR_NONE, b->time), NULL);
+    free(g);
+    dragout_on = 1;
+    dragout_target = XCB_WINDOW_NONE;
+    dragout_waiting = dragout_accepted = 0;
+    say("dragout owner");
+}
+
+static void dragout_motion(const xcb_motion_notify_event_t *m)
+{
+    xcb_translate_coordinates_reply_t *t;
+    xcb_window_t child;
+    uint32_t version = 0;
+    xcb_get_property_reply_t *r;
+    if (!dragout_on) return;
+    dragout_time = m->time;
+    t = xcb_translate_coordinates_reply(conn, xcb_translate_coordinates(conn, screen->root, screen->root,
+                                                                         m->root_x, m->root_y), NULL);
+    child = t ? t->child : XCB_WINDOW_NONE;
+    free(t);
+    r = child ? xcb_get_property_reply(conn, xcb_get_property(conn, 0, child, xa_aware, XCB_ATOM_ATOM, 0, 1), NULL)
+              : NULL;
+    if (r && r->format == 32 && xcb_get_property_value_length(r) >= 4) version = *(uint32_t *)xcb_get_property_value(r);
+    free(r);
+    if (version < 3) child = XCB_WINDOW_NONE;
+    if (child != dragout_target) {
+        if (dragout_target) dragout_send(dragout_target, xa_leave, 0, 0, 0, 0);
+        dragout_target = child;
+        dragout_waiting = dragout_accepted = 0;
+        if (child) {
+            dragout_send(child, xa_enter, 5u << 24, xa_uri, xa_text, 0);
+            say("dragout enter 0x%x", (unsigned)child);
+        }
+    }
+    if (dragout_target && !dragout_waiting) {
+        dragout_send(dragout_target, xa_position, 0, ((uint32_t)m->root_x << 16) | (uint16_t)m->root_y, m->time, xa_copy);
+        dragout_waiting = 1;
+    }
+}
+
+static void dragout_release(const xcb_button_release_event_t *b)
+{
+    if (!dragout_on) return;
+    dragout_on = 0;
+    xcb_ungrab_pointer(conn, b->time);
+    if (dragout_target && dragout_accepted) {
+        dragout_send(dragout_target, xa_drop, 0, b->time, 0, 0);
+        say("dragout drop");
+    } else if (dragout_target) {
+        dragout_send(dragout_target, xa_leave, 0, 0, 0, 0);
+        say("dragout leave");
+    }
+    xcb_flush(conn);
+}
+
+/* A message for the drag's source: 1 when it was one. */
+static int dragout_message(const xcb_client_message_event_t *m)
+{
+    if (!dragout_mode || m->format != 32 || m->window != window) return 0;
+    if (m->type == xa_status) {
+        dragout_waiting = 0;
+        dragout_accepted = (m->data.data32[1] & 1) != 0;
+        say("dragout status %s", dragout_accepted ? "accept" : "refuse");
+    } else if (m->type == xa_finished) {
+        say("dragout finished %u %s", (unsigned)(m->data.data32[1] & 1), m->data.data32[2] == xa_copy ? "copy" : "other");
+    } else {
+        return 0;
+    }
+    return 1;
+}
+
+/* XdndSelection asked of it: its file's address. */
+static int dragout_request(const xcb_selection_request_event_t *req)
+{
+    static const char text[] = "file:///home/me/x%20out.txt\r\n";
+    xcb_atom_t property = req->property ? req->property : req->target;
+    if (!dragout_mode || req->selection != xa_selection) return 0;
+    if (req->target == xa_uri || req->target == xa_text) {
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, req->requestor, property, req->target, 8, sizeof(text) - 1, text);
+        notify(req, property);
+        say("dragout sent %s", req->target == xa_uri ? "text/uri-list" : "text/plain;charset=utf-8");
+    } else {
+        notify(req, XCB_ATOM_NONE);
+    }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     const char *title = argc > 1 ? argv[1] : "Blit X stand-in";
@@ -1176,6 +1325,7 @@ int main(int argc, char **argv)
         }
     }
     dnd_start();
+    dragout_init();
     xcb_map_window(conn, window);
     xcb_flush(conn);
 
@@ -1260,6 +1410,7 @@ int main(int argc, char **argv)
                 break;
             }
             case XCB_SELECTION_REQUEST:
+                if (dragout_request((xcb_selection_request_event_t *)ev)) break;
                 clip_request((xcb_selection_request_event_t *)ev);
                 break;
             case XCB_SELECTION_NOTIFY:
@@ -1365,6 +1516,12 @@ int main(int argc, char **argv)
                 }
                 break;
             }
+            case XCB_MOTION_NOTIFY:
+                dragout_motion((xcb_motion_notify_event_t *)ev);
+                break;
+            case XCB_BUTTON_RELEASE:
+                dragout_release((xcb_button_release_event_t *)ev);
+                break;
             case XCB_BUTTON_PRESS: {
                 xcb_button_press_event_t *b = (xcb_button_press_event_t *)ev;
                 if (menu && b->event == menu) {
@@ -1385,6 +1542,7 @@ int main(int argc, char **argv)
                     break;
                 }
                 say("button %u %d,%d", b->detail, b->event_x, b->event_y);
+                if (dragout_mode && b->detail == 1 && b->event == window) dragout_press(b);
                 if (press_sends) {
                     /* As a toolkit does before it asks: its own implicit
                        grab let go (EWMH _NET_WM_MOVERESIZE). */
@@ -1397,6 +1555,7 @@ int main(int argc, char **argv)
             case XCB_CLIENT_MESSAGE: {
                 xcb_client_message_event_t *m = (xcb_client_message_event_t *)ev;
                 if (dnd_message(m)) break;
+                if (dragout_message(m)) break;
                 if (m->type == protocols && m->format == 32 && m->data.data32[0] == delete_window) {
                     if (dialog && m->window == dialog) {
                         say("dialog-delete");

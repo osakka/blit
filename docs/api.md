@@ -3039,8 +3039,19 @@ It speaks the frame channel above as a producer, with these additions.
   finished with that action, none its drag cancelled. The program letting
   its drag go first is `CLIP clear o<n>`; the channel lost cancels it. A
   drag with no source (inside the program's own windows) is not carried;
-  one without the press, or with no type, is cancelled at once. X
-  programs dragging out (XDND as the target) are a later row.
+  one without the press, or with no type, is cancelled at once.
+  An X program dragging out (since 0.3.121) is the same `CLIP dragout`:
+  when it owns XdndSelection with a button the compositor gave it down on
+  its window, a drop window over the whole X root (XdndAware) makes the
+  compositor its XDND target; its types come from XdndEnter (XdndTypeList
+  past three) and its action from its first XdndPosition (copy, move, or
+  copy,move for any other). Reads convert its XdndSelection, as an X paste
+  is read. Its button release is held to the end: `CLIP dragend o<n>
+  copy|move` is XdndStatus accepting that action, then the release, and
+  its XdndDrop is answered XdndFinished; `none` refuses it and it leaves.
+  Dropped onto an X window it is refused (`CLIP dropped o<n> refused`):
+  the compositor cannot also be that window's source without taking
+  XdndSelection from the program dragging.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`

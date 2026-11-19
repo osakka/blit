@@ -370,3 +370,39 @@ drag at once, as before 0.3.119, and says so once. compositor_gate's
 dragout part runs with drag=1; a second case without it shows the drag
 cancelled and the window keeping its pointer -- 0.3.119 fails it (the drag
 not cancelled). The mini PC was put back on 0.3.118 until this release.
+
+## Amended 2026-11-19 (0.3.121): X programs drag out
+
+Agreed with Hibr: no wire change, the same `CLIP dragout`. The compositor is
+the X program's XDND target. It watches XdndSelection (XFixes); an X
+program taking it while a button the compositor delivered is down on its
+window arms a drop window: override-redirect, input-only, the root's size,
+on top, XdndAware 5 -- the program's drag finds it wherever the pointer is
+(its own windows' raising stays beneath). Nothing from it in 2 s, or no
+position before its button comes up: disarmed, its drag X's own.
+- Its XdndEnter (types, XdndTypeList past three) and first XdndPosition
+  (action) become `CLIP dragout o<n>`; each position is answered
+  XdndStatus not-yet-accepting, positions wanted. Its window then takes
+  no pointer input; its releases are held.
+- Reads: an X source in all but name (primary 2: x_sel_atom gives
+  XdndSelection), converted at its latest position's time through the X
+  paste transfer (INCR, the idle timeout). XDND lets the target read before
+  the drop; GTK and the stand-in answer.
+- `CLIP dragend copy|move`: XdndStatus accepting that action, one X round
+  trip (the status and the Wayland release reach X by different roads --
+  without it the release won and the program left), then the held release;
+  its XdndDrop is answered XdndFinished with the action. `none`: XdndStatus
+  refusing, the release; it leaves.
+- Onto an X window: refused; being that window's source would take
+  XdndSelection from the program dragging and end its drag.
+- Its selection or window gone, another owner, Xwayland gone: `CLIP clear
+  o<n>`.
+
+Evidence: xwayland_gate's dragout part (an X stand-in that drags as a
+toolkit does: owner at the press, a pointer grab, the XdndAware window under
+the pointer): announced with copy and its types; the desktop's read served
+from XdndSelection; the release held; dragend copy -> accepted, dropped,
+finished copy; none -> refused, left; onto an X window refused, said) plain
+and under ASan/UBSan in the release environment; a real GTK3 drag source
+under Xwayland (GDK_BACKEND=x11) in a throwaway container: announced, read,
+ended in GTK as a successful drag.

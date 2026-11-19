@@ -152,7 +152,7 @@ class Desk:
     """compositor_gate's Desktop, with `WINDOW cursor` lines set aside."""
 
     def __init__(self, listener):
-        self.desk = cg.Desktop(listener)
+        self.desk = cg.Desktop(listener, b'OK dmabuf=0 window=1 drag=1\n')
         self.cursors = []
 
     def next(self, wait=10.0):
@@ -1342,6 +1342,119 @@ def x_drop_part(desk, standin, env, log, work):
                 c.wait()
 
 
+def x_dragout_part(desk, standin, env, log, work):
+    """X programs dragging out (XDND, 0.3.121): the compositor is the X
+    program's drag target, through a drop window over the root while its
+    button is down, and the desktop runs the drag as `CLIP dragout o<n>`.
+    Dropped on the desktop: `CLIP read o<n>` converts its XdndSelection;
+    `dragend copy` is its status accepted, then its held release -- it
+    drops, and is finished. `dragend none`: refused, it leaves. Onto an X
+    window: refused."""
+    def until(pattern, wait=10):
+        deadline = time.time() + wait
+        while True:
+            got = desk.next(max(0.1, deadline - time.time()))
+            check(got is not None, lambda: 'no line matching %r:\n%s' % (pattern, log()))
+            if got[0] == 'frame':
+                os.close(got[2])
+                continue
+            if got[0] == 'frm3':
+                for fd in got[2]:
+                    os.close(fd)
+                continue
+            m = re.fullmatch(pattern, got[1])
+            if m:
+                return m
+
+    out_path = os.path.join(work, 'xstandin-dragout.out')
+    client = cg.start([standin, 'Drag out'], dict(env, XSTANDIN_DRAG_OUT='1'), open(out_path, 'w'))
+    printed = lambda: open(out_path).read()
+    route = None
+    try:
+        wid = int(until(r'WINDOW new (\d+) 0', 20).group(1))
+        desk.send('WINDOW size %d 400 300 activated' % wid)
+        wait_for(lambda: 'XSTANDIN configure 400x300' in printed(), lambda: 'not configured:\n' + printed())
+        deadline = time.time() + 10
+        while wid not in desk.input_socks and time.time() < deadline:
+            got = desk.next(0.2)              # its title, appid and decor lines: not this part's
+            if got and got[0] == 'frame':
+                os.close(got[2])
+        check(wid in desk.input_socks, 'no INPUT sock for %d' % wid)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[wid])
+        frame = [0]
+
+        def send(*lines):
+            text = ''
+            for line in lines:
+                frame[0] += 1
+                text += '%s\nINPUT frame %d %d\n' % (line % BLIT_PICTURE, BLIT_PICTURE, frame[0])
+            route.sendall(text.encode())
+
+        def desktop_reads(seq, type_):
+            r, w = os.pipe()
+            socket.send_fds(desk.desk.sock, [('CLIP read %s %s\n' % (seq, type_)).encode()], [w])
+            os.close(w)
+            got = b''
+            while True:
+                chunk = os.read(r, 4096)
+                if not chunk:
+                    break
+                got += chunk
+            os.close(r)
+            return got
+
+        def drag(n):
+            send('INPUT ptr %d 40.00 40.00', 'INPUT btn %d 272 press')
+            # As a hand moves: after the program has taken the drag (its grab).
+            wait_for(lambda: printed().count('XSTANDIN dragout owner') >= n, lambda: 'no drag started:\n' + printed())
+            time.sleep(0.2)
+            for i in range(1, 6):
+                send('INPUT ptr %%d %d.00 %d.00' % (40 + i * 8, 40 + i * 6))
+                time.sleep(0.03)
+            m = until(r'CLIP dragout o(\d+) %d (\S+) (.*)' % wid)
+            check(m.group(1) == str(n) and m.group(2) == 'copy' and m.group(3) == 'text/uri-list text/plain;charset=utf-8',
+                  'the X drag out was %r' % m.group(0))
+            wait_for(lambda: printed().count('XSTANDIN dragout enter') >= n, lambda: 'not entered:\n' + printed())
+
+        # 1. Dropped on the desktop.
+        drag(1)
+        got = desktop_reads('o1', 'text/uri-list')
+        check(got == b'file:///home/me/x%20out.txt\r\n', 'the desktop read %r' % got)
+        send('INPUT btn %d 272 release')
+        time.sleep(0.4)                   # the release held: nothing for the program yet
+        check('XSTANDIN dragout drop' not in printed() and 'XSTANDIN dragout leave' not in printed(),
+              lambda: 'the release reached the program before the end:\n' + printed())
+        desk.send('CLIP dragend o1 copy')
+        wait_for(lambda: 'XSTANDIN dragout status accept\nXSTANDIN dragout drop\nXSTANDIN dragout finished 1 copy'
+                 in printed(), lambda: 'not accepted, dropped, finished:\n' + printed())
+        # 2. Cancelled.
+        drag(2)
+        send('INPUT btn %d 272 release')
+        desk.send('CLIP dragend o2 none')
+        wait_for(lambda: 'XSTANDIN dragout status refuse\nXSTANDIN dragout leave' in printed(),
+                 lambda: 'not refused and left:\n' + printed())
+        # 3. Onto an X window: refused (the program's own window stands in).
+        drag(3)
+        desk.send('CLIP drop o3 %d 10 10 text/uri-list' % wid)
+        until(r'CLIP dropped o3 refused')
+        send('INPUT btn %d 272 release')
+        desk.send('CLIP dragend o3 none')
+        wait_for(lambda: printed().count('XSTANDIN dragout leave') >= 2, lambda: 'the third not left:\n' + printed())
+        wait_for(lambda: 'an X program\'s drag onto an X window is not carried' in log(),
+                 lambda: 'the refusal was not said:\n' + log())
+        desk.send('WINDOW close %d' % wid)
+        until(r'WINDOW gone %d' % wid)
+        return ('x-dragout=XdndSelection+button->drop window->CLIP dragout o1 copy(types) desktop-read=XdndSelection '
+                'release-held dragend copy->status accept,drop,finished none->refuse,leave onto-X=refused')
+    finally:
+        if route:
+            route.close()
+        if client.poll() is None:
+            client.kill()
+            client.wait()
+
+
 def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
     """Xwayland killed while an X program owns PRIMARY and the desktop
     CLIPBOARD: its offer cleared with its window, and the next Xwayland's
@@ -1769,6 +1882,7 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         route.close()
         xpid, restart = x_restart_part(desk, standin, cenv, clip_dir, lambda: settled(log), work, xpid)
         print('XWAYLAND_GATE_DROP_OK %s' % x_drop_part(desk, standin, cenv, lambda: settled(log), work))
+        print('XWAYLAND_GATE_DRAGOUT_OK %s' % x_dragout_part(desk, standin, cenv, lambda: settled(log), work))
 
         desk.send('WINDOW quit 0')
         try:
