@@ -7118,8 +7118,11 @@ static void input_devices_json(const BlitRuntime *runtime, char *body,
         used += length;
         ++count;
     }
-    snprintf(body + used, capacity - used, "],\"count\":%d,\"dropped\":%d}",
-             count, dropped);
+    /* `pending`: device opens still under way (the opener thread's, #16):
+       0 once a scan's results are all in, so a client can tell "not yet
+       discovered" from "not there" (Gitea #124). */
+    snprintf(body + used, capacity - used, "],\"count\":%d,\"dropped\":%d,\"pending\":%d}",
+             count, dropped, runtime->opener_pending_count);
 }
 
 static const char *request_body(const char *request)

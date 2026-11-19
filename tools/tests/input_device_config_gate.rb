@@ -145,6 +145,15 @@ Dir.mktmpdir('blit-cfg') do |root|
       end
     end
 
+    # Discovery settles before the device is looked for (Gitea #124): its
+    # opens run off the loop, so an answering API may not have their results
+    # yet. `pending` 0 means they are in -- a device missing then is a real
+    # loss, and fails below.
+    begin
+      await(timeout: 10) { collection.fetch('pending', 1).zero? }
+    rescue Timeout::Error
+      failures << "device discovery did not settle: #{collection.fetch('pending', '?')} opens pending after 10 s"
+    end
     stream = open_input_stream(PORT)
     id = 'input-node-event0'
     before = collection

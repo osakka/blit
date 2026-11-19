@@ -1186,6 +1186,11 @@ paths:
         number of serialised devices and `dropped` the number that did not fit
         the response; a client that sees a non-zero `dropped` is seeing an
         incomplete inventory and is told so rather than silently shortchanged.
+        `pending` is the number of device opens still under way (they run off
+        the event loop); 0 means every scan's results are in, so a device a
+        client expects and does not see then is not there, rather than not
+        yet discovered. A start's first scan is queued before the API
+        listens, so the first answer already counts it.
       responses:
         '200':
           description: Input inventory
@@ -1203,6 +1208,7 @@ paths:
                       $ref: '#/components/schemas/InputDevice'
                   count: {type: integer, minimum: 0}
                   dropped: {type: integer, minimum: 0}
+                  pending: {type: integer, minimum: 0}
         default:
           $ref: '#/components/responses/Problem'
   /v1/input/keymap:
