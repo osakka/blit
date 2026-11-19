@@ -2615,6 +2615,16 @@ It speaks the frame channel above as a producer, with these additions.
     repositioned); a member of another route on the connection moves to
     this one. Where draws of the top-level and its members overlap, the
     topmost wins.
+  - **Views** (from 0.3.125, Gitea #159). Blit maps the pointer into a
+    picture's frame pixels; a picture with a `WINDOW view` has surface
+    pixels that are not those. The desktop relays each view under its own
+    id: `INPUT view <image-id> <sx> <sy> <sw> <sh> <dw> <dh>`, or
+    `INPUT view <image-id> -` when the view is dropped, for a route's own
+    picture or a member's. Blit then sends `(x - sx) * dw / sw` (and the
+    same for y), plus a member's offset. Answers are `INPUT ok <id>`, or
+    `INPUT error <id> EINVAL` for a picture in no route on the connection
+    or a rectangle that is empty, negative or past 32767. A new member
+    starts at its frame's pixels until its own `INPUT view`.
 - **Sizes are the program's to honour.** A Wayland client is told a size
   and commits the buffer it draws; most draw exactly that size, but a
   client with a fixed size, or one mid-resize, commits another. The

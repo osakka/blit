@@ -797,8 +797,9 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
        main surface drawn with it: 1 a crop of 128x96 at 16,8 shown at
        256x192; 2 no viewport, buffer scale 2; 3 scale 1 again (the buffer
        at its pixels); 4 a desynchronized subsurface at 10,10, its 64x40
-       buffer shown at 128x80. */
-    if (s->view_script && s->sized && s->view_step < 4) {
+       buffer shown at 128x80; 5 the subsurface unmapped (a NULL buffer);
+       6 mapped again, the same viewport. */
+    if (s->view_script && s->sized && s->view_step < 6) {
         ++s->view_step;
         if (s->view_step == 1) {
             wp_viewport_set_source(s->viewport, wl_fixed_from_int(16), wl_fixed_from_int(8), wl_fixed_from_int(128),
@@ -811,6 +812,11 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
             wl_surface_set_buffer_scale(s->surface, 2);
         } else if (s->view_step == 3) {
             wl_surface_set_buffer_scale(s->surface, 1);
+        } else if (s->view_step == 5) {
+            wl_surface_attach(s->sub_surface, NULL, 0, 0);
+            wl_surface_commit(s->sub_surface);
+        } else if (s->view_step == 6) {
+            draw(s, s->sub_surface, 64, 40);
         } else {
             s->sub_surface = wl_compositor_create_surface(s->compositor);
             wl_surface_add_listener(s->sub_surface, &surface_listener, s);

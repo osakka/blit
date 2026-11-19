@@ -1084,6 +1084,9 @@ static void window_gone(struct bc_xdg *x)
     }
     window_input_close(x);
     x->id = 0;
+    /* Its id gone, the desktop has no view for it: a picture mapped again
+       under a new id says its view again (Gitea #159). */
+    x->view_said = 0;
     x->mapped = 0;
 }
 

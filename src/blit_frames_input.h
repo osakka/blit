@@ -18,6 +18,11 @@
        INPUT member <popup id> <top-level id> <x> <y>\n
            INPUT ok <popup id> / INPUT error <popup id> <code>
            a popup's picture joins its top-level's route, at that offset
+       INPUT view <image id> <sx> <sy> <sw> <sh> <dw> <dh>\n   INPUT view <image id> -\n
+           INPUT ok <image id> / INPUT error <image id> EINVAL
+           a route's or member's picture shows its frame's rectangle
+           sx,sy sw x sh at dw x dh surface pixels (Gitea #159, the
+           compositor's WINDOW view relayed); `-` the frame at its pixels
 
    Each route is one image's, so one channel carries the routes of several
    pictures (a desktop multiplexes its windows over one channel per display,
@@ -92,10 +97,18 @@ typedef struct BlitFrameInput BlitFrameInput;
    than this open at once over one window are refused EBUSY. */
 #define BLIT_FRAME_INPUT_MEMBERS 16
 
+/* A picture's view (INPUT view): its frame's rectangle v[0..3] shown at
+   v[4] x v[5] surface pixels; on 0, the frame at its own pixels. */
+typedef struct {
+    int on;
+    int v[6];
+} BlitFrameView;
+
 typedef struct {
     unsigned int image_id;
     int x, y;               /* its offset in the top-level's surface pixels */
     int seen;               /* the picture has existed: its absence is a delete */
+    BlitFrameView view;
 } BlitFrameMember;
 
 struct BlitFrameInput {
@@ -121,6 +134,7 @@ struct BlitFrameInput {
     const char *last_miss;
     BlitFrameMember members[BLIT_FRAME_INPUT_MEMBERS];
     int member_count;
+    BlitFrameView view;     /* the route's own picture's (INPUT view) */
 };
 
 static int frame_input_key_held(const BlitFrameInput *in, unsigned int code)
@@ -1012,16 +1026,30 @@ static void frame_input_pointer_route(BlitRuntime *runtime, BlitFrameClient *cli
         /* Where in the picture drawn, as a fraction of its frame. */
         fx = (d->src_x + (double)(px - d->x) * d->src_w / d->width) / over->width;
         fy = (d->src_y + (double)(py - d->y) * d->src_h / d->height) / over->height;
-        /* That point in the top-level's surface pixels, its latest frame. */
+        /* That point in its frame's pixels; through the picture's view
+           (Gitea #159) in its surface pixels; plus a member's offset, in the
+           top-level's surface pixels. */
         tx = fx * over->width;
         ty = fy * over->height;
-        if (over != image)
-            for (m = 0; m < in->member_count; ++m)
-                if (in->members[m].image_id == d->image_id) {
-                    tx += in->members[m].x;
-                    ty += in->members[m].y;
-                    break;
-                }
+        {
+            const BlitFrameView *view = over == image ? &in->view : NULL;
+            const BlitFrameMember *member = NULL;
+            if (over != image)
+                for (m = 0; m < in->member_count; ++m)
+                    if (in->members[m].image_id == d->image_id) {
+                        member = &in->members[m];
+                        view = &member->view;
+                        break;
+                    }
+            if (view != NULL && view->on) {
+                tx = (tx - view->v[0]) * view->v[4] / view->v[2];
+                ty = (ty - view->v[1]) * view->v[5] / view->v[3];
+            }
+            if (member != NULL) {
+                tx += member->x;
+                ty += member->y;
+            }
+        }
         in->last_over = d->image_id;
         in->last_draw[0] = d->x; in->last_draw[1] = d->y;
         in->last_draw[2] = d->width; in->last_draw[3] = d->height;
@@ -1447,11 +1475,56 @@ static void frame_input_member(BlitRuntime *runtime, BlitFrameClient *client, un
     if (m == route->member_count) {
         ++route->member_count;
         route->members[m].seen = image != NULL;
+        route->members[m].view.on = 0;   /* a new member's view comes with its own INPUT view */
     }
     route->members[m].image_id = popup;
     route->members[m].x = x;
     route->members[m].y = y;
     frame_input_accept(client, popup);
+}
+
+/* `INPUT view <image> <sx> <sy> <sw> <sh> <dw> <dh>` or `INPUT view <image> -`:
+   the view of a picture of a route on this channel, its own or a member's
+   (Gitea #159). EINVAL for a picture in no route here, or a rectangle that
+   is empty, negative or past 32767. */
+static void frame_input_view(BlitRuntime *runtime, BlitFrameClient *client, char *text)
+{
+    char *words[8], *p = text;
+    int w, k, m, i, ok = 1, v[6] = {0};
+    unsigned int id;
+    BlitFrameView *view = NULL;
+    for (w = 0; w < 8 && p != NULL; ++w) {
+        words[w] = p;
+        p = strchr(p, ' ');
+        if (p != NULL) *p++ = '\0';
+    }
+    id = w >= 1 ? frame_input_parse_id(words[0]) : 0;
+    if (id == 0 || p != NULL || !(w == 2 || w == 7) || (w == 2 && strcmp(words[1], "-") != 0)) {
+        frame_input_refuse(runtime, client, id, "EINVAL");
+        return;
+    }
+    for (i = 0; w == 7 && i < 6; ++i) {
+        int one;
+        v[i] = frame_input_parse_offset(words[1 + i], &one);
+        ok = ok && one && v[i] >= (i < 2 ? 0 : 1);
+    }
+    for (k = 0; view == NULL && k < client->input_capacity; ++k) {
+        BlitFrameInput *route = client->inputs[k];
+        if (route == NULL)
+            continue;
+        if (route->image_id == id)
+            view = &route->view;
+        for (m = 0; view == NULL && m < route->member_count; ++m)
+            if (route->members[m].image_id == id)
+                view = &route->members[m].view;
+    }
+    if (view == NULL || !ok) {
+        frame_input_refuse(runtime, client, id, "EINVAL");
+        return;
+    }
+    view->on = w == 7;
+    memcpy(view->v, v, sizeof(view->v));
+    frame_input_accept(client, id);
 }
 
 /* One INPUT message: a line, its newline optional. The image id is read
@@ -1506,6 +1579,9 @@ static void frame_input_request(BlitRuntime *runtime, BlitFrameClient *client,
             *mode++ = '\0';
             confine = strcmp(mode, "confine") == 0 ? 1 : strcmp(mode, "relative") == 0 ? 0 : -1;
         }
+    } else if (strncmp(line, "INPUT view ", 11) == 0) {
+        frame_input_view(runtime, client, line + 11);
+        return;
     } else if (strncmp(line, "INPUT member ", 13) == 0) {
         /* Four words: each cut out so it reads alone. */
         char *words[4], *p = line + 13;

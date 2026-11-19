@@ -1572,6 +1572,30 @@ def viewport_part(compositor, standin, work):
                      lambda: 'a pointer in the subsurface\'s scaled part did not reach it:\n' + open(spath).read())
         finally:
             route.close()
+        # 5, 6: unmapped (its id gone), then mapped again under a new id --
+        # whose view the desktop must be told again, before its frame.
+        desk.send('WINDOW size 3 208 120')
+        seen = []
+        while 'WINDOW gone 4' not in seen:
+            got = desk.next()
+            check(got is not None, 'step 5: the subsurface was not gone: %r' % seen)
+            if got[0] == 'frame':
+                os.close(got[2])
+            else:
+                seen.append(got[1])
+        desk.send('WINDOW size 3 210 120')
+        seen, sub_frame = [], None
+        while sub_frame is None:
+            got = desk.next()
+            check(got is not None, 'step 6: the subsurface did not come back: %r' % seen)
+            if got[0] == 'frame':
+                if got[1][0] != 3:
+                    sub_frame = got[1][0]
+                os.close(got[2])
+            else:
+                seen.append(got[1])
+        check('WINDOW view %d 0 0 64 40 128 80' % sub_frame in seen,
+              lambda: 'the subsurface mapped again as %d had no view before its frame: %r' % (sub_frame, seen))
         # A bad value: the program's error; the compositor and the others go on.
         bad_path = os.path.join(work, 'standin-viewport-bad.out')
         bad = start([standin, '--viewport-bad', 'Bad'], cenv, open(bad_path, 'w'))
@@ -1582,7 +1606,7 @@ def viewport_part(compositor, standin, work):
         check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
         quit_compositor(desk, comp)
         return ('offered=v1 fits=no-view scale=view crop+scale=view buffer-scale=view back=view- '
-                'sub=view,placed-at-shown-size,input-in-scaled-part bad-value=protocol-error,others-unharmed')
+                'sub=view,placed-at-shown-size,input-in-scaled-part,remapped=view-again bad-value=protocol-error,others-unharmed')
     finally:
         for p in clients + [comp]:
             if p and p.poll() is None:

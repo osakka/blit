@@ -1267,6 +1267,33 @@ def sock():
         check(ch.ask('INPUT member 9 7 -4 -6\n') == b'INPUT ok 9\n', 'a member moved')
         server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'], 'y': origin[1] + p9['y']})
         receiver.expect(['ptr 7 -4.00 -6.00'], 'a member at a negative offset')
+        # INPUT view (Gitea #159): the member's frame shown through a view --
+        # its surface pixels are the frame's through it, then its offset.
+        for line, want in (('INPUT view 8 -\n', b'INPUT error 8 EINVAL\n'),            # no route's
+                           ('INPUT view 9 0 0 0 80 80 40\n', b'INPUT error 9 EINVAL\n'),  # empty
+                           ('INPUT view 9 0 0 160 80 80\n', b'INPUT error 9 EINVAL\n'),   # short
+                           ('INPUT view 9 -1 0 160 80 80 40\n', b'INPUT error 9 EINVAL\n'),
+                           ('INPUT view 9 0 0 160 80 80 40\n', b'INPUT ok 9\n')):        # buffer scale 2
+            got = ch.ask(line)
+            check(got == want, '%r was answered %r, not %r' % (line, got, want))
+        sx, sy = p9['width'] - 1, p9['height'] - 1
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'] + sx, 'y': origin[1] + p9['y'] + sy})
+        receiver.expect(['ptr 7 %.2f %.2f' % (-4 + sx * 160 / p9['width'] / 2, -6 + sy * 80 / p9['height'] / 2)],
+                        'the pointer on member 9 at buffer scale 2')
+        check(ch.ask('INPUT view 9 40 20 80 40 160 80\n') == b'INPUT ok 9\n', 'a crop and scale')
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'], 'y': origin[1] + p9['y'] + 1})
+        receiver.expect(['ptr 7 %.2f %.2f' % (-4 + (0 - 40) * 2, -6 + (1 * 80 / p9['height'] - 20) * 2)],
+                        'the pointer on member 9 through a crop')
+        check(ch.ask('INPUT view 9 -\n') == b'INPUT ok 9\n', 'a view dropped')
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + p9['x'] + 2, 'y': origin[1] + p9['y']})
+        receiver.expect(['ptr 7 %.2f -6.00' % (-4 + 2 * 160 / p9['width'])], 'the member at its pixels again')
+        # The route's own picture's view.
+        check(ch.ask('INPUT view 7 0 0 %d %d %d %d\n' % (FRAME_W, FRAME_H, FRAME_W // 2, FRAME_H // 2)) ==
+              b'INPUT ok 7\n', 'the route\'s own view')
+        server.inject({'kind': 'pointer_motion', 'x': origin[0] + at['x'] + 2, 'y': origin[1] + at['y'] + 2})
+        receiver.expect(['ptr 7 %.2f %.2f' % (2 * FRAME_W / at['width'] / 2, 2 * FRAME_H / at['height'] / 2)],
+                        'the pointer on 7 at buffer scale 2')
+        check(ch.ask('INPUT view 7 -\n') == b'INPUT ok 7\n', 'the route\'s view dropped')
         # Its picture deleted: the member ends, the point is 7's again.
         a.write('\033_Ga=d,d=I,i=9,q=2\033\\')
         wait_for(lambda: route(server.input(a.id), 7)['members'] == [], 'the member outlived its picture')
@@ -1275,7 +1302,7 @@ def sock():
                                               (p9['y'] - at['y']) * FRAME_H / at['height'])],
                         'the pointer where the member was')
         check(ch.ask('INPUT member 9 7 0 0\n') == b'INPUT error 9 EINVAL\n', 'a deleted member was taken')
-        cases.append('member:9@12,63+-4,-6')
+        cases.append('member:9@12,63+-4,-6 view:scale2,crop,dropped,own')
 
         # Resized in place: the same placement, smaller.
         place(a, 7, 1, 1, 8, 2)
