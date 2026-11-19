@@ -9,6 +9,33 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-19: 0.3.123 a program's own drag icon
+
+- **What it is:** `WINDOW dragicon <id> o<n> <dx> <dy>` (agreed with Hibr),
+  the icon's frames, and `WINDOW gone` at the end. Frames are at most 256
+  px a side, scaled here, aspect kept.
+  - Covers every buffer kind: shm and linear dmabufs scaled; a dmabuf
+    within the bound as FRM3; a tiled one past it as FRM3 at its size.
+  - Covers X programs: their own _NET_WM_WINDOW_TYPE_DND window is never a
+    popup and becomes the icon. ADR 0229 amended.
+- **frame_input_gate fixed:** its `INPUT keep` lines raced the fabricated
+  devices; under load a key was read before the keep. A refused keep now
+  serves as a barrier, and the gate passes 5/5 quiet and 3/3 at load 7-12.
+  It tests blit-server, not the compositor.
+- **Gates on this host:** `renderer` 87 and `renderer-gles` 67 passed in
+  full. `all` passed 192, with frame_input_gate failing at load 5.8 (the
+  race above), fixed in this release.
+- **Release environment (Debian 13):** compositor_gate (drag icons: shm
+  300x200 -> 256x170 at -10,-5, dmabuf 64x48 FRM3, linear dmabuf scaled)
+  and xwayland_gate (the X DND window as the icon, 64x48 at -8,-6), plain
+  and ASan/UBSan, plus the package gate and update_pair.
+- **Real programs:** GTK3's own drag icon, as a Wayland program (32x32
+  frames) and as an X program (its drag window, 32x32 frames, at the
+  pointer).
+- **Live, the mini PC:** the pair update to 0.3.123 was verified. The icon
+  shows on screen once Hibr's side of `WINDOW dragicon` ships.
+- **Published** to hibr-apt under HOLD/done with my-vpn-ea.
+
 ## 2026-11-19: 0.3.122 X onto X, relayed
 
 - **What it is:** an X program's drag onto an X window is relayed instead
