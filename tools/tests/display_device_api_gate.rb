@@ -129,9 +129,10 @@ displays.each do |display|
   claimed = display.fetch('capabilities', [])
   failures << "#{display['id']}: capabilities #{claimed.inspect} must include " \
               'mode-report' unless claimed.include?('mode-report')
-  unexpected = settable - %w[rotation brightness_percent zoom]
-  failures << "#{display['id']}: configuration offers #{unexpected.inspect}; " \
-              "mode selection still needs issue #60's resize protocol" unless
+  # mode (ADR 0236) only with the capability that says it is writable.
+  unexpected = settable - %w[rotation brightness_percent zoom] - (claimed.include?('mode') ? %w[mode mode_trial] : [])
+  failures << "#{display['id']}: configuration offers #{unexpected.inspect}, " \
+              "which its capabilities #{claimed.inspect} do not claim" unless
     unexpected.empty?
   failures << "#{display['id']}: rotation is settable without the capability" if
     settable.include?('rotation') && !claimed.include?('rotation')
@@ -158,17 +159,15 @@ if first
     failures << 'the item endpoint disagrees with the collection: ' \
                 "#{item.inspect} vs #{first.inspect}"
   end
-  # A mode is the one that resizes every surface on the display, and it is
-  # still issue #60's. The PATCH route exists now, so the refusal has to come
-  # from the property check rather than from the route's absence -- a weaker
-  # guarantee than it was, which is why the problem detail is read too.
+  # A mode is writable from 0.3.125 (ADR 0236) as a string ("1280x720@60",
+  # "auto", "keep"); an object is not one, and is refused as a bad mode, not
+  # silently ignored. display_mode_gate drives real mode changes.
   code, problem = request('PATCH', "/v1/displays/#{first.fetch('id')}",
                           body: { 'configuration' => {
                             'mode' => { 'width' => 640, 'height' => 480 } } })
-  failures << "PATCH a mode -> #{code}; selecting a mode resizes every " \
-              'surface and must still be refused' unless code == 400
-  unless problem.is_a?(Hash) && problem['code'] == 'invalid_display_property'
-    failures << "a refused mode should name the property: #{problem.inspect}"
+  failures << "PATCH a mode object -> #{code}, not 400" unless code == 400
+  unless problem.is_a?(Hash) && problem['code'] == 'invalid_display_mode'
+    failures << "a mode object should be invalid_display_mode: #{problem.inspect}"
   end
 end
 
@@ -247,6 +246,6 @@ unless failures.empty?
 end
 
 puts "DISPLAY_DEVICE_API_PASS displays=#{displays.length} envelope=11 " \
-     'item_matches_collection=yes capabilities=derived mode=refused unknown_id=404 ' \
+     'item_matches_collection=yes capabilities=derived mode=object_refused unknown_id=404 ' \
      'zoom=capability+configuration+refused+steps_of_25+halves_bounds+kept_across_restart+cleared ' \
      "zoom_key=#{first&.dig('state', 'connector')} name_key_migrated=#{migrated}"

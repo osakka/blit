@@ -316,6 +316,14 @@ typedef struct {
        `power` until something can set it. -1 is "not read". */
     int power_state;
     char connector[64];
+    /* Gitea #60: the mode chosen for it ("" its preferred; "WxH" or
+       "WxH@Hz") and kept in the settings; a mode on trial, reverted to
+       `mode_previous` at `mode_trial_until_us` unless kept. */
+    char mode_kept[32];
+    char mode_trial_value[32];
+    char mode_previous[32];
+    int mode_trial;
+    unsigned long long mode_trial_until_us;
     /* The backlight this display owns, under BLIT_BACKLIGHT_ROOT or
        /sys/class/backlight. Empty when the host has none, which is the answer
        on both machines #69 can reach. */
@@ -5060,6 +5068,10 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
         complete &= json_appendf(body, capacity, &used, ",\"brightness\"");
     if (runtime->kms != NULL)
         complete &= json_appendf(body, capacity, &used, ",\"zoom\"");
+    /* Gitea #60: `mode` -- configuration.mode is writable -- where the
+       display has a KMS connector to set it on. */
+    if (runtime->kms != NULL && display->connector[0] != '\0')
+        complete &= json_appendf(body, capacity, &used, ",\"mode\"");
     complete &= json_appendf(body, capacity, &used,
         "],\"state\":{\"present\":true,\"presentation_state\":\"%s\","
         "\"physical\":{\"width\":%d,\"height\":%d}",
@@ -5095,10 +5107,23 @@ static size_t display_item_json(const BlitRuntime *runtime, int index,
                 listed = 1;
             }
         }
-        if (runtime->kms != NULL)
+        if (runtime->kms != NULL) {
             complete &= json_appendf(body, capacity, &used, "%s\"zoom\":%d",
                                      listed ? "," : "",
                                      display->zoom > 100 ? display->zoom : 100);
+            /* Gitea #60: the mode chosen, and one on trial with what is left. */
+            complete &= json_appendf(body, capacity, &used, ",\"mode\":\"%s\"",
+                                     display->mode_trial ? display->mode_trial_value :
+                                     display->mode_kept[0] ? display->mode_kept : "auto");
+            if (display->mode_trial) {
+                unsigned long long now = monotonic_us();
+                complete &= json_appendf(body, capacity, &used,
+                                         ",\"mode_trial\":{\"revert_to\":\"%s\",\"revert_in_ms\":%llu}",
+                                         display->mode_previous,
+                                         display->mode_trial_until_us > now ?
+                                         (display->mode_trial_until_us - now) / 1000ULL : 0ULL);
+            }
+        }
     }
     complete &= json_appendf(body, capacity, &used,
                              "},\"revision\":%llu}",
@@ -21373,7 +21398,7 @@ static void audio_cards_json(BlitRuntime *runtime, char *body, size_t capacity)
 static const char *display_rejected_property(const char *configuration)
 {
     static const char *const writable[] = {
-        "rotation", "brightness_percent", "zoom"
+        "rotation", "brightness_percent", "zoom", "mode"
     };
 
     return json_rejected_property(configuration, writable,
@@ -21469,6 +21494,105 @@ static int apply_display_rotation(BlitRuntime *runtime, int display_index,
     return 0;
 }
 
+/* Gitea #60: a mode as written -- "auto" (the preferred), "WxH" (the
+   highest refresh at that size) or "WxH@Hz" -- read into its parts; 0 for
+   anything else. */
+static int display_mode_parse(const char *text, int *width, int *height, double *hz)
+{
+    char *end;
+    long w, h;
+    *width = *height = 0;
+    *hz = 0;
+    if (strcmp(text, "auto") == 0 || text[0] == '\0') return 1;
+    w = strtol(text, &end, 10);
+    if (end == text || *end != 'x' || w < 1 || w > 16384) return 0;
+    text = end + 1;
+    h = strtol(text, &end, 10);
+    if (end == text || h < 1 || h > 16384) return 0;
+    if (*end == '@') {
+        text = end + 1;
+        *hz = strtod(text, &end);
+        if (end == text || *hz <= 0 || *hz > 1000) return 0;
+    }
+    if (*end != '\0') return 0;
+    *width = (int)w;
+    *height = (int)h;
+    return 1;
+}
+
+/* Whether the display lists that mode (a refresh within half a hertz). */
+static int display_lists_mode(const BlitDisplay *display, int width, int height, double hz)
+{
+    int i;
+    if (width == 0) return 1;
+    for (i = 0; i < display->mode_count; ++i)
+        if (display->modes[i].width == width && display->modes[i].height == height &&
+            (hz <= 0 || (display->modes[i].refresh_hz - hz < 0.5 && hz - display->modes[i].refresh_hz < 0.5)))
+            return 1;
+    return 0;
+}
+
+static void reconcile_kms_topology(BlitRuntime *runtime);
+
+/* Gitea #60: each stored display's kept mode wished on its connector before
+   the outputs first come up, so a start is one modeset at that mode, not
+   the preferred one and then this. Keys are connector names; one that is
+   not a connector here wishes nothing that matters. */
+static void display_wish_stored_modes(BlitRuntime *runtime)
+{
+    const char *cursor;
+    char key[128], value[512], mode[48];
+    int w, h;
+    double hz;
+    if (runtime->kms == NULL || !runtime->settings_enabled) return;
+    cursor = json_key_cursor(runtime->settings_document, "displays");
+    if (cursor == NULL) return;
+    while (*cursor != '\0' && *cursor != '{') ++cursor;
+    if (*cursor != '{') return;
+    ++cursor;
+    while ((cursor = json_next_member(cursor, key, sizeof(key), value, sizeof(value))) != NULL)
+        if (value[0] == '{' && json_string(value, "mode", mode, sizeof(mode)) &&
+            display_mode_parse(mode, &w, &h, &hz) && w > 0)
+            blit_kms_wish_mode(runtime->kms, key, w, h, hz);
+}
+
+/* The display's connector to `text` (parsed already valid) and every
+   output rebuilt as needed; on failure the connector is put back to
+   `previous` and 0 is returned with why in `why`. */
+static int display_set_mode(BlitRuntime *runtime, int display_index, const char *text, const char *previous,
+                            char *why, size_t why_capacity)
+{
+    char connector[64];
+    uint32_t order[BLIT_MAX_DISPLAYS];
+    int w, h, ok, i, count = runtime->display_count;
+    double hz;
+    for (i = 0; i < count; ++i) order[i] = (uint32_t)runtime->displays[i].id;
+    snprintf(connector, sizeof(connector), "%s", runtime->displays[display_index].connector);
+    display_mode_parse(text, &w, &h, &hz);
+    blit_kms_wish_mode(runtime->kms, connector, w, h, hz);
+    ok = blit_kms_apply_modes(runtime->kms, why, why_capacity) == 0;
+    if (!ok) {
+        display_mode_parse(previous, &w, &h, &hz);
+        blit_kms_wish_mode(runtime->kms, connector, w, h, hz);
+        blit_kms_apply_modes(runtime->kms, NULL, 0);
+        blit_kms_keep_order(runtime->kms, order, count);
+    }
+    reconcile_kms_topology(runtime);
+    return ok;
+}
+
+/* How long a mode is on trial before it reverts, unless kept (Gitea #60). */
+static unsigned long long display_mode_trial_us(void)
+{
+    const char *configured = getenv("BLIT_DISPLAY_MODE_TRIAL_MS");
+    long ms = configured != NULL ? strtol(configured, NULL, 10) : 15000;
+    if (ms < 100 || ms > 600000) ms = 15000;
+    return (unsigned long long)ms * 1000ULL;
+}
+
+/* A stored configuration is applied, not tried: set by its two callers. */
+static int display_configuration_stored;
+
 static int apply_display_configuration(BlitRuntime *runtime,
                                        int display_index,
                                        const char *configuration,
@@ -21553,7 +21677,108 @@ static int apply_display_configuration(BlitRuntime *runtime,
     }
     if (zoom_requested && zoom != (display->zoom > 100 ? display->zoom : 100))
         display_apply_zoom(runtime, display_index, zoom);
+    {
+        char mode[48], why[160];
+        int w, h;
+        double hz;
+        /* An object or array is no mode: refused, not dropped with the
+           other non-scalars. */
+        if (json_key_cursor(configuration, "mode") != NULL && json_key_cursor(scalars, "mode") == NULL) {
+            config_problem(problem, 400, "Bad Request", "invalid_display_mode",
+                           "mode is a string: \"auto\", \"WxH\", \"WxH@Hz\" or \"keep\".");
+            return 0;
+        }
+        if (json_key_cursor(scalars, "mode") != NULL) {
+            if (!json_string(scalars, "mode", mode, sizeof(mode)) ||
+                (strcmp(mode, "keep") != 0 && !display_mode_parse(mode, &w, &h, &hz))) {
+                config_problem(problem, 400, "Bad Request", "invalid_display_mode",
+                               "mode is \"auto\" (the display's preferred), \"WxH\" (the highest "
+                               "refresh at that size), \"WxH@Hz\", or \"keep\" for the mode on "
+                               "trial.");
+                return 0;
+            }
+            if (runtime->kms == NULL || display->connector[0] == '\0') {
+                config_problem(problem, 422, "Unprocessable Entity", "display_mode_unsupported",
+                               "This display has no KMS connector to set a mode on.");
+                return 0;
+            }
+            if (strcmp(mode, "keep") == 0) {
+                if (display_configuration_stored) return 1;
+                if (!display->mode_trial) {
+                    config_problem(problem, 409, "Conflict", "display_mode_not_on_trial",
+                                   "No mode is on trial on this display: \"keep\" confirms one set "
+                                   "within the last trial period.");
+                    return 0;
+                }
+                display->mode_trial = 0;
+                snprintf(display->mode_kept, sizeof(display->mode_kept), "%s",
+                         strcmp(display->mode_trial_value, "auto") == 0 ? "" : display->mode_trial_value);
+                return 1;
+            }
+            if (!display_lists_mode(display, w, h, hz)) {
+                config_problem(problem, 422, "Unprocessable Entity", "display_mode_unlisted",
+                               "The display does not list that mode: GET it and choose one of its "
+                               "modes.");
+                return 0;
+            }
+            if (display_configuration_stored) {
+                /* At start or a hot-plug: the connector was wished it
+                   already, or is now; nothing to try. */
+                snprintf(display->mode_kept, sizeof(display->mode_kept), "%s",
+                         strcmp(mode, "auto") == 0 ? "" : mode);
+                blit_kms_wish_mode(runtime->kms, display->connector, w, h, hz);
+                if (blit_kms_apply_modes(runtime->kms, why, sizeof(why)) != 0) {
+                    blit_kms_wish_mode(runtime->kms, display->connector, 0, 0, 0);
+                    blit_kms_apply_modes(runtime->kms, NULL, 0);
+                    display->mode_kept[0] = '\0';
+                }
+                reconcile_kms_topology(runtime);
+                return 1;
+            }
+            {
+                char previous[32], value[32];
+                int index_kept = display_index;
+                snprintf(previous, sizeof(previous), "%s",
+                         display->mode_trial ? display->mode_previous :
+                         display->mode_kept[0] ? display->mode_kept : "auto");
+                snprintf(value, sizeof(value), "%s", mode);
+                if (!display_set_mode(runtime, display_index, value, previous, why, sizeof(why))) {
+                    char detail[256];
+                    snprintf(detail, sizeof(detail), "The display could not be brought up at %s (%s); it "
+                             "is back at %s.", value, why, previous);
+                    config_problem(problem, 422, "Unprocessable Entity", "display_mode_failed", detail);
+                    return 0;
+                }
+                /* The reconcile keeps the display where it was in the list. */
+                display = &runtime->displays[index_kept];
+                display->mode_trial = 1;
+                display->mode_trial_until_us = monotonic_us() + display_mode_trial_us();
+                snprintf(display->mode_trial_value, sizeof(display->mode_trial_value), "%s", value);
+                snprintf(display->mode_previous, sizeof(display->mode_previous), "%s", previous);
+                diagnostic_log(runtime, "info", "display_mode_trial", value);
+            }
+        }
+    }
     return 1;
+}
+
+/* A mode on trial and not kept goes back (Gitea #60): the screen may be
+   dark, and only a revert nobody has to ask for brings it back. */
+static void display_mode_trial_check(BlitRuntime *runtime)
+{
+    int i;
+    for (i = 0; i < runtime->display_count; ++i) {
+        BlitDisplay *display = &runtime->displays[i];
+        char why[160], detail[192];
+        if (!display->mode_trial || monotonic_us() < display->mode_trial_until_us) continue;
+        display->mode_trial = 0;
+        snprintf(detail, sizeof(detail), "%s not kept; back to %s", display->mode_trial_value,
+                 display->mode_previous);
+        display_set_mode(runtime, i, display->mode_previous, "auto", why, sizeof(why));
+        diagnostic_log(runtime, "warning", "display_mode_reverted", detail);
+        fprintf(stderr, "blit: display %s: mode %s\n", runtime->displays[i].connector, detail);
+        return;   /* the list may have changed: the next pass sees the rest */
+    }
 }
 
 static const char *audio_card_rejected_property(const char *configuration)
@@ -23051,12 +23276,18 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
     first = 1;
     for (i = 0; i < runtime->display_count; ++i) {
         char name[256];
-        if (runtime->displays[i].zoom <= 100)
+        if (runtime->displays[i].zoom <= 100 && runtime->displays[i].mode_kept[0] == '\0')
             continue;
         json_escape(display_settings_key(&runtime->displays[i]), name,
                     sizeof(name));
-        json_appendf(out, capacity, &used, "%s\"%s\":{\"zoom\":%d}",
-                     first ? "" : ",", name, runtime->displays[i].zoom);
+        /* Gitea #60: a kept mode, never one on trial. */
+        json_appendf(out, capacity, &used, "%s\"%s\":{", first ? "" : ",", name);
+        if (runtime->displays[i].zoom > 100)
+            json_appendf(out, capacity, &used, "\"zoom\":%d%s", runtime->displays[i].zoom,
+                         runtime->displays[i].mode_kept[0] ? "," : "");
+        if (runtime->displays[i].mode_kept[0])
+            json_appendf(out, capacity, &used, "\"mode\":\"%s\"", runtime->displays[i].mode_kept);
+        json_appendf(out, capacity, &used, "}");
         first = 0;
     }
     settings_copy_unseen(runtime, "displays", BLIT_SETTINGS_DISPLAY, out,
@@ -24001,10 +24232,12 @@ static void settings_apply_displays(BlitRuntime *runtime)
                                      configuration, sizeof(configuration)))
             continue;
         memset(&problem, 0, sizeof(problem));
+        display_configuration_stored = 1;
         if (!apply_display_configuration(runtime, i, configuration, &problem))
             fprintf(stderr,
                     "blit: stored configuration for display %s not applied: "
                     "%s\n", runtime->displays[i].name, problem.detail);
+        display_configuration_stored = 0;
     }
 }
 
@@ -26819,6 +27052,7 @@ static void discover_displays(BlitRuntime *runtime)
     }
     runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
     blit_kms_set_phase_hook(runtime->kms, display_guard_hook, runtime);
+    display_wish_stored_modes(runtime);
     pointer_art_present(runtime);
     if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                sizeof(error)) < 0) {
@@ -27025,7 +27259,9 @@ static void reconcile_kms_topology(BlitRuntime *runtime)
             char configuration[128]; BlitConfigProblem problem;
             if (settings_display_member(runtime, &runtime->displays[i], configuration, sizeof(configuration))) {
                 memset(&problem, 0, sizeof(problem));
+                display_configuration_stored = 1;
                 apply_display_configuration(runtime, i, configuration, &problem);
+                display_configuration_stored = 0;
             }
         }
         blit_kms_set_display_position(runtime->kms, i, runtime->displays[i].bounds.x, runtime->displays[i].bounds.y);
@@ -33233,6 +33469,7 @@ int main(int argc, char **argv)
         update_pointer_shape(&runtime);
         gles_guard_check(&runtime);
         display_guard_check(&runtime);
+        display_mode_trial_check(&runtime);
         {
             /* A quiet window holds every output; a barrier, its own. */
             uint32_t held = now < runtime.terminal_frame_quiet_until_us ?

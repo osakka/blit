@@ -72,8 +72,6 @@ already be fixed.
 - Startup must not block before the API is listening (#109): since 0.3.16
   a GPU start that hangs is killed after 10 s and the next start runs on the
   CPU with the API up; close the ticket once the owner agrees.
-- Display mode selection, which needs a resize handshake with the desktop
-  (#60).
 - A stable display name so per-display settings survive a restart (#103).
 
 ### 4. Text

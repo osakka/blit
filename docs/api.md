@@ -929,15 +929,27 @@ remainder. Clients must use these reported values rather than reconstructing
 positions from font names, display modes, or hard-coded halves. See ADRs 0075
 and 0076 in docs/adr.
 
-### Display settings: rotation, brightness, zoom, and what power costs
+### Display settings: mode, rotation, brightness, zoom, and what power costs
 
-A display's mode is not writable (ADR 0064): selecting a mode changes the
-render output size and therefore every surface on the display, and a Hibr
-desktop's cells come from its owner (ADR 0063), so applying one needs a
-resize protocol with that owner (issue #60). A PATCH naming `mode` is a 400
-`invalid_display_property`.
+A display's mode is writable from 0.3.125 ([ADR
+0236](adr/0236-display-mode-selection.md), Gitea #60):
+`PATCH /v1/displays/{id}` `{"configuration":{"mode":"1280x720@60"}}` --
+`"auto"` for the preferred mode, `"WxH"` for the highest refresh at that
+size -- applies one of the display's `modes` at once, on trial:
 
-What is writable is the settings that leave the mode alone, and
+```sh
+curl -X PATCH "$base/v1/displays/display-93" -d '{"configuration":{"mode":"1280x720@60"}}'
+# the screen is right? within 15 s:
+curl -X PATCH "$base/v1/displays/display-93" -d '{"configuration":{"mode":"keep"}}'
+```
+
+Not kept within the trial, it reverts by itself (`configuration.mode_trial`
+says to what and when). The display, its panes and their sessions are
+resized as a replug at that mode would resize them, and a desktop follows
+that resize with nothing more. Kept, the mode is saved under the connector
+name and a start comes up at it. The errors are in the OpenAPI description.
+
+The other writable settings leave the mode alone, and
 `capabilities` says which of them this hardware can actually perform. It is derived, not
 declared: `configuration` offers exactly what `capabilities` claims, and a
 PATCH accepts exactly that. A property that takes a value and does nothing

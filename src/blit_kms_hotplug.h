@@ -135,7 +135,8 @@ static int kms_activate_output(BlitKms *kms, const KmsConnector *connector)
     memset(&modes, 0, sizeof(modes));
     modes.count_modes = connector->mode_count;
     modes.modes = (drmModeModeInfo *)connector->modes;
-    mode_index = choose_mode(&modes);
+    mode_index = wished_mode(kms, connector->name, connector->modes, connector->mode_count);
+    if (mode_index < 0) mode_index = choose_mode(&modes);
     output->mode = connector->modes[mode_index];
     output->mode_count = connector->mode_count;
     output->active_mode = mode_index;
@@ -184,6 +185,10 @@ static int kms_reconcile_snapshot(BlitKms *kms, const KmsSnapshot *snapshot)
         return 0;
     }
     kms->hotplug_error[0] = '\0';
+    if (snapshot != &kms->reconciled) {
+        kms->reconciled = *snapshot;
+        kms->reconciled_valid = 1;
+    }
     if (snapshot->unknown_count)
         snprintf(kms->hotplug_error, sizeof(kms->hotplug_error), "connector_state_unknown_inventory_retained");
     /* Retry quarantined teardown without ever assigning its CRTC elsewhere. */
@@ -200,9 +205,16 @@ static int kms_reconcile_snapshot(BlitKms *kms, const KmsSnapshot *snapshot)
         if (uncertain) { ++i; continue; }
         for (j = 0; j < snapshot->count; ++j)
             if (snapshot->connectors[j].id == output->connector) {
-                int m;
-                for (m = 0; m < snapshot->connectors[j].mode_count; ++m)
-                    if (memcmp(&snapshot->connectors[j].modes[m], &output->mode, sizeof(output->mode)) == 0) keep = 1;
+                /* Kept while it has the mode it would be given now: the
+                   connector's wish (Gitea #60), else its preferred. */
+                const KmsConnector *c = &snapshot->connectors[j];
+                drmModeConnector modes;
+                int m = wished_mode(kms, c->name, c->modes, c->mode_count);
+                memset(&modes, 0, sizeof(modes));
+                modes.count_modes = c->mode_count;
+                modes.modes = (drmModeModeInfo *)c->modes;
+                if (m < 0 && c->mode_count > 0) m = choose_mode(&modes);
+                if (m >= 0 && memcmp(&c->modes[m], &output->mode, sizeof(output->mode)) == 0) keep = 1;
             }
         if (keep && output->info.presentation_state != BLIT_KMS_PRESENTATION_FAILED) { ++i; continue; }
         kms_release_output(kms, output, 0);

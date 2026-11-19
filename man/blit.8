@@ -396,6 +396,10 @@ With
 makes opening the display device, or setting up the outputs, hang this many
 milliseconds, to test that the next start serves the API without displays.
 .TP
+.B BLIT_DISPLAY_MODE_TRIAL_MS
+How long a display mode set through the API is on trial before it reverts
+unless kept, in milliseconds; default 15000.
+.TP
 .B BLIT_TEST_DISPLAY_GUARD_HOLD
 With
 .BR BLIT_TEST_MODE=1 ,

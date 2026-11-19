@@ -266,14 +266,29 @@ paths:
     patch:
       tags: [hardware]
       operationId: updateDisplay
-      summary: Set a display's brightness or pixel zoom
+      summary: Set a display's mode, brightness or pixel zoom
       description: >-
-        Writable: `brightness_percent` where a backlight is attributed,
-        `zoom` on every KMS display, and `rotation` 0. Any other property is
-        a 400 `invalid_display_property`
-        rather than ignored. Selecting a mode is deliberately not here: it
-        resizes every surface on the display and needs issue #60's resize
-        protocol.
+        Writable: `mode` and `zoom` on every KMS display, `brightness_percent`
+        where a backlight is attributed, and `rotation` 0. Any other property
+        is a 400 `invalid_display_property` rather than ignored.
+
+        `mode` (from 0.3.125, Gitea #60) is `"auto"` (the display's preferred
+        mode), `"WxH"` (the highest refresh at that size), `"WxH@Hz"` (within
+        half a hertz) -- one of the display's `modes` -- or `"keep"`. A mode
+        is applied at once and is on trial: the display, its panes and their
+        sessions are resized as a replug at that mode would, the display
+        keeps its place in the list, and `configuration.mode_trial` says
+        what it reverts to and when. Unless `"keep"` comes within the trial
+        (15 s), it reverts by itself -- a monitor that shows nothing at a
+        mode cannot be fixed by a controller that cannot see it. Kept, it is
+        saved in the settings document's `displays` section under the
+        connector name and a start comes up at it in one modeset. `"auto"`
+        kept removes the saved mode. 400 `invalid_display_mode` for anything
+        else; 422 `display_mode_unlisted` for a mode the display does not
+        list; 422 `display_mode_failed` when the display could not be
+        brought up at it (it is back where it was, and the detail says
+        so); 409 `display_mode_not_on_trial` for `"keep"` with nothing on
+        trial; 422 `display_mode_unsupported` without a KMS connector.
 
         Native KMS has no rotation transform (ADR 0184): `rotation` 0 is
         accepted, 90, 180 or 270 is a 422 `display_rotation_unsupported`, and
@@ -307,6 +322,9 @@ paths:
                       minimum: 100
                       maximum: 400
                       multipleOf: 25
+                    mode:
+                      type: string
+                      pattern: '^(auto|keep|[0-9]+x[0-9]+(@[0-9]+(\.[0-9]+)?)?)$'
                   additionalProperties: false
               additionalProperties: false
       responses:
@@ -2619,7 +2637,9 @@ components:
           description: >-
             What this backend and this hardware can actually perform, derived
             rather than declared: `configuration` offers exactly these and a
-            PATCH accepts exactly these. `mode-report` is always present.
+            PATCH accepts exactly these. `mode-report` is always present;
+            `mode` (configuration.mode is writable) where the display has a
+            KMS connector.
             `rotation` is absent: native KMS composes straight into the
             connector's framebuffer and has no rotation transform (ADR 0184).
             `brightness` is present
@@ -2627,7 +2647,7 @@ components:
             present on every KMS display (ADR 0204).
           items:
             type: string
-            enum: [mode-report, brightness, zoom]
+            enum: [mode-report, mode, brightness, zoom]
         state:
           type: object
           required: [present, presentation_state, physical]
@@ -2673,11 +2693,11 @@ components:
           type: object
           description: >-
             The settable properties this display can actually perform, and
-            only those (issue #69). Selecting a mode changes the render output
-            size and therefore every surface on the display, and a Hibr
-            desktop's cells come from its owner (ADR 0063), so it needs a
-            resize protocol with that owner. The modes are reported so a
-            controller can show them; `mode` is still refused.
+            only those (issue #69). `mode` is the mode chosen: `auto`, a kept
+            mode, or the one on trial, with `mode_trial` while it is (see
+            PATCH; Gitea #60). A desktop follows the resize as it follows a
+            replug: its panes and their sessions are resized, nothing more
+            is needed from it.
 
             `brightness_percent` is the backlight's level. It is read from
             `actual_brightness`, which is what the panel is doing, and written
@@ -2693,6 +2713,14 @@ components:
           properties:
             brightness_percent: {type: integer, minimum: 0, maximum: 100}
             zoom: {type: integer, minimum: 100, maximum: 400, multipleOf: 25}
+            mode: {type: string}
+            mode_trial:
+              type: object
+              required: [revert_to, revert_in_ms]
+              properties:
+                revert_to: {type: string}
+                revert_in_ms: {type: integer, minimum: 0}
+              additionalProperties: false
           additionalProperties: false
         revision:
           $ref: '#/components/schemas/Revision'

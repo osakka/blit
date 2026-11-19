@@ -256,6 +256,22 @@ int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y);
    nearest-neighbour; its pointer and panel stay at their normal size, and
    its pointer position, like its place, is logical. */
 int blit_kms_set_zoom(BlitKms *kms, int index, int zoom);
+/* Gitea #60: the mode a connector (by name) is to have: width x height at
+   refresh_hz (within half a hertz; 0 the highest at that size), or width 0
+   for its preferred mode. Kept for the connector's next activation -- at
+   open, or a hot-plug -- and applied to a live output by
+   blit_kms_apply_modes. A wish the connector does not list leaves it
+   preferred. */
+int blit_kms_wish_mode(BlitKms *kms, const char *connector, int width, int height, double refresh_hz);
+/* Rebuilds every live output whose mode is not its wish's, as a replug at
+   that mode would (the inventory revision moves), keeping the displays'
+   order. -1 when an output asked for could not be brought up at it; its
+   connector's error says why. */
+int blit_kms_apply_modes(BlitKms *kms, char *error, size_t error_capacity);
+/* The outputs put in this order of connector ids, those not named after:
+   a rebuilt output comes back last, and a failed then reverted rebuild
+   takes two applies, so the caller says the order it had before. */
+void blit_kms_keep_order(BlitKms *kms, const uint32_t *connectors, int count);
 int blit_kms_fd(const BlitKms *kms);
 int blit_kms_service(BlitKms *kms, int readable);
 int blit_kms_suspend(BlitKms *kms);

@@ -210,6 +210,12 @@ struct BlitKms {
     KmsSnapshot snapshot;
     unsigned long long snapshot_revision;
     unsigned long long applied_snapshot_revision;
+    /* Gitea #60: the connectors' wished modes, and the snapshot last
+       reconciled, for applying a wish between scans. */
+    struct { char connector[64]; int width, height; double refresh_hz; } wishes[KMS_MAX_OUTPUTS];
+    int wish_count;
+    KmsSnapshot reconciled;
+    int reconciled_valid;
     unsigned long long monitor_scans;
     double monitor_last_scan_ms;
     char hotplug_error[128];
@@ -390,6 +396,32 @@ static double mode_refresh_hz(const drmModeModeInfo *mode)
     if (mode->flags & DRM_MODE_FLAG_DBLSCAN) hz /= 2.0;
     if (mode->vscan > 1) hz /= (double)mode->vscan;
     return hz;
+}
+
+static int choose_mode(const drmModeConnector *connector);
+
+/* The connector's wished mode's index, or -1 (none, or not listed). */
+static int wished_mode(const BlitKms *kms, const char *name, const drmModeModeInfo *modes, int count)
+{
+    int i, w, best = -1;
+    for (w = 0; w < kms->wish_count; ++w)
+        if (strcmp(kms->wishes[w].connector, name) == 0) break;
+    if (w == kms->wish_count || kms->wishes[w].width <= 0) return -1;
+    for (i = 0; i < count; ++i) {
+        double hz = mode_refresh_hz(&modes[i]);
+        if (modes[i].hdisplay != kms->wishes[w].width || modes[i].vdisplay != kms->wishes[w].height) continue;
+        if (kms->wishes[w].refresh_hz > 0) {
+            double off = hz - kms->wishes[w].refresh_hz, best_off;
+            if (off < 0) off = -off;
+            if (off > 0.5) continue;
+            best_off = best < 0 ? 1e9 : mode_refresh_hz(&modes[best]) - kms->wishes[w].refresh_hz;
+            if (best_off < 0) best_off = -best_off;
+            if (off < best_off) best = i;
+        } else if (best < 0 || hz > mode_refresh_hz(&modes[best])) {
+            best = i;
+        }
+    }
+    return best;
 }
 
 static int choose_mode(const drmModeConnector *connector)
@@ -2483,6 +2515,71 @@ int blit_kms_set_display_position(BlitKms *kms, int index, int x, int y)
 
 /* ADR 0204: an output's zoom. A change repaints it in full, at a size the
    GPU's scene is made again for, and moves its pointer. */
+int blit_kms_wish_mode(BlitKms *kms, const char *connector, int width, int height, double refresh_hz)
+{
+    int w;
+    if (kms == NULL || connector == NULL || connector[0] == '\0') return -1;
+    for (w = 0; w < kms->wish_count; ++w)
+        if (strcmp(kms->wishes[w].connector, connector) == 0) break;
+    if (w == kms->wish_count) {
+        if (kms->wish_count == KMS_MAX_OUTPUTS) return -1;
+        ++kms->wish_count;
+        snprintf(kms->wishes[w].connector, sizeof(kms->wishes[w].connector), "%s", connector);
+    }
+    kms->wishes[w].width = width > 0 ? width : 0;
+    kms->wishes[w].height = width > 0 ? height : 0;
+    kms->wishes[w].refresh_hz = width > 0 && refresh_hz > 0 ? refresh_hz : 0;
+    return 0;
+}
+
+void blit_kms_keep_order(BlitKms *kms, const uint32_t *connectors, int count)
+{
+    int i, j, k, placed = 0;
+    if (kms == NULL) return;
+    for (i = 0; i < count; ++i)
+        for (j = placed; j < kms->output_count; ++j)
+            if (kms_output(kms, j)->connector == connectors[i]) {
+                int slot = kms->slots[j];
+                for (k = j; k > placed; --k) kms->slots[k] = kms->slots[k - 1];
+                kms->slots[placed++] = slot;
+                break;
+            }
+}
+
+int blit_kms_apply_modes(BlitKms *kms, char *error, size_t error_capacity)
+{
+    uint32_t order[KMS_MAX_OUTPUTS];
+    int count, i, j, w;
+    if (kms == NULL || !kms->reconciled_valid) return 0;
+    count = kms->output_count;
+    for (i = 0; i < count; ++i) order[i] = kms_output(kms, i)->connector;
+    kms_reconcile_snapshot(kms, &kms->reconciled);
+    /* A rebuilt output comes back last; it goes back to its place, so the
+       first display stays the first. */
+    blit_kms_keep_order(kms, order, count);
+    /* Every wished connector that is connected is live, at its wish. */
+    for (w = 0; w < kms->wish_count; ++w) {
+        const KmsConnector *c = NULL;
+        int m;
+        for (j = 0; j < kms->reconciled.count; ++j)
+            if (strcmp(kms->reconciled.connectors[j].name, kms->wishes[w].connector) == 0)
+                c = &kms->reconciled.connectors[j];
+        if (c == NULL) continue;
+        m = wished_mode(kms, c->name, c->modes, c->mode_count);
+        for (j = 0; j < kms->output_count; ++j)
+            if (kms_output(kms, j)->connector == c->id) break;
+        if (j == kms->output_count) {
+            set_error(error, error_capacity, kms->hotplug_error[0] ? kms->hotplug_error : "output not brought up");
+            return -1;
+        }
+        if (m >= 0 && memcmp(&c->modes[m], &kms_output(kms, j)->mode, sizeof(c->modes[m])) != 0) {
+            set_error(error, error_capacity, "output not at the mode asked for");
+            return -1;
+        }
+    }
+    return 0;
+}
+
 int blit_kms_set_zoom(BlitKms *kms, int index, int zoom)
 {
     KmsOutput *output;

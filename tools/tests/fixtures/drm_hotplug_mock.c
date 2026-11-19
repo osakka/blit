@@ -116,9 +116,24 @@ drmModeConnectorPtr drmModeGetConnector(int fd, uint32_t id)
     for (i = 0; i < s.count; ++i) if (s.ids[i] == id) {
         if (s.fail_add == -1000 - (int)id) { c->connection = DRM_MODE_UNKNOWNCONNECTION; break; }
         c->connection = DRM_MODE_CONNECTED; c->count_modes = 1;
-        c->modes = calloc(1, sizeof(*c->modes));
+        c->modes = calloc(17, sizeof(*c->modes));
         c->modes[0].hdisplay = s.width[i]; c->modes[0].vdisplay = s.height[i];
         c->modes[0].vrefresh = 60; c->modes[0].type = DRM_MODE_TYPE_PREFERRED;
+        /* Gitea #60: BLIT_DRM_MOCK_MODES="WxH@Hz,..." -- more modes, not
+           preferred, on every connector. */
+        {
+            const char *more = getenv("BLIT_DRM_MOCK_MODES");
+            while (more != NULL && *more != '\0' && c->count_modes < 17) {
+                int w, h, hz, n = 0;
+                if (sscanf(more, "%dx%d@%d%n", &w, &h, &hz, &n) != 3 || n == 0) break;
+                c->modes[c->count_modes].hdisplay = (uint16_t)w;
+                c->modes[c->count_modes].vdisplay = (uint16_t)h;
+                c->modes[c->count_modes].vrefresh = (uint32_t)hz;
+                ++c->count_modes;
+                more += n;
+                if (*more == ',') ++more;
+            }
+        }
         c->encoder_id = id; break;
     }
     return c;
@@ -135,8 +150,19 @@ drmModeCrtcPtr drmModeGetCrtc(int fd, uint32_t id)
 int drmModeSetCrtc(int fd, uint32_t crtc, uint32_t fb, uint32_t x, uint32_t y,
                     uint32_t *connectors, int count, drmModeModeInfoPtr mode)
 {
-    MockState s = state(); (void)fd; (void)x; (void)y; (void)mode;
+    MockState s = state(); (void)fd; (void)x; (void)y;
+    const char *fail_mode = getenv("BLIT_DRM_MOCK_FAIL_MODE");
     if (fb && count && connectors && (int)connectors[0] == s.fail_add) return -1;
+    /* Gitea #60: a mode the "monitor" will not take, WxH; and every mode set
+       traced, so a gate sees which. */
+    if (fb && mode != NULL && fail_mode != NULL) {
+        int w, h;
+        if (sscanf(fail_mode, "%dx%d", &w, &h) == 2 && mode->hdisplay == w && mode->vdisplay == h) {
+            trace("mode-refused", mode->hdisplay, mode->vdisplay);
+            return -1;
+        }
+    }
+    if (fb && mode != NULL) trace("mode", mode->hdisplay, mode->vdisplay);
     if (!fb && (int)crtc == s.fail_remove) return -1;
     trace(fb ? "modeset" : "disable", crtc, fb); return 0;
 }

@@ -568,6 +568,7 @@ suite_renderer() {
     run_gate kms_graphics_clip_gate.sh sh "$ROOT/tools/tests/kms_graphics_clip_gate.sh"
     run_gate kms_hotplug_gate.rb ruby "$ROOT"/tools/tests/kms_hotplug_gate.rb
     run_gate kms_hotplug_cycles.rb ruby "$ROOT"/tools/tests/kms_hotplug_cycles.rb
+    run_gate display_mode_gate.rb ruby "$ROOT"/tools/tests/display_mode_gate.rb
     run_gate kms_pointer_phase_gate.rb ruby "$ROOT"/tools/tests/kms_pointer_phase_gate.rb
     run_gate pointer_shake_gate.sh "$ROOT"/tools/tests/pointer_shake_gate.sh
     run_gate surface_damage_gate.sh sh "$ROOT"/tools/tests/surface_damage_gate.sh

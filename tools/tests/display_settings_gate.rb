@@ -133,10 +133,10 @@ Dir.mktmpdir('blit-display') do |root|
           "native KMS has no rotation transform: #{item['capabilities'].inspect}")
     check(!item.fetch('capabilities', []).include?('brightness'),
           'brightness is claimed with no backlight on the host')
-    # Zoom (ADR 0204) is a setting of every KMS display; brightness is not
-    # offered without a backlight, so it is the only one.
-    check(item.fetch('configuration', {}) == { 'zoom' => 100 },
-          "configuration should hold only zoom: #{item['configuration'].inspect}")
+    # Zoom (ADR 0204) and mode (ADR 0236) are settings of every KMS display
+    # with a connector; brightness is not offered without a backlight.
+    check(item.fetch('configuration', {}) == { 'zoom' => 100, 'mode' => 'auto' },
+          "configuration should hold only zoom and mode: #{item['configuration'].inspect}")
     code, problem = patch('rotation' => 90)
     check(code == 422 && problem.to_h['code'] == 'display_rotation_unsupported',
           "rotation is refused -> #{code} #{problem.inspect}")
@@ -152,11 +152,13 @@ Dir.mktmpdir('blit-display') do |root|
     # the hardware cannot do, and the difference is the point: a controller
     # that sees 422 knows to look at `capabilities`, and 400 means it sent
     # something Blit will never accept.
+    # (`mode` became writable in 0.3.125, ADR 0236; `power` is reported
+    # and never writable.)
     code, problem = json('PATCH', '/v1/displays/display-1',
-                         { 'configuration' => { 'mode' => '1920x1080' } })
-    check(code == 400, "a mode change -> #{code}")
+                         { 'configuration' => { 'power' => 'off' } })
+    check(code == 400, "a power change -> #{code}")
     check(problem.to_h['code'] == 'invalid_display_property',
-          "mode refusal code: #{problem.inspect}")
+          "power refusal code: #{problem.inspect}")
   end
 
   # ---- a fabricated backlight --------------------------------------------
