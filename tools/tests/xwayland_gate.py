@@ -1457,19 +1457,39 @@ def x_dragout_part(desk, standin, env, log, work):
         desk.send('CLIP dragend o2 none')
         wait_for(lambda: 'XSTANDIN dragout status refuse\nXSTANDIN dragout leave' in printed(),
                  lambda: 'not refused and left:\n' + printed())
-        # 3. Onto an X window: refused (the program's own window stands in).
-        drag(3)
-        desk.send('CLIP drop o3 %d 10 10 text/uri-list' % wid)
-        until(r'CLIP dropped o3 refused')
-        send('INPUT btn %d 272 release')
-        desk.send('CLIP dragend o3 none')
-        wait_for(lambda: printed().count('XSTANDIN dragout leave') >= 2, lambda: 'the third not left:\n' + printed())
-        wait_for(lambda: 'an X program\'s drag onto an X window is not carried' in log(),
-                 lambda: 'the refusal was not said:\n' + log())
+        # 3. Onto another X program's window (0.3.122): relayed -- it is told
+        # the drop window is the source, answers it (hover, then taken), and
+        # reads the dragging program's own XdndSelection.
+        tpath = os.path.join(work, 'xstandin-relay-target.out')
+        target = cg.start([standin, 'Relay target'], dict(env, XSTANDIN_DND='accept'), open(tpath, 'w'))
+        tprinted = lambda: open(tpath).read()
+        try:
+            twid = int(until(r'WINDOW new (\d+) 0', 20).group(1))
+            desk.send('WINDOW size %d 400 300' % twid)
+            wait_for(lambda: 'XSTANDIN configure 400x300' in tprinted(), lambda: 'not configured:\n' + tprinted())
+            drag(3)
+            desk.send('CLIP drag o3 %d 20 30 text/uri-list text/plain;charset=utf-8' % twid)
+            until(r'CLIP hover o3 copy')
+            desk.send('CLIP drop o3 %d 20 30 text/uri-list text/plain;charset=utf-8' % twid)
+            until(r'CLIP dropped o3 taken')
+            wait_for(lambda: 'XSTANDIN dnd got file:///home/me/x%20out.txt||' in tprinted(),
+                     lambda: 'the X target did not get the program\'s data:\n' + tprinted())
+            check(desk.desk.clip_fds == [], 'the desktop was asked to write an X program\'s drag')
+            send('INPUT btn %d 272 release')
+            desk.send('CLIP dragend o3 copy')
+            wait_for(lambda: printed().count('XSTANDIN dragout finished 1 copy') == 2,
+                     lambda: 'the relayed drag did not finish at its source:\n' + printed())
+            desk.send('WINDOW close %d' % twid)
+            until(r'WINDOW gone %d' % twid)
+        finally:
+            if target.poll() is None:
+                target.kill()
+                target.wait()
         desk.send('WINDOW close %d' % wid)
         until(r'WINDOW gone %d' % wid)
         return ('x-dragout=XdndSelection+button->drop window->CLIP dragout o1 copy(types) desktop-read=XdndSelection '
-                'release-held dragend copy->status accept,drop,finished none->refuse,leave onto-X=refused')
+                'release-held dragend copy->status accept,drop,finished none->refuse,leave '
+                'onto-X=relayed(hover copy,taken,target read the source,source finished)')
     finally:
         if route:
             route.close()

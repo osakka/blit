@@ -501,6 +501,7 @@ struct bc_drop {
     uint32_t xwin, xto;               /* xcb_window_t */
     uint32_t xversion, xtime;
     int xwaiting;                     /* a position sent, its XdndStatus not back */
+    int xrelay;                       /* an X program's drag onto an X window: relayed, its own XdndSelection */
     uint32_t xtypes[8];               /* the types as atoms, XdndTypeList */
     int nxtypes;
 };
@@ -3698,6 +3699,7 @@ static void drop_begin(struct bc_server *s, const BcLine *l, int hover)
     d->accepted = d->copy = d->dropped = d->received = d->left = 0;
     d->xstate = BC_XDND_NONE;
     d->xwin = d->xto = XCB_WINDOW_NONE;
+    d->xrelay = 0;
     d->hover = hover;
     d->out = l->out;
     d->hover_said = -1;
@@ -3709,14 +3711,10 @@ static void drop_begin(struct bc_server *s, const BcLine *l, int hover)
     /* An X program's window takes it by XDND (0.3.117); its menus and
        other override-redirect windows take none. */
     if (x != NULL && x->xwin != NULL && d->timer != NULL) {
-        if (d->out && s->dragout.n == d->seq && s->dragout.x) {
-            /* An X program's drag onto an X window: the compositor cannot be
-               its source too (it would take XdndSelection from the program
-               dragging, and end that drag). Refused, for now. */
-            logf_("drop o%u on window %u: an X program's drag onto an X window is not carried", d->seq, d->window);
-            drop_end(s, 0);
-            return;
-        }
+        /* An X program's drag onto an X window: relayed (xdnd_begin) --
+           the window is told the drop window is the source, and reads the
+           program's own XdndSelection; nobody's selection is taken. */
+        if (d->out && s->dragout.n == d->seq && s->dragout.x) d->xrelay = 1;
         if (x->xpopup || !xdnd_begin(s, x->xwin)) drop_end(s, 0);
         return;
     }
@@ -9110,7 +9108,7 @@ static void xdnd_send(struct bc_server *s, xcb_atom_t type, uint32_t l1, uint32_
     u.ev.format = 32;
     u.ev.window = s->drop.xwin;
     u.ev.type = type;
-    u.ev.data.data32[0] = s->x.dnd_window;
+    u.ev.data.data32[0] = s->drop.xrelay ? s->x.xdrag.proxy : s->x.dnd_window;
     u.ev.data.data32[1] = l1;
     u.ev.data.data32[2] = l2;
     u.ev.data.data32[3] = l3;
@@ -9118,6 +9116,8 @@ static void xdnd_send(struct bc_server *s, xcb_atom_t type, uint32_t l1, uint32_
     xcb_send_event(s->x.conn, 0, s->drop.xto, XCB_EVENT_MASK_NO_EVENT, u.bytes);
     xcb_flush(s->x.conn);
 }
+
+static void xdnd_time(struct bc_server *s, xcb_timestamp_t time);
 
 static int xdnd_begin(struct bc_server *s, struct bc_xwin *w)
 {
@@ -9141,6 +9141,22 @@ static int xdnd_begin(struct bc_server *s, struct bc_xwin *w)
         x_prop32(s, proxy, atoms[BC_ATOM_XDND_PROXY], XCB_ATOM_WINDOW, &self) && self == proxy)
         d->xto = proxy;
     d->xversion = version < BC_XDND_VERSION ? version : BC_XDND_VERSION;
+    if (d->xrelay) {
+        /* The program's own types and time; its XdndTypeList on the drop
+           window, which the window is told is the source. */
+        int i;
+        d->nxtypes = 0;
+        for (i = 0; i < s->x.xdrag.ntypes && d->nxtypes < 8; ++i) d->xtypes[d->nxtypes++] = s->x.xdrag.types[i];
+        xcb_change_property(s->x.conn, XCB_PROP_MODE_REPLACE, s->x.xdrag.proxy, atoms[BC_ATOM_XDND_TYPE_LIST],
+                            XCB_ATOM_ATOM, 32, (uint32_t)d->nxtypes, d->xtypes);
+        d->xstate = BC_XDND_TIME;
+        d->xwaiting = 0;
+        logf_("drop o%u on window %u at %d,%d: relayed from X window 0x%x to X window 0x%x (XDND %u)", d->seq,
+              d->window, d->x, d->y, (unsigned)s->x.xdrag.source, (unsigned)w->window, (unsigned)d->xversion);
+        xdnd_time(s, s->x.xdrag.src ? s->x.xdrag.src->xtime : XCB_CURRENT_TIME);
+        if (!d->hover) wl_event_source_timer_update(d->timer, BC_DROP_MOTION_MS);
+        return 1;
+    }
     d->nxtypes = 0;
     snprintf(types, sizeof(types), "%s", d->types);
     for (t = strtok_r(types, " ", &save); t && d->nxtypes < 8; t = strtok_r(NULL, " ", &save)) {
@@ -9194,7 +9210,7 @@ static void xdnd_time(struct bc_server *s, xcb_timestamp_t time)
     struct bc_drop *d = &s->drop;
     if (d->seq == 0 || d->xstate != BC_XDND_TIME) return;
     d->xtime = time;
-    xcb_set_selection_owner(s->x.conn, s->x.dnd_window, s->x.atoms[BC_ATOM_XDND_SELECTION], time);
+    if (!d->xrelay) xcb_set_selection_owner(s->x.conn, s->x.dnd_window, s->x.atoms[BC_ATOM_XDND_SELECTION], time);
     xdnd_send(s, s->x.atoms[BC_ATOM_XDND_ENTER], (d->xversion << 24) | (d->nxtypes > 3 ? 1u : 0u),
               d->nxtypes > 0 ? d->xtypes[0] : 0, d->nxtypes > 1 ? d->xtypes[1] : 0, d->nxtypes > 2 ? d->xtypes[2] : 0);
     d->xstate = BC_XDND_ENTERED;
@@ -9226,6 +9242,7 @@ static void xdnd_status(struct bc_server *s, const xcb_client_message_event_t *e
     if (!(ev->data.data32[1] & 1) || d->dropped) return;
     d->accepted = 1;
     d->dropped = 1;
+    if (d->xrelay) d->received = 1;   /* it reads the program's selection, unseen here */
     d->xstate = BC_XDND_DROPPED;
     xdnd_send(s, s->x.atoms[BC_ATOM_XDND_DROP], 0, d->xtime, 0, 0);
     wl_event_source_timer_update(d->timer, BC_DROP_FINISH_MS);
@@ -9244,12 +9261,13 @@ static void xdnd_end(struct bc_server *s)
 {
     struct bc_drop *d = &s->drop;
     if (d->xstate == BC_XDND_ENTERED) xdnd_send(s, s->x.atoms[BC_ATOM_XDND_LEAVE], 0, 0, 0, 0);
-    if (d->xstate >= BC_XDND_ENTERED && s->x.conn) {
+    if (d->xstate >= BC_XDND_ENTERED && s->x.conn && !d->xrelay) {
         xcb_set_selection_owner(s->x.conn, XCB_WINDOW_NONE, s->x.atoms[BC_ATOM_XDND_SELECTION], d->xtime);
         xcb_flush(s->x.conn);
     }
     d->xstate = BC_XDND_NONE;
     d->xwin = d->xto = XCB_WINDOW_NONE;
+    d->xrelay = 0;
 }
 
 /* The window or X going mid-drop: refused, with nothing more sent to it. */
@@ -9515,6 +9533,16 @@ static void xdrag_message(struct bc_server *s, const xcb_client_message_event_t 
     const xcb_atom_t *atoms = s->x.atoms;
     const uint32_t *l = ev->data.data32;
     if (!s->x.xdrag.armed) return;
+    /* An X window's answers to a relayed drop (it was told the drop window
+       is the source). */
+    if (ev->type == atoms[BC_ATOM_XDND_STATUS]) {
+        if (s->drop.xrelay) xdnd_status(s, ev);
+        return;
+    }
+    if (ev->type == atoms[BC_ATOM_XDND_FINISHED]) {
+        if (s->drop.xrelay) xdnd_finished(s, ev);
+        return;
+    }
     if (ev->type == atoms[BC_ATOM_XDND_ENTER]) {
         int i;
         s->x.xdrag.source = l[0];

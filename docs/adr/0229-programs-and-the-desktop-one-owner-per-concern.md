@@ -406,3 +406,26 @@ finished copy; none -> refused, left; onto an X window refused, said) plain
 and under ASan/UBSan in the release environment; a real GTK3 drag source
 under Xwayland (GDK_BACKEND=x11) in a throwaway container: announced, read,
 ended in GTK as a successful drag.
+
+## Amended 2026-11-19 (0.3.122): X onto X, relayed
+
+0.3.121 refused an X program's drag onto an X window: being that window's
+XDND source would take XdndSelection from the program dragging and end its
+drag. It is relayed instead. The compositor runs the target side of row 1
+toward the X window as before, but with the drop window -- the one the
+dragging program talks to -- as the source in every message (XdndEnter's,
+XdndPosition's and XdndDrop's first word), the program's own types (its
+XdndTypeList set on the drop window) and its latest position's time, and
+without owning XdndSelection. The window's XdndStatus and XdndFinished come
+to the drop window and are its `CLIP hover` and `CLIP dropped`; its
+ConvertSelection of XdndSelection goes to the program that owns it, which
+answers it directly. The dragging program then ends as any X drag out, at
+`CLIP dragend`. Hover feedback now works over X windows for X drags too.
+
+Evidence: xwayland_gate's dragout part, onto a second X stand-in that
+accepts: hover copy, taken, the target got the source's URI with no read
+asked of the desktop, the source finished copy; plain and ASan/UBSan. Its
+drop part also drops on a window moved to a second display (root 1953,44
+for 33,44 on HDMI-A-1 at 1920,0). A real GTK3 X drag source onto a real
+GTK3 X drop target, in a throwaway container: hover copy, taken, the file
+received, the source's drag ended as a success.

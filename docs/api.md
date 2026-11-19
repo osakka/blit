@@ -3049,9 +3049,11 @@ It speaks the frame channel above as a producer, with these additions.
   is read. Its button release is held to the end: `CLIP dragend o<n>
   copy|move` is XdndStatus accepting that action, then the release, and
   its XdndDrop is answered XdndFinished; `none` refuses it and it leaves.
-  Dropped onto an X window it is refused (`CLIP dropped o<n> refused`):
-  the compositor cannot also be that window's source without taking
-  XdndSelection from the program dragging.
+  Over or onto an X window (since 0.3.122) it is relayed: the window is
+  told the drop window is the source (XdndEnter, XdndPosition and XdndDrop
+  from it, the program's types and time), answers it -- `CLIP hover` and
+  `CLIP dropped` as for any program -- and reads the dragging program's
+  own XdndSelection; nobody's selection is taken.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`
