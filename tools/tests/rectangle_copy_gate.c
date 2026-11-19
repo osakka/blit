@@ -134,8 +134,11 @@ int main(void)
     CHECK(!grid->damage_valid); ++cases;
     seed(); terminal_copy_rectangle(session,grid,(int[]){99,99,99,99,9,1,1,9},8);
     equal_cell(0,0,23,11); ++cases;
-    seed(); terminal_copy_rectangle(session,grid,(int[]){5,4,2,3,1,1,1,1},8);
-    CHECK(!grid->damage_valid); ++cases;
+    {   /* Gitea #120: a copy that changes nothing is not counted. */
+        unsigned long long copies=rectangle_copy_stats.copies;
+        seed(); terminal_copy_rectangle(session,grid,(int[]){5,4,2,3,1,1,1,1},8);
+        CHECK(!grid->damage_valid&&rectangle_copy_stats.copies==copies); ++cases;
+    }
     seed(); session->terminal_origin_mode=1;
     grid->scroll_top=2;grid->scroll_bottom=8;grid->lrmm_enabled=1;grid->left_margin=3;grid->right_margin=15;
     terminal_copy_rectangle(session,grid,(int[]){1,1,2,2,1,7,13,1},8);
@@ -163,13 +166,18 @@ int main(void)
     {
         struct timespec before,after;
         double ms;
+        unsigned long long copies,cells;
         seed_dimensions(232,71);
+        copies=rectangle_copy_stats.copies; cells=rectangle_copy_stats.cells;
         CHECK(clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&before)==0);
         for(int n=0;n<30;++n) {
             int p[]={2+n,2+n,39+n,145+n,1,3+n,3+n,1};
             terminal_copy_rectangle(session,grid,p,8);
         }
         CHECK(clock_gettime(CLOCK_PROCESS_CPUTIME_ID,&after)==0);
+        /* Gitea #120: /v1/diagnostics/runtime counts what was copied. */
+        CHECK(rectangle_copy_stats.copies==copies+30&&rectangle_copy_stats.cells==cells+30ULL*144*38);
+        ++cases;
         ms=(after.tv_sec-before.tv_sec)*1000.0+(after.tv_nsec-before.tv_nsec)/1000000.0;
         printf("RECTANGLE_COPY_COST grid=232x71 rectangle=144x38 steps=30 local_cpu_total_ms=%.3f mean_ms=%.3f excludes=parser_hold_render_input\n",ms,ms/30);
     }

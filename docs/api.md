@@ -3154,7 +3154,10 @@ a *blink* ([ADR 0213](adr/0213-graphics-ledger-blink-counters-and-held-pictures.
 `graphics_deletes`, `graphics_images_freed`, `graphics_upload_bytes`
 (GPU texture uploads), `graphics_bytes_landed`, `graphics_full_repaints`,
 `graphics_barrier_holds`, `graphics_barrier_timeouts` and
-`graphics_synchronized_live_draws`. `GET /v1/diagnostics/graphics-ledger`
+`graphics_synchronized_live_draws`. `rectangle_copies` and
+`rectangle_copy_cells` (since 0.3.124) count the terminal rectangle copies
+(DECCRA) applied and the cells they moved: read them before and after a
+window drag to see whether Hibr's hold sent the drag as copies. `GET /v1/diagnostics/graphics-ledger`
 says what happened around one: a ring of the last 512 picture events
 (`transmit`, `place`, `delete`, `free`, `reset`, `blink`, `barrier`), each
 stamped with the output's presented-frame count, the image and placement,

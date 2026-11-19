@@ -433,6 +433,11 @@ typedef struct {
     unsigned long long synchronized_live_draws;
 } BlitGraphicsLedger;
 
+/* The rectangle copies applied (DECCRA), for /v1/diagnostics/runtime. */
+static struct {
+    unsigned long long copies, cells;
+} rectangle_copy_stats;
+
 /* Frees and deletes waiting for the service pass's trace (it was sized by
    the 16-picture store; a pass that frees more counts what it dropped). */
 #define BLIT_GRAPHICS_TRACE_PENDING 24
@@ -4048,6 +4053,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         "\"graphics_images_freed\":%llu,\"graphics_upload_bytes\":%llu,"
         "\"graphics_bytes_landed\":%llu,\"graphics_full_repaints\":%llu,"
         "\"graphics_blink_frames\":%llu,\"graphics_blink_events\":%llu,"
+        "\"rectangle_copies\":%llu,\"rectangle_copy_cells\":%llu,"
         "\"graphics_barrier_holds\":%llu,\"graphics_barrier_timeouts\":%llu,"
         "\"graphics_synchronized_live_draws\":%llu,"
         "\"graphics_ledger_sequence\":%llu,"
@@ -4157,6 +4163,7 @@ static void runtime_diagnostics_json(BlitRuntime *runtime, char *body,
         graphics_ledger.images_freed, graphics_output_total(runtime, 0),
         graphics_ledger.upload_bytes_landed, graphics_output_total(runtime, 1),
         graphics_ledger.blink_frames, graphics_ledger.blink_events,
+        rectangle_copy_stats.copies, rectangle_copy_stats.cells,
         graphics_ledger.barrier_holds, graphics_ledger.barrier_timeouts,
         graphics_ledger.synchronized_live_draws, graphics_ledger.sequence,
         runtime->pixel_frames_accepted,
@@ -13924,6 +13931,9 @@ static void terminal_copy_rectangle(const BlitSession *session,
     if (height <= 0 || width <= 0)
         return;
     if (top == source.top && left == source.left) return;
+    /* Gitea #120: what a real drag through Hibr's hold actually copies. */
+    ++rectangle_copy_stats.copies;
+    rectangle_copy_stats.cells += (unsigned long long)width * (unsigned long long)height;
     first = top > source.top ? height - 1 : 0;
     stop = top > source.top ? -1 : height;
     step = top > source.top ? -1 : 1;

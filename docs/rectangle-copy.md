@@ -94,9 +94,22 @@ The fixture also times30 local144x38 cell copies on a232x71 grid. That is
 primitive CPU cost only: no input, PTY parsing, hold, application redraw,
 glyph rendering or physical presentation. It is not a frame-rate measurement.
 
-After Hibr integration, measure actual through-hold bytes, application/server
-CPU, physical presentation cadence and incremental-vs-clean correctness for
-content-bearing30-step drags. Cover wallpaper, translucent/pixel windows,
+Hibr's hold now emits the copy (mods/hold/render.c, `HD_COPY`). From 0.3.124
+`/v1/diagnostics/runtime` counts every copy Blit applies (`rectangle_copies`,
+`rectangle_copy_cells`; the gate checks both, and that a copy changing
+nothing is not counted), so a real drag is measured on the box itself:
+
+```sh
+p() { curl -s -H "Authorization: Bearer $TOKEN" "$base/v1/diagnostics/runtime" |
+      jq '.performance | {rectangle_copies,rectangle_copy_cells,terminal_bytes,process_cpu_ms,frames,max_frame_gap_ms}'; }
+p; # drag a content-bearing window across the desktop with solid drag
+p
+```
+
+The copies and cells say the drag went as copies; `terminal_bytes` against
+the cells moved says what hold saved; `process_cpu_ms` and the frame gaps
+say what it cost. Still to measure that way, on hardware,
+content-bearing 30-step drags. Cover wallpaper, translucent/pixel windows,
 overlaps, Arabic/wide/emoji text, joined panes, resize/reconnect and mixed
 capable/incapable clients. Do not close120 or claim solid-motion speed from
 the local copy fixture alone. See [ADR0175](adr/0175-complete-cell-rectangle-copy.md)
