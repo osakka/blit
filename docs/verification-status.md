@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-19: 0.3.121 X programs drag out
+
+- **What it is:** an X program dragging out reaches the desktop as the same
+  `CLIP dragout` (agreed with Hibr, no wire change).
+  - The compositor becomes its XDND target through a drop window over the X
+    root, armed when the program owns XdndSelection with a button down.
+  - Reads convert XdndSelection, and the release is held until `CLIP
+    dragend`: accepted means XdndStatus, an X round trip, the release, then
+    XdndFinished for its drop.
+  - Onto an X window it is refused for now. ADR 0229 amended.
+- **Gates on this host:** `all` 193 pass, 11 skip; `renderer` 87;
+  `renderer-gles` 67.
+- **Release environment (Debian 13):** xwayland_gate's new dragout part
+  (an X stand-in dragging as a toolkit does: announced, read, release
+  held, copy, accepted, dropped and finished; none refused and left; onto
+  X refused and said) passes plain and under ASan/UBSan. The ASan run
+  caught a timer leak, fixed before release. Also compositor_gate, the
+  package gate and update_pair.
+- **Real program:** a GTK3 drag source under Xwayland (GDK_BACKEND=x11)
+  in a throwaway container: announced, its URI read, and ended in GTK as a
+  successful drag.
+- **Live, the mini PC:** the pair update to 0.3.121 was verified.
+- **Published** to hibr-apt, under a HOLD/done with the repo maintainer's
+  session (my-vpn-ea). The repository was clean and in sync, and its
+  history is one commit.
+
 ## 2026-11-18: 0.3.120 a program's drag only for a desktop that runs it
 
 - **What it is:** a fix for 0.3.119, found in review before any desktop
