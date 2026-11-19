@@ -261,8 +261,8 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `wiretap-right` | `U+1002C8` | `"\udbc0\udec8"` | — |
 | `wiretap-off-left` | `U+1002C9` | `"\udbc0\udec9"` | — |
 | `wiretap-off-right` | `U+1002CA` | `"\udbc0\udeca"` | — |
-| `wiretap-1` | `U+1002CB` | `"\udbc0\udecb"` | — |
-| `wiretap-1-off` | `U+1002CC` | `"\udbc0\udecc"` | — |
+| `wiretap-1` | `U+1002CB` | `"\udbc0\udecb"` | 1 |
+| `wiretap-1-off` | `U+1002CC` | `"\udbc0\udecc"` | 0 |
 | `wifi-signal-1` | `U+1002D1` | `"\udbc0\uded1"` | 1 |
 | `wifi-signal-2` | `U+1002D2` | `"\udbc0\uded2"` | 2 |
 | `wifi-signal-3` | `U+1002D3` | `"\udbc0\uded3"` | 3 |
@@ -320,6 +320,54 @@ Generated from the same catalogue served by `GET /v1/fonts/icons`. These origina
 | `battery-wide-4-charging-right` | `U+100307` | `"\udbc0\udf07"` | 4 |
 | `battery-wide-ac-left` | `U+100308` | `"\udbc0\udf08"` | — |
 | `battery-wide-ac-right` | `U+100309` | `"\udbc0\udf09"` | — |
+| `disc-0-left` | `U+1003A1` | `"\udbc0\udfa1"` | — |
+| `disc-0-right` | `U+1003A2` | `"\udbc0\udfa2"` | — |
+| `disc-1-left` | `U+1003A3` | `"\udbc0\udfa3"` | — |
+| `disc-1-right` | `U+1003A4` | `"\udbc0\udfa4"` | — |
+| `disc-2-left` | `U+1003A5` | `"\udbc0\udfa5"` | — |
+| `disc-2-right` | `U+1003A6` | `"\udbc0\udfa6"` | — |
+| `disc-3-left` | `U+1003A7` | `"\udbc0\udfa7"` | — |
+| `disc-3-right` | `U+1003A8` | `"\udbc0\udfa8"` | — |
+| `disc-4-left` | `U+1003A9` | `"\udbc0\udfa9"` | — |
+| `disc-4-right` | `U+1003AA` | `"\udbc0\udfaa"` | — |
+| `disc-5-left` | `U+1003AB` | `"\udbc0\udfab"` | — |
+| `disc-5-right` | `U+1003AC` | `"\udbc0\udfac"` | — |
+| `disc-6-left` | `U+1003AD` | `"\udbc0\udfad"` | — |
+| `disc-6-right` | `U+1003AE` | `"\udbc0\udfae"` | — |
+| `disc-7-left` | `U+1003AF` | `"\udbc0\udfaf"` | — |
+| `disc-7-right` | `U+1003B0` | `"\udbc0\udfb0"` | — |
+| `vinyl-0-left` | `U+1003B1` | `"\udbc0\udfb1"` | — |
+| `vinyl-0-right` | `U+1003B2` | `"\udbc0\udfb2"` | — |
+| `vinyl-1-left` | `U+1003B3` | `"\udbc0\udfb3"` | — |
+| `vinyl-1-right` | `U+1003B4` | `"\udbc0\udfb4"` | — |
+| `vinyl-2-left` | `U+1003B5` | `"\udbc0\udfb5"` | — |
+| `vinyl-2-right` | `U+1003B6` | `"\udbc0\udfb6"` | — |
+| `vinyl-3-left` | `U+1003B7` | `"\udbc0\udfb7"` | — |
+| `vinyl-3-right` | `U+1003B8` | `"\udbc0\udfb8"` | — |
+| `vinyl-4-left` | `U+1003B9` | `"\udbc0\udfb9"` | — |
+| `vinyl-4-right` | `U+1003BA` | `"\udbc0\udfba"` | — |
+| `vinyl-5-left` | `U+1003BB` | `"\udbc0\udfbb"` | — |
+| `vinyl-5-right` | `U+1003BC` | `"\udbc0\udfbc"` | — |
+| `vinyl-6-left` | `U+1003BD` | `"\udbc0\udfbd"` | — |
+| `vinyl-6-right` | `U+1003BE` | `"\udbc0\udfbe"` | — |
+| `vinyl-7-left` | `U+1003BF` | `"\udbc0\udfbf"` | — |
+| `vinyl-7-right` | `U+1003C0` | `"\udbc0\udfc0"` | — |
+| `cassette-0-left` | `U+1003C1` | `"\udbc0\udfc1"` | — |
+| `cassette-0-right` | `U+1003C2` | `"\udbc0\udfc2"` | — |
+| `cassette-1-left` | `U+1003C3` | `"\udbc0\udfc3"` | — |
+| `cassette-1-right` | `U+1003C4` | `"\udbc0\udfc4"` | — |
+| `cassette-2-left` | `U+1003C5` | `"\udbc0\udfc5"` | — |
+| `cassette-2-right` | `U+1003C6` | `"\udbc0\udfc6"` | — |
+| `cassette-3-left` | `U+1003C7` | `"\udbc0\udfc7"` | — |
+| `cassette-3-right` | `U+1003C8` | `"\udbc0\udfc8"` | — |
+| `cassette-4-left` | `U+1003C9` | `"\udbc0\udfc9"` | — |
+| `cassette-4-right` | `U+1003CA` | `"\udbc0\udfca"` | — |
+| `cassette-5-left` | `U+1003CB` | `"\udbc0\udfcb"` | — |
+| `cassette-5-right` | `U+1003CC` | `"\udbc0\udfcc"` | — |
+| `cassette-6-left` | `U+1003CD` | `"\udbc0\udfcd"` | — |
+| `cassette-6-right` | `U+1003CE` | `"\udbc0\udfce"` | — |
+| `cassette-7-left` | `U+1003CF` | `"\udbc0\udfcf"` | — |
+| `cassette-7-right` | `U+1003D0` | `"\udbc0\udfd0"` | — |
 
 ## Themed text additions
 
@@ -330,6 +378,42 @@ Text aliases use the terminal foreground, not intrinsic colour.
 | `hibr-pen` (themed alias) | `U+270E` | `"\u270e"` |
 | `berkanan` | `U+16D2` | `"\u16d2"` |
 | `wired` | `U+21CC` | `"\u21cc"` |
+| `transport-play` | `U+10037D` | `"\udbc0\udf7d"` |
+| `transport-wide-play-left` | `U+10037E` | `"\udbc0\udf7e"` |
+| `transport-wide-play-right` | `U+10037F` | `"\udbc0\udf7f"` |
+| `transport-pause` | `U+100380` | `"\udbc0\udf80"` |
+| `transport-wide-pause-left` | `U+100381` | `"\udbc0\udf81"` |
+| `transport-wide-pause-right` | `U+100382` | `"\udbc0\udf82"` |
+| `transport-stop` | `U+100383` | `"\udbc0\udf83"` |
+| `transport-wide-stop-left` | `U+100384` | `"\udbc0\udf84"` |
+| `transport-wide-stop-right` | `U+100385` | `"\udbc0\udf85"` |
+| `transport-prev` | `U+100386` | `"\udbc0\udf86"` |
+| `transport-wide-prev-left` | `U+100387` | `"\udbc0\udf87"` |
+| `transport-wide-prev-right` | `U+100388` | `"\udbc0\udf88"` |
+| `transport-next` | `U+100389` | `"\udbc0\udf89"` |
+| `transport-wide-next-left` | `U+10038A` | `"\udbc0\udf8a"` |
+| `transport-wide-next-right` | `U+10038B` | `"\udbc0\udf8b"` |
+| `transport-rewind` | `U+10038C` | `"\udbc0\udf8c"` |
+| `transport-wide-rewind-left` | `U+10038D` | `"\udbc0\udf8d"` |
+| `transport-wide-rewind-right` | `U+10038E` | `"\udbc0\udf8e"` |
+| `transport-forward` | `U+10038F` | `"\udbc0\udf8f"` |
+| `transport-wide-forward-left` | `U+100390` | `"\udbc0\udf90"` |
+| `transport-wide-forward-right` | `U+100391` | `"\udbc0\udf91"` |
+| `transport-eject` | `U+100392` | `"\udbc0\udf92"` |
+| `transport-wide-eject-left` | `U+100393` | `"\udbc0\udf93"` |
+| `transport-wide-eject-right` | `U+100394` | `"\udbc0\udf94"` |
+| `transport-record` | `U+100395` | `"\udbc0\udf95"` |
+| `transport-wide-record-left` | `U+100396` | `"\udbc0\udf96"` |
+| `transport-wide-record-right` | `U+100397` | `"\udbc0\udf97"` |
+| `transport-repeat` | `U+100398` | `"\udbc0\udf98"` |
+| `transport-wide-repeat-left` | `U+100399` | `"\udbc0\udf99"` |
+| `transport-wide-repeat-right` | `U+10039A` | `"\udbc0\udf9a"` |
+| `transport-repeat-one` | `U+10039B` | `"\udbc0\udf9b"` |
+| `transport-wide-repeat-one-left` | `U+10039C` | `"\udbc0\udf9c"` |
+| `transport-wide-repeat-one-right` | `U+10039D` | `"\udbc0\udf9d"` |
+| `transport-shuffle` | `U+10039E` | `"\udbc0\udf9e"` |
+| `transport-wide-shuffle-left` | `U+10039F` | `"\udbc0\udf9f"` |
+| `transport-wide-shuffle-right` | `U+1003A0` | `"\udbc0\udfa0"` |
 
 Berkanan preserves its runic meaning; it is not the Bluetooth icon. Existing standard/Nerd assignments are not repurposed.
 
@@ -468,5 +552,110 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `slate-light-sticky` | `U+100311` | `"\udbc0\udf11"` | cell pens | Slate set: title bar with the sticky box: the square with a pin in it |
 | `slate-light-sticky-pressed` | `U+100312` | `"\udbc0\udf12"` | cell pens | Slate set: title bar with the sticky box pressed (also hover): the box filled, a pin in it |
 | `slate-light-sticky-on` | `U+100313` | `"\udbc0\udf13"` | cell pens | Slate set: title bar with the sticky box on (sticky is set): the square with the pin bold |
+| `lcd-big-0-tl` | `U+100314` | `"\udbc0\udf14"` | foreground | LCD big digit 0, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-0-tr` | `U+100315` | `"\udbc0\udf15"` | foreground | LCD big digit 0: top-right cell |
+| `lcd-big-0-bl` | `U+100316` | `"\udbc0\udf16"` | foreground | LCD big digit 0: bottom-left cell |
+| `lcd-big-0-br` | `U+100317` | `"\udbc0\udf17"` | foreground | LCD big digit 0: bottom-right cell |
+| `lcd-big-1-tl` | `U+100318` | `"\udbc0\udf18"` | foreground | LCD big digit 1, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-1-tr` | `U+100319` | `"\udbc0\udf19"` | foreground | LCD big digit 1: top-right cell |
+| `lcd-big-1-bl` | `U+10031A` | `"\udbc0\udf1a"` | foreground | LCD big digit 1: bottom-left cell |
+| `lcd-big-1-br` | `U+10031B` | `"\udbc0\udf1b"` | foreground | LCD big digit 1: bottom-right cell |
+| `lcd-big-2-tl` | `U+10031C` | `"\udbc0\udf1c"` | foreground | LCD big digit 2, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-2-tr` | `U+10031D` | `"\udbc0\udf1d"` | foreground | LCD big digit 2: top-right cell |
+| `lcd-big-2-bl` | `U+10031E` | `"\udbc0\udf1e"` | foreground | LCD big digit 2: bottom-left cell |
+| `lcd-big-2-br` | `U+10031F` | `"\udbc0\udf1f"` | foreground | LCD big digit 2: bottom-right cell |
+| `lcd-big-3-tl` | `U+100320` | `"\udbc0\udf20"` | foreground | LCD big digit 3, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-3-tr` | `U+100321` | `"\udbc0\udf21"` | foreground | LCD big digit 3: top-right cell |
+| `lcd-big-3-bl` | `U+100322` | `"\udbc0\udf22"` | foreground | LCD big digit 3: bottom-left cell |
+| `lcd-big-3-br` | `U+100323` | `"\udbc0\udf23"` | foreground | LCD big digit 3: bottom-right cell |
+| `lcd-big-4-tl` | `U+100324` | `"\udbc0\udf24"` | foreground | LCD big digit 4, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-4-tr` | `U+100325` | `"\udbc0\udf25"` | foreground | LCD big digit 4: top-right cell |
+| `lcd-big-4-bl` | `U+100326` | `"\udbc0\udf26"` | foreground | LCD big digit 4: bottom-left cell |
+| `lcd-big-4-br` | `U+100327` | `"\udbc0\udf27"` | foreground | LCD big digit 4: bottom-right cell |
+| `lcd-big-5-tl` | `U+100328` | `"\udbc0\udf28"` | foreground | LCD big digit 5, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-5-tr` | `U+100329` | `"\udbc0\udf29"` | foreground | LCD big digit 5: top-right cell |
+| `lcd-big-5-bl` | `U+10032A` | `"\udbc0\udf2a"` | foreground | LCD big digit 5: bottom-left cell |
+| `lcd-big-5-br` | `U+10032B` | `"\udbc0\udf2b"` | foreground | LCD big digit 5: bottom-right cell |
+| `lcd-big-6-tl` | `U+10032C` | `"\udbc0\udf2c"` | foreground | LCD big digit 6, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-6-tr` | `U+10032D` | `"\udbc0\udf2d"` | foreground | LCD big digit 6: top-right cell |
+| `lcd-big-6-bl` | `U+10032E` | `"\udbc0\udf2e"` | foreground | LCD big digit 6: bottom-left cell |
+| `lcd-big-6-br` | `U+10032F` | `"\udbc0\udf2f"` | foreground | LCD big digit 6: bottom-right cell |
+| `lcd-big-7-tl` | `U+100330` | `"\udbc0\udf30"` | foreground | LCD big digit 7, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-7-tr` | `U+100331` | `"\udbc0\udf31"` | foreground | LCD big digit 7: top-right cell |
+| `lcd-big-7-bl` | `U+100332` | `"\udbc0\udf32"` | foreground | LCD big digit 7: bottom-left cell |
+| `lcd-big-7-br` | `U+100333` | `"\udbc0\udf33"` | foreground | LCD big digit 7: bottom-right cell |
+| `lcd-big-8-tl` | `U+100334` | `"\udbc0\udf34"` | foreground | LCD big digit 8, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-8-tr` | `U+100335` | `"\udbc0\udf35"` | foreground | LCD big digit 8: top-right cell |
+| `lcd-big-8-bl` | `U+100336` | `"\udbc0\udf36"` | foreground | LCD big digit 8: bottom-left cell |
+| `lcd-big-8-br` | `U+100337` | `"\udbc0\udf37"` | foreground | LCD big digit 8: bottom-right cell |
+| `lcd-big-9-tl` | `U+100338` | `"\udbc0\udf38"` | foreground | LCD big digit 9, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-9-tr` | `U+100339` | `"\udbc0\udf39"` | foreground | LCD big digit 9: top-right cell |
+| `lcd-big-9-bl` | `U+10033A` | `"\udbc0\udf3a"` | foreground | LCD big digit 9: bottom-left cell |
+| `lcd-big-9-br` | `U+10033B` | `"\udbc0\udf3b"` | foreground | LCD big digit 9: bottom-right cell |
+| `lcd-big-minus-tl` | `U+10033C` | `"\udbc0\udf3c"` | foreground | LCD big minus, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-minus-tr` | `U+10033D` | `"\udbc0\udf3d"` | foreground | LCD big minus: top-right cell |
+| `lcd-big-minus-bl` | `U+10033E` | `"\udbc0\udf3e"` | foreground | LCD big minus: bottom-left cell |
+| `lcd-big-minus-br` | `U+10033F` | `"\udbc0\udf3f"` | foreground | LCD big minus: bottom-right cell |
+| `lcd-big-blank-tl` | `U+100340` | `"\udbc0\udf40"` | foreground | LCD big blank, seven segments two cells by two rows: top-left cell, unlit segments faint |
+| `lcd-big-blank-tr` | `U+100341` | `"\udbc0\udf41"` | foreground | LCD big blank: top-right cell |
+| `lcd-big-blank-bl` | `U+100342` | `"\udbc0\udf42"` | foreground | LCD big blank: bottom-left cell |
+| `lcd-big-blank-br` | `U+100343` | `"\udbc0\udf43"` | foreground | LCD big blank: bottom-right cell |
+| `lcd-big-colon-t` | `U+100344` | `"\udbc0\udf44"` | foreground | LCD big colon, one cell by two rows: its top dot |
+| `lcd-big-colon-b` | `U+100345` | `"\udbc0\udf45"` | foreground | LCD big colon: its bottom dot |
+| `lcd-0-left` | `U+100346` | `"\udbc0\udf46"` | foreground | LCD small digit 0, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-0-right` | `U+100347` | `"\udbc0\udf47"` | foreground | LCD small digit 0: right cell |
+| `lcd-1-left` | `U+100348` | `"\udbc0\udf48"` | foreground | LCD small digit 1, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-1-right` | `U+100349` | `"\udbc0\udf49"` | foreground | LCD small digit 1: right cell |
+| `lcd-2-left` | `U+10034A` | `"\udbc0\udf4a"` | foreground | LCD small digit 2, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-2-right` | `U+10034B` | `"\udbc0\udf4b"` | foreground | LCD small digit 2: right cell |
+| `lcd-3-left` | `U+10034C` | `"\udbc0\udf4c"` | foreground | LCD small digit 3, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-3-right` | `U+10034D` | `"\udbc0\udf4d"` | foreground | LCD small digit 3: right cell |
+| `lcd-4-left` | `U+10034E` | `"\udbc0\udf4e"` | foreground | LCD small digit 4, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-4-right` | `U+10034F` | `"\udbc0\udf4f"` | foreground | LCD small digit 4: right cell |
+| `lcd-5-left` | `U+100350` | `"\udbc0\udf50"` | foreground | LCD small digit 5, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-5-right` | `U+100351` | `"\udbc0\udf51"` | foreground | LCD small digit 5: right cell |
+| `lcd-6-left` | `U+100352` | `"\udbc0\udf52"` | foreground | LCD small digit 6, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-6-right` | `U+100353` | `"\udbc0\udf53"` | foreground | LCD small digit 6: right cell |
+| `lcd-7-left` | `U+100354` | `"\udbc0\udf54"` | foreground | LCD small digit 7, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-7-right` | `U+100355` | `"\udbc0\udf55"` | foreground | LCD small digit 7: right cell |
+| `lcd-8-left` | `U+100356` | `"\udbc0\udf56"` | foreground | LCD small digit 8, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-8-right` | `U+100357` | `"\udbc0\udf57"` | foreground | LCD small digit 8: right cell |
+| `lcd-9-left` | `U+100358` | `"\udbc0\udf58"` | foreground | LCD small digit 9, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-9-right` | `U+100359` | `"\udbc0\udf59"` | foreground | LCD small digit 9: right cell |
+| `lcd-minus-left` | `U+10035A` | `"\udbc0\udf5a"` | foreground | LCD small minus, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-minus-right` | `U+10035B` | `"\udbc0\udf5b"` | foreground | LCD small minus: right cell |
+| `lcd-blank-left` | `U+10035C` | `"\udbc0\udf5c"` | foreground | LCD small blank, seven segments two cells by one row: left cell, unlit segments faint |
+| `lcd-blank-right` | `U+10035D` | `"\udbc0\udf5d"` | foreground | LCD small blank: right cell |
+| `lcd-colon` | `U+10035E` | `"\udbc0\udf5e"` | foreground | LCD small colon: two dots in one cell |
+| `led-h-0` | `U+10035F` | `"\udbc0\udf5f"` | foreground | LED meter, horizontal: two LEDs in the cell, 0 of 8 steps lit from the left, the rest faint |
+| `led-h-1` | `U+100360` | `"\udbc0\udf60"` | foreground | LED meter, horizontal: two LEDs in the cell, 1 of 8 steps lit from the left, the rest faint |
+| `led-h-2` | `U+100361` | `"\udbc0\udf61"` | foreground | LED meter, horizontal: two LEDs in the cell, 2 of 8 steps lit from the left, the rest faint |
+| `led-h-3` | `U+100362` | `"\udbc0\udf62"` | foreground | LED meter, horizontal: two LEDs in the cell, 3 of 8 steps lit from the left, the rest faint |
+| `led-h-4` | `U+100363` | `"\udbc0\udf63"` | foreground | LED meter, horizontal: two LEDs in the cell, 4 of 8 steps lit from the left, the rest faint |
+| `led-h-5` | `U+100364` | `"\udbc0\udf64"` | foreground | LED meter, horizontal: two LEDs in the cell, 5 of 8 steps lit from the left, the rest faint |
+| `led-h-6` | `U+100365` | `"\udbc0\udf65"` | foreground | LED meter, horizontal: two LEDs in the cell, 6 of 8 steps lit from the left, the rest faint |
+| `led-h-7` | `U+100366` | `"\udbc0\udf66"` | foreground | LED meter, horizontal: two LEDs in the cell, 7 of 8 steps lit from the left, the rest faint |
+| `led-h-8` | `U+100367` | `"\udbc0\udf67"` | foreground | LED meter, horizontal: two LEDs in the cell, 8 of 8 steps lit from the left, the rest faint |
+| `led-v-0` | `U+100368` | `"\udbc0\udf68"` | foreground | LED meter, vertical: four LEDs in the cell, 0 of 8 steps lit from the bottom, the rest faint |
+| `led-v-1` | `U+100369` | `"\udbc0\udf69"` | foreground | LED meter, vertical: four LEDs in the cell, 1 of 8 steps lit from the bottom, the rest faint |
+| `led-v-2` | `U+10036A` | `"\udbc0\udf6a"` | foreground | LED meter, vertical: four LEDs in the cell, 2 of 8 steps lit from the bottom, the rest faint |
+| `led-v-3` | `U+10036B` | `"\udbc0\udf6b"` | foreground | LED meter, vertical: four LEDs in the cell, 3 of 8 steps lit from the bottom, the rest faint |
+| `led-v-4` | `U+10036C` | `"\udbc0\udf6c"` | foreground | LED meter, vertical: four LEDs in the cell, 4 of 8 steps lit from the bottom, the rest faint |
+| `led-v-5` | `U+10036D` | `"\udbc0\udf6d"` | foreground | LED meter, vertical: four LEDs in the cell, 5 of 8 steps lit from the bottom, the rest faint |
+| `led-v-6` | `U+10036E` | `"\udbc0\udf6e"` | foreground | LED meter, vertical: four LEDs in the cell, 6 of 8 steps lit from the bottom, the rest faint |
+| `led-v-7` | `U+10036F` | `"\udbc0\udf6f"` | foreground | LED meter, vertical: four LEDs in the cell, 7 of 8 steps lit from the bottom, the rest faint |
+| `led-v-8` | `U+100370` | `"\udbc0\udf70"` | foreground | LED meter, vertical: four LEDs in the cell, 8 of 8 steps lit from the bottom, the rest faint |
+| `led-peak-h` | `U+100371` | `"\udbc0\udf71"` | foreground | LED meter, horizontal: the peak cap, a short upright bar |
+| `led-peak-v` | `U+100372` | `"\udbc0\udf72"` | foreground | LED meter, vertical: the peak cap, a short level bar at the top |
+| `slider-cap-left` | `U+100373` | `"\udbc0\udf73"` | foreground | Slider: the left end: an end bar and the filled track |
+| `slider-track` | `U+100374` | `"\udbc0\udf74"` | foreground | Slider: the track ahead of the knob, light |
+| `slider-track-filled` | `U+100375` | `"\udbc0\udf75"` | foreground | Slider: the track behind the knob, full |
+| `slider-knob` | `U+100376` | `"\udbc0\udf76"` | foreground | Slider: the knob, grooved |
+| `slider-cap-right` | `U+100377` | `"\udbc0\udf77"` | foreground | Slider: the right end: the track and an end bar |
+| `fader-cap-top` | `U+100378` | `"\udbc0\udf78"` | foreground | Fader: the top end: an end bar and the track |
+| `fader-track` | `U+100379` | `"\udbc0\udf79"` | foreground | Fader: the track above the knob, light |
+| `fader-track-filled` | `U+10037A` | `"\udbc0\udf7a"` | foreground | Fader: the track below the knob, full |
+| `fader-knob` | `U+10037B` | `"\udbc0\udf7b"` | foreground | Fader: the knob, grooved |
+| `fader-cap-bottom` | `U+10037C` | `"\udbc0\udf7c"` | foreground | Fader: the bottom end: the filled track and an end bar |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

@@ -35,7 +35,9 @@ Dir.chdir(root) do
     (1..4).map { |l| "wifi-signal-#{l}" } + %w[wifi-off] + (1..4).map { |l| "cellular-#{l}" } +
     ((1..4).map { |l| "wifi-signal-wide-#{l}" } + %w[wifi-off-wide] + (0..3).map { |l| "volume-wide-#{l}" } +
      %w[off wait on ring].map { |s| "phone-classic-wide-#{s}" } +
-     (0..4).map { |l| "battery-wide-#{l}" } + (0..4).map { |l| "battery-wide-#{l}-charging" } + %w[battery-wide-ac])
+     (0..4).map { |l| "battery-wide-#{l}" } + (0..4).map { |l| "battery-wide-#{l}-charging" } + %w[battery-wide-ac] +
+     # ADR 0237: the now-playing discs, eight frames each.
+     %w[disc vinyl cassette].flat_map { |k| (0..7).map { |f| "#{k}-#{f}" } })
       .flat_map { |i| ["#{i}-left", "#{i}-right"] }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
   # ADR 0214: the outer-edge frame is cell geometry at U+1002AE-1002B6, clear

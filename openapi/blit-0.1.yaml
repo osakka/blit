@@ -2259,7 +2259,8 @@ components:
         set: {type: string, enum: [chalk, slate-light, slate, capsule, frame]}
         part:
           type: string
-          enum: [bar-corner, title-bar, note-close, frame, dialog-border, button-cap, checkbox, switch, capsule]
+          enum: [bar-corner, title-bar, note-close, frame, dialog-border, button-cap, checkbox, switch, capsule,
+                 lcd-big-top, lcd-big-bottom, lcd-digit, lcd-colon, led, slider, fader]
           description: What the glyph is a piece of.
         cells:
           type: object

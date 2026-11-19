@@ -253,6 +253,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0234 — Shake to find the pointer](0234-shake-to-find-the-pointer.md)
 - [0235 — The busy pointer](0235-the-busy-pointer.md)
 - [0236 — Display mode selection, tried and kept](0236-display-mode-selection.md)
+- [0237 — Player glyphs](0237-player-glyphs.md)
 
 ## Status
 

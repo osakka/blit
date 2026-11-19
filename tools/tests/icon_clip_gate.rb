@@ -58,7 +58,8 @@ catalogue.fetch('icons').each do |i|
   columns = i.fetch('columns', 1)
   spec << ["icon-#{columns > 1 ? 'span' : 'single'}", i['codepoint'].to_i(16), columns, i.fetch('column', 0), i['id']]
 end
-catalogue.fetch('text_glyphs', []).each { |i| spec << ['text-glyph', i['codepoint'].to_i(16), 1, 0, i['id']] }
+# A text glyph can span columns too (ADR 0237's two-cell transport buttons).
+catalogue.fetch('text_glyphs', []).each { |i| spec << ['text-glyph', i['codepoint'].to_i(16), i.fetch('columns', 1), i.fetch('column', 0), i['id']] }
 JSON.parse(File.read('assets/fonts/hibr-ui-glyphs.json')).fetch('scalars').each do |s|
   spec << ['hibr-ui', s.to_i(16), 1, 0, 'ui']
 end

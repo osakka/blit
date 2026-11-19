@@ -42,7 +42,7 @@ These are asset cmap counts, not glyph counts, application coverage or effective
 | text-spleen-12x24 | `text/spleen/spleen-12x24.otf` | 926 |
 | text-spleen-16x32 | `text/spleen/spleen-16x32.otf` | 978 |
 | text-spleen-32x64 | `text/spleen/spleen-32x64.otf` | 978 |
-| stack-icons | `BlitIcons-Regular.ttf` | 317 |
+| stack-icons | `BlitIcons-Regular.ttf` | 401 |
 | stack-nerd | `SymbolsNerdFontMono-Regular.ttf` | 10410 |
 | stack-NotoSansSymbols2-Regular | `NotoSansSymbols2-Regular.ttf` | 2955 |
 | stack-NotoSansSymbols-Regular | `NotoSansSymbols-Regular.ttf` | 1107 |

@@ -36,7 +36,8 @@ require 'yaml'
 ROOT = File.expand_path('../..', __dir__)
 Dir.chdir(ROOT)
 
-PARTS = %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule].freeze
+PARTS = %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule
+           lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader].freeze
 BACKGROUNDS = %w[bar panel wallpaper dialog-face button-face].freeze
 FOREGROUNDS = %w[ink track bar].freeze
 LINES = %w[none highlight box-face dialog-face button-face knob].freeze
@@ -84,7 +85,8 @@ entries.each do |e|
   check(SETS.include?(e['set']), "#{id}: set #{e['set'].inspect}")
   check((e['pens'] == 'foreground') == %w[chalk frame].include?(e['set']), "#{id}: only Chalk and the frame are drawn in the foreground alone")
   check(e['pens'] != 'foreground' || e['line'] == 'none', "#{id}: a one-colour glyph has no line pen to set")
-  expected_span = { 'switch' => 2, 'capsule' => 3 }.fetch(e['part'], 1)
+  expected_span = { 'switch' => 2, 'capsule' => 3, 'lcd-big-top' => 2, 'lcd-big-bottom' => 2,
+                    'lcd-digit' => 2 }.fetch(e['part'], 1)
   check(c['span'] == expected_span, "#{id}: a #{e['part']} spans #{expected_span} cells, not #{c['span']}")
   check(e['part'] != 'capsule' || (e['foreground'] == 'track' && e['background'] == 'panel' && e['line'] == 'knob'),
         "#{id}: a capsule's track is the foreground, its knob the line, on a panel")

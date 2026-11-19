@@ -407,6 +407,30 @@ U+1002F4–100309, and the full-screen and sticky boxes U+10030A–100313).
   knob; the capsule sets the foreground to the track's colour and SGR 58
   white.
 
+## Player glyphs: LCD digits, LED meters, sliders, transport, discs
+
+From 0.3.126 ([ADR 0237](adr/0237-player-glyphs.md)), for a music player or
+any program that wants an instrument's face. Their ids and codepoints are in
+the catalogue (`GET /v1/fonts/icons`) and [special additions](fonts/special.md).
+
+- **LCD digits** are drawn in the cell's foreground (choose the LCD's
+  colour with it); unlit segments are faint. A big digit is four cells,
+  `lcd-big-<c>-tl` `-tr` on one row and `-bl` `-br` below; a small digit
+  two cells, `lcd-<c>-left` `-right`; `<c>` is `0`-`9`, `minus` or `blank`
+  (all segments faint). `lcd-big-colon-t`/`-b` and `lcd-colon` are one cell.
+  So `04:51` in big digits is 9 columns by 2 rows.
+- **LED meters**: `led-h-<n>` holds two LEDs, `n` of 8 steps lit from the
+  left; a bar of 20 cells has 160 steps. `led-v-<n>` holds four, lit from
+  the bottom. Colour each cell (green, yellow, red); `led-peak-h`/`-v` mark
+  a peak.
+- **Sliders and faders**: `slider-cap-left`, then `slider-track-filled`
+  up to the knob, `slider-knob`, `slider-track` after it, `slider-cap-right`;
+  faders the same top to bottom with `fader-*`.
+- **Transport**: `transport-<name>` in one cell, `transport-wide-<name>-left`
+  and `-right` in two; in the text colour.
+- **Now playing**: `disc-<f>`, `vinyl-<f>`, `cassette-<f>`, each `-left` and
+  `-right`, in their own colours; step `f` 0-7 while playing, 0 when stopped.
+
 ## Discover first; retain a fallback
 
 Read-only discovery (the update credential is not needed):

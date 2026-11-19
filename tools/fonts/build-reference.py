@@ -105,7 +105,12 @@ def generate():
     special += '| Semantic ID | Codepoint | JSON string | Signal level |\n| --- | --- | --- | --- |\n'
     for icon in icons['icons']:
         cp = int(icon['codepoint'], 16)
-        special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {icon.get("signal_level", "—")} |\n'
+        note = ''
+        if icon.get('deprecated'):
+            # 0.3.55: the bars are the cellular signal now.
+            note = (' **Deprecated (0.3.55):** the bars are the cellular signal; use '
+                    + ', '.join(f'`{r}`' for r in icon['replaced_by']) + '.')
+        special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {icon.get("signal_level", "—")}{note} |\n'
     special += '\n## Themed text additions\n\nText aliases use the terminal foreground, not intrinsic colour.\n\n'
     special += '| Semantic ID | Codepoint | JSON string |\n| --- | --- | --- |\n'
     for icon in icons['icons']:
@@ -121,7 +126,11 @@ def generate():
     for icon in icons.get('cell_geometry', []):
         cp = int(icon['codepoint'], 16)
         colour = 'colour' if icon.get('colour') else 'cell pens' if icon.get('pens') == 'cell' else 'foreground'
-        special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {colour} | {icon["shape"]} |\n'
+        note = ''
+        if icon.get('deprecated'):
+            # ADR 0214: the old frame glyphs, kept, each naming its replacement.
+            note = ' **Deprecated (ADR 0214):** use ' + ', '.join(f'`{r}`' for r in icon['replaced_by']) + '.'
+        special += f'| `{icon["id"]}` | `U+{cp:04X}` | `{json.dumps(chr(cp))}` | {colour} | {icon["shape"]}{note} |\n'
     special += '\n[Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).\n'
     outputs['special.md'] = special
     emoji_root = ROOT / 'assets/unicode/emoji-18.0'

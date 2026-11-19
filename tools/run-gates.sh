@@ -442,6 +442,7 @@ suite_font() {
     run_gate catalogue_fields_gate.rb ruby tools/tests/catalogue_fields_gate.rb
     run_gate outline_catalogue_gate.rb ruby tools/tests/outline_catalogue_gate.rb
     run_gate custom_icon_gate.rb ruby tools/tests/custom_icon_gate.rb
+    run_gate player_glyph_gate.rb ruby tools/tests/player_glyph_gate.rb
     run_gate icon_clip_gate.rb ruby tools/tests/icon_clip_gate.rb
     run_gate pixel_font_stack_gate.rb ruby tools/tests/pixel_font_stack_gate.rb
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb

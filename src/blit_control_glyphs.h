@@ -20,6 +20,7 @@
    capsule scales with the cell's height, in 22nds of it; see its table. */
 
 #include "blit_window_glyphs.h"
+#include "blit_player_glyphs.h"
 
 #define BLIT_CONTROL_FIRST 0x10029AU
 #define BLIT_CONTROL_COUNT 20U
@@ -86,7 +87,7 @@ static int blit_control_pen_index(uint32_t scalar)
 static int blit_chrome_glyph(uint32_t scalar)
 {
     return blit_window_glyph(scalar) || blit_control_glyph(scalar) || blit_frame_glyph(scalar) ||
-        blit_state_glyph(scalar);
+        blit_state_glyph(scalar) || blit_player_glyph(scalar);
 }
 
 static int blit_chrome_pen_index(uint32_t scalar)
@@ -279,6 +280,9 @@ static int blit_chrome_draw(uint32_t scalar, int plane, unsigned char *pixels, i
     unsigned char roles[128 * 128];
     int x, y;
     if (blit_window_glyph(scalar)) return blit_window_draw(scalar, plane, pixels, stride, w, h);
+    /* ADR 0237: the player glyphs are coverage in the foreground, with
+       partial coverage (an unlit segment); they have no pens. */
+    if (blit_player_glyph(scalar)) return plane ? 1 : blit_player_draw(scalar, pixels, stride, w, h);
     if (!blit_control_glyph(scalar) && !blit_frame_glyph(scalar) && !blit_state_glyph(scalar)) return 0;
     if (w <= 0 || h <= 0 || w > 128 || h > 128) return 0;
     if (blit_frame_glyph(scalar)) blit_frame_roles(scalar, roles, w, h);
