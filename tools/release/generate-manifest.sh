@@ -12,7 +12,9 @@ usage:
   generate-manifest.sh PACKAGE [OUTPUT]
   generate-manifest.sh --check PACKAGE MANIFEST
 
-The generated output is the canonical machine-owned manifest section. Set
+The generated output is the canonical machine-owned manifest section; after
+it, tools/release/record-gates.sh adds the gate results (gates_<suite>:) and
+the operator a `notes:` line. --check verifies all three. Set
 BLIT_SOURCE_COMMIT and BLIT_DOCUMENTATION_COMMIT when the package was built
 from a commit that is not the current checkout (for example, when recording
 the manifest in the following commit).
@@ -160,11 +162,26 @@ check() {
         }
     done <"$expected"
 
+    # Gitea #27: gate results recorded by tools/release/record-gates.sh are
+    # passes of this source; a failed run, or gates of other or uncommitted
+    # source, are a release error.
+    gates=0
+    while IFS= read -r line; do
+        case $line in
+            gates_*:*) ;;
+            *) continue ;;
+        esac
+        gates=$((gates + 1))
+        case $line in
+            *" fail=0 source=$source_commit") ;;
+            *) fail "gate result not a pass of source $source_commit: $line" ;;
+        esac
+    done <"$manifest"
     package_release=$(dpkg-deb -f "$package" Version)
     manifest_release=$(manifest_value release "$manifest")
     [ "$manifest_release" = "${package_release%-1}" ] ||
         fail "manifest release does not match package"
-    echo "RELEASE_MANIFEST_PASS package=$package_release manifest=$manifest"
+    echo "RELEASE_MANIFEST_PASS package=$package_release manifest=$manifest gates=$gates"
 }
 
 case "${1:-}" in

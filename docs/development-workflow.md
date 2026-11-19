@@ -308,13 +308,16 @@ exact pinned Hibr checkout as an explicit input; omitting it fails closed:
 ```sh
 hibr=/path/to/hibr-$(sed -n '1p' packaging/HIBR_VERSION)
 deb=/tmp/blit-package/blit_X.Y.Z-1_amd64.deb
+git commit packaging/VERSION   # the version first: the gates test the commit that ships
 tools/build-tcc.sh
 tools/build-tcc.sh build/blit/blit-helper helper
-BLIT_HIBR_ROOT=$hibr tools/run-gates.sh all
-BLIT_GATE_BACKEND=gles tools/run-gates.sh renderer
+BLIT_HIBR_ROOT=$hibr tools/run-gates.sh all >build/gates-all.txt
+tools/run-gates.sh renderer >build/gates-renderer.txt
+tools/run-gates.sh renderer-gles >build/gates-renderer-gles.txt
 BLIT_HIBR_ROOT=$hibr packaging/build-deb.sh /tmp/blit-package
 BLIT_SOURCE_COMMIT=<build-commit> BLIT_DOCUMENTATION_COMMIT=<build-commit> \
   tools/release/generate-manifest.sh "$deb" releases/X.Y.Z.yaml
+tools/release/record-gates.sh releases/X.Y.Z.yaml build/gates-*.txt
 tools/tests/package_artifact_gate.sh "$deb"
 tools/deploy/update-live.sh HOST "$deb"
 ```
@@ -330,7 +333,16 @@ sources package only needs publishing (`publish.sh` given each `.deb`) when
 its content changes, not every release.
 
 `releases/<version>.yaml` is generated from the package, not written by
-hand, apart from the `status:` line the operator adds. The two commit
+hand, apart from the `status:` and `notes:` lines the operator adds. The
+gate results are recorded from the runs' outputs (Gitea #27):
+`record-gates.sh` writes `gates_<suite>: pass=N skip=N fail=0
+source=<commit>` for each, and refuses a failed run or one whose
+`run-gates: source=` line (printed since 0.3.125) is not the manifest's
+`source_commit`, clean -- so the version is committed before the gates
+run. `--check` refuses a recorded result that is not a pass of that
+source. `update-live.sh` ends with a smoke check: the same displays up, a
+surface in as many panes as before (the desktop came back), frames
+advancing. The two commit
 variables are needed when the manifest is recorded in a later commit than
 the build. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
 existing manifest with a package. The artifact gate and `update-live.sh`

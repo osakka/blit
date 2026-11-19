@@ -741,6 +741,11 @@ printf 'run-gates: version=%s font=%s\n' \
     "$(sed -n '1p' "$ROOT/packaging/VERSION")" "$(basename "$FONT")"
 printf 'run-gates: jobs=%s timeout=%ss port_offset=%s\n' \
     "$JOBS" "${BLIT_GATE_TIMEOUT:-300}" "$PORT_OFFSET"
+# What was tested (Gitea #27): the commit, "+dirty" when tracked files differ
+# from it; tools/release/record-gates.sh puts it in the release manifest.
+run_source=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null) || run_source=unknown
+[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ] || run_source="$run_source+dirty"
+printf 'run-gates: source=%s suites=%s\n' "$run_source" "$*"
 printf '\n'
 
 SUITES="$*"
