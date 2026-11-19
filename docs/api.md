@@ -258,6 +258,20 @@ compositor with `compositor.reason` `previous GLES start did not complete`,
 logs `gles_start_guard`, and clears the marker, so a deliberate restart tries
 GLES again. The saved setting is never rewritten.
 
+The rest of the display start is guarded too (since 0.3.124, Gitea #162).
+`<settings path>.display-starting` holds the phase the start is in while it
+runs -- `drm` (opening the display device), `gles` (the GPU start, above),
+`outputs` (setting the outputs up) -- and goes once every display has flipped.
+A start that hangs is ended by the console watchdog after 10 s; the next start
+finds the marker. Left in `drm` or `outputs`, that start serves the API with
+no displays: `/v1/server` `display_backend.ready` is false and its `error`
+says `displays not started: the previous start hung while opening the display
+device` (or `setting up the outputs`), logged as `display_start_guard`, so the
+box stays reachable to update or reconfigure. It clears the marker; a
+deliberate restart starts the displays again. Left in `gles`, the GLES guard
+above decides: the CPU next. Before this, such a hang repeated on every
+restart until systemd's start limit stopped Blit with no API.
+
 ### Frame timing
 
 `document.server.kms_frame_timing` chooses when a native KMS frame is

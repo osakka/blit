@@ -187,8 +187,55 @@ Dir.mktmpdir('blit-gles-setting') do |root|
   server(port, env) do |base|
     abort 'GLES_COMPOSITOR_FAIL the GPU was not tried again after the hang' unless compositor(base)['active'] == 'gles'
   end
+
+  # 7, 8. A start that hangs outside the GPU start (Gitea #162): opening the
+  #    display device, or setting up the outputs. The phase is on disk while
+  #    it hangs; the next start serves the API with no displays and says why
+  #    (the box stays reachable); the one after starts the displays, and a
+  #    healthy start removes the marker.
+  display_marker = File.join(root, 'settings.json.display-starting')
+  { 'BLIT_TEST_DRM_HANG_MS' => ['drm', 'opening the display device'],
+    'BLIT_TEST_OUTPUTS_HANG_MS' => ['outputs', 'setting up the outputs'] }.each do |hook, (phase, said)|
+    FileUtils.rm_f([marker, display_marker])
+    hung = gate_spawn(env.merge('BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_TEST_MODE' => '1', hook => '60000',
+                                'BLIT_PSF_FONT' => File.join(GATE_ROOT, 'assets/fonts/Blit-Terminus16.psf')),
+                      ENV.fetch('BLIT_GATE_BINARY', File.join(GATE_ROOT, 'build/blit/blit-server')),
+                      port.to_s, out: '/dev/null', err: '/dev/null')
+    begin
+      Timeout.timeout(10) { sleep 0.1 until File.exist?(display_marker) && File.read(display_marker) == phase }
+      sleep 1.5
+      reachable = begin
+        Net::HTTP.start('127.0.0.1', port, open_timeout: 1, read_timeout: 1) { |h| h.get('/v1/version') }
+        true
+      rescue StandardError
+        false
+      end
+      abort "GLES_COMPOSITOR_FAIL a start hung in #{phase} is reachable; the test hook did not hang it" if reachable
+    rescue Timeout::Error
+      abort "GLES_COMPOSITOR_FAIL a start hung in #{phase} left no marker saying so: " \
+            "#{File.exist?(display_marker) ? File.read(display_marker).inspect : 'none'}"
+    ensure
+      Process.kill('KILL', hung) rescue nil
+      Process.wait(hung) rescue nil
+    end
+    server(port, env) do |base|
+      backend = JSON.parse(Net::HTTP.get(base + '/v1/server')).fetch('display_backend')
+      abort "GLES_COMPOSITOR_FAIL the start after a #{phase} hang was not API-only with its reason: #{backend.inspect}" unless
+        backend['ready'] == false && backend['error'].include?("the previous start hung while #{said}")
+      abort "GLES_COMPOSITOR_FAIL the #{phase} marker was not cleared" if File.exist?(display_marker)
+    end
+    server(port, env) do |base|
+      backend = JSON.parse(Net::HTTP.get(base + '/v1/server')).fetch('display_backend')
+      abort "GLES_COMPOSITOR_FAIL the displays were not started again after a #{phase} hang: #{backend.inspect}" unless
+        backend['ready'] == true
+      Timeout.timeout(10) { sleep 0.1 while File.exist?(display_marker) }
+    rescue Timeout::Error
+      abort "GLES_COMPOSITOR_FAIL a healthy start left its display marker"
+    end
+  end
 end
 
 puts "GLES_COMPOSITOR_PASS #{frame_line.sub('GLES_FRAME_PASS ', 'frame=')} " \
      'surfaceless=gles fallback=cpu_with_reason setting=saved_and_applied guard=crash_start_skipped_then_retried ' \
-     'orderly_stop=not_a_crash hung_start=cpu_next_then_gpu'
+     'orderly_stop=not_a_crash hung_start=cpu_next_then_gpu hung_drm=api_only_next_then_displays ' \
+     'hung_outputs=api_only_next_then_displays healthy=marker_cleared'

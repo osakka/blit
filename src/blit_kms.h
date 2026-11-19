@@ -227,6 +227,9 @@ typedef struct {
 
 BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font);
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity);
+/* Gitea #162: told the phase blit_kms_open is in ("gles" around the GPU
+   start, "drm" otherwise), so a start that hangs can be named next time. */
+void blit_kms_set_phase_hook(BlitKms *kms, void (*hook)(void *ctx, const char *phase), void *ctx);
 int blit_kms_display_count(const BlitKms *kms);
 /* ADR 0187: why presentation effects are not drawn on an output, "" when
    they are -- without copying its whole display info, for the pointer path. */

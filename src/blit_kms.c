@@ -233,6 +233,8 @@ struct BlitKms {
     /* ADR 0226: the picture texture cache's bytes (0: the default). */
     unsigned long long texture_budget;
     int gles_requested;
+    void (*phase_hook)(void *ctx, const char *phase);
+    void *phase_ctx;
     char gles_error[160];
 };
 
@@ -2233,11 +2235,27 @@ BlitKms *blit_kms_new(BlitFont *font, BlitFont *wide_font)
     return kms;
 }
 
+void blit_kms_set_phase_hook(BlitKms *kms, void (*hook)(void *ctx, const char *phase), void *ctx)
+{
+    if (kms == NULL) return;
+    kms->phase_hook = hook;
+    kms->phase_ctx = ctx;
+}
+
+static void kms_phase(BlitKms *kms, const char *phase)
+{
+    if (kms->phase_hook) kms->phase_hook(kms->phase_ctx, phase);
+}
+
 int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
 {
     KmsSnapshot snapshot;
     const char *configured;
     if (kms == NULL) return -1;
+    /* Tests only: a display device whose open hangs (Gitea #162). */
+    if (getenv("BLIT_TEST_DRM_HANG_MS") != NULL && getenv("BLIT_TEST_MODE") != NULL &&
+        strcmp(getenv("BLIT_TEST_MODE"), "1") == 0)
+        usleep((useconds_t)atoi(getenv("BLIT_TEST_DRM_HANG_MS")) * 1000U);
     kms->fd = open(getenv("BLIT_DRM_DEVICE") ? getenv("BLIT_DRM_DEVICE") :
                    "/dev/dri/card0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
     if (kms->fd < 0) { set_error(error, error_capacity, strerror(errno)); return -1; }
@@ -2249,6 +2267,7 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         fprintf(stderr, "blit: GLES compositor not started: %s\n", kms->gles_error);
     } else if (kms->gles_requested) {
         const char *platform = getenv("BLIT_GLES_PLATFORM");
+        kms_phase(kms, "gles");
         /* Tests only: a GPU start that hangs rather than fails (issue #109).
            The console watchdog ends such a start; the guard marker written
            before it sends the next start to the CPU. */
@@ -2258,6 +2277,7 @@ int blit_kms_open(BlitKms *kms, char *error, size_t error_capacity)
         kms->gles = platform != NULL && strcmp(platform, "surfaceless") == 0 ?
             blit_gles_open_surfaceless(kms->gles_error, sizeof(kms->gles_error)) :
             blit_gles_open_gbm(kms->fd, kms->gles_error, sizeof(kms->gles_error));
+        kms_phase(kms, "drm");
         if (kms->gles != NULL)
             fprintf(stderr, "blit: GLES compositor: %s\n", blit_gles_identity(kms->gles));
         else

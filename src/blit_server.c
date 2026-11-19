@@ -1419,6 +1419,12 @@ typedef struct {
        healthy for a while; a marker found at startup means the last one
        crashed, so that run uses CPU (ADR 0181). */
     char gles_guard_path[300];
+    /* Gitea #162: the display start's phase on disk while it runs ("drm",
+       "gles", "outputs"); a start that finds it from one that hung in
+       "drm" or "outputs" serves the API with no displays. */
+    char display_guard_path[300];
+    int display_guard_active, display_guard_skip, display_guard_clear;
+    char display_guard_phase[16];
     int gles_guard_active;
     uint64_t gles_guard_since_us;
     int boot_expect_desktop;
@@ -2881,6 +2887,72 @@ static int render_wait_ms(BlitRuntime *runtime, uint64_t now)
 static void update_pointer_shape(BlitRuntime *runtime);
 static int pointer_shake_master(BlitRuntime *runtime, const BlitPointerConfig *config);
 static BlitSession *pointer_lock_session(BlitRuntime *runtime);
+
+/* The display start's phase, written over the marker (startup only, before
+   the loop runs: a write here waits on nothing else). */
+static void display_guard_set(BlitRuntime *runtime, const char *phase)
+{
+    int fd;
+    if (!runtime->display_guard_active) return;
+    fd = open(runtime->display_guard_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) return;
+    if (write(fd, phase, strlen(phase)) < 0) { /* the marker is best effort */ }
+    close(fd);
+}
+
+static void display_guard_hook(void *ctx, const char *phase)
+{
+    display_guard_set(ctx, phase);
+}
+
+/* Before the displays start: a marker left by a start that hung in the
+   display device or the outputs (the console watchdog ended it) makes this
+   one serve the API with no displays, saying why, so the box is reachable;
+   the next deliberate restart tries the displays again. A hang in the GPU
+   start ("gles") is the GLES guard's: the CPU next, as before. */
+static void display_guard_start(BlitRuntime *runtime)
+{
+    char phase[16] = "";
+    int fd;
+    if (!runtime->settings_enabled || runtime->settings_path[0] == '\0') return;
+    snprintf(runtime->display_guard_path, sizeof(runtime->display_guard_path), "%s.display-starting",
+             runtime->settings_path);
+    if ((fd = open(runtime->display_guard_path, O_RDONLY | O_CLOEXEC)) >= 0) {
+        ssize_t n = read(fd, phase, sizeof(phase) - 1);
+        close(fd);
+        phase[n > 0 ? n : 0] = '\0';
+        unlink(runtime->display_guard_path);
+        if (strcmp(phase, "gles") != 0) {
+            runtime->display_guard_skip = 1;
+            snprintf(runtime->display_guard_phase, sizeof(runtime->display_guard_phase), "%s",
+                     phase[0] ? phase : "drm");
+            return;
+        }
+    }
+    runtime->display_guard_active = 1;
+    display_guard_set(runtime, "drm");
+}
+
+/* Healthy: every display has flipped (or there are none). */
+static void display_guard_check(BlitRuntime *runtime)
+{
+    int i;
+    if (!runtime->display_guard_active) return;
+    for (i = 0; i < runtime->display_count && runtime->kms; ++i) {
+        BlitKmsDisplayInfo info;
+        if (blit_kms_display_info(runtime->kms, i, &info) != 0) continue;
+        if (info.flip_completions == 0) return;
+    }
+    runtime->display_guard_active = 0;
+    if (runtime->settings_writer_running) {
+        pthread_mutex_lock(&runtime->settings_writer_lock);
+        runtime->display_guard_clear = 1;
+        pthread_cond_signal(&runtime->settings_writer_wake);
+        pthread_mutex_unlock(&runtime->settings_writer_lock);
+    } else {
+        unlink(runtime->display_guard_path);
+    }
+}
 
 static void gles_guard_start(BlitRuntime *runtime)
 {
@@ -23171,8 +23243,14 @@ static void *settings_writer(void *argument)
         size_t length;
         pthread_mutex_lock(&runtime->settings_writer_lock);
         while (!runtime->settings_writer_stop && !runtime->settings_job_busy &&
-               !runtime->gles_guard_clear)
+               !runtime->gles_guard_clear && !runtime->display_guard_clear)
             pthread_cond_wait(&runtime->settings_writer_wake, &runtime->settings_writer_lock);
+        if (runtime->display_guard_clear) {
+            runtime->display_guard_clear = 0;
+            pthread_mutex_unlock(&runtime->settings_writer_lock);
+            unlink(runtime->display_guard_path);
+            continue;
+        }
         if (runtime->gles_guard_clear) {
             /* The GPU start proved healthy: its marker goes, off the loop, as
                every other write to the settings disk does (Gitea #158). */
@@ -26698,6 +26776,17 @@ static void discover_displays(BlitRuntime *runtime)
         }
     }
     error[0] = '\0';
+    if (runtime->display_guard_skip) {
+        /* Gitea #162: the last start hung here; the API comes up alone. */
+        snprintf(runtime->presentation_error, sizeof(runtime->presentation_error),
+                 "displays not started: the previous start hung while %s and was ended by the console "
+                 "watchdog; the API runs without displays. Restart Blit to try the displays again.",
+                 strcmp(runtime->display_guard_phase, "outputs") == 0 ? "setting up the outputs"
+                                                                       : "opening the display device");
+        diagnostic_log(runtime, "error", "display_start_guard", runtime->presentation_error);
+        fprintf(stderr, "blit: %s\n", runtime->presentation_error);
+        return;
+    }
     /* Before either device-I/O thread exists. A missing DRM device still
        takes the normal degraded/API-only startup path without touching
        a console. A real native presentation must have a recoverable VT. */
@@ -26711,6 +26800,7 @@ static void discover_displays(BlitRuntime *runtime)
         atexit(blit_vt_close);
     }
     runtime->kms = blit_kms_new(&runtime->font, &runtime->wide_font);
+    blit_kms_set_phase_hook(runtime->kms, display_guard_hook, runtime);
     pointer_art_present(runtime);
     if (runtime->kms == NULL || blit_kms_open(runtime->kms, error,
                                                sizeof(error)) < 0) {
@@ -32586,6 +32676,7 @@ int main(int argc, char **argv)
     signal(SIGINT, stop_server);
     signal(SIGTERM, stop_server);
     signal(SIGPIPE, SIG_IGN);
+    display_guard_start(&runtime);
     discover_displays(&runtime);
     display_layouts_materialize(&runtime, 0);
     apply_test_refresh_override(&runtime);
@@ -32598,8 +32689,14 @@ int main(int argc, char **argv)
        brightness is refused on a display that has no backlight. */
     discover_backlights(&runtime);
     runtime.kms_inventory_revision = blit_kms_inventory_revision(runtime.kms);
-    if (runtime.kms != NULL)
+    if (runtime.kms != NULL) {
+        display_guard_set(&runtime, "outputs");
+        /* Tests only: an output setup that hangs (Gitea #162). */
+        if (getenv("BLIT_TEST_OUTPUTS_HANG_MS") != NULL && getenv("BLIT_TEST_MODE") != NULL &&
+            strcmp(getenv("BLIT_TEST_MODE"), "1") == 0)
+            usleep((useconds_t)atoi(getenv("BLIT_TEST_OUTPUTS_HANG_MS")) * 1000U);
         initialize_outputs(&runtime);
+    }
     /* Issue #69. After the outputs exist, because a rotation drops the
        output's cached scene texture, and before the first frame, because that
        texture is sized from the display's logical rectangle. The document was
@@ -33117,6 +33214,7 @@ int main(int argc, char **argv)
         service_hibr_frame_barriers(&runtime, now);
         update_pointer_shape(&runtime);
         gles_guard_check(&runtime);
+        display_guard_check(&runtime);
         {
             /* A quiet window holds every output; a barrier, its own. */
             uint32_t held = now < runtime.terminal_frame_quiet_until_us ?
