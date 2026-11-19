@@ -38,9 +38,14 @@ read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
     assumed 101 characters and a font-kept U+270E (Blit's pen, by ADR
     0195).
 - **run-gates (Gitea #106):** a TERM to the runner with two jobs left the
-  gate running in about half the runs. The runner now signals recorded
-  gates itself. Its gate repeats the case: the old runner failed 2 of 3,
-  the new one passed 6 of 6.
+  gate running in about half the runs. Cause: under `set -e`, the
+  scheduler's trap ended at its first failing `kill`, which was the worker
+  that had already finished, before it signalled the worker still running
+  a gate. Each trap's kill and wait may now fail. The pid-file
+  workaround shipped first was replaced by this fix after the release; the
+  runner is not in the package. Its gate repeats the case: the old runner
+  failed 2 of 3, the fixed one passed 3 of 3, plus 32 of 32 hand
+  cancellations.
 - **update-live (Gitea #27):** a smoke check after the update. It ran on
   this deploy: 1 display up, 2 panes showing a surface, frames advancing.
 - **Gates on this host:**

@@ -225,11 +225,7 @@ execute_gate() {
     g_t0=$(now_ms)
     timeout -k 10 "$g_limit" "$@" </dev/null >"$g_out" 2>&1 &
     gpid=$!
-    # Where the runner finds it when cancelled (Gitea #106): it signals the
-    # gate itself rather than through the scheduler's and worker's traps.
-    printf '%s\n' "$gpid" >"$tmpdir/gate.$g_idx.pid"
     wait "$gpid" && rc=0 || rc=$?
-    rm -f "$tmpdir/gate.$g_idx.pid"
     gpid=''
     g_ms=$(( $(now_ms) - g_t0 ))
     out=$(cat "$g_out")
@@ -347,7 +343,6 @@ gate_lane() {
         ;;
     worker)
         [ "$lane" = "$WORKER_LANE" ] || return 0
-        [ ! -e "$tmpdir/cancelled" ] || return 0
         mkdir "$tmpdir/claim.$idx" 2>/dev/null || return 0
         execute_gate "$idx" "$name" "$@"
         ;;
@@ -378,16 +373,8 @@ sched_pid=''
 # Cancelled (Gitea #106): the running gate is signalled and waited for -- its
 # timeout takes its process group down -- before the scratch directory goes;
 # no later gate starts.
-# The gates are signalled by the runner itself, from the pids the workers
-# record: relayed through the scheduler's and a worker's traps alone, a TERM
-# to the runner with two jobs left the gate running in about half the runs
-# (the scheduler's trap began, its kills did not all happen, the worker never
-# heard). `cancelled` stops any worker claiming another gate; then every
-# recorded gate is signalled until none is alive -- timeout takes its process
-# group down and is gone within its -k 10 grace -- and the scratch goes after.
 cleanup() {
     trap - EXIT HUP INT TERM
-    : >"$tmpdir/cancelled" 2>/dev/null || true
     if [ -n "$gpid" ]; then
         kill -TERM "$gpid" 2>/dev/null || true
         wait "$gpid" 2>/dev/null || true
@@ -396,21 +383,6 @@ cleanup() {
         kill -TERM "$sched_pid" 2>/dev/null || true
         wait "$sched_pid" 2>/dev/null || true
     fi
-    c_wait=0
-    while [ "$c_wait" -lt 150 ]; do
-        c_alive=0
-        for c_file in "$tmpdir"/gate.*.pid; do
-            [ -f "$c_file" ] || continue
-            c_pid=$(cat "$c_file" 2>/dev/null) || continue
-            if [ -n "$c_pid" ] && kill -0 "$c_pid" 2>/dev/null; then
-                kill -TERM "$c_pid" 2>/dev/null || true
-                c_alive=1
-            fi
-        done
-        [ "$c_alive" -eq 0 ] && break
-        sleep 0.1
-        c_wait=$((c_wait + 1))
-    done
     rm -rf "$tmpdir"
 }
 trap cleanup EXIT
@@ -788,14 +760,20 @@ worker() {
     export BLIT_GATE_PORT_OFFSET
     # A terminal's Ctrl+C reaches every process of the run but not a gate
     # (timeout gives it a process group of its own): the worker takes it down.
-    trap '[ -z "$gpid" ] || { kill -TERM "$gpid" 2>/dev/null; wait "$gpid" 2>/dev/null; }; exit 130' INT
-    trap '[ -z "$gpid" ] || { kill -TERM "$gpid" 2>/dev/null; wait "$gpid" 2>/dev/null; }; exit 143' HUP TERM
+    # Under set -e, a kill or wait that fails would end the trap there: each
+    # is allowed to fail (Gitea #106).
+    trap '[ -z "$gpid" ] || { kill -TERM "$gpid" 2>/dev/null || true; wait "$gpid" 2>/dev/null || true; }; exit 130' INT
+    trap '[ -z "$gpid" ] || { kill -TERM "$gpid" 2>/dev/null || true; wait "$gpid" 2>/dev/null || true; }; exit 143' HUP TERM
     run_suites
 }
 schedule() {
     sched_workers=''
-    trap 'for p in $sched_workers; do kill -TERM "$p" 2>/dev/null; done; wait; exit 130' INT
-    trap 'for p in $sched_workers; do kill -TERM "$p" 2>/dev/null; done; wait; exit 143' HUP TERM
+    # A worker that has finished is gone: its kill fails, and under set -e
+    # that ended this trap before the next worker -- the one still running a
+    # gate -- was signalled (Gitea #106; TERM with two jobs left it running
+    # in about half the runs). Each kill is allowed to fail.
+    trap 'for p in $sched_workers; do kill -TERM "$p" 2>/dev/null || true; done; wait || true; exit 130' INT
+    trap 'for p in $sched_workers; do kill -TERM "$p" 2>/dev/null || true; done; wait || true; exit 143' HUP TERM
     k=0
     while [ "$k" -lt "$JOBS" ]; do
         worker parallel $((PORT_OFFSET + k * GATE_PORT_STRIDE)) &
