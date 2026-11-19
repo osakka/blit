@@ -9,6 +9,35 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-19: 0.3.126 player glyphs; display modes across hot-plug
+
+- **Player glyphs (ADR 0237):** the owner-approved preview, built. They are
+  live in huiamp's Audio Player 0.7.2, by id, with a fallback to its older
+  look.
+  - 105 drawn by the raster in the text colour (U+100314-10037C): LCD
+    digits with faint unlit segments, LED meters, sliders, faders.
+  - 84 in the icon font (U+10037D-1003D0): transport buttons in one and
+    two cells, and CD, record and cassette in eight frames.
+  - player_glyph_gate passes at every cell size from 8 to 64 px, and the
+    font suite passes 51.
+- **Display modes across hot-plug (Gitea #60):** a trial goes with its
+  display, and stored modes are recorded rather than rebuilt from inside
+  the reconcile. 0.3.125 fails display_mode_gate's new replug case.
+- **Gates:** `gates_all` 197/11, `gates_renderer` 88/1 and
+  `gates_renderer-gles` 68/0, all on 61b514a, the shipped commit.
+  - Earlier 0.3.126 runs failed under_text_picture_gate three times inside
+    suites (once at load 12, twice in `all`). It never failed in earlier
+    releases' suites, alone (7 runs), or beside a suite on the 0.3.126 and
+    0.3.125 servers (10 runs). The cause is not found.
+  - The gate now says what it saw on that failure, and the run that
+    shipped passed it.
+- **Release environment (Debian 13):** compositor_gate, xwayland_gate and
+  update_pair pass.
+- **Live, the mini PC:** the update was verified, and the smoke check
+  passed with 2 displays (a second monitor is attached now), 3 panes with a
+  surface, and frames advancing.
+- **Published** to hibr-apt (7ecfc86) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-19: 0.3.125 display modes, views through the pointer, the start guard on orderly stop
 
 - **Display modes (Gitea #60, ADR 0236):** `configuration.mode`, a listed
