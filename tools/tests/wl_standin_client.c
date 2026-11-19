@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH]] [--animate n] [--lock] [--sub] [--csd] [--clip]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -260,6 +260,8 @@ struct standin {
     struct wl_data_offer *drop_offer;
     int drop_fd;                      /* --drop-lazy: the pipe asked for at the drop, not yet read */
     int dragout;                      /* --drag-out: a left press starts a drag of a file */
+    int32_t icon_w, icon_h;           /* --drag-icon WxH: its drag has an icon that size */
+    struct wl_surface *icon_surface;  /* at -10,-5 from the hot spot (attach's dx, dy) */
     struct wl_data_device_manager *ddm;
     struct zwp_primary_selection_device_manager_v1 *psm;
     struct wl_data_device *data_device;
@@ -409,7 +411,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     }
     close(fd);
     wl_buffer_add_listener(b->buffer, &buffer_listener, b);
-    wl_surface_attach(surface, b->buffer, 0, 0);
+    wl_surface_attach(surface, b->buffer, surface == s->icon_surface ? -10 : 0, surface == s->icon_surface ? -5 : 0);
     /* --viewport: the main surface's viewport, set before each commit. */
     if (s->viewport && surface == s->surface) {
         if (s->viewport_mode == 1) wp_viewport_set_destination(s->viewport, w, h);
@@ -431,7 +433,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     wl_surface_commit(surface);
     ++s->draws;
     printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" :
-           surface == s->child_surface ? "child " : surface == s->sub_surface ? "sub " : "popup ", w, h);
+           surface == s->child_surface ? "child " : surface == s->sub_surface ? "sub " : surface == s->icon_surface ? "icon " : "popup ", w, h);
     fflush(stdout);
     return 0;
 }
@@ -1398,7 +1400,9 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
         if (wl_data_source_get_version(src) >= 3)
             wl_data_source_set_actions(src, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY |
                                                 WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
-        wl_data_device_start_drag(s->data_device, src, s->surface, NULL, serial);
+        if (s->icon_w > 0) s->icon_surface = wl_compositor_create_surface(s->compositor);
+        wl_data_device_start_drag(s->data_device, src, s->surface, s->icon_surface, serial);
+        if (s->icon_surface) draw(s, s->icon_surface, s->icon_w, s->icon_h);
         printf("STANDIN drag started\n");
     }
     /* --cursor: a shape named, the pointer hidden, an image of its own. */
@@ -1858,6 +1862,8 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--drop-refuse") == 0) s.drop = 2;
         else if (strcmp(argv[i], "--drop-lazy") == 0) s.drop = 3;
         else if (strcmp(argv[i], "--drag-out") == 0) s.dragout = 1;
+        else if (strcmp(argv[i], "--drag-icon") == 0 && i + 1 < argc &&
+                 sscanf(argv[i + 1], "%dx%d", &s.icon_w, &s.icon_h) == 2) ++i;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
         else if (strcmp(argv[i], "--lock") == 0) s.lock = 1;
         else if (strcmp(argv[i], "--text-input") == 0) s.text_input = 1;

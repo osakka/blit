@@ -228,6 +228,14 @@ class Session:
         return None
 
 
+def keep_applied(ch):
+    """`INPUT keep` has no answer, and the devices are not the channel: the
+    server may read a key before the line that keeps it. A refused keep
+    (EINVAL, which leaves the set as it is) is answered after every line
+    before it on the channel -- so the keep before it is in force."""
+    check(ch.ask('INPUT keep button0\n') == b'INPUT error 0 EINVAL\n', 'the keep barrier was not EINVAL')
+
+
 class Channel:
     def __init__(self, session, version=5):
         self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -791,6 +799,7 @@ def multi(server, a, work, b):
         # W alone and Alt+Q reach the program; a chord not in the grammar
         # refuses the line and keeps the set; an empty keep clears it.
         ch.line('INPUT keep alt-w ctrl-alt-l super\n')
+        keep_applied(ch)
         key(56, 1)
         key(17, 1, 0)
         key(16, 1, 0)
@@ -806,6 +815,7 @@ def multi(server, a, work, b):
         key(56, 0)
         ra.expect(['key 20 56 press', 'key 20 56 release'], 'the refused line kept the set')
         ch.line('INPUT keep\n')
+        keep_applied(ch)
         key(56, 1)
         key(17, 1, 0)
         key(56, 0)
@@ -832,6 +842,7 @@ def multi(server, a, work, b):
         check(b'\033[<128;' not in a.sent()[before_sent:] and b'\033[<129;' not in a.sent()[before_sent:],
               'an unkept further button reached the terminal: %r' % a.sent()[before_sent:])
         ch.line('INPUT keep button8 super-button9\n')
+        keep_applied(ch)
         press(8)
         press(9)
         ra.expect(['btn 20 276 press', 'btn 20 276 release'], 'only the unkept forward to the program')
@@ -848,6 +859,7 @@ def multi(server, a, work, b):
         for bad in ('button4', 'button7', 'button12', 'button0', 'buttonx', 'super-button'):
             check(ch.ask('INPUT keep %s\n' % bad) == b'INPUT error 0 EINVAL\n', '%s was not EINVAL' % bad)
         ch.line('INPUT keep\n')
+        keep_applied(ch)
         press(8)
         ra.expect(['btn 20 275 press', 'btn 20 275 release'], 'an empty keep gave button 8 back')
         # ADR 0233: the input method's keys, set by the desktop, reach the

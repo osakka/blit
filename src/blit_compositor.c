@@ -203,6 +203,8 @@ struct bc_surface {
     wl_fixed_t vp_pending_src[4], vp_src[4];
     int32_t vp_pending_dst[2], vp_dst[2];
     int vp_warned;
+    int dragicon;                     /* the icon of the program's drag out (s->dragout.icon) */
+    int32_t pending_ox, pending_oy;   /* attach's dx, dy and offset's, applied at commit */
     int cursor_logged;                /* a cursor image from it was noted once */
     /* The global menu (org_kde_kwin_appmenu): where the program serves its
        menus over D-Bus, "" none. */
@@ -336,7 +338,7 @@ enum {
     BC_ATOM_XDND_AWARE, BC_ATOM_XDND_PROXY, BC_ATOM_XDND_ENTER, BC_ATOM_XDND_POSITION, BC_ATOM_XDND_STATUS,
     BC_ATOM_XDND_LEAVE, BC_ATOM_XDND_DROP, BC_ATOM_XDND_FINISHED, BC_ATOM_XDND_SELECTION,
     BC_ATOM_XDND_TYPE_LIST, BC_ATOM_XDND_ACTION_COPY, BC_ATOM_BLIT_XDND_TIME,
-    BC_ATOM_XDND_ACTION_MOVE,
+    BC_ATOM_XDND_ACTION_MOVE, BC_ATOM_NET_WM_WINDOW_TYPE_DND,
     BC_ATOMS
 };
 
@@ -585,6 +587,12 @@ struct bc_server {
         struct bc_xdg *window;
         int x;                        /* an X program's (XDND): the compositor its target */
         uint32_t xheld;               /* its buttons released meanwhile, given at the end */
+        /* Its icon (0.3.123): `WINDOW dragicon <icon_id> o<n> <ix> <iy>`, its
+           top-left from the pointer's hot spot. */
+        struct bc_surface *icon;
+        struct bc_xdg *icon_pic;      /* its picture: id, holds of its dmabuf frames, its kept copy */
+        uint32_t icon_id;
+        int32_t ix, iy;
     } dragout;
     uint32_t dragouts;                /* the o<n> count */
     int drag_said;                    /* "the desktop does not run drags" logged */
@@ -2017,9 +2025,14 @@ static void surface_attach(struct wl_client *client, struct wl_resource *resourc
                            struct wl_resource *buffer, int32_t x, int32_t y)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
-    (void)client; (void)x; (void)y;
+    (void)client;
     set_pending_buffer(surface, buffer);
     surface->pending_attach = 1;
+    /* A position change (the drag icon's); version 5 says it by offset. */
+    if (wl_resource_get_version(resource) < 5) {
+        surface->pending_ox += x;
+        surface->pending_oy += y;
+    }
 }
 
 static void surface_damage(struct wl_client *client, struct wl_resource *resource, int32_t x,
@@ -2070,6 +2083,178 @@ static void subs_parent_applied(struct bc_surface *parent);
 
 /* A committed buffer as a frame of a window or popup of either kind: sent
    (send_buffer's result), and the picture mapped at the buffer's size. */
+/* ---- the drag's icon (0.3.123, agreed with Hibr) ----
+
+   A program's start_drag may name an icon surface: `WINDOW dragicon <id>
+   o<n> <dx> <dy>` after its `CLIP dragout`, <dx> <dy> its top-left from the
+   pointer's hot spot (the protocol's: 0,0 at first, moved by attach's
+   dx/dy or offset, said again when they change), its frames FRM1 copies at
+   most BC_DRAGICON_MAX a side -- scaled down, aspect kept, here, where the
+   buffer is (Hibr's ask: it cannot scale a frame without copying it) --
+   and `WINDOW gone <id>` at the drag's end or the icon's. A dmabuf icon
+   goes as FRM3, no copy, when within the bound; past it a linear one is
+   read and scaled as shared memory is, and a tiled one -- which no CPU can
+   read -- goes as FRM3 at its size, for Blit's GPU to draw at the size the
+   desktop places it. An X program's icon is its own override-redirect
+   window of type _NET_WM_WINDOW_TYPE_DND (GTK's, Qt's), its place from the
+   pointer where it was when the drag was announced. */
+
+#define BC_DRAGICON_MAX 256
+
+/* An area average of `w` x `h` 32-bit pixels into `nw` x `nh`. */
+static void dragicon_scale(const unsigned char *src, uint32_t w, uint32_t h, uint32_t stride, uint32_t *dst,
+                           uint32_t nw, uint32_t nh)
+{
+    uint32_t dx, dy;
+    for (dy = 0; dy < nh; ++dy) {
+        uint32_t y0 = dy * h / nh, y1 = (dy + 1) * h / nh;
+        if (y1 <= y0) y1 = y0 + 1;
+        for (dx = 0; dx < nw; ++dx) {
+            uint32_t x0 = dx * w / nw, x1 = (dx + 1) * w / nw, y, x, n = 0;
+            uint64_t c[4] = {0, 0, 0, 0};
+            if (x1 <= x0) x1 = x0 + 1;
+            for (y = y0; y < y1; ++y) {
+                const uint32_t *row = (const uint32_t *)(src + (size_t)y * stride);
+                for (x = x0; x < x1; ++x) {
+                    uint32_t p = row[x];
+                    c[0] += p & 0xff;
+                    c[1] += (p >> 8) & 0xff;
+                    c[2] += (p >> 16) & 0xff;
+                    c[3] += p >> 24;
+                    ++n;
+                }
+            }
+            dst[(size_t)dy * nw + dx] = (uint32_t)(c[0] / n) | (uint32_t)(c[1] / n) << 8 |
+                                        (uint32_t)(c[2] / n) << 16 | (uint32_t)(c[3] / n) << 24;
+        }
+    }
+}
+
+static void dragicon_say(struct bc_server *s)
+{
+    bc_wire_line(&s->wire, "WINDOW dragicon %u o%u %d %d", s->dragout.icon_id, s->dragout.n, s->dragout.ix,
+                 s->dragout.iy);
+}
+
+/* The drag's end, or its icon's: gone. */
+static void dragicon_end(struct bc_server *s)
+{
+    if (s->dragout.icon_id) {
+        holds_end_id(s, s->dragout.icon_id);         /* its dmabuf frames the client's again */
+        bc_wire_line(&s->wire, "WINDOW gone %u", s->dragout.icon_id);
+    }
+    if (s->dragout.icon_pic) {
+        kept_set(s->dragout.icon_pic, NULL);
+        free(s->dragout.icon_pic);
+    }
+    if (s->dragout.icon) s->dragout.icon->dragicon = 0;
+    s->dragout.icon = NULL;
+    s->dragout.icon_pic = NULL;
+    s->dragout.icon_id = 0;
+}
+
+/* `surface` becomes the drag's icon, at <ix> <iy> from the hot spot. */
+static void dragicon_begin(struct bc_server *s, struct bc_surface *surface, int32_t ix, int32_t iy)
+{
+    struct bc_xdg *pic = calloc(1, sizeof(*pic));
+    if (pic == NULL) return;
+    pic->server = s;
+    pic->surface = surface;
+    pic->kept.fd = -1;
+    surface->dragicon = 1;
+    s->dragout.icon = surface;
+    s->dragout.icon_pic = pic;
+    s->dragout.icon_id = pic->id = bc_wire_new_id(&s->wire);
+    s->dragout.ix = ix;
+    s->dragout.iy = iy;
+    dragicon_say(s);
+}
+
+static void dragicon_size(uint32_t w, uint32_t h, uint32_t *nw, uint32_t *nh)
+{
+    *nw = w;
+    *nh = h;
+    if (w <= BC_DRAGICON_MAX && h <= BC_DRAGICON_MAX) return;
+    if (w >= h) { *nw = BC_DRAGICON_MAX; *nh = h * BC_DRAGICON_MAX / w; }
+    else { *nh = BC_DRAGICON_MAX; *nw = w * BC_DRAGICON_MAX / h; }
+    if (*nw == 0) *nw = 1;
+    if (*nh == 0) *nh = 1;
+}
+
+/* A linear dmabuf icon past the bound: read between its fences, scaled. */
+static int dragicon_dmabuf_scaled(struct bc_server *s, struct bc_surface *surface, struct bc_dmabuf *b)
+{
+    struct dma_buf_sync sync;
+    size_t bytes = (size_t)b->offsets[0] + (size_t)b->strides[0] * (size_t)b->height;
+    uint32_t nw, nh, format = b->format == BC_FOURCC_XR24 ? BC_SHM_XRGB8888
+                                : b->format == BC_FOURCC_AR24 ? BC_SHM_ARGB8888 : b->format;
+    uint32_t *small;
+    unsigned char *map;
+    int rc;
+    dragicon_size((uint32_t)b->width, (uint32_t)b->height, &nw, &nh);
+    map = mmap(NULL, bytes, PROT_READ, MAP_SHARED, b->fds[0], 0);
+    if (map == MAP_FAILED) return send_dmabuf(s->dragout.icon_pic, b);
+    if ((small = malloc((size_t)nw * nh * 4)) == NULL) {
+        munmap(map, bytes);
+        return BC_SENT_NONE;
+    }
+    sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
+    ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+    dragicon_scale(map + b->offsets[0], (uint32_t)b->width, (uint32_t)b->height, b->strides[0], small, nw, nh);
+    sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
+    ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
+    munmap(map, bytes);
+    rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, small, nw, nh, nw * 4, format);
+    free(small);
+    if (rc != 0) return BC_SENT_NONE;
+    frames_taken(surface);
+    return BC_SENT_COPY;
+}
+
+static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer, int attached)
+{
+    struct bc_server *s = surface->server;
+    struct wl_shm_buffer *shm;
+    uint32_t w, h, nw, nh, format;
+    int rc;
+    if (s->dragout.icon != surface || s->dragout.icon_id == 0) return BC_SENT_NONE;
+    if (surface->pending_ox || surface->pending_oy) {
+        s->dragout.ix += surface->pending_ox;
+        s->dragout.iy += surface->pending_oy;
+        dragicon_say(s);
+    }
+    if (!attached || buffer == NULL) return BC_SENT_NONE;
+    if ((shm = wl_shm_buffer_get(buffer)) == NULL) {
+        struct bc_dmabuf *b = dmabuf_from_buffer(buffer);
+        if (b == NULL || s->dragout.icon_pic == NULL) return BC_SENT_NONE;
+        if ((b->width > BC_DRAGICON_MAX || b->height > BC_DRAGICON_MAX) && dmabuf_copyable(b))
+            return dragicon_dmabuf_scaled(s, surface, b);
+        return send_dmabuf(s->dragout.icon_pic, b);
+    }
+    w = (uint32_t)wl_shm_buffer_get_width(shm);
+    h = (uint32_t)wl_shm_buffer_get_height(shm);
+    format = wl_shm_buffer_get_format(shm);
+    if (format != BC_SHM_ARGB8888 && format != BC_SHM_XRGB8888) return BC_SENT_NONE;
+    dragicon_size(w, h, &nw, &nh);
+    wl_shm_buffer_begin_access(shm);
+    if (nw == w && nh == h) {
+        rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, wl_shm_buffer_get_data(shm), w, h,
+                              (uint32_t)wl_shm_buffer_get_stride(shm), format);
+    } else {
+        uint32_t *small = malloc((size_t)nw * nh * 4);
+        rc = -1;
+        if (small) {
+            dragicon_scale(wl_shm_buffer_get_data(shm), w, h, (uint32_t)wl_shm_buffer_get_stride(shm), small, nw, nh);
+            rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, small, nw, nh, nw * 4, format);
+            free(small);
+        }
+    }
+    wl_shm_buffer_end_access(shm);
+    if (rc != 0) return BC_SENT_NONE;
+    frames_taken(surface);
+    return BC_SENT_COPY;
+}
+
 static int picture_frame(struct bc_xdg *x, struct bc_surface *surface, struct wl_resource *buffer)
 {
     struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
@@ -2167,6 +2352,8 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
             sent = picture_frame(x, surface, buffer);
             if (sent != BC_SENT_NONE) x_frame_measure(x, surface);
         }
+    } else if (surface->dragicon) {
+        sent = dragicon_apply(surface, buffer, attached);
     } else if (sub) {
         sent = sub_apply_buffer(sub, buffer, attached);
     } else if (surface->role == BC_ROLE_XWAYLAND) {
@@ -2185,6 +2372,7 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
     } else if (!attached && pic && pic->mapped && pic->id) {
         frames_taken(surface);
     }
+    surface->pending_ox = surface->pending_oy = 0;
     /* Its subsurfaces' positions and synchronized state are applied with it. */
     subs_parent_applied(surface);
 }
@@ -2391,7 +2579,10 @@ static void surface_set_buffer_scale(struct wl_client *client, struct wl_resourc
 static void surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x,
                            int32_t y)
 {
-    (void)client; (void)resource; (void)x; (void)y;
+    struct bc_surface *surface = wl_resource_get_user_data(resource);
+    (void)client;
+    surface->pending_ox += x;
+    surface->pending_oy += y;
 }
 
 static const struct wl_surface_interface surface_impl = {
@@ -2411,6 +2602,7 @@ static const struct wl_surface_interface surface_impl = {
 static void surface_destroyed(struct wl_resource *resource)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
+    if (surface->dragicon && surface->server->dragout.icon == surface) dragicon_end(surface->server);
     /* Its viewport outlives it, inert (no_surface on use). */
     if (surface->viewport) wl_resource_set_user_data(surface->viewport, NULL);
     set_pending_buffer(surface, NULL);
@@ -3154,6 +3346,7 @@ static void source_destroyed(struct wl_resource *resource)
         /* The program let its drag go: the desktop's drag of it ends. */
         logf_("drag out o%u: its program let it go", s->dragout.n);
         bc_wire_line(&s->wire, "CLIP clear o%u", s->dragout.n);
+        dragicon_end(s);
         memset(&s->dragout, 0, sizeof(s->dragout));
     }
     if (s->sel[src->primary].source == src) clip_source_gone(s, src->primary);
@@ -3214,6 +3407,9 @@ static void device_set_selection(struct wl_resource *device, struct wl_resource 
 
 static void pointer_focus(struct bc_server *s, struct bc_surface *surface, double lx, double ly);
 static void xdrag_dragend(struct bc_server *s, int action, uint32_t held);
+static void dragicon_end(struct bc_server *s);
+static void dragicon_say(struct bc_server *s);
+static void dragicon_begin(struct bc_server *s, struct bc_surface *surface, int32_t ix, int32_t iy);
 
 /* The program's drag out over: told as the desktop says -- dropped with
    that action (performed, then finished), or cancelled. */
@@ -3224,6 +3420,7 @@ static void dragout_end(struct bc_server *s, int action)
     uint32_t held = s->dragout.xheld;
     int x = s->dragout.x;
     if (n == 0) return;
+    dragicon_end(s);
     memset(&s->dragout, 0, sizeof(s->dragout));
     if (x) {
         xdrag_dragend(s, action, held);
@@ -3260,7 +3457,7 @@ static void data_device_start_drag(struct wl_client *client, struct wl_resource 
     size_t used = 0;
     uint32_t a;
     int i;
-    (void)client; (void)icon;
+    (void)client;
     if (src == NULL) {
         logf_("a drag with no source (inside its program's windows) is not carried");
         return;
@@ -3304,6 +3501,10 @@ static void data_device_start_drag(struct wl_client *client, struct wl_resource 
                  (a & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) && (a & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)
                      ? "copy,move" : (a & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE) ? "move" : "copy",
                  types);
+    if (icon) {
+        struct bc_surface *is = wl_resource_get_user_data(icon);
+        if (is && is != sf && is->xdg == NULL && is->sub == NULL) dragicon_begin(s, is, 0, 0);
+    }
     logf_("drag out o%u from window %u: %s", s->dragout.n, x->id, types);
 }
 
@@ -7343,7 +7544,7 @@ static const char *const bc_atom_names[BC_ATOMS] = {
     "x-kde-passwordManagerHint", "_BLIT_SELECTION",
     "XdndAware", "XdndProxy", "XdndEnter", "XdndPosition", "XdndStatus", "XdndLeave", "XdndDrop",
     "XdndFinished", "XdndSelection", "XdndTypeList", "XdndActionCopy", "_BLIT_XDND_TIME",
-    "XdndActionMove",
+    "XdndActionMove", "_NET_WM_WINDOW_TYPE_DND",
 };
 
 /* One child of the root: an X top-level, from its CreateNotify to its
@@ -8113,6 +8314,11 @@ static struct bc_xdg *x_popup_parent(struct bc_server *s, struct bc_xwin *w)
 /* The window and its surface matched: shown as a picture -- a toplevel,
    or for an override-redirect window a popup of the toplevel it belongs
    to (x_popup_parent), at its offset from that toplevel in X space. */
+static int xdrag_icon_window(struct bc_server *s, struct bc_xwin *w);
+static int x_dnd_type(struct bc_server *s, struct bc_xwin *w);
+static void xdrag_icon_adopt(struct bc_server *s, struct bc_xwin *w);
+static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer, int attached);
+
 static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *sf)
 {
     struct bc_xdg *x, *parent = NULL;
@@ -8120,6 +8326,17 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
     w->surface = sf;
     sf->xwl_matched = 1;
     x_set_held(sf, NULL);
+    if (w->override_redirect && x_dnd_type(s, w)) {
+        /* A drag icon is never a popup: the drag's when its program's drag
+           out is under way (now, or when it is announced), else not shown. */
+        if (xdrag_icon_window(s, w)) {
+            xdrag_icon_adopt(s, w);
+            if (held && dragicon_apply(sf, held, 1) != BC_SENT_HELD) wl_buffer_send_release(held);
+        } else if (held) {
+            wl_buffer_send_release(held);
+        }
+        return;
+    }
     if (w->override_redirect && (parent = x_popup_parent(s, w)) == NULL) {
         if (!w->or_logged)
             logf_("X: override-redirect window 0x%x at %d,%d belongs to no shown X window: not shown",
@@ -9476,6 +9693,47 @@ static void xdrag_reply(struct bc_server *s, xcb_atom_t type, uint32_t l1, uint3
     xcb_flush(s->x.conn);
 }
 
+/* Whether `w` is the dragging program's own drag icon: an override-redirect
+   window of its client, _NET_WM_WINDOW_TYPE_DND. */
+static int x_dnd_type(struct bc_server *s, struct bc_xwin *w);
+
+static int xdrag_icon_window(struct bc_server *s, struct bc_xwin *w)
+{
+    if (!s->dragout.n || !s->dragout.x || s->dragout.icon || !w->override_redirect ||
+        x_client_of(s, w->window) != x_client_of(s, s->x.xdrag.source))
+        return 0;
+    return x_dnd_type(s, w);
+}
+
+/* Whether `w` says it is a drag icon (_NET_WM_WINDOW_TYPE_DND). */
+static int x_dnd_type(struct bc_server *s, struct bc_xwin *w)
+{
+    xcb_get_property_reply_t *r;
+    int dnd = 0, i, n;
+    r = xcb_get_property_reply(s->x.conn, xcb_get_property(s->x.conn, 0, w->window,
+                                                         s->x.atoms[BC_ATOM_NET_WM_WINDOW_TYPE], XCB_ATOM_ATOM, 0, 8),
+                               NULL);
+    n = r && r->format == 32 ? xcb_get_property_value_length(r) / 4 : 0;
+    for (i = 0; i < n; ++i)
+        if (((const xcb_atom_t *)xcb_get_property_value(r))[i] == s->x.atoms[BC_ATOM_NET_WM_WINDOW_TYPE_DND]) dnd = 1;
+    free(r);
+    return dnd;
+}
+
+/* `w`, matched to its surface, the drag's icon: placed from the pointer, and
+   asked to draw again (an Expose) so its next frame comes to the desktop. */
+static void xdrag_icon_adopt(struct bc_server *s, struct bc_xwin *w)
+{
+    struct bc_xdg *from = s->dragout.window;
+    int32_t px = from && from->xwin ? from->xwin->x + (int32_t)s->ptr_x : 0;
+    int32_t py = from && from->xwin ? from->xwin->y + (int32_t)s->ptr_y : 0;
+    dragicon_begin(s, w->surface, w->x - px, w->y - py);
+    logf_("drag out o%u: X window 0x%x is its icon, at %d,%d from the pointer", s->dragout.n, (unsigned)w->window,
+          s->dragout.ix, s->dragout.iy);
+    xcb_clear_area(s->x.conn, 1, w->window, 0, 0, 0, 0);
+    xcb_flush(s->x.conn);
+}
+
 /* Its first position: announced to the desktop. */
 static void xdrag_announce(struct bc_server *s, xcb_atom_t action, xcb_timestamp_t time)
 {
@@ -9526,6 +9784,15 @@ static void xdrag_announce(struct bc_server *s, xcb_atom_t action, xcb_timestamp
                  : action == atoms[BC_ATOM_XDND_ACTION_MOVE] ? "move" : "copy,move", types);
     logf_("drag out o%u from window %u (X window 0x%x, XDND %u): %s", s->dragout.n, s->x.xdrag.from->id,
           (unsigned)s->x.xdrag.source, (unsigned)s->x.xdrag.version, types);
+    {
+        /* Its icon window, if it is up already. */
+        struct bc_xwin *w;
+        wl_list_for_each(w, &s->x.windows, link)
+            if (w->surface && xdrag_icon_window(s, w)) {
+                xdrag_icon_adopt(s, w);
+                break;
+            }
+    }
 }
 
 static void xdrag_message(struct bc_server *s, const xcb_client_message_event_t *ev)

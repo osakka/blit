@@ -429,3 +429,34 @@ drop part also drops on a window moved to a second display (root 1953,44
 for 33,44 on HDMI-A-1 at 1920,0). A real GTK3 X drag source onto a real
 GTK3 X drop target, in a throwaway container: hover copy, taken, the file
 received, the source's drag ended as a success.
+
+## Amended 2026-11-19 (0.3.123): the drag's own icon
+
+Agreed with Hibr: `WINDOW dragicon <id> o<n> <dx> <dy>`, its frames as any
+picture's, a repeat for a new offset, `WINDOW gone <id>` at the end; the
+desktop draws it at the pointer plus (dx, dy), above everything, with its
+copy/none badge, its own glyph until the first frame. Hibr asked for frames
+at most 256 px a side, scaled here, where the buffer is: it cannot scale a
+dmabuf or memfd frame without copying it, and a large thumbnail is a
+megabyte a frame for every display.
+- Wayland programs: start_drag's icon surface gets a picture of its own
+  (id, holds, kept copy); its position is the protocol's -- 0,0 at the hot
+  spot, moved by attach's dx/dy (version < 5) or offset.
+- Every buffer kind (the owner: no self-imposed limits): shared memory,
+  scaled by an area average past the bound; a dmabuf within the bound as
+  FRM3, no copy; a linear dmabuf past it read between its fences and
+  scaled; a tiled one past it, which no CPU can read, as FRM3 at its size --
+  Blit's GPU draws a picture at the size it is placed.
+- X programs: their icon is their own override-redirect window of type
+  _NET_WM_WINDOW_TYPE_DND (GTK, Qt). Such a window is never a popup; during
+  an X program's drag out it is the drag's icon, placed from the pointer
+  where it was when the drag was announced, and asked to draw again (an
+  Expose) so its next frame comes.
+
+Evidence: compositor_gate's dragout part -- a 300x200 shm icon at -10,-5
+as a 256x170 frame, a 64x48 dmabuf as FRM3, a 300x200 linear dmabuf read
+and scaled to 256x170, each gone at the end -- with ASan/UBSan;
+xwayland_gate's dragout part -- the X stand-in's DND window the icon, 64x48
+at -8,-6, gone at the end -- plain and ASan/UBSan; real GTK3: its Wayland
+drag icon (32x32 frames) and, under Xwayland in a throwaway container, its
+X drag window (32x32 frames, at the pointer).

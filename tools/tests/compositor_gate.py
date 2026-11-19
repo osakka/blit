@@ -2267,7 +2267,7 @@ def dragout_part(compositor, standin, work):
     clients = []
     route = None
     try:
-        desk = Desktop(listener, b'OK dmabuf=0 window=1 drag=1\n')
+        desk = Desktop(listener, b'OK dmabuf=1 fence=0 formats=XR24/0/0 window=1 drag=1\n')
         desk.line('WINDOW display blit-0 -')
         cenv = dict(env, WAYLAND_DISPLAY='blit-0')
         outs = []
@@ -2363,13 +2363,69 @@ def dragout_part(compositor, standin, work):
         desk.send('CLIP dragend o3 none')
         wait_for(lambda: 'STANDIN drag cancelled' in src(), lambda: 'not cancelled:\n' + src())
         send('INPUT btn %d 272 release')
+        # 4-6. Its own icon (0.3.123): `WINDOW dragicon <id> o<n> <dx> <dy>`,
+        # moved by attach's dx/dy, its frames at most 256 a side (aspect
+        # kept), `WINDOW gone` at the end -- shared memory scaled; a dmabuf
+        # within the bound as FRM3; a linear dmabuf past it read and scaled.
+        icons = []
+        for n, (extra, size, kind, want) in enumerate(((['--drag-icon', '300x200'], (300, 200), 'frame', (256, 170)),
+                                                      (['--drag-icon', '64x48', '--dmabuf'], (64, 48), 'frm3', (64, 48)),
+                                                      (['--drag-icon', '300x200', '--dmabuf'], (300, 200), 'frame',
+                                                       (256, 170))), 4):
+            path = os.path.join(work, 'standin-dragout-icon-%d.out' % n)
+            clients.append(start([standin, '--drag-out'] + extra + ['Icon%d' % n], cenv, open(path, 'w')))
+            win = int(until('WINDOW new ').split()[2])     # ids are shared with icons: not counted here
+            until('WINDOW decor %d server' % win)
+            iroute = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            deadline = time.time() + 5
+            while win not in desk.input_socks and time.time() < deadline:
+                got = desk.next(0.2)
+                if got and got[0] == 'frame':
+                    os.close(got[2])
+            check(win in desk.input_socks, 'no INPUT sock for %d' % win)
+            iroute.connect(desk.input_socks[win])
+            iroute.sendall(b'INPUT ptr %d 20.00 20.00\nINPUT frame %d 100\nINPUT btn %d 272 press\nINPUT frame %d 101\n'
+                           % (BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE))
+            got_icon, moved, frame_size = None, False, None
+            end = time.time() + 6
+            while time.time() < end and not (moved and frame_size):
+                got = desk.next(0.2)
+                if got is None:
+                    continue
+                if got[0] == 'line':
+                    m = re.fullmatch(r'WINDOW dragicon (\d+) o%d (-?\d+) (-?\d+)' % n, got[1])
+                    if m:
+                        got_icon = int(m.group(1))
+                        moved = moved or (m.group(2), m.group(3)) == ('-10', '-5')
+                    continue
+                if got[0] == 'frame':
+                    image, w, h = got[1][0], got[1][2], got[1][3]
+                    os.close(got[2])
+                    if image == got_icon:
+                        frame_size = ('frame', (w, h))
+                elif got[0] == 'frm3':
+                    image, w, h = got[1][0], got[1][2], got[1][3]
+                    for fd in got[2]:
+                        os.close(fd)
+                    if image == got_icon:
+                        frame_size = ('frm3', (w, h))
+            check(got_icon and moved, 'icon %d: no WINDOW dragicon at -10,-5' % n)
+            check(frame_size == (kind, want), 'icon %d (%dx%d): got %r, expected %s %dx%d'
+                  % (n, size[0], size[1], frame_size, kind, want[0], want[1]))
+            desk.send('CLIP dragend o%d copy' % n)
+            until('WINDOW gone %d' % got_icon)
+            iroute.sendall(b'INPUT btn %d 272 release\nINPUT frame %d 102\n' % (BLIT_PICTURE, BLIT_PICTURE))
+            iroute.close()
+            icons.append('%s %dx%d->%s %dx%d' % ('dmabuf' if '--dmabuf' in extra else 'shm', size[0], size[1], kind,
+                                                   want[0], want[1]))
         quit_compositor(desk, comp)
         text = settled(log)
         check('drag out o1 from window 1' in text and 'drag out o1: moved' in text and 'drag out o3: cancelled' in text,
               lambda: 'the log does not say the drags:\n' + text)
         return ('dragout=CLIP dragout o<n>(copy,move,types) pointer-left,no-input-meanwhile desktop-read+dragend move->'
                 'action,performed,finished onto-program=hover o2 copy,dropped o2 taken,source-wrote-target '
-                'dragend none->cancelled; %s' % dragout_unsaid_part(compositor, standin, work))
+                'dragend none->cancelled icons=dragicon(-10,-5),%s,gone; %s'
+                % (','.join(icons), dragout_unsaid_part(compositor, standin, work)))
     finally:
         if route:
             route.close()

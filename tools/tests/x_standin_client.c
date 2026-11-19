@@ -1097,7 +1097,7 @@ static int dnd_notify(const xcb_selection_notify_event_t *ev)
    "dragout drop", "dragout leave", "dragout sent <target>", "dragout
    finished <accepted> <action>". */
 static int dragout_mode, dragout_on, dragout_waiting, dragout_accepted;
-static xcb_window_t dragout_target;
+static xcb_window_t dragout_target, dragout_icon;   /* its icon: 64x48, _NET_WM_WINDOW_TYPE_DND */
 static xcb_timestamp_t dragout_time;
 static xcb_atom_t xa_aware, xa_enter, xa_position, xa_status, xa_leave, xa_drop, xa_finished, xa_selection,
     xa_copy, xa_uri, xa_text;
@@ -1152,21 +1152,55 @@ static void dragout_press(const xcb_button_press_event_t *b)
     dragout_on = 1;
     dragout_target = XCB_WINDOW_NONE;
     dragout_waiting = dragout_accepted = 0;
+    {
+        /* As GTK and Qt: an override-redirect window that follows the pointer. */
+        uint32_t values[3] = { screen->white_pixel, 1, XCB_EVENT_MASK_EXPOSURE };
+        xcb_atom_t dnd = atom("_NET_WM_WINDOW_TYPE_DND");
+        dragout_icon = xcb_generate_id(conn);
+        xcb_create_window(conn, XCB_COPY_FROM_PARENT, dragout_icon, screen->root, (int16_t)(b->root_x - 8),
+                          (int16_t)(b->root_y - 6), 64, 48, 0, XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual,
+                          XCB_CW_BACK_PIXEL | XCB_CW_OVERRIDE_REDIRECT | XCB_CW_EVENT_MASK, values);
+        xcb_change_property(conn, XCB_PROP_MODE_REPLACE, dragout_icon, atom("_NET_WM_WINDOW_TYPE"), XCB_ATOM_ATOM, 32,
+                            1, &dnd);
+        xcb_map_window(conn, dragout_icon);
+        xcb_flush(conn);
+    }
     say("dragout owner");
 }
 
 static void dragout_motion(const xcb_motion_notify_event_t *m)
 {
-    xcb_translate_coordinates_reply_t *t;
     xcb_window_t child;
     uint32_t version = 0;
     xcb_get_property_reply_t *r;
     if (!dragout_on) return;
     dragout_time = m->time;
-    t = xcb_translate_coordinates_reply(conn, xcb_translate_coordinates(conn, screen->root, screen->root,
-                                                                         m->root_x, m->root_y), NULL);
-    child = t ? t->child : XCB_WINDOW_NONE;
-    free(t);
+    if (dragout_icon) {
+        uint32_t at[2] = { (uint32_t)(int32_t)(m->root_x - 8), (uint32_t)(int32_t)(m->root_y - 6) };
+        xcb_configure_window(conn, dragout_icon, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, at);
+    }
+    /* The top child of the root under the pointer, its own icon skipped (as
+       GTK's and Qt's window caches skip their drag window). */
+    child = XCB_WINDOW_NONE;
+    {
+        xcb_query_tree_reply_t *q = xcb_query_tree_reply(conn, xcb_query_tree(conn, screen->root), NULL);
+        int n = q ? xcb_query_tree_children_length(q) : 0, i;
+        xcb_window_t *kids = q ? xcb_query_tree_children(q) : NULL;
+        for (i = n - 1; i >= 0 && child == XCB_WINDOW_NONE; --i) {
+            xcb_get_window_attributes_reply_t *a;
+            xcb_get_geometry_reply_t *g;
+            if (kids[i] == dragout_icon) continue;
+            a = xcb_get_window_attributes_reply(conn, xcb_get_window_attributes(conn, kids[i]), NULL);
+            g = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, kids[i]), NULL);
+            if (a && g && a->map_state == XCB_MAP_STATE_VIEWABLE && m->root_x >= g->x && m->root_y >= g->y &&
+                m->root_x < g->x + g->width && m->root_y < g->y + g->height)
+                child = kids[i];
+            free(a);
+            free(g);
+        }
+        free(q);
+    }
+
     r = child ? xcb_get_property_reply(conn, xcb_get_property(conn, 0, child, xa_aware, XCB_ATOM_ATOM, 0, 1), NULL)
               : NULL;
     if (r && r->format == 32 && xcb_get_property_value_length(r) >= 4) version = *(uint32_t *)xcb_get_property_value(r);
@@ -1192,6 +1226,10 @@ static void dragout_release(const xcb_button_release_event_t *b)
     if (!dragout_on) return;
     dragout_on = 0;
     xcb_ungrab_pointer(conn, b->time);
+    if (dragout_icon) {
+        xcb_destroy_window(conn, dragout_icon);
+        dragout_icon = XCB_WINDOW_NONE;
+    }
     if (dragout_target && dragout_accepted) {
         dragout_send(dragout_target, xa_drop, 0, b->time, 0, 0);
         say("dragout drop");
@@ -1359,6 +1397,8 @@ int main(int argc, char **argv)
                     draw_fill(panel, 200, 100);
                 } else if (submenu && e->window == submenu) {
                     draw_fill(submenu, 80, 50);
+                } else if (dragout_icon && e->window == dragout_icon) {
+                    draw_fill(dragout_icon, 64, 48);
                 }
                 break;
             }

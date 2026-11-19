@@ -1440,8 +1440,29 @@ def x_dragout_part(desk, standin, env, log, work):
                   'the X drag out was %r' % m.group(0))
             wait_for(lambda: printed().count('XSTANDIN dragout enter') >= n, lambda: 'not entered:\n' + printed())
 
-        # 1. Dropped on the desktop.
+        # 1. Dropped on the desktop; its icon (0.3.123) -- its own
+        # _NET_WM_WINDOW_TYPE_DND window, as GTK's and Qt's -- the drag's:
+        # placed from the pointer (the stand-in keeps it at -8,-6), its
+        # frames the icon's, gone at the end.
         drag(1)
+        icon, icon_at, icon_frame = None, None, None
+        deadline = time.time() + 6
+        while time.time() < deadline and not (icon and icon_frame):
+            got = desk.next(0.2)
+            if got is None:
+                continue
+            if got[0] == 'line':
+                m = re.fullmatch(r'WINDOW dragicon (\d+) o1 (-?\d+) (-?\d+)', got[1])
+                if m:
+                    icon, icon_at = int(m.group(1)), (int(m.group(2)), int(m.group(3)))
+                continue
+            fds = got[2] if got[0] == 'frm3' else [got[2]]
+            if icon is not None and got[1][0] == icon:
+                icon_frame = (got[1][2], got[1][3])
+            for fd in fds:
+                os.close(fd)
+        check(icon is not None and icon_frame == (64, 48), 'the X icon: %r %r %r' % (icon, icon_at, icon_frame))
+        check(abs(icon_at[0] + 8) <= 1 and abs(icon_at[1] + 6) <= 1, 'the X icon at %r, not -8,-6' % (icon_at,))
         got = desktop_reads('o1', 'text/uri-list')
         check(got == b'file:///home/me/x%20out.txt\r\n', 'the desktop read %r' % got)
         send('INPUT btn %d 272 release')
@@ -1449,6 +1470,7 @@ def x_dragout_part(desk, standin, env, log, work):
         check('XSTANDIN dragout drop' not in printed() and 'XSTANDIN dragout leave' not in printed(),
               lambda: 'the release reached the program before the end:\n' + printed())
         desk.send('CLIP dragend o1 copy')
+        until(r'WINDOW gone %d' % icon)
         wait_for(lambda: 'XSTANDIN dragout status accept\nXSTANDIN dragout drop\nXSTANDIN dragout finished 1 copy'
                  in printed(), lambda: 'not accepted, dropped, finished:\n' + printed())
         # 2. Cancelled.
@@ -1487,9 +1509,10 @@ def x_dragout_part(desk, standin, env, log, work):
                 target.wait()
         desk.send('WINDOW close %d' % wid)
         until(r'WINDOW gone %d' % wid)
-        return ('x-dragout=XdndSelection+button->drop window->CLIP dragout o1 copy(types) desktop-read=XdndSelection '
+        return ('x-dragout=XdndSelection+button->drop window->CLIP dragout o1 copy(types) icon=DND window %r at %r '
+                'desktop-read=XdndSelection '
                 'release-held dragend copy->status accept,drop,finished none->refuse,leave '
-                'onto-X=relayed(hover copy,taken,target read the source,source finished)')
+                'onto-X=relayed(hover copy,taken,target read the source,source finished)' % (icon_frame, icon_at))
     finally:
         if route:
             route.close()

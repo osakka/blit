@@ -3054,6 +3054,18 @@ It speaks the frame channel above as a producer, with these additions.
   from it, the program's types and time), answers it -- `CLIP hover` and
   `CLIP dropped` as for any program -- and reads the dragging program's
   own XdndSelection; nobody's selection is taken.
+  The drag's icon (since 0.3.123, agreed with Hibr): `WINDOW dragicon <id>
+  o<n> <dx> <dy>` after `CLIP dragout`, <id> a new picture id and <dx>
+  <dy> its top-left from the pointer's hot spot (said again when they
+  change); its frames as any picture's, and `WINDOW gone <id>` at the
+  drag's end or the icon's. A Wayland program's start_drag icon surface,
+  moved by attach's dx/dy or offset; an X program's own override-redirect
+  window of type _NET_WM_WINDOW_TYPE_DND (GTK's and Qt's), placed from the
+  pointer where it was at the announcement, and never shown as a popup.
+  Frames are at most 256 a side, scaled down with their aspect kept, here:
+  shared memory and linear dmabufs read and scaled; a dmabuf within the
+  bound as FRM3, no copy; a tiled dmabuf past it -- no CPU can read it --
+  as FRM3 at its size, for Blit to draw at the size the desktop places.
   `<seq>` is the sender's own count. "A program" is a Wayland program or,
   from milestone D, an X program (X programs, above). A program's selection (set by the
   program with the keyboard) reaches the desktop as `text/plain;charset=utf-8`
