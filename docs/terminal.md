@@ -204,7 +204,7 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 | Actions | `a=t` transmit, `a=T` transmit and show, `a=p` place, `a=d` delete, `a=q` query (PNG too), `a=f` with `r=1` edit the image in place ([ADR 0200](adr/0200-kitty-images-change-in-place.md)); `a=p`, `a=d` and `a=q` need no data section |
 | Transmission | Direct (`t=d`), in chunks (`m=1`) |
 | Formats | `f=24` RGB, `f=32` RGBA, `f=100` PNG; `o=z` zlib compression |
-| Placement | source rectangle `x y w h`, cell offset `X Y`, size in cells `c r`, layer `z`, placement id `p`, `C=1` to keep the cursor |
+| Placement | source rectangle `x y w h`, cell offset `X Y`, size in cells `c r` or, a Blit extension from 0.3.127, in pixels `W T` (width and height together, 1–16384, never with `c` or `r`: a picture at an exact size, such as a program's scaled video), layer `z`, placement id `p`, `C=1` to keep the cursor |
 | Replacing | transmitting to an existing id replaces its pixels and keeps its placements |
 | Delete | `a i z c p q x y`, and their capitals to free the image too. Each is counted by letter in the session's `graphics_diagnostics.deletes`, with the images capitals freed in `delete_freed`, and traced as `kitty_delete`; an image freed any other way (eviction, a failed upload) is traced as `image_freed` with its reason |
 | Replies | `OK`, or an error for every failure (`EINVAL`, `ENOENT`, `ENOSPC`, `EFBIG`, `ENOMEM`); only to a request with `i=`; `q=1` hides OK, `q=2` hides everything |

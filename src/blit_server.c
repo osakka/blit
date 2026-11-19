@@ -12034,6 +12034,13 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     int keep_cursor = 0;
     int placement_columns = 0;
     int placement_rows = 0;
+    /* Gitea #159, from 0.3.127: W= and T=, a Blit extension -- the
+       placement's width and height in pixels, instead of c and r (a picture
+       drawn at an exact size: a program's scaled subsurface). Letters the
+       Kitty protocol does not define; it has H and V for relative
+       placements. */
+    int placement_px_width = 0;
+    int placement_px_height = 0;
     int placement_width = 0;
     int placement_height = 0;
     int z = 0;
@@ -12090,6 +12097,8 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
         !kitty_parameter_int(payload, 'C', 0, &keep_cursor) ||
         !kitty_parameter_int(payload, 'c', 0, &placement_columns) ||
         !kitty_parameter_int(payload, 'r', 0, &placement_rows) ||
+        !kitty_parameter_int(payload, 'W', 0, &placement_px_width) ||
+        !kitty_parameter_int(payload, 'T', 0, &placement_px_height) ||
         !kitty_parameter_int(payload, 'z', 0, &z) ||
         !kitty_parameter_int(payload, 'q', 0, &quiet) || quiet < 0 || quiet > 2 ||
         placement_id < 0 || keep_cursor < 0 || keep_cursor > 1) {
@@ -12136,6 +12145,16 @@ static void terminal_apply_kitty(BlitSession *session, BlitSurface *surface)
     y = surface->cursor_y * cell_height + offset_y;
     placement_width = kitty_cells_to_pixels(session, placement_columns, 0);
     placement_height = kitty_rows_to_pixels(session, placement_rows, 0);
+    /* W and T go together, each 1-16384, and never with c or r. */
+    if (placement_px_width || placement_px_height) {
+        if (placement_px_width < 1 || placement_px_width > 16384 || placement_px_height < 1 ||
+            placement_px_height > 16384 || placement_columns || placement_rows) {
+            kitty_fail(session, image_id, quiet, "placement-bounds", "EINVAL");
+            return;
+        }
+        placement_width = placement_px_width;
+        placement_height = placement_px_height;
+    }
     if (placement_width < 0 || placement_height < 0) {
         kitty_fail(session, image_id, quiet, "placement-bounds", "EINVAL");
         return;

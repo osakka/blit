@@ -120,6 +120,13 @@ phase_a = [
   # numbered placement 1 of image 3: red; placement 2 of it: yellow
   cup(1, 21), esc("a=T,#{common},i=3,p=1,x=0,y=0,w=4,h=4,C=1", payload),
   cup(1, 31), esc('a=p,i=3,p=2,x=4,y=4,w=4,h=4,C=1,q=2'),
+  # Gitea #159, 0.3.127: W/T, an exact pixel size -- the green quadrant at
+  # 13x7, 1 px right and down in its cell; and three refused (not stored):
+  # W without T, W/T with c, W past 16384
+  cup(1, 41), esc("a=T,#{common},i=6,x=4,y=0,w=4,h=4,X=1,Y=1,W=13,T=7,C=1", payload),
+  cup(3, 41), esc("a=T,#{common},i=9,W=13,C=1", payload),
+  cup(3, 41), esc("a=T,#{common},i=10,W=13,T=7,c=2,C=1", payload),
+  cup(3, 41), esc("a=T,#{common},i=11,W=16385,T=7,C=1", payload),
   # no C=1: the cursor moves past the 1x1-cell image
   cup(5, 1), esc("a=T,#{common},i=4", payload)
 ].join
@@ -143,7 +150,7 @@ Dir.mktmpdir('kitty-placement') do |dir|
   surface = created.fetch('surface_id')
 
   Timeout.timeout(10) do
-    sleep 0.1 until json("/v1/terminal-sessions/#{session}")['graphics'].to_a.length >= 4
+    sleep 0.1 until json("/v1/terminal-sessions/#{session}")['graphics'].to_a.length >= 5
   end
   sleep 1.5
 
@@ -166,6 +173,15 @@ Dir.mktmpdir('kitty-placement') do |dir|
   check(solid.call(80 + 3, 2, BLUE), 'X/Y: blue block 3 px right, 2 px down in its cell')
   check(at.call(80 + 2, 2) == background && at.call(80 + 3, 1) == background,
         'X/Y: nothing at the cell origin')
+  # W/T: exactly 13x7 px of green, at 1,1 in its cell, nothing past it
+  check(block.call(320 + 1, 1, 13, 7).all? { |p| p == GREEN }, 'W=13,T=7: a 13x7 green block')
+  check(at.call(320 + 14, 1) == background && at.call(320 + 1, 8) == background && at.call(320, 1) == background,
+        'W=13,T=7: nothing outside its 13x7')
+  image6 = json("/v1/terminal-sessions/#{session}").fetch('graphics').find { |g| g['id'] == 6 }
+  check(image6 && image6['placement_width'] == 13 && image6['placement_height'] == 7,
+        "W/T in the diagnostics: #{image6 && image6.slice('placement_width', 'placement_height')}")
+  ids = json("/v1/terminal-sessions/#{session}").fetch('graphics').map { |g| g['id'] }
+  check((ids & [9, 10, 11]).empty?, "a refused W/T placement was stored: #{ids}")
   # two placements of one image
   check(solid.call(160, 0, RED), 'p=1: red placement')
   check(solid.call(240, 0, YELLOW), 'p=2: yellow placement of the same image')
@@ -227,4 +243,4 @@ unless $failures.empty?
   warn "kitty-placement gate: #{$failures.length} failure(s)"
   exit 1
 end
-puts 'KITTY_PLACEMENT_PASS'
+puts 'KITTY_PLACEMENT_PASS crop offset numbered cursor delete scroll pixel_size=W/T,refused=3'
