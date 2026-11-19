@@ -213,4 +213,51 @@ check(!server_left.include?("#{File.basename(BINARY)} #{server_port}"),
       "the hung gate left a blit-server behind: #{server_left}")
 check(!serving?(server_port), "port #{server_port} is still served after the timeout")
 
-puts 'RUN_GATES_GATE_PASS offsets=distinct timeout=reported_no_orphan jobs1=jobs4 timing_lane=alone'
+# --- cancelled (Gitea #106) -------------------------------------------------
+# A terminal's Ctrl+C is INT to the run's whole process group; a service
+# manager's stop is TERM to the runner. Either way: the run ends at once with
+# a signal's status (130, 143), no later gate starts (a timing-lane gate,
+# which waits for the parallel lane under any JOBS), the running gate and
+# what it started are gone, and the runner's scratch directory is removed.
+
+def cancel_run(dir, jobs, signal, to_group)
+  tag = "#{signal.downcase}-#{jobs}-#{Process.pid}"
+  sleeper = "7#{Process.pid}#{jobs}#{signal == 'INT' ? 1 : 2}" # an unlikely sleep, in seconds
+  marks = File.join(dir, "cancel-#{tag}")
+  scratch = File.join(dir, "tmp-#{tag}")
+  FileUtils.mkdir_p([marks, scratch])
+  suite = File.join(dir, "cancel-#{tag}.sh")
+  File.write(suite, <<~SH)
+    suite_fake() {
+        run_gate long sh -c 'touch #{marks}/long; sleep #{sleeper} & wait'
+        run_serial_gate after sh -c 'touch #{marks}/after'
+    }
+  SH
+  env = { 'BLIT_GATE_FAKE_SUITE' => suite, 'BLIT_GATE_JOBS' => jobs.to_s, 'BLIT_GATE_PORT_OFFSET' => '7000',
+          'BLIT_GATE_FAILURE_DIR' => dir, 'TMPDIR' => scratch }
+  pid = Process.spawn(env, 'sh', RUNNER, 'fake', pgroup: true, out: File::NULL, err: File::NULL)
+  deadline = Time.now + 20
+  sleep 0.05 until File.exist?(File.join(marks, 'long')) || Time.now > deadline
+  check(File.exist?(File.join(marks, 'long')), "#{tag}: the long gate never started")
+  sleep 0.3
+  Process.kill(signal, to_group ? -pid : pid)
+  status = nil
+  deadline = Time.now + 15
+  until (status = Process.wait2(pid, Process::WNOHANG)&.last) || Time.now > deadline
+    sleep 0.05
+  end
+  check(status, "#{tag}: the runner did not end after #{signal}")
+  want = signal == 'INT' ? 130 : 143
+  check(status.exitstatus == want, "#{tag}: the runner ended #{status.inspect}, not #{want}")
+  check(!File.exist?(File.join(marks, 'after')), "#{tag}: a later gate started after #{signal}")
+  sleep 0.3
+  left, = Open3.capture2e('pgrep', '-af', "sleep #{sleeper}")
+  check(!left.include?("sleep #{sleeper}"), "#{tag}: the running gate was left behind: #{left}")
+  check(Dir.children(scratch).empty?, "#{tag}: the scratch directory was left: #{Dir.children(scratch)}")
+  "#{signal.downcase}/jobs#{jobs}=#{want}"
+end
+
+cancelled = [cancel_run(dir, 1, 'INT', true), cancel_run(dir, 2, 'INT', true),
+             cancel_run(dir, 1, 'TERM', false), cancel_run(dir, 2, 'TERM', false)]
+
+puts "RUN_GATES_GATE_PASS offsets=distinct timeout=reported_no_orphan jobs1=jobs4 timing_lane=alone cancel=#{cancelled.join(',')}"

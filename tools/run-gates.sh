@@ -370,9 +370,15 @@ tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/blit-run-gates.XXXXXX")
 mkdir "$tmpdir/res"
 : >"$tmpdir/timing"
 sched_pid=''
+# Cancelled (Gitea #106): the running gate is signalled and waited for -- its
+# timeout takes its process group down -- before the scratch directory goes;
+# no later gate starts.
 cleanup() {
     trap - EXIT HUP INT TERM
-    [ -z "$gpid" ] || kill -TERM "$gpid" 2>/dev/null || true
+    if [ -n "$gpid" ]; then
+        kill -TERM "$gpid" 2>/dev/null || true
+        wait "$gpid" 2>/dev/null || true
+    fi
     if [ -n "$sched_pid" ]; then
         kill -TERM "$sched_pid" 2>/dev/null || true
         wait "$sched_pid" 2>/dev/null || true
@@ -745,11 +751,15 @@ worker() {
     WORKER_LANE=$1
     BLIT_GATE_PORT_OFFSET=$2
     export BLIT_GATE_PORT_OFFSET
-    trap '[ -z "$gpid" ] || kill -TERM "$gpid" 2>/dev/null; exit 143' HUP TERM
+    # A terminal's Ctrl+C reaches every process of the run but not a gate
+    # (timeout gives it a process group of its own): the worker takes it down.
+    trap '[ -z "$gpid" ] || { kill -TERM "$gpid" 2>/dev/null; wait "$gpid" 2>/dev/null; }; exit 130' INT
+    trap '[ -z "$gpid" ] || { kill -TERM "$gpid" 2>/dev/null; wait "$gpid" 2>/dev/null; }; exit 143' HUP TERM
     run_suites
 }
 schedule() {
     sched_workers=''
+    trap 'for p in $sched_workers; do kill -TERM "$p" 2>/dev/null; done; wait; exit 130' INT
     trap 'for p in $sched_workers; do kill -TERM "$p" 2>/dev/null; done; wait; exit 143' HUP TERM
     k=0
     while [ "$k" -lt "$JOBS" ]; do
