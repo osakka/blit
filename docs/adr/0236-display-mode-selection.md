@@ -85,4 +85,10 @@ multi-display held session -- are being checked on its side (holdpix).
   - `auto` kept: the preferred mode, the setting removed.
 - kms_hotplug_gate, kms_hotplug_cycles and display_layout_gate pass with
   the new keep rule.
-- Not yet: a live mode change on the owner's hardware (needs the owner).
+- Hot-plug (amended 2026-11-19, after 0.3.125): a display unplugged during
+  a trial has its wish put back, so a replug comes back at the previous
+  mode (display_mode_gate fails on 0.3.125 there); a stored mode applied
+  inside the reconcile is recorded only, not rebuilt from within it (both
+  displays replugged in one scan pass; not shown to fail before).
+- Not yet: a live mode change on the owner's hardware (needs the owner,
+  after hibr's window-containment fix).

@@ -58,7 +58,7 @@ Dir.mktmpdir('blit-display-mode') do |root|
           'BLIT_GLES_PLATFORM' => 'surfaceless', 'BLIT_DRM_DEVICE' => device,
           'BLIT_DRM_MOCK_STATE' => state, 'BLIT_DRM_MOCK_TRACE' => trace, 'LD_PRELOAD' => mock,
           'BLIT_DRM_MOCK_MODES' => '256x160@60,256x160@75,240x144@60',
-          'BLIT_DRM_MOCK_FAIL_MODE' => '240x144', 'BLIT_DISPLAY_MODE_TRIAL_MS' => '1500',
+          'BLIT_DRM_MOCK_FAIL_MODE' => '240x144', 'BLIT_DISPLAY_MODE_TRIAL_MS' => '12000',
           'BLIT_AUTH_TOKEN' => 'mode-test', 'BLIT_LOGIN_AUTOSTART' => '0', 'BLIT_PANE_LAYOUT' => '1x1',
           'BLIT_SETTINGS_PATH' => settings, 'BLIT_INPUT_ROOT' => File.join(root, 'input'),
           'BLIT_PSF_FONT' => File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf') }
@@ -123,7 +123,7 @@ Dir.mktmpdir('blit-display-mode') do |root|
     check(size.('display-93') == [320, 192], 'the other display changed')
     await('the session resized with its display') { columns.call < wide }
     check(get("/v1/terminal-sessions/#{session['id']}")['process_id'] == session['process_id'], 'the session restarted')
-    await('the trial reverted', 6) { size.('display-94') == [320, 192] }
+    await('the trial reverted', 20) { size.('display-94') == [320, 192] }
     check(display.('display-94')['configuration']['mode'] == 'auto' && !display.('display-94')['configuration']['mode_trial'],
           "after the revert: #{display.('display-94')['configuration']}")
     await('the session back at its size') { columns.call == wide }
@@ -138,7 +138,7 @@ Dir.mktmpdir('blit-display-mode') do |root|
     patch_mode('display-94', '256x160@60')
     check(size.('display-94') == [128, 80] && display.('display-94')['configuration']['zoom'] == 200,
           "a mode under zoom 200: #{display.('display-94')}")
-    await('the zoomed trial reverted', 6) { size.('display-94') == [160, 96] }
+    await('the zoomed trial reverted', 20) { size.('display-94') == [160, 96] }
     call('PATCH', '/v1/displays/display-94', { configuration: { zoom: 100 } })
     results << 'zoom=kept-over-mode'
 
@@ -147,18 +147,58 @@ Dir.mktmpdir('blit-display-mode') do |root|
     code, body = patch_mode('display-93', 'keep')
     check(code == 200 && body['configuration']['mode'] == '256x160' && !body['configuration']['mode_trial'],
           "keep: #{code} #{body}")
-    sleep 2
+    sleep 13
     check(size.('display-93') == [256, 160], 'a kept mode reverted')
     await('the kept mode saved') { (JSON.parse(File.read(settings)).dig('displays', 'DP-1', 'mode') rescue nil) == '256x160' }
     results << 'keep=stays,saved'
 
+    # Hot-plug. Unplugged during a trial, replugged: the trial went with it,
+    # the display comes back at the mode it had before -- what is done at a
+    # black screen is to pull the cable.
+    plug = ->(ids) { File.write(state + '.new', "#{ids.length} 0 0 0\n" + ids.map { |i| "#{i} 320 192\n" }.join); File.rename(state + '.new', state) }
+    patch_mode('display-94', '256x160@75')
+    check(size.('display-94') == [256, 160], 'the trial before the unplug')
+    plug.([93])
+    await('display-94 unplugged') { order.call == %w[display-93] }
+    plug.([93, 94])
+    await('display-94 replugged') { order.call == %w[display-93 display-94] }
+    check(size.('display-94') == [320, 192] && display.('display-94')['configuration']['mode'] == 'auto' &&
+          !display.('display-94')['configuration']['mode_trial'], "after a replug mid-trial: #{display.('display-94')}")
+    sleep 13
+    check(size.('display-94') == [320, 192], 'a reverted trial came back after the replug')
+    # The kept mode's display replugged, the other zoomed with a session:
+    # the kept mode comes back, the other display is untouched.
+    call('PATCH', '/v1/displays/display-94', { configuration: { zoom: 200 } })
+    s94 = call('POST', '/v1/terminal-sessions', { command: '/bin/cat', pane_id: 'pane-display-94-1' }).last
+    plug.([94])
+    await('display-93 unplugged') { order.call == %w[display-94] }
+    plug.([93, 94])
+    await('display-93 replugged') { order.call.sort == %w[display-93 display-94] }
+    check(size.('display-93') == [256, 160] && display.('display-93')['configuration']['mode'] == '256x160',
+          "the kept mode after a replug: #{display.('display-93')}")
+    check(size.('display-94') == [160, 96] && display.('display-94')['configuration']['zoom'] == 200,
+          "the other display after a replug: #{display.('display-94')}")
+    check(get("/v1/terminal-sessions/#{s94['id']}")['process_id'] == s94['process_id'], "the other display's session restarted")
+    # Both replugged in one scan, each new to the reconcile at once: the kept
+    # mode is recorded, not rebuilt from inside it.
+    plug.([])
+    await('both unplugged') { order.call.empty? }
+    plug.([93, 94])
+    await('both replugged') { order.call.sort == %w[display-93 display-94] }
+    check(size.('display-93') == [256, 160] && size.('display-94') == [160, 96],
+          "both replugged: #{size.('display-93')} #{size.('display-94')}")
+    check(get("/v1/terminal-sessions/#{s94['id']}")['process_id'] == s94['process_id'], 'a session restarted across both')
+    call('PATCH', '/v1/displays/display-94', { configuration: { zoom: 100 } })
+    results << 'hotplug=trial-reverted-on-replug,kept-mode-back,other-untouched,both-at-once'
+
     # A mode the monitor refuses: put back where it was, said.
+    before = order.call
     code, body = patch_mode('display-93', '240x144')
     check(code == 422 && body['code'] == 'display_mode_failed' && body['detail'].include?('back at 256x160'),
           "a refused mode: #{code} #{body}")
     check(traced.call.include?('mode-refused 240 144'), 'the refused modeset was not tried')
-    check(size.('display-93') == [256, 160] && order.call == %w[display-93 display-94],
-          "after a refused mode: #{size.('display-93')} #{order.call}")
+    check(size.('display-93') == [256, 160] && order.call == before,
+          "after a refused mode: #{size.('display-93')} #{order.call}, before #{before}")
     results << 'refused-by-monitor=back,said'
 
     # Restart: the kept mode in one modeset, no preferred one first.

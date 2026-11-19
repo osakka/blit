@@ -21722,17 +21722,15 @@ static int apply_display_configuration(BlitRuntime *runtime,
                 return 0;
             }
             if (display_configuration_stored) {
-                /* At start or a hot-plug: the connector was wished it
-                   already, or is now; nothing to try. */
+                /* At start or a hot-plug: the connector was wished it before
+                   its output came up (display_wish_stored_modes), so the
+                   output is at it already. Only recorded here -- rebuilding
+                   from inside the reconcile that calls this would run a
+                   reconcile over a half-filled display list. */
                 snprintf(display->mode_kept, sizeof(display->mode_kept), "%s",
                          strcmp(mode, "auto") == 0 ? "" : mode);
                 blit_kms_wish_mode(runtime->kms, display->connector, w, h, hz);
-                if (blit_kms_apply_modes(runtime->kms, why, sizeof(why)) != 0) {
-                    blit_kms_wish_mode(runtime->kms, display->connector, 0, 0, 0);
-                    blit_kms_apply_modes(runtime->kms, NULL, 0);
-                    display->mode_kept[0] = '\0';
-                }
-                reconcile_kms_topology(runtime);
+                (void)why;
                 return 1;
             }
             {
@@ -27223,6 +27221,23 @@ static void reconcile_kms_topology(BlitRuntime *runtime)
     unsigned long long pending[BLIT_MAX_DISPLAYS];
     unsigned long missed[BLIT_MAX_DISPLAYS];
     if (revision == runtime->kms_inventory_revision) return;
+    /* Gitea #60: a display that leaves with a mode on trial takes the trial
+       with it, so its connector's wish goes back: a replug -- what is done
+       at a black screen -- comes back at the mode it had before. */
+    for (i = 0; i < old_count; ++i) {
+        int still = 0, w, h;
+        double hz;
+        BlitKmsDisplayInfo now;
+        if (!runtime->displays[i].mode_trial) continue;
+        for (j = 0; j < blit_kms_display_count(runtime->kms); ++j)
+            if (blit_kms_display_info(runtime->kms, j, &now) == 0 && now.id == runtime->displays[i].id)
+                still = 1;
+        if (still) continue;
+        display_mode_parse(runtime->displays[i].mode_previous, &w, &h, &hz);
+        blit_kms_wish_mode(runtime->kms, runtime->displays[i].connector, w, h, hz);
+        runtime->displays[i].mode_trial = 0;
+        diagnostic_log(runtime, "warning", "display_mode_reverted", "the display left during its trial");
+    }
     memcpy(previous, runtime->displays, sizeof(previous));
     memcpy(pending, runtime->pixel_frames_pending, sizeof(pending));
     memcpy(missed, runtime->render_missed_deadlines, sizeof(missed));
