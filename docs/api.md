@@ -2358,10 +2358,20 @@ It speaks the frame channel above as a producer, with these additions.
   log says the refusals once when they begin and once when they end. Any
   other refusal gives the buffer back unshown and says so in its log. The feedback's main device
   is the first DRM render node: the hello does not name Blit's GPU.
-- **Viewports** (0.3.115): `wp_viewporter` v1 is offered. A viewport the
-  size of its buffer (mpv's outputs set one) is shown as any buffer; one
-  that crops or scales is shown as its pixels, unscaled, and said once in
-  the compositor's log. Bad values are the program's protocol errors.
+- **Viewports and buffer scale** (0.3.115; shown from 0.3.124, Gitea
+  #159): `wp_viewporter` v1 is offered, and `wl_surface.set_buffer_scale`
+  is honoured. A buffer at its own pixels (a viewport its buffer's size, as
+  mpv's outputs set, or none) is shown as any buffer. One that crops or
+  scales is `WINDOW view` (below): the desktop draws that rectangle of the
+  buffer at that size. The picture's size in its surface pixels -- what
+  input, `WINDOW sub`'s size, popups and `WINDOW geometry` are measured
+  in -- is the shown size, not the buffer's. A program's drag icon is
+  cropped and scaled by the compositor when it copies it (shared memory,
+  linear dmabuf); a tiled dmabuf icon goes as FRM3 with its `WINDOW view`.
+  The source is rounded to whole buffer pixels (Blit's placements and
+  crops are whole pixels). Buffer transforms are not applied: no output is
+  announced rotated or flipped, so programs have no reason to send one;
+  one is said in the log. Bad values are the program's protocol errors.
 - **Pacing.** A program's frame callback is answered when Blit has taken
   the frame -- an `FRM1` when it is sent; an `FRM3` at once when it is the
   only frame of the window Blit holds, else at Blit's `FRAME release` of the
@@ -2394,8 +2404,10 @@ It speaks the frame channel above as a producer, with these additions.
     the top-level, or a popup (from 0.3.92; Firefox draws a menu's contents
     in a subsurface of the popup) -- a tree of subsurfaces is flattened onto
     it, `<x> <y>` the sum of the positions down to it in that window's
-    surface pixels (negative allowed), `<w> <h>` its committed buffer's
-    size, `above` or `below` that window's own picture. Sent when it first has a buffer (and every subsurface above it
+    surface pixels (negative allowed), `<w> <h>` its size in those pixels
+    -- its committed buffer's, or from 0.3.124 the size its viewport or
+    buffer scale shows it at (`WINDOW view`) -- `above` or `below` that
+    window's own picture. Sent when it first has a buffer (and every subsurface above it
     in the tree is mapped), and again, for all of that top-level's
     subsurfaces, bottom to top, whenever any is new or its offset, size or
     place in the order changes; positions and order are applied at the
@@ -2409,6 +2421,22 @@ It speaks the frame channel above as a producer, with these additions.
     added down to the top-level; the compositor hit-tests subsurfaces by
     their input regions (an empty one, as Firefox sets on its content, gives
     the pointer to the parent), a popup's in the popup.
+  - `WINDOW view <id> <sx> <sy> <sw> <sh> <dw> <dh>` (from 0.3.124, Gitea
+    #159): picture `<id>` -- a top-level, popup, subsurface or drag icon --
+    shows the rectangle `<sx>,<sy>` `<sw>x<sh>` of its buffer (buffer
+    pixels) at `<dw>x<dh>`, its size in its surface pixels; for a
+    subsurface those are its top-level's surface pixels, the ones its
+    `WINDOW sub` place is in (a subsurface's pixels are its parent's).
+    From a program's `wp_viewport` (crop, scale) and buffer scale (a
+    scale-2 buffer of 256x160: `0 0 256 160 128 80`). Sent after the
+    picture is described and before the frame it first goes with, again
+    when it changes (with that frame, or alone when only the viewport
+    changed), and on a new channel before the picture's frame is sent
+    again. `WINDOW view <id> -`: back to the buffer at its pixels. No line
+    for a picture whose buffer is shown at its pixels. `WINDOW geometry`
+    and the `INPUT` positions for the window are in its surface pixels, so
+    the desktop maps through the view: a buffer pixel is
+    `sx + x * sw / dw`.
   - `WINDOW decor <id> server|client`: who draws the frame
     (`zxdg_decoration`). `client` (a program that insists on its own, such
     as GTK's client-side decorations) gets a bare window from the desktop,

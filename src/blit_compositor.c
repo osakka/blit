@@ -196,13 +196,21 @@ struct bc_surface {
     struct wl_list feedback;          /* committed, waiting for Blit to take the frame */
     struct wl_event_source *pace;     /* the refresh timer for `due` */
     uint64_t last_done_us;            /* when frame callbacks were last answered */
-    int scale_warned;
+    /* wl_surface.set_buffer_scale, pending and committed (1 unset). */
+    int32_t pending_scale, scale;
     /* wp_viewport (0.3.115): pending and committed; a source width of -1
        and a destination width of -1 are unset. */
     struct wl_resource *viewport;
     wl_fixed_t vp_pending_src[4], vp_src[4];
     int32_t vp_pending_dst[2], vp_dst[2];
-    int vp_warned;
+    /* Gitea #159: its buffer as shown, from the buffer's size, its scale and
+       its viewport, worked out when it is applied -- the buffer rectangle
+       view[0..3] (buffer pixels) shown at view[4] x view[5] (surface
+       pixels); view_on when that is not simply the buffer at its pixels.
+       buf_w, buf_h: its newest buffer's size. */
+    int32_t buf_w, buf_h;
+    int32_t view[6];
+    int view_on;
     int dragicon;                     /* the icon of the program's drag out (s->dragout.icon) */
     int32_t pending_ox, pending_oy;   /* attach's dx, dy and offset's, applied at commit */
     int cursor_logged;                /* a cursor image from it was noted once */
@@ -293,7 +301,11 @@ struct bc_xdg {
                                          none): sent again on a new channel */
     int replay;                       /* the re-announce pass: 1 announced, 2 its
                                          parent still to say (WINDOW parent) */
-    int32_t buffer_w, buffer_h;       /* its committed buffer's size */
+    int32_t shown_w, shown_h;         /* its size in its surface pixels: its buffer's,
+                                         or its viewport's, its scale's (#159) */
+    /* The `WINDOW view` the desktop has for it (Gitea #159). */
+    int view_said;
+    int32_t view_sent[6];
     /* popup */
     struct bc_positioner positioner;
     int32_t px, py;                   /* relative to the parent's geometry */
@@ -2101,6 +2113,9 @@ static void subs_parent_applied(struct bc_surface *parent);
 
 #define BC_DRAGICON_MAX 256
 
+static void surface_view(struct bc_surface *surface);
+static void view_say(struct bc_xdg *x);
+
 /* An area average of `w` x `h` 32-bit pixels into `nw` x `nh`. */
 static void dragicon_scale(const unsigned char *src, uint32_t w, uint32_t h, uint32_t stride, uint32_t *dst,
                            uint32_t nw, uint32_t nh)
@@ -2191,7 +2206,8 @@ static int dragicon_dmabuf_scaled(struct bc_server *s, struct bc_surface *surfac
     uint32_t *small;
     unsigned char *map;
     int rc;
-    dragicon_size((uint32_t)b->width, (uint32_t)b->height, &nw, &nh);
+    const int32_t *v = surface->view;
+    dragicon_size((uint32_t)v[4], (uint32_t)v[5], &nw, &nh);
     map = mmap(NULL, bytes, PROT_READ, MAP_SHARED, b->fds[0], 0);
     if (map == MAP_FAILED) return send_dmabuf(s->dragout.icon_pic, b);
     if ((small = malloc((size_t)nw * nh * 4)) == NULL) {
@@ -2200,7 +2216,9 @@ static int dragicon_dmabuf_scaled(struct bc_server *s, struct bc_surface *surfac
     }
     sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
-    dragicon_scale(map + b->offsets[0], (uint32_t)b->width, (uint32_t)b->height, b->strides[0], small, nw, nh);
+    /* Its viewport's crop and size (Gitea #159), bounded. */
+    dragicon_scale(map + b->offsets[0] + (size_t)v[1] * b->strides[0] + (size_t)v[0] * 4, (uint32_t)v[2],
+                   (uint32_t)v[3], b->strides[0], small, nw, nh);
     sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
     munmap(map, bytes);
@@ -2227,24 +2245,33 @@ static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer
     if ((shm = wl_shm_buffer_get(buffer)) == NULL) {
         struct bc_dmabuf *b = dmabuf_from_buffer(buffer);
         if (b == NULL || s->dragout.icon_pic == NULL) return BC_SENT_NONE;
-        if ((b->width > BC_DRAGICON_MAX || b->height > BC_DRAGICON_MAX) && dmabuf_copyable(b))
+        if ((surface->view_on || b->width > BC_DRAGICON_MAX || b->height > BC_DRAGICON_MAX) &&
+            dmabuf_copyable(b))
             return dragicon_dmabuf_scaled(s, surface, b);
+        /* Tiled, not readable here: its frame as it is, and the view, for
+           the desktop to show it by (as a window's). */
+        view_say(s->dragout.icon_pic);
         return send_dmabuf(s->dragout.icon_pic, b);
     }
     w = (uint32_t)wl_shm_buffer_get_width(shm);
     h = (uint32_t)wl_shm_buffer_get_height(shm);
     format = wl_shm_buffer_get_format(shm);
     if (format != BC_SHM_ARGB8888 && format != BC_SHM_XRGB8888) return BC_SENT_NONE;
-    dragicon_size(w, h, &nw, &nh);
+    /* Its viewport's crop and size, or the buffer's (Gitea #159), bounded. */
+    dragicon_size((uint32_t)surface->view[4], (uint32_t)surface->view[5], &nw, &nh);
     wl_shm_buffer_begin_access(shm);
-    if (nw == w && nh == h) {
+    if (!surface->view_on && nw == w && nh == h) {
         rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, wl_shm_buffer_get_data(shm), w, h,
                               (uint32_t)wl_shm_buffer_get_stride(shm), format);
     } else {
         uint32_t *small = malloc((size_t)nw * nh * 4);
         rc = -1;
         if (small) {
-            dragicon_scale(wl_shm_buffer_get_data(shm), w, h, (uint32_t)wl_shm_buffer_get_stride(shm), small, nw, nh);
+            const int32_t *v = surface->view;
+            uint32_t stride = (uint32_t)wl_shm_buffer_get_stride(shm);
+            dragicon_scale((const unsigned char *)wl_shm_buffer_get_data(shm) + (size_t)v[1] * stride +
+                               (size_t)v[0] * 4,
+                           (uint32_t)v[2], (uint32_t)v[3], stride, small, nw, nh);
             rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, small, nw, nh, nw * 4, format);
             free(small);
         }
@@ -2257,13 +2284,13 @@ static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer
 
 static int picture_frame(struct bc_xdg *x, struct bc_surface *surface, struct wl_resource *buffer)
 {
-    struct wl_shm_buffer *shm = wl_shm_buffer_get(buffer);
-    struct bc_dmabuf *dmabuf = dmabuf_from_buffer(buffer);
-    int sent = send_buffer(x, surface, buffer);
+    int sent;
+    x->shown_w = surface->view[4];
+    x->shown_h = surface->view[5];
+    view_say(x);
+    sent = send_buffer(x, surface, buffer);
     x->mapped = 1;
     x->hidden = 0;
-    x->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf ? dmabuf->width : 0;
-    x->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf ? dmabuf->height : 0;
     return sent;
 }
 static void sub_cache(struct bc_xdg *sub, struct wl_resource *buffer, int attached);
@@ -2281,7 +2308,29 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
     /* The frame callbacks and feedback wait for Blit to take the next
        frame of this surface; feedback for a frame it never took is
        discarded once a newer buffer comes. */
-    if (attached && buffer) feedback_discard(&surface->feedback);
+    if (attached && buffer) {
+        int32_t bw, bh;
+        feedback_discard(&surface->feedback);
+        if (vp_buffer_size(buffer, &bw, &bh)) {
+            surface->buf_w = bw;
+            surface->buf_h = bh;
+        }
+    }
+    surface_view(surface);
+    if (!(attached && buffer) && pic && pic->mapped && pic->id && surface->buf_w > 0 &&
+        (pic->shown_w != surface->view[4] || pic->shown_h != surface->view[5] ||
+         surface->view_on != pic->view_said ||
+         (surface->view_on && memcmp(pic->view_sent, surface->view, sizeof(pic->view_sent)) != 0))) {
+        /* Its viewport or scale changed with no new buffer: the frame it
+           has, shown the new way. */
+        pic->shown_w = surface->view[4];
+        pic->shown_h = surface->view[5];
+        if (pic->subsurface) {
+            struct bc_xdg *root = sub_root(pic, NULL, NULL);
+            if (root) subs_show(root, pic, 0);
+        }
+        view_say(pic);
+    }
     wl_list_insert_list(surface->frames.prev, frames);
     wl_list_init(frames);
     wl_list_insert_list(surface->feedback.prev, feedback);
@@ -2377,15 +2426,17 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
     subs_parent_applied(surface);
 }
 
-/* ---- wp_viewporter (0.3.115) ----
+/* ---- wp_viewporter (0.3.115; crop and scale shown from 0.3.124) ----
 
    A surface's viewport: a source rectangle of its buffer and the size it
-   is shown at. Blit shows a program's buffer as its pixels, so the common
-   use -- a viewport the buffer's own size, as mpv's outputs set at scale
-   1 -- is exactly what it shows; one that crops or scales is shown as the
-   buffer, unscaled, and said once in the log. The protocol's errors are
-   kept: bad values, a source not a whole size with no destination, a
-   source outside the buffer, a viewport for a surface already gone. */
+   is shown at, with the buffer's scale (wl_surface.set_buffer_scale) the
+   surface's own pixels before either. Worked out at each apply
+   (surface_view) and told to the desktop as `WINDOW view` (view_say),
+   which draws the buffer rectangle at that size; the surface's size in
+   its own pixels -- input, subsurface and popup placement -- is the shown
+   size, not the buffer's (Gitea #159). The protocol's errors are kept:
+   bad values, a source not a whole size with no destination, a source
+   outside the surface, a viewport for a surface already gone. */
 
 static int vp_buffer_size(struct wl_resource *buffer, int32_t *w, int32_t *h);
 
@@ -2394,7 +2445,7 @@ static int vp_buffer_size(struct wl_resource *buffer, int32_t *w, int32_t *h);
 static int viewport_commit(struct bc_surface *surface, struct wl_resource *buffer)
 {
     int32_t bw = 0, bh = 0;
-    int i, crop, scaled;
+    int i;
     for (i = 0; i < 4; ++i) surface->vp_src[i] = surface->vp_pending_src[i];
     surface->vp_dst[0] = surface->vp_pending_dst[0];
     surface->vp_dst[1] = surface->vp_pending_dst[1];
@@ -2404,25 +2455,83 @@ static int viewport_commit(struct bc_surface *surface, struct wl_resource *buffe
                                "a source not a whole size, and no destination");
         return 0;
     }
-    if (buffer == NULL || !vp_buffer_size(buffer, &bw, &bh)) return 1;
-    crop = surface->vp_src[2] != wl_fixed_from_int(-1) &&
-        (surface->vp_src[0] != 0 || surface->vp_src[1] != 0 ||
-         surface->vp_src[2] != wl_fixed_from_int(bw) || surface->vp_src[3] != wl_fixed_from_int(bh));
+    if (buffer != NULL && vp_buffer_size(buffer, &bw, &bh)) {
+        bw /= surface->pending_scale;
+        bh /= surface->pending_scale;
+    } else if (surface->buf_w > 0) {
+        bw = surface->buf_w / surface->pending_scale;
+        bh = surface->buf_h / surface->pending_scale;
+    } else {
+        return 1;
+    }
     if (surface->vp_src[2] != wl_fixed_from_int(-1) &&
         (surface->vp_src[0] + surface->vp_src[2] > wl_fixed_from_int(bw) ||
          surface->vp_src[1] + surface->vp_src[3] > wl_fixed_from_int(bh))) {
         wl_resource_post_error(surface->viewport, WP_VIEWPORT_ERROR_OUT_OF_BUFFER,
-                               "the source is outside the %dx%d buffer", bw, bh);
+                               "the source is outside the %dx%d surface", bw, bh);
         return 0;
     }
-    scaled = surface->vp_dst[0] != -1 && (surface->vp_dst[0] != bw || surface->vp_dst[1] != bh);
-    if ((crop || scaled) && !surface->vp_warned) {
-        surface->vp_warned = 1;
-        logf_("a viewport asks %s of a %dx%d buffer (to %dx%d): shown as its pixels, unscaled",
-              crop && scaled ? "a crop and a scale" : crop ? "a crop" : "a scale", bw, bh,
-              surface->vp_dst[0] != -1 ? surface->vp_dst[0] : bw, surface->vp_dst[1] != -1 ? surface->vp_dst[1] : bh);
-    }
     return 1;
+}
+
+/* At apply: the buffer as shown (the struct's view), from the newest
+   buffer's size, the committed scale and viewport. The source, in the
+   surface's pixels (fixed point) times the scale, is rounded to whole
+   buffer pixels: Blit's placements and crops are whole pixels. */
+static void surface_view(struct bc_surface *surface)
+{
+    int32_t bw = surface->buf_w, bh = surface->buf_h, k = surface->scale > 0 ? surface->scale : 1;
+    int32_t lw = bw / k, lh = bh / k, *v = surface->view;
+    int src = surface->viewport && surface->vp_src[2] != wl_fixed_from_int(-1);
+    int dst = surface->viewport && surface->vp_dst[0] != -1;
+    if (bw <= 0 || bh <= 0) {
+        surface->view_on = 0;
+        return;
+    }
+    if (src) {
+        v[0] = (int32_t)((int64_t)surface->vp_src[0] * k / 256);
+        v[1] = (int32_t)((int64_t)surface->vp_src[1] * k / 256);
+        v[2] = (int32_t)(((int64_t)surface->vp_src[2] * k + 128) / 256);
+        v[3] = (int32_t)(((int64_t)surface->vp_src[3] * k + 128) / 256);
+        if (v[2] < 1) v[2] = 1;
+        if (v[3] < 1) v[3] = 1;
+        if (v[0] + v[2] > bw) v[0] = bw - v[2] > 0 ? bw - v[2] : 0, v[2] = bw - v[0];
+        if (v[1] + v[3] > bh) v[1] = bh - v[3] > 0 ? bh - v[3] : 0, v[3] = bh - v[1];
+    } else {
+        v[0] = v[1] = 0;
+        v[2] = bw;
+        v[3] = bh;
+    }
+    v[4] = dst ? surface->vp_dst[0] : src ? wl_fixed_to_int(surface->vp_src[2]) : lw;
+    v[5] = dst ? surface->vp_dst[1] : src ? wl_fixed_to_int(surface->vp_src[3]) : lh;
+    if (v[4] < 1) v[4] = 1;
+    if (v[5] < 1) v[5] = 1;
+    surface->view_on = v[0] != 0 || v[1] != 0 || v[2] != bw || v[3] != bh || v[4] != bw || v[5] != bh;
+}
+
+/* `WINDOW view <id> <sx> <sy> <sw> <sh> <dw> <dh>` when the picture's view
+   is not the one the desktop has, `WINDOW view <id> -` when it is back to
+   the buffer at its pixels; after the picture is described (its WINDOW
+   new, popup or sub) and before the frame it goes with. */
+static void view_say(struct bc_xdg *x)
+{
+    struct bc_surface *surface = x->surface;
+    int on;
+    if (surface == NULL || x->id == 0 || (x->subsurface && !x->sub_shown)) return;
+    on = surface->view_on;
+    if (on == x->view_said && (!on || memcmp(x->view_sent, surface->view, sizeof(x->view_sent)) == 0)) return;
+    if (on) {
+        const int32_t *v = surface->view;
+        bc_wire_line(&x->server->wire, "WINDOW view %u %d %d %d %d %d %d", x->id, v[0], v[1], v[2], v[3],
+                     v[4], v[5]);
+        memcpy(x->view_sent, v, sizeof(x->view_sent));
+        if (!x->view_said)
+            logf_("window %u: shown as %dx%d of its %dx%d buffer at %d,%d, at %dx%d", x->id, v[2], v[3],
+                  surface->buf_w, surface->buf_h, v[0], v[1], v[4], v[5]);
+    } else {
+        bc_wire_line(&x->server->wire, "WINDOW view %u -", x->id);
+    }
+    x->view_said = on;
 }
 
 static void viewport_reset(struct bc_surface *surface)
@@ -2534,6 +2643,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
     (void)client;
     surface->commit_us = now_us();
     if (surface->viewport && !viewport_commit(surface, buffer)) return;
+    surface->scale = surface->pending_scale;
     set_pending_buffer(surface, NULL);
     surface->pending_attach = 0;
     /* An Xwayland surface's serial is applied with the commit, and may
@@ -2570,10 +2680,7 @@ static void surface_set_buffer_scale(struct wl_client *client, struct wl_resourc
         wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE, "scale %d", scale);
         return;
     }
-    if (scale != 1 && !surface->scale_warned) {
-        surface->scale_warned = 1;
-        logf_("a buffer scale %d is shown as pixels (scale 1)", scale);
-    }
+    surface->pending_scale = scale;
 }
 
 static void surface_offset(struct wl_client *client, struct wl_resource *resource, int32_t x,
@@ -2708,6 +2815,7 @@ static void compositor_create_surface(struct wl_client *client, struct wl_resour
         wl_client_post_no_memory(client);
         return;
     }
+    surface->pending_scale = surface->scale = 1;
     wl_list_init(&surface->pending_frames);
     wl_list_init(&surface->frames);
     wl_list_init(&surface->due);
@@ -4111,7 +4219,7 @@ static int subs_show(struct bc_xdg *root, struct bc_xdg *fresh, int resend)
     for (i = 0; i < n; ++i) {
         struct bc_xdg *c = at[i].sub;
         if (!c->sub_shown || c->sent_x != at[i].x || c->sent_y != at[i].y ||
-            c->sent_w != c->buffer_w || c->sent_h != c->buffer_h || c->sent_above != at[i].above ||
+            c->sent_w != c->shown_w || c->sent_h != c->shown_h || c->sent_above != at[i].above ||
             c->sent_index != i)
             changed = 1;
     }
@@ -4121,18 +4229,19 @@ static int subs_show(struct bc_xdg *root, struct bc_xdg *fresh, int resend)
         int was = c->sub_shown;
         if (c->id == 0) c->id = bc_wire_new_id(&s->wire);
         bc_wire_line(&s->wire, "WINDOW sub %u %u %d %d %d %d %s", c->id, root->id, at[i].x, at[i].y,
-                     c->buffer_w, c->buffer_h, at[i].above ? "above" : "below");
+                     c->shown_w, c->shown_h, at[i].above ? "above" : "below");
         c->sub_shown = 1;
         c->sent_x = at[i].x;
         c->sent_y = at[i].y;
-        c->sent_w = c->buffer_w;
-        c->sent_h = c->buffer_h;
+        c->sent_w = c->shown_w;
+        c->sent_h = c->shown_h;
         c->sent_above = at[i].above;
         c->sent_index = i;
+        view_say(c);
         window_set_output(c, root->output);
         if (!was) {
             logf_("subsurface %u: window %u at %d,%d %dx%d %s", c->id, root->id, at[i].x, at[i].y,
-                  c->buffer_w, c->buffer_h, at[i].above ? "above" : "below");
+                  c->shown_w, c->shown_h, at[i].above ? "above" : "below");
             if (c != fresh && resend) window_resend(c);
         }
     }
@@ -4162,10 +4271,11 @@ static int sub_apply_buffer(struct bc_xdg *sub, struct wl_resource *buffer, int 
     }
     if (sub->id == 0) sub->id = bc_wire_new_id(&s->wire);
     sub->mapped = 1;
-    sub->buffer_w = shm ? wl_shm_buffer_get_width(shm) : dmabuf->width;
-    sub->buffer_h = shm ? wl_shm_buffer_get_height(shm) : dmabuf->height;
+    sub->shown_w = sub->surface->view[4];
+    sub->shown_h = sub->surface->view[5];
     root = sub_root(sub, NULL, NULL);
     subs_show(root, sub, 1);
+    view_say(sub);
     /* Shown now: a frame of its picture. Not (yet): kept, its callbacks
        answered, and sent when it is described. */
     if (sub->sub_shown && s->link == BC_LINK_UP) return send_buffer(sub, sub->surface, buffer);
@@ -6482,13 +6592,13 @@ static struct bc_surface *tree_target(struct bc_xdg *w, double wx, double wy, do
     n = subs_collect(w, at);
     for (pass = 0; pass < 3; ++pass) {
         if (pass == 1) {
-            if (w->surface && surface_takes_pointer(w->surface, w->buffer_w, w->buffer_h, wx, wy)) break;
+            if (w->surface && surface_takes_pointer(w->surface, w->shown_w, w->shown_h, wx, wy)) break;
             continue;
         }
         for (i = n - 1; i >= 0; --i) {
             struct bc_xdg *c = at[i].sub;
             if (at[i].above != (pass == 0) || c->surface == NULL) continue;
-            if (surface_takes_pointer(c->surface, c->buffer_w, c->buffer_h, wx - at[i].x, wy - at[i].y)) {
+            if (surface_takes_pointer(c->surface, c->shown_w, c->shown_h, wx - at[i].x, wy - at[i].y)) {
                 *lx = wx - at[i].x;
                 *ly = wy - at[i].y;
                 return c->surface;
@@ -6517,7 +6627,7 @@ static struct bc_surface *pointer_target(struct bc_server *s, struct bc_xdg *x, 
         while (window_is_popup(top) && top->parent) top = top->parent;
         if (top != x) continue;
         depth = xdg_origin(p, &ox, &oy);
-        if (px >= ox && py >= oy && px < ox + p->buffer_w && py < oy + p->buffer_h &&
+        if (px >= ox && py >= oy && px < ox + p->shown_w && py < oy + p->shown_h &&
             depth >= best_depth) {
             best = p;
             best_depth = depth;
@@ -11760,6 +11870,7 @@ static void window_resend(struct bc_xdg *x)
 {
     struct bc_server *s = x->server;
     struct bc_hold *h, *kept = NULL;
+    view_say(x);
     wl_list_for_each(h, &s->holds, link)
         if (h->id == x->id && h->sequence == 0) kept = h;
     if (kept) {
@@ -11794,7 +11905,10 @@ static void reannounce(struct bc_server *s)
     struct bc_constraint *c;
     int windows = 0, frames = 0;
     bc_wire_line(w, "WINDOW display %s %s", s->socket_name, s->x.display);
-    wl_list_for_each(x, &s->windows, link) x->replay = 0;
+    wl_list_for_each(x, &s->windows, link) {
+        x->replay = 0;
+        x->view_said = 0;     /* a new desktop has every picture at its pixels */
+    }
     /* Toplevels of either kind in creation order (the list is newest first). */
     wl_list_for_each_reverse(x, &s->windows, link) {
         if (!window_is_toplevel(x)) continue;

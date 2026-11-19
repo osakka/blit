@@ -1199,3 +1199,35 @@ Evidence:
 - mpv 0.40 on this host now runs `vo/gpu` on the compositor (software GL)
   instead of SDL, and a file dropped on it through `CLIP drop` (0.3.114)
   opened: its title became "dropped picture.ppm - mpv".
+
+## Amended 2026-11-19 (0.3.124): crops and scales shown (Gitea #159)
+
+The 0.3.115 limit -- a viewport that crops or scales shown unscaled --
+is gone, and `wl_surface.set_buffer_scale` (before, shown as pixels) with
+it. At each apply the compositor works out the buffer as shown: the
+buffer's rectangle (the viewport's source, in surface pixels times the
+scale, rounded to whole buffer pixels) and the size it is shown at (the
+destination; else the source's size; else the buffer over its scale). Not
+the buffer at its pixels, it is `WINDOW view <id> sx sy sw sh dw dh` to the
+desktop, before the frame it goes with; back at its pixels, `WINDOW view
+<id> -`. The picture's size in its surface pixels is the shown one:
+`WINDOW sub`'s `<w> <h>`, the pointer's hit test of subsurfaces and
+popups. Every picture kind takes it: toplevels and popups of either
+kind (Xwayland uses a viewport to emulate a resolution change),
+subsurfaces (mpv's dmabuf-wayland video), drag icons -- those the
+compositor copies are cropped and scaled by it, a tiled dmabuf icon goes
+with its line. A Hibr without the line ignores it ("not known here"),
+shown as before. Buffer transforms are still not applied: no output is
+announced transformed, so a program has no reason to send one.
+
+Evidence:
+- compositor_gate `COMPOSITOR_VIEWPORT_OK`, with ASan/UBSan too: a 2x
+  destination is `WINDOW view 2 0 0 256 160 512 320` before its frame; a
+  crop of 128x96 at 16,8 shown at 256x192; buffer scale 2 of 202x120 is
+  `0 0 202 120 101 60`; back to scale 1 is `WINDOW view 3 -`; a
+  subsurface's 64x40 buffer shown at 128x80 is `WINDOW sub 4 3 10 10 128
+  80 above` and its view before its frame, never described at 64x40, and
+  a pointer at 110,70 in the window enters it at 100,60 -- past its
+  buffer's size, inside its shown size.
+- `COMPOSITOR_DRAGOUT_OK`: a 128x96 icon at buffer scale 2 is a 64x48
+  frame, from shared memory and from a linear dmabuf.

@@ -1494,11 +1494,15 @@ def ime_part(compositor, standin, work):
 
 
 def viewport_part(compositor, standin, work):
-    """wp_viewporter (0.3.115): the global is offered. A viewport the size of
-    its buffer (mpv's outputs set one at scale 1) shows as any window, with
-    nothing logged. One that scales is shown as its pixels, unscaled, and
-    said once. A bad value is the program's protocol error, and the
-    compositor carries on."""
+    """wp_viewporter (0.3.115) and buffer scale, shown (Gitea #159): the
+    global is offered. A viewport the size of its buffer (mpv's outputs set
+    one at scale 1) shows as any window, no `WINDOW view`. One that scales
+    is `WINDOW view <id> 0 0 256 160 512 320` before its frame. Scripted
+    (--view-script): a crop and scale, a buffer scale 2, back to the buffer
+    at its pixels (`WINDOW view <id> -`), and a subsurface whose 64x40
+    buffer is shown at 128x80 -- its `WINDOW sub` that size, and a pointer
+    in the scaled part past its buffer's size goes to it. A bad value is
+    the program's protocol error, and the compositor carries on."""
     runtime = os.path.join(work, 'run-viewport')
     os.mkdir(runtime, 0o700)
     name = 'blit-compositor-gate-viewport-%d' % os.getpid()
@@ -1522,12 +1526,52 @@ def viewport_part(compositor, standin, work):
             for want in ('WINDOW new %d 0' % n, 'WINDOW title %d %s' % (n, title), 'WINDOW appid %d blit.standin' % n,
                          'WINDOW limits %d 64 48 0 0' % n, 'WINDOW decor %d server' % n):
                 desk.line(want)
+            if n == 2:
+                desk.line('WINDOW view 2 0 0 256 160 512 320')
             desk.frame(256, 160, image_id=n)
         check('STANDIN global wp_viewporter 1' in open(outs[0]).read(), 'wp_viewporter was not offered')
-        check('a viewport asks' not in settled(log).split('Scales')[0],
-              lambda: 'a viewport its buffer\'s size was logged:\n' + settled(log))
-        wait_for(lambda: settled(log).count('a viewport asks a scale of a 256x160 buffer (to 512x320): shown as its pixels, unscaled') == 1,
-                 lambda: 'a scaling viewport was not said once:\n' + settled(log))
+        # The script: picture 3, its subsurface 4.
+        spath = os.path.join(work, 'standin-viewport-script.out')
+        clients.append(start([standin, '--view-script', 'Script'], cenv, open(spath, 'w')))
+        for want in ('WINDOW new 3 0', 'WINDOW title 3 Script', 'WINDOW appid 3 blit.standin',
+                     'WINDOW limits 3 64 48 0 0', 'WINDOW decor 3 server'):
+            desk.line(want)
+        desk.frame(256, 160, image_id=3)
+        for w, view in ((200, 'WINDOW view 3 16 8 128 96 256 192'), (202, 'WINDOW view 3 0 0 202 120 101 60'),
+                        (204, 'WINDOW view 3 -')):
+            desk.send('WINDOW size 3 %d 120' % w)
+            desk.line(view)
+            desk.frame(w, 120, image_id=3)
+        desk.send('WINDOW size 3 206 120')
+        seen, frames = [], set()
+        while frames != {3, 4}:
+            got = desk.next()
+            check(got is not None, 'step 4 stopped after %r' % seen)
+            if got[0] == 'frame':
+                image, _seq, fw, fh = got[1][:4]
+                os.close(got[2])
+                check((image, fw, fh) in ((3, 206, 120), (4, 64, 40)), 'step 4: a %dx%d frame of %d' % (fw, fh, image))
+                check(image != 4 or 'WINDOW view 4 0 0 64 40 128 80' in seen,
+                      lambda: 'the subsurface\'s frame came before its view: %r' % seen)
+                frames.add(image)
+            else:
+                seen.append(got[1])
+        deadline = time.time() + 5
+        while 'WINDOW sub 4 3 10 10 128 80 above' not in seen and time.time() < deadline:
+            got = desk.next(0.5)
+            if got and got[0] == 'line':
+                seen.append(got[1])
+        check('WINDOW sub 4 3 10 10 128 80 above' in seen, lambda: 'the subsurface not placed at its shown size: %r' % seen)
+        check(not [l for l in seen if l.startswith('WINDOW sub 4') and ' 64 40 ' in l],
+              lambda: 'the subsurface was described at its buffer\'s size: %r' % seen)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[3])
+        try:
+            route.sendall(b'INPUT ptr %d 110.00 70.00\nINPUT frame %d 1\n' % (BLIT_PICTURE, BLIT_PICTURE))
+            wait_for(lambda: 'STANDIN pointer enter sub 100.00 60.00' in open(spath).read(),
+                     lambda: 'a pointer in the subsurface\'s scaled part did not reach it:\n' + open(spath).read())
+        finally:
+            route.close()
         # A bad value: the program's error; the compositor and the others go on.
         bad_path = os.path.join(work, 'standin-viewport-bad.out')
         bad = start([standin, '--viewport-bad', 'Bad'], cenv, open(bad_path, 'w'))
@@ -1537,7 +1581,8 @@ def viewport_part(compositor, standin, work):
               lambda: 'the bad viewport\'s program saw no protocol error:\n' + open(bad_path).read())
         check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
         quit_compositor(desk, comp)
-        return 'offered=v1 fits=shown,nothing-logged scale=shown-unscaled,said-once bad-value=protocol-error,others-unharmed'
+        return ('offered=v1 fits=no-view scale=view crop+scale=view buffer-scale=view back=view- '
+                'sub=view,placed-at-shown-size,input-in-scaled-part bad-value=protocol-error,others-unharmed')
     finally:
         for p in clients + [comp]:
             if p and p.poll() is None:
@@ -2371,7 +2416,12 @@ def dragout_part(compositor, standin, work):
         for n, (extra, size, kind, want) in enumerate(((['--drag-icon', '300x200'], (300, 200), 'frame', (256, 170)),
                                                       (['--drag-icon', '64x48', '--dmabuf'], (64, 48), 'frm3', (64, 48)),
                                                       (['--drag-icon', '300x200', '--dmabuf'], (300, 200), 'frame',
-                                                       (256, 170))), 4):
+                                                       (256, 170)),
+                                                      # Gitea #159: shown at its scale's size, by the compositor.
+                                                      (['--drag-icon', '128x96', '--drag-icon-scale'], (128, 96), 'frame',
+                                                       (64, 48)),
+                                                      (['--drag-icon', '128x96', '--dmabuf', '--drag-icon-scale'], (128, 96),
+                                                       'frame', (64, 48))), 4):
             path = os.path.join(work, 'standin-dragout-icon-%d.out' % n)
             clients.append(start([standin, '--drag-out'] + extra + ['Icon%d' % n], cenv, open(path, 'w')))
             win = int(until('WINDOW new ').split()[2])     # ids are shared with icons: not counted here
@@ -2416,8 +2466,8 @@ def dragout_part(compositor, standin, work):
             until('WINDOW gone %d' % got_icon)
             iroute.sendall(b'INPUT btn %d 272 release\nINPUT frame %d 102\n' % (BLIT_PICTURE, BLIT_PICTURE))
             iroute.close()
-            icons.append('%s %dx%d->%s %dx%d' % ('dmabuf' if '--dmabuf' in extra else 'shm', size[0], size[1], kind,
-                                                   want[0], want[1]))
+            icons.append('%s %dx%d%s->%s %dx%d' % ('dmabuf' if '--dmabuf' in extra else 'shm', size[0], size[1],
+                                                     '@2' if '--drag-icon-scale' in extra else '', kind, want[0], want[1]))
         quit_compositor(desk, comp)
         text = settled(log)
         check('drag out o1 from window 1' in text and 'drag out o1: moved' in text and 'drag out o3: cancelled' in text,

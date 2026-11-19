@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH]] [--animate n] [--lock] [--sub] [--csd] [--clip]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale]]] [--animate n] [--lock] [--sub] [--csd] [--clip] [--view-script]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -246,6 +246,8 @@ struct standin {
     int hang;                         /* --hang: H stops it until SIGUSR1 (ADR 0235) */
     int second_wm;                    /* --second-wm: a second xdg_wm_base nobody reads */
     int viewport_mode;                /* --viewport 1 (its buffer's size), --viewport-scale 2, --viewport-bad 3 */
+    int view_script, view_step;       /* --view-script: a step at each sized configure (Gitea #159) */
+    struct wp_viewport *sub_viewport;
     struct wp_viewporter *viewporter;
     struct wp_viewport *viewport;
     uint32_t wm_name;                 /* the xdg_wm_base global, for binding it again */
@@ -261,6 +263,7 @@ struct standin {
     int drop_fd;                      /* --drop-lazy: the pipe asked for at the drop, not yet read */
     int dragout;                      /* --drag-out: a left press starts a drag of a file */
     int32_t icon_w, icon_h;           /* --drag-icon WxH: its drag has an icon that size */
+    int icon_scale;                   /* --drag-icon-scale: the icon's buffer scale is 2 (Gitea #159) */
     struct wl_surface *icon_surface;  /* at -10,-5 from the hot spot (attach's dx, dy) */
     struct wl_data_device_manager *ddm;
     struct zwp_primary_selection_device_manager_v1 *psm;
@@ -413,7 +416,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     wl_buffer_add_listener(b->buffer, &buffer_listener, b);
     wl_surface_attach(surface, b->buffer, surface == s->icon_surface ? -10 : 0, surface == s->icon_surface ? -5 : 0);
     /* --viewport: the main surface's viewport, set before each commit. */
-    if (s->viewport && surface == s->surface) {
+    if (s->viewport && s->viewport_mode && surface == s->surface) {
         if (s->viewport_mode == 1) wp_viewport_set_destination(s->viewport, w, h);
         else if (s->viewport_mode == 2) wp_viewport_set_destination(s->viewport, w * 2, h * 2);
         else wp_viewport_set_destination(s->viewport, 0, 5);
@@ -790,6 +793,37 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
     xdg_surface_ack_configure(xs, serial);
     if (s->csd)
         xdg_surface_set_window_geometry(s->xdg_surface, 10, 10, s->want_w - 20, s->want_h - 20);
+    /* --view-script (Gitea #159), one step at each sized configure, the
+       main surface drawn with it: 1 a crop of 128x96 at 16,8 shown at
+       256x192; 2 no viewport, buffer scale 2; 3 scale 1 again (the buffer
+       at its pixels); 4 a desynchronized subsurface at 10,10, its 64x40
+       buffer shown at 128x80. */
+    if (s->view_script && s->sized && s->view_step < 4) {
+        ++s->view_step;
+        if (s->view_step == 1) {
+            wp_viewport_set_source(s->viewport, wl_fixed_from_int(16), wl_fixed_from_int(8), wl_fixed_from_int(128),
+                                   wl_fixed_from_int(96));
+            wp_viewport_set_destination(s->viewport, 256, 192);
+        } else if (s->view_step == 2) {
+            wp_viewport_set_source(s->viewport, wl_fixed_from_int(-1), wl_fixed_from_int(-1), wl_fixed_from_int(-1),
+                                   wl_fixed_from_int(-1));
+            wp_viewport_set_destination(s->viewport, -1, -1);
+            wl_surface_set_buffer_scale(s->surface, 2);
+        } else if (s->view_step == 3) {
+            wl_surface_set_buffer_scale(s->surface, 1);
+        } else {
+            s->sub_surface = wl_compositor_create_surface(s->compositor);
+            wl_surface_add_listener(s->sub_surface, &surface_listener, s);
+            s->subsurface = wl_subcompositor_get_subsurface(s->subcompositor, s->sub_surface, s->surface);
+            wl_subsurface_set_position(s->subsurface, 10, 10);
+            wl_subsurface_set_desync(s->subsurface);
+            s->sub_viewport = wp_viewporter_get_viewport(s->viewporter, s->sub_surface);
+            wp_viewport_set_destination(s->sub_viewport, 128, 80);
+            draw(s, s->sub_surface, 64, 40);
+        }
+        printf("STANDIN view step %d\n", s->view_step);
+        fflush(stdout);
+    }
     draw(s, s->surface, s->want_w, s->want_h);
     if (s->csd && s->sized && !s->csd_asked) {
         s->csd_asked = 1;
@@ -1402,6 +1436,7 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
                                                 WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
         if (s->icon_w > 0) s->icon_surface = wl_compositor_create_surface(s->compositor);
         wl_data_device_start_drag(s->data_device, src, s->surface, s->icon_surface, serial);
+        if (s->icon_surface && s->icon_scale) wl_surface_set_buffer_scale(s->icon_surface, 2);
         if (s->icon_surface) draw(s, s->icon_surface, s->icon_w, s->icon_h);
         printf("STANDIN drag started\n");
     }
@@ -1859,9 +1894,11 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--viewport") == 0) s.viewport_mode = 1;
         else if (strcmp(argv[i], "--viewport-scale") == 0) s.viewport_mode = 2;
         else if (strcmp(argv[i], "--viewport-bad") == 0) s.viewport_mode = 3;
+        else if (strcmp(argv[i], "--view-script") == 0) s.view_script = 1;
         else if (strcmp(argv[i], "--drop-refuse") == 0) s.drop = 2;
         else if (strcmp(argv[i], "--drop-lazy") == 0) s.drop = 3;
         else if (strcmp(argv[i], "--drag-out") == 0) s.dragout = 1;
+        else if (strcmp(argv[i], "--drag-icon-scale") == 0) s.icon_scale = 1;
         else if (strcmp(argv[i], "--drag-icon") == 0 && i + 1 < argc &&
                  sscanf(argv[i + 1], "%dx%d", &s.icon_w, &s.icon_h) == 2) ++i;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
@@ -1928,7 +1965,7 @@ int main(int argc, char **argv)
     }
     xdg_wm_base_add_listener(s.wm_base, &wm_listener, &s);
     s.surface = wl_compositor_create_surface(s.compositor);
-    if (s.viewport_mode) {
+    if (s.viewport_mode || s.view_script) {
         if (s.viewporter == NULL) { fprintf(stderr, "STANDIN --viewport: no wp_viewporter\n"); return 1; }
         s.viewport = wp_viewporter_get_viewport(s.viewporter, s.surface);
         printf("STANDIN viewport made\n");
@@ -2032,6 +2069,7 @@ int main(int argc, char **argv)
     if (s.ti) zwp_text_input_v3_destroy(s.ti);
     if (s.ti_manager) zwp_text_input_manager_v3_destroy(s.ti_manager);
     if (s.ddm) wl_data_device_manager_destroy(s.ddm);
+    if (s.sub_viewport) wp_viewport_destroy(s.sub_viewport);
     if (s.viewport) wp_viewport_destroy(s.viewport);
     if (s.viewporter) wp_viewporter_destroy(s.viewporter);
     if (s.psm) zwp_primary_selection_device_manager_v1_destroy(s.psm);
