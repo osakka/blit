@@ -2387,19 +2387,26 @@ components:
     ArabicCompanion:
       type: [object, 'null']
       description: >-
-        The Arabic companion actually loaded, or null. Its baseline is the
-        active font's.
+        The Arabic faces actually loaded, or null when neither is. Its
+        baseline is the active font's. path and family are the companion
+        (Blit Arabic Modern), null for a pixel font, which has none;
+        words_path and words_family are the word face (Noto Naskh Arabic),
+        present only when it is attached (arabic naskh, ADR 0241).
       required: [path, family, baseline_px, shaping]
       properties:
-        path: {type: string}
-        family: {type: string}
+        path: {type: [string, 'null']}
+        family: {type: [string, 'null']}
         baseline_px: {type: integer, minimum: 0}
         shaping:
           type: string
-          enum: [visual-cell-marks]
+          enum: [words, visual-cell-marks]
           description: >-
-            Hibr supplies display-order forms; OpenType positions cell-local
-            marks. Blit does not apply paragraph bidi again.
+            words when the word face is attached: runs of Arabic are shaped
+            as words (ADR 0241). visual-cell-marks otherwise: Hibr supplies
+            display-order forms; OpenType positions cell-local marks. Blit
+            does not apply paragraph bidi again.
+        words_path: {type: string}
+        words_family: {type: string}
       additionalProperties: false
     FontConfiguration:
       type: object
@@ -2422,6 +2429,14 @@ components:
             FT_LOAD_TARGET_NORMAL), light (FT_LOAD_TARGET_LIGHT) or none
             (FT_LOAD_NO_HINTING). Fitted icons and symbols ignore it. A change
             rebuilds the glyph cache and redraws, as a size change does.
+        arabic:
+          type: string
+          enum: [naskh, modern]
+          description: >-
+            The face Arabic is drawn in (ADR 0241): naskh (the default) shapes
+            runs as words in Noto Naskh Arabic, for every text font; modern
+            draws cell by cell in Blit Arabic Modern. A word face that cannot
+            be attached fails the change and keeps the active font.
       additionalProperties: false
     FontProfiles:
       type: object
@@ -2441,6 +2456,7 @@ components:
             size_px: {type: integer, minimum: 1}
             sizing: {type: string, enum: [scale, pixels]}
             hinting: {type: string, enum: [full, light, none]}
+            arabic: {type: string, enum: [naskh, modern]}
             rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
             colour_glyphs: {type: boolean}
             arabic_companion:
@@ -3164,6 +3180,7 @@ components:
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
                 size_px: {type: integer, minimum: 8, maximum: 64}
                 hinting: {type: string, enum: [full, light, none]}
+                arabic: {type: string, enum: [naskh, modern]}
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
             effects:
               type: object

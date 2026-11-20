@@ -82,6 +82,12 @@ hinted: it changes how crisp text is at small sizes, and nothing about the
 cell grid. Fitted icons and symbols, emoji and cell-geometry glyphs ignore it
 (ADR 0218). Set it with `PUT /v1/fonts`; it is stored with the font.
 
+`arabic` (`naskh`, `modern`; default `naskh`) chooses how Arabic is drawn
+(ADR 0241): `naskh` shapes it as words in Noto Naskh Arabic, for every text
+font including the pixel fonts; `modern` draws it cell by cell in Blit
+Arabic Modern. Set it with `PUT /v1/fonts`; it is stored with the font, and
+`active.arabic` reports it.
+
 **The icon pen** is the pen of Blit's colour icons (U+100000 and up that
 carry colour), and it is per cell: SGR 68:v (`1` auto, `2` black, `3`
 white), ended by SGR 69 (ADR 0221). Without it an icon is drawn in its own
@@ -489,9 +495,14 @@ application already chooses.
 ## Arabic and Arabic-Indic numerals
 
 Every outline text font attaches the one Arabic companion, Blit Arabic
-Modern, automatically. Inspect `active.arabic_companion` for the loaded
-family/path, shared `baseline_px` and `shaping: "visual-cell-marks"`; each
-profile reports `arabic_companion_path`. Both are null for the pixel fonts.
+Modern, automatically, and under the default `arabic: "naskh"` every text
+font, pixel fonts included, also attaches the word face, Noto Naskh Arabic.
+Inspect `active.arabic_companion` for the loaded family/path, shared
+`baseline_px` and `shaping`: `"words"` with `words_family`/`words_path` when
+the word face is attached, else `"visual-cell-marks"`. Each profile reports
+`arabic_companion_path`, null for the pixel fonts; a pixel font's
+`active.arabic_companion` has a null `path` and `family` under `naskh` and
+is null under `modern`.
 Primary `glyphs`/`mappings` counts describe the PSF fallback, not total
 coverage.
 
