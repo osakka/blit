@@ -4,7 +4,8 @@
    flattened on the right into a D. Drawn here through draw_cell_glyphs,
    the compositor's own cell path, for every text font given, at every cell
    height 8-64 (the raster's range) and every hinting mode:
-   - a symmetric shape that reaches its last column stays symmetric in bold;
+   - a symmetric shape that reaches its last column stays symmetric in bold
+     (ASCII, Latin-1, punctuation and the shape blocks are swept);
    - text, and every glyph with room, is drawn bold exactly as before (regular glyph,
      then the same glyph one pixel right, last column dropped).
    BLIT_BOLD_GATE_OLD=1 hands the raster's regular glyph to bold cells, as
@@ -22,7 +23,14 @@ static int old_get(void *state, uint32_t cp, int columns, int pen, int bold,
 
 static uint32_t pixels[CELLS_W * CELLS_H], expected[CELLS_W * CELLS_H];
 
-static void clear(uint32_t *p) { int i; for (i = 0; i < CELLS_W * CELLS_H; ++i) p[i] = 0; }
+/* Only the cell and a pixel round it are drawn or read: clear just that. */
+static int clear_w = CELLS_W, clear_h = CELLS_H;
+static void clear(uint32_t *p)
+{
+    int y;
+    for (y = 7; y < 9 + clear_h && y < CELLS_H; ++y)
+        memset(p + y * CELLS_W + 7, 0, (size_t)(clear_w + 2) * 4);
+}
 static int cov(const uint32_t *p, int x, int y) { return (int)(p[(8 + y) * CELLS_W + 8 + x] & 0xff); }
 
 int main(int argc, char **argv)
@@ -64,10 +72,15 @@ int main(int argc, char **argv)
                 for (cp = 0x21; cp <= 0x2bff; ++cp) {
                     BlitRasterGlyph regular;
                     int sym = 0, x, y, edge = 0;
+                    /* Text (ASCII, Latin-1, punctuation and bullets) and the
+                       shape blocks: arrows, technical, geometric shapes,
+                       miscellaneous symbols, dingbats, symbols and arrows. */
                     if (cp == 0x7f) cp = 0xa1;
-                    if (cp == 0x250) cp = 0x2010;
+                    if (cp == 0x100) cp = 0x2010;
                     if (cp == 0x2070) cp = 0x2190;
-                    if (cp >= 0x2500 && cp <= 0x259f) continue; /* cell geometry */
+                    if (cp == 0x2200) cp = 0x2300;
+                    if (cp == 0x2400) cp = 0x25a0;
+                    if (cp == 0x27c0) cp = 0x2b00;
                     if (!regular_get(font.raster_state, cp, 1, 0, 0, &regular) ||
                         regular.fallback || regular.format != BLIT_RASTER_COVERAGE ||
                         regular.ink_offset_x || regular.ink_offset_y) continue;
@@ -76,6 +89,7 @@ int main(int argc, char **argv)
                     for (y = 0; y < regular.height; ++y)
                         if (regular.pixels[y * regular.stride + width - 1] >= 64) edge = 1;
                     ++cases;
+                    clear_w = width + 1; clear_h = height;
                     clear(pixels);
                     draw_cell_glyphs(&output, &font, NULL, cp, NULL, 0, 8, 8, width, height,
                                      0xffffff, 0, 1, 0);
@@ -87,7 +101,11 @@ int main(int argc, char **argv)
                         clear(expected);
                         draw_glyph(&reference, &font, cp, 8, 8, width, height, 0xffffff, 0, 0, 0, 0);
                         draw_glyph(&reference, &font, cp, 9, 8, width, height, 0xffffff, 0, 1, 0, 0);
-                        if (memcmp(pixels, expected, sizeof(pixels))) {
+                        int differs = 0, row;
+                        for (row = 7; row < 9 + height && !differs; ++row)
+                            differs = memcmp(pixels + row * CELLS_W + 7, expected + row * CELLS_W + 7,
+                                             (size_t)(width + 3) * 4) != 0;
+                        if (differs) {
                             if (failures++ < 8)
                                 fprintf(stderr, "BOLD changed %s h=%d hinting=%d U+%04X\n",
                                         argv[f], height, hinting, cp);

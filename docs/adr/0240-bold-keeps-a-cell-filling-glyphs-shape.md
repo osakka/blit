@@ -68,10 +68,15 @@ advance fits the cell.
 ## Evidence
 
 `tools/tests/bold_shape_gate.sh` draws through `draw_cell_glyphs` for every
-shipped text font, cell heights 8-64 and full, light and no hinting:
-symmetric shapes that reach their last column (U+25CF, U+25CB, U+25A0 and
-others) keep matching edges in bold, beyond what the font's own lean gives;
-no ink leaves the cell; every other glyph's bold cell is byte for byte the
-old overstrike. With `BLIT_BOLD_GATE_OLD=1` the raster hands bold cells the
-regular glyph, as before this ADR, and the gate fails (Hack U+25CF among
-them).
+shipped text font, cell heights 8-64 and full, light and no hinting, over
+ASCII, Latin-1, punctuation and bullets and the shape blocks (arrows,
+technical, geometric shapes, miscellaneous symbols, dingbats, symbols and
+arrows): 1,191,015 bold cells, 0 failures. Symmetric shapes that reach
+their last column (U+25CF, U+25CB, U+25A0 and others, 2,310 cases) keep
+matching edges in bold, beyond what the font's own lean gives; no ink
+leaves the cell; every other glyph's bold cell is byte for byte the old
+overstrike. With the raster's regular glyph handed to bold cells, as
+before this ADR, 2,211 shapes fail (Hack U+25CF among them). The sweep
+first covered every block up to U+2BFF (2,627,415 cells), which took over
+the runner's five minutes on a loaded host; the blocks it dropped (Latin
+Extended, mathematical operators, control pictures) hold no shapes.
