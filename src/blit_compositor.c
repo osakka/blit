@@ -8433,6 +8433,25 @@ static int x_dnd_type(struct bc_server *s, struct bc_xwin *w);
 static void xdrag_icon_adopt(struct bc_server *s, struct bc_xwin *w);
 static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer, int attached);
 
+/* An X window that covers a display exactly, or the whole X screen (the
+   displays' extent) -- a game's full-screen window when override-redirect
+   (Gitea #175). */
+static int x_covers_display(struct bc_server *s, const struct bc_xwin *w)
+{
+    struct bc_output *o;
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0, first = 1;
+    wl_list_for_each(o, &s->outputs, link) {
+        if (w->x == o->x && w->y == o->y && w->width == o->width && w->height == o->height)
+            return 1;
+        if (first || o->x < x0) x0 = o->x;
+        if (first || o->y < y0) y0 = o->y;
+        if (first || o->x + o->width > x1) x1 = o->x + o->width;
+        if (first || o->y + o->height > y1) y1 = o->y + o->height;
+        first = 0;
+    }
+    return !first && w->x == x0 && w->y == y0 && w->width == x1 - x0 && w->height == y1 - y0;
+}
+
 static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *sf)
 {
     struct bc_xdg *x, *parent = NULL;
@@ -8460,19 +8479,7 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
        to none (a toolkit's hidden 1x1 helper at -1,-1, a notification) is
        not shown: on the owner's machine those outnumbered the games. */
     if (w->override_redirect) {
-        struct bc_output *o;
-        int covers = 0, x0 = 0, y0 = 0, x1 = 0, y1 = 0, first = 1;
-        wl_list_for_each(o, &s->outputs, link) {
-            if (w->x == o->x && w->y == o->y && w->width == o->width && w->height == o->height)
-                covers = 1;
-            if (first || o->x < x0) x0 = o->x;
-            if (first || o->y < y0) y0 = o->y;
-            if (first || o->x + o->width > x1) x1 = o->x + o->width;
-            if (first || o->y + o->height > y1) y1 = o->y + o->height;
-            first = 0;
-        }
-        if (!first && w->x == x0 && w->y == y0 && w->width == x1 - x0 && w->height == y1 - y0)
-            covers = 1;
+        int covers = x_covers_display(s, w);
         w->or_fullscreen = covers;
         if (!covers && (parent = x_popup_parent(s, w)) == NULL) {
             if (!w->or_logged)
