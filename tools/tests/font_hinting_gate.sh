@@ -12,7 +12,7 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 # assignment, so a missing or too-old module stops the gate.
 cflags=$("$root/tools/build-flags.sh" --cflags font)
 libs=$("$root/tools/build-flags.sh" --libs font)
-work=$(mktemp -d /tmp/blit-hinting-gate.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/blit-hinting-gate.XXXXXX")
 # Only these validated, uniquely created temporary files are removed.
 trap 'rm -f "$work/gate"; rmdir "$work"' EXIT HUP INT TERM
 # shellcheck disable=SC2086

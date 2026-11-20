@@ -4,6 +4,7 @@
 # Pixel regression gate for the live Hibr failure shape: a negative-z Kitty
 # wallpaper must survive an incremental terminal damage repaint.
 
+require 'tmpdir'
 require 'base64'
 require 'json'
 require 'net/http'
@@ -13,7 +14,7 @@ require_relative 'test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_WALLPAPER_DAMAGE_PORT', '19212')))
 base = URI("http://127.0.0.1:#{port}")
-log = "/tmp/blit-wallpaper-damage-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-wallpaper-damage-#{Process.pid}.log"
 pid = gate_spawn(TestProfile.environment, TestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 

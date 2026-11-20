@@ -4,6 +4,7 @@
 # A hidden VT cursor may move without changing any cell. This gate ensures
 # that such control traffic does not schedule presentation frames.
 
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'timeout'
@@ -12,7 +13,7 @@ require_relative 'gate_server'
 
 port = gate_port(Integer(ENV.fetch('BLIT_HIDDEN_CURSOR_PORT', '19249')))
 base = URI("http://127.0.0.1:#{port}")
-log = "/tmp/blit-hidden-cursor-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-hidden-cursor-#{Process.pid}.log"
 env = {
   **gate_display_env,
   

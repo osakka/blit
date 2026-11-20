@@ -20,33 +20,48 @@ Dir.mktmpdir('blit-session-log-gate') do |work|
   paths=[]
   begin
     Timeout.timeout(8){loop{begin;req.call('GET','/v1/version');break;rescue Errno::ECONNREFUSED;sleep 0.02;end}}
-    [nil,nil,File.join(work,'chosen.log')].each do |chosen|
+    # Two sessions that write no log, one that does, one that names its own.
+    log_base=Dir.tmpdir
+    kept=nil
+    [[nil,false],[nil,false],[nil,true],[File.join(work,'chosen.log'),false]].each do |chosen,writes|
+      script='printf "\033]2;%s\007" "$DT_LOG"; ' + (writes ? 'echo kept > "$DT_LOG"; ' : '') + '/bin/sleep 2'
       created=req.call('POST','/v1/terminal-sessions',{
-        command:'/usr/bin/hibr',arguments:['-c','printf "\033]2;%s\007" "$DT_LOG"; /bin/sleep 2'],
+        command:'/usr/bin/hibr',arguments:['-c',script],
         surface:{width:1,height:1},environment:chosen ? {DT_LOG:chosen} : {}})
       begin
         title=nil
         Timeout.timeout(5) do
           loop do
             title=req.call('GET',"/v1/terminal-sessions/#{created['id']}")['title']
-            break if title&.start_with?('/tmp/')
+            break if title&.start_with?('/')
             sleep 0.02
           end
         end
         if chosen
           raise 'explicit log path overwritten' unless title==chosen
         else
-          raise "unsafe default log path: #{title}" unless title.match?(%r{\A/tmp/blit-hibr-[A-Za-z0-9]+/desktop\.log\z})
+          raise "unsafe default log path: #{title}" unless title.match?(%r{\A#{Regexp.escape(log_base)}/blit-hibr-[A-Za-z0-9]+/desktop\.log\z})
           dir=File.dirname(title);paths<<dir
+          kept=dir if writes
           st=File.lstat(dir)
           raise 'unsafe log directory owner/mode' unless st.directory? && st.uid==Process.uid && (st.mode&0777)==0700
         end
       ensure
         req.call('DELETE',"/v1/terminal-sessions/#{created['id']}")
       end
+      # The server removes the directory with the session when nothing was
+      # written there, and keeps it, with the log, when something was.
+      unless chosen
+        dir=paths.last
+        gone=false
+        Timeout.timeout(5){loop{gone=!File.exist?(dir);break if gone==!writes;sleep 0.05}} rescue nil
+        raise "an unused log directory outlived its session: #{dir}" if !writes && !gone
+        raise "a written log was removed with its session: #{dir}" if writes && gone
+      end
     end
-    raise 'log directory reused across sessions' unless paths.uniq.size==2
-    puts 'SESSION_LOG_PASS private=0700 owner=session_uid names=unique explicit_override=preserved'
+    raise 'log directory reused across sessions' unless paths.uniq.size==3
+    raise 'no directory kept for the written log' unless kept && File.exist?(File.join(kept,'desktop.log'))
+    puts 'SESSION_LOG_PASS private=0700 owner=session_uid names=unique explicit_override=preserved unused=removed written=kept tmpdir=followed'
   ensure
     Process.kill('TERM',pid) rescue nil
     Process.wait(pid) rescue nil

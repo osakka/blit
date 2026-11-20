@@ -13,6 +13,7 @@
 # usable: a device control string that is not a graphics payload must not
 # appear, or "nothing arrived" could never be read as nothing arrived.
 
+require 'tmpdir'
 require 'json'
 require 'fileutils'
 require 'net/http'
@@ -27,7 +28,7 @@ PORT = gate_port(Integer(ENV.fetch('BLIT_GATE_PORT', '19265'), 10))
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
 FONT = ENV.fetch('BLIT_GATE_FONT',
                  File.join(ROOT, 'assets/fonts/Blit-Terminus16.psf'))
-KITTY_PROBE = "/tmp/blit-kitty-image-echo-#{Process.pid}"
+KITTY_PROBE = "#{Dir.tmpdir}/blit-kitty-image-echo-#{Process.pid}"
 BASE = URI("http://127.0.0.1:#{PORT}")
 
 abort("graphics-trace gate: missing #{BINARY}") unless File.executable?(BINARY)

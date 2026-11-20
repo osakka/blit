@@ -192,6 +192,13 @@ The runner is measured, bounded and parallel (ADR 0216):
 | `BLIT_GATE_LIVE_DMABUF` | A live host whose GPU imports dmabufs (with `BLIT_AUTH_TOKEN`); enables `frame_dmabuf_live_gate.sh` in the hibr suite (ADR 0223). |
 | `BLIT_GATE_SERVER_ENV` | `NAME=value` words given to every gate server, e.g. `BLIT_GATE_SERVER_ENV='BLIT_FOO=1'`. The one way to give gate servers a variable on purpose; a gate's own settings still win. |
 
+Every gate runs with the run's own `TMPDIR`, inside the runner's scratch
+directory, so what a gate leaves there -- its temporary directories, its
+servers' Hibr log directories, the DRM mock -- goes when the run ends, passed,
+failed or cancelled; a new gate makes its scratch with `mktemp`,
+`Dir.mktmpdir` or `tempfile` and never names `/tmp` itself. A failing gate's
+whole output is kept in `build/gate-failures/` (`BLIT_GATE_FAILURE_DIR`).
+
 Gate servers are sealed from the host they run on. Every gate starts
 blit-server (and blit-compositor) through one helper per language --
 `gate_spawn`/`gate_sudo_argv` in `tools/tests/gate_env.rb`,

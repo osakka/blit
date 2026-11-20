@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-bin=$(mktemp /tmp/blit-kms-clip.XXXXXX)
+bin=$(mktemp "${TMPDIR:-/tmp}/blit-kms-clip.XXXXXX")
 trap 'rm -f "$bin"' EXIT HUP INT TERM
 cflags=$("$root/tools/build-flags.sh" --cflags drm zlib)
 libs=$("$root/tools/build-flags.sh" --libs drm zlib)

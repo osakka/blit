@@ -7,9 +7,9 @@ source "$root/tools/diagnostics/http.sh"
 # One of the gates' fixed ports (ADR 0216): the same offset rule as the rest.
 . "$root/tools/tests/gate_port.sh"
 port=$(gate_port 19830)
-ready=$(mktemp /tmp/blit-diagnostic-auth-ready.XXXXXX)
-out=$(mktemp /tmp/blit-diagnostic-auth-output.XXXXXX)
-token_file=$(mktemp /tmp/blit-diagnostic-auth-token.XXXXXX)
+ready=$(mktemp "${TMPDIR:-/tmp}/blit-diagnostic-auth-ready.XXXXXX")
+out=$(mktemp "${TMPDIR:-/tmp}/blit-diagnostic-auth-output.XXXXXX")
+token_file=$(mktemp "${TMPDIR:-/tmp}/blit-diagnostic-auth-token.XXXXXX")
 unlink "$ready"
 printf '%s\n' diagnostic-test-token >"$token_file"
 server_pid=''

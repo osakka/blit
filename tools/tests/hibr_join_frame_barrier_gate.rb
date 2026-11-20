@@ -42,7 +42,7 @@ env = {
   'BLIT_COMMAND_ALLOWLIST' => FAKE_DESKTOP
 }
 pid = gate_spawn(env, SERVER, PORT.to_s,
-                    out: "/tmp/blit-hibr-join-frame-barrier-gate-#{Process.pid}.log",
+                    out: "#{Dir.tmpdir}/blit-hibr-join-frame-barrier-gate-#{Process.pid}.log",
                     err: [:child, :out])
 sessions = []
 

@@ -1110,6 +1110,11 @@ typedef struct {
     int attach_unsettled;
     int attach_reassert_hibr_matches;
     int hibr_process;
+    /* ADR 0167: the private directory of a Hibr session's default DT_LOG,
+       made by the server (so it knows it) and removed when the session ends
+       if nothing was written there (rmdir only removes an empty one: a log
+       is kept for diagnosis). Empty when the request named DT_LOG. */
+    char hibr_log_dir[PATH_MAX];
     int hibr_desktop_primary;
     int hibr_desktop_join;
     /* Let a frame barrier time out; not waited for until it draws again. */
@@ -17479,6 +17484,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
     char **argument_storage = arguments + 1;
     char *environment_keys[BLIT_SESSION_STRINGS];
     char *environment_values[BLIT_SESSION_STRINGS];
+    char hibr_log_dir[PATH_MAX];
     int argument_count;
     int environment_count;
     char display_id[128];
@@ -17686,9 +17692,31 @@ static int create_session(BlitRuntime *runtime, const char *json,
             for (k = 0; k < 16; ++k)
                 snprintf(frame_token + k * 2, 3, "%02x", random_bytes[k]);
     }
+    /* ADR 0167: a Hibr session's private log directory, unless the request
+       names DT_LOG. Made here rather than in the child so the server knows
+       it and can remove it, empty, when the session ends; owned by the
+       session's user, mode 0700, under TMPDIR (a gate run's own) or /tmp. */
+    hibr_log_dir[0] = '\0';
+    if (hibr_process) {
+        int named = 0, k;
+        const char *base = getenv("TMPDIR");
+        for (k = 0; k < environment_count; ++k)
+            if (strcmp(environment_keys[k], "DT_LOG") == 0) named = 1;
+        if (!named) {
+            snprintf(hibr_log_dir, sizeof(hibr_log_dir), "%s/blit-hibr-XXXXXX",
+                     base != NULL && base[0] == '/' ? base : "/tmp");
+            if (mkdtemp(hibr_log_dir) == NULL ||
+                (run_as_user && chown(hibr_log_dir, run_uid, run_gid) != 0)) {
+                if (hibr_log_dir[0] != '\0' && strstr(hibr_log_dir, "XXXXXX") == NULL)
+                    rmdir(hibr_log_dir);
+                hibr_log_dir[0] = '\0';
+            }
+        }
+    }
     process_id = forkpty(&master_fd, NULL, NULL, &size);
     if (process_id < 0) {
         fprintf(stderr, "blit: forkpty failed: %s\n", strerror(errno));
+        if (hibr_log_dir[0] != '\0') rmdir(hibr_log_dir);
         return 0;
     }
     if (process_id == 0) {
@@ -17696,7 +17724,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
         char session_text[32];
         char surface_text[64];
         char port_text[16];
-        char hibr_log_path[256];
+        char hibr_log_path[PATH_MAX + 16];
         char run_home[512];
         if (run_as_user == 2) {
             run_pw = getpwuid(run_uid);
@@ -17830,9 +17858,15 @@ static int create_session(BlitRuntime *runtime, const char *json,
            after credential drop and explicit environment overrides. */
         if (hibr_process && getenv("DT_LOG") == NULL) {
             char log_directory[] = "/tmp/blit-hibr-XXXXXX";
-            if (mkdtemp(log_directory) == NULL) _exit(126);
-            snprintf(hibr_log_path, sizeof(hibr_log_path), "%s/desktop.log",
-                     log_directory);
+            /* The server's directory, made before the fork; this one only
+               if that could not be made. */
+            if (hibr_log_dir[0] != '\0')
+                snprintf(hibr_log_path, sizeof(hibr_log_path), "%s/desktop.log",
+                         hibr_log_dir);
+            else if (mkdtemp(log_directory) == NULL) _exit(126);
+            else
+                snprintf(hibr_log_path, sizeof(hibr_log_path), "%s/desktop.log",
+                         log_directory);
             if (setenv("DT_LOG", hibr_log_path, 0) != 0) _exit(126);
         }
         execve(command, arguments, environ);
@@ -17857,6 +17891,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
             session->exit_code = -1;
             session->hibr_resume_requested = hibr_resume_requested;
             session->hibr_process = hibr_process;
+            snprintf(session->hibr_log_dir, sizeof(session->hibr_log_dir), "%s", hibr_log_dir);
             session->hibr_desktop_primary = hibr_desktop_primary;
             session->hibr_desktop_join = hibr_desktop_join;
             if (hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager) {
@@ -19433,6 +19468,9 @@ static void destroy_session(BlitRuntime *runtime, BlitSession *session)
     graphics_image_release(&session->terminal_kitty_stage);
     if (session->focused)
         session->focused = 0;
+    /* ADR 0167: its log directory goes with it, unless a log was written. */
+    if (session->hibr_log_dir[0] != '\0')
+        rmdir(session->hibr_log_dir);
     memset(session, 0, sizeof(*session));
     if (runtime->session_count > 0)
         --runtime->session_count;
@@ -33606,6 +33644,14 @@ int main(int argc, char **argv)
     /* The same for the display start's marker (Gitea #162): a stop in order
        is not a start that hung. */
     if (runtime.display_guard_active) unlink(runtime.display_guard_path);
+    /* ADR 0167: the sessions' empty log directories, on every orderly exit
+       (a stop, a restart, an update). */
+    {
+        int k;
+        for (k = 0; k < BLIT_MAX_SESSIONS; ++k)
+            if (runtime.sessions[k].used && runtime.sessions[k].hibr_log_dir[0] != '\0')
+                rmdir(runtime.sessions[k].hibr_log_dir);
+    }
     blit_font_free(&runtime.font);
     blit_font_free(&runtime.hud_font);
     {

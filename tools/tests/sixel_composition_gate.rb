@@ -3,6 +3,7 @@
 
 # Exercise the existing operator sixel assertions through one explicit SDL
 # profile. Local and physical runs share the protocol/pixel oracle.
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'open3'
@@ -12,7 +13,7 @@ require_relative 'test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_SIXEL_COMPOSITION_PORT', '19304')))
 base = "http://127.0.0.1:#{port}"
-log = "/tmp/blit-sixel-composition-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-sixel-composition-#{Process.pid}.log"
 pid = gate_spawn(TestProfile.environment, TestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 begin

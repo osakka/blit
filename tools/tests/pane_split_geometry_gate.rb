@@ -6,6 +6,7 @@
 # half-region has a cell remainder. The pre-ADR-0075 implementation quantized
 # the whole display first, which put a terminal row across the physical split.
 
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'uri'
@@ -19,7 +20,7 @@ env = {
   'BLIT_PSF_FONT' => 'assets/fonts/Blit-Terminus16.psf'
 }
 pid = gate_spawn(env, 'build/blit/blit-server', port.to_s,
-                    out: "/tmp/blit-pane-split-gate-#{Process.pid}.log", err: [:child, :out])
+                    out: "#{Dir.tmpdir}/blit-pane-split-gate-#{Process.pid}.log", err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil
   Process.wait(pid) rescue nil

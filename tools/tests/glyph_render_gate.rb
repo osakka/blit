@@ -5,6 +5,7 @@
 # Cell snapshots prove terminal state; this gate proves representative
 # geometric glyphs survive the renderer boundary with their intended shape.
 
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'timeout'
@@ -13,7 +14,7 @@ require_relative 'test_profile'
 
 port = gate_port(Integer(ENV.fetch('BLIT_GLYPH_RENDER_PORT', '19264')))
 base = URI("http://127.0.0.1:#{port}")
-log = "/tmp/blit-glyph-render-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-glyph-render-#{Process.pid}.log"
 pid = gate_spawn(TestProfile.environment, TestProfile.binary, port.to_s,
                     out: log, err: [:child, :out])
 

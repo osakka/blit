@@ -253,7 +253,11 @@ execute_gate() {
         else
             g_detail="rc=$rc $last"
         fi
-        g_log="${BLIT_GATE_FAILURE_DIR:-/tmp}/blit-gate-$g_name.$$.out"
+        # A failure's whole output is kept for reading, outside the run's
+        # scratch directory (which goes when the run ends) and outside /tmp.
+        g_faildir=${BLIT_GATE_FAILURE_DIR:-$ROOT/build/gate-failures}
+        mkdir -p "$g_faildir" 2>/dev/null || true
+        g_log="$g_faildir/blit-gate-$g_name.$$.out"
         printf '%s\n' "$out" >"$g_log" 2>/dev/null || g_log=''
     fi
     # The result is complete before .done exists; the coordinator reads only
@@ -368,6 +372,19 @@ run_serial_gate() {
 
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/blit-run-gates.XXXXXX")
 mkdir "$tmpdir/res"
+# Every gate's scratch -- its mktemp directories, its servers' Hibr log
+# directories, the DRM mock -- goes in the run's own temporary directory, and
+# so goes with it when the run ends, passed, failed or cancelled. /tmp no
+# longer collects a directory per gate run (thousands, which slowed every
+# listing of /tmp enough to fail other projects' stall gates).
+# The gates' servers can run as root and their sessions as other users (the
+# login manager), so this directory behaves as /tmp does: anyone may pass
+# through to it and create in it, and only an entry's owner may remove it.
+mkdir "$tmpdir/tmp"
+chmod 0711 "$tmpdir"
+chmod 1777 "$tmpdir/tmp"
+TMPDIR=$tmpdir/tmp
+export TMPDIR
 : >"$tmpdir/timing"
 sched_pid=''
 # Cancelled (Gitea #106): the running gate is signalled and waited for -- its
@@ -383,7 +400,11 @@ cleanup() {
         kill -TERM "$sched_pid" 2>/dev/null || true
         wait "$sched_pid" 2>/dev/null || true
     fi
-    rm -rf "$tmpdir"
+    rm -rf "$tmpdir" 2>/dev/null || true
+    # What a gate made as root, or as another user, and did not remove.
+    if [ -d "$tmpdir" ]; then
+        sudo -n rm -rf "$tmpdir" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT

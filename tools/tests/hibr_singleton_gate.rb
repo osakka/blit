@@ -26,7 +26,7 @@ env = {
   'BLIT_COMMAND_ALLOWLIST' => fake_desktop
 }
 pid = gate_spawn(env, BINARY, port.to_s,
-                    out: "/tmp/blit-hibr-singleton-gate-#{Process.pid}.log", err: [:child, :out])
+                    out: "#{Dir.tmpdir}/blit-hibr-singleton-gate-#{Process.pid}.log", err: [:child, :out])
 sessions = []
 at_exit do
   sessions.each do |session_id|

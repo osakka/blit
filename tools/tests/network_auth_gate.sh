@@ -15,17 +15,17 @@ BINARY=${BLIT_GATE_BINARY:-$ROOT/build/blit/blit-server}
 PORT=${BLIT_GATE_PORT:-19205}
 PORT=$(gate_port "$PORT")
 TOKEN=${BLIT_GATE_TOKEN:-blit-network-gate}
-LOG=$(mktemp /tmp/blit-network-gate.XXXXXX)
-UNAUTH=$(mktemp /tmp/blit-network-unauth.XXXXXX)
-AUTH=$(mktemp /tmp/blit-network-auth.XXXXXX)
-DIAGNOSTICS=$(mktemp /tmp/blit-network-diagnostics.XXXXXX)
-RUNTIME_DIAGNOSTICS=$(mktemp /tmp/blit-network-runtime-diagnostics.XXXXXX)
-CONSOLE_DIAGNOSTICS=$(mktemp /tmp/blit-network-console-diagnostics.XXXXXX)
-GRAPHICS=$(mktemp /tmp/blit-network-graphics.XXXXXX)
-AUDIO=$(mktemp /tmp/blit-network-audio.XXXXXX)
-DISPLAYS=$(mktemp /tmp/blit-network-displays.XXXXXX)
-COMMAND_DENIED=$(mktemp /tmp/blit-network-command-denied.XXXXXX)
-COMMAND_ALLOWED=$(mktemp /tmp/blit-network-command-allowed.XXXXXX)
+LOG=$(mktemp "${TMPDIR:-/tmp}/blit-network-gate.XXXXXX")
+UNAUTH=$(mktemp "${TMPDIR:-/tmp}/blit-network-unauth.XXXXXX")
+AUTH=$(mktemp "${TMPDIR:-/tmp}/blit-network-auth.XXXXXX")
+DIAGNOSTICS=$(mktemp "${TMPDIR:-/tmp}/blit-network-diagnostics.XXXXXX")
+RUNTIME_DIAGNOSTICS=$(mktemp "${TMPDIR:-/tmp}/blit-network-runtime-diagnostics.XXXXXX")
+CONSOLE_DIAGNOSTICS=$(mktemp "${TMPDIR:-/tmp}/blit-network-console-diagnostics.XXXXXX")
+GRAPHICS=$(mktemp "${TMPDIR:-/tmp}/blit-network-graphics.XXXXXX")
+AUDIO=$(mktemp "${TMPDIR:-/tmp}/blit-network-audio.XXXXXX")
+DISPLAYS=$(mktemp "${TMPDIR:-/tmp}/blit-network-displays.XXXXXX")
+COMMAND_DENIED=$(mktemp "${TMPDIR:-/tmp}/blit-network-command-denied.XXXXXX")
+COMMAND_ALLOWED=$(mktemp "${TMPDIR:-/tmp}/blit-network-command-allowed.XXXXXX")
 server_pid=
 cleanup() {
     if [ -n "$server_pid" ]; then kill "$server_pid" 2>/dev/null || true; fi
@@ -176,7 +176,7 @@ fi
 # The check reports presence and length only. It must never print the value:
 # the surface it reads is returned by the API in full.
 TOKEN_PORT=$((PORT + 1))
-TOKEN_SURFACE=$(mktemp /tmp/blit-network-token-surface.XXXXXX)
+TOKEN_SURFACE=$(mktemp "${TMPDIR:-/tmp}/blit-network-token-surface.XXXXXX")
 token_server_pid=
 token_cleanup() {
     if [ -n "$token_server_pid" ]; then kill "$token_server_pid" 2>/dev/null || true; fi
@@ -258,8 +258,8 @@ fi
 # Three postures, three servers. The first two need no token, so they cannot
 # reuse the one above.
 POSTURE_PORT=$((PORT + 2))
-POSTURE_LOG=$(mktemp /tmp/blit-network-posture.XXXXXX)
-POSTURE_BODY=$(mktemp /tmp/blit-network-posture-body.XXXXXX)
+POSTURE_LOG=$(mktemp "${TMPDIR:-/tmp}/blit-network-posture.XXXXXX")
+POSTURE_BODY=$(mktemp "${TMPDIR:-/tmp}/blit-network-posture-body.XXXXXX")
 posture_pid=
 posture_cleanup() {
     gate_display_cleanup

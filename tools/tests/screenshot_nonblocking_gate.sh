@@ -7,8 +7,8 @@ set -euo pipefail
 
 base=${1:?usage: screenshot_nonblocking_gate.sh http://host:8080 [display-id]}
 display=${2:-display-1}
-shot=$(mktemp /tmp/blit-screenshot-gate.XXXXXX.bmp)
-version=$(mktemp /tmp/blit-screenshot-gate.XXXXXX.json)
+shot=$(mktemp "${TMPDIR:-/tmp}/blit-screenshot-gate.XXXXXX.bmp")
+version=$(mktemp "${TMPDIR:-/tmp}/blit-screenshot-gate.XXXXXX.json")
 shot_pid=''
 auth=()
 if [ -n "${BLIT_AUTH_TOKEN:-}" ]; then

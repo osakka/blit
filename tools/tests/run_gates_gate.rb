@@ -257,10 +257,29 @@ def cancel_run(dir, jobs, signal, to_group, round = 0)
   "#{signal.downcase}/jobs#{jobs}=#{want}"
 end
 
+# --- a gate's temporary files go with the run --------------------------------
+# Every gate gets the run's own TMPDIR: what a passing and a failing gate make
+# there is gone when the run ends, and nothing of theirs is left in the
+# caller's temporary directory (thousands of per-gate directories in /tmp once
+# slowed every listing of it).
+caller_tmp = File.join(dir, 'caller-tmp')
+FileUtils.mkdir_p(caller_tmp)
+tmp_suite = File.join(dir, 'tmp_suite.sh')
+File.write(tmp_suite, "suite_fake() {\n" \
+  "    run_gate makes sh -c 'd=$(mktemp -d); touch \"$d/x\"; echo \"$d\" >>\"$RUNS/made\"; echo made'\n" \
+  "    run_gate makes-fails sh -c 'd=$(mktemp -d); touch \"$d/x\"; echo \"$d\" >>\"$RUNS/made\"; exit 3'\n" \
+  "}\n")
+tmp_out, _tmp_status, tmp_runs = runner(dir, tmp_suite, 2, %w[fake], 'TMPDIR' => caller_tmp)
+made = File.exist?(File.join(tmp_runs, 'made')) ? File.read(File.join(tmp_runs, 'made')).split : []
+check(made.size == 2, "the temporary-file gates did not both run: #{tmp_out}")
+check(made.all? { |d| d.start_with?("#{caller_tmp}/blit-run-gates.") }, "a gate's TMPDIR was not the run's own: #{made}")
+check(made.none? { |d| File.exist?(d) }, "a gate's temporary directory outlived the run: #{made}")
+check(Dir.children(caller_tmp).empty?, "the run left files in the caller's TMPDIR: #{Dir.children(caller_tmp)}")
+
 # TERM with two jobs three times: relayed only through the scheduler's and a
 # worker's traps, it left the gate running in about half the runs.
 cancelled = [cancel_run(dir, 1, 'INT', true), cancel_run(dir, 2, 'INT', true),
              cancel_run(dir, 1, 'TERM', false)] +
             (1..3).map { |n| cancel_run(dir, 2, 'TERM', false, n) }.uniq
 
-puts "RUN_GATES_GATE_PASS offsets=distinct timeout=reported_no_orphan jobs1=jobs4 timing_lane=alone cancel=#{cancelled.join(',')}"
+puts "RUN_GATES_GATE_PASS offsets=distinct timeout=reported_no_orphan jobs1=jobs4 timing_lane=alone tmpdir=run_own,removed cancel=#{cancelled.join(',')}"

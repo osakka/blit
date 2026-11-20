@@ -570,9 +570,12 @@ as requested; what each display actually uses is in
 .BR /v1/diagnostics .
 .TP
 .B DT_LOG
-For Hibr desktops, a log file under
-.I /tmp
-unless the request names one.
+For Hibr desktops, a log file in a private directory under
+.B TMPDIR
+(else
+.IR /tmp ),
+unless the request names one; the directory is removed when the session
+ends if no log was written there.
 .PP
 A session request may also set
 .B BLIT_TERMINAL_FG

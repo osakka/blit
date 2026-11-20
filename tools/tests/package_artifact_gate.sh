@@ -41,7 +41,7 @@ test "$actual_hash" = "$manifest_hash"
 # package provenance must not be hand-copied.
 "$root/tools/release/generate-manifest.sh" --check "$package" "$manifest"
 
-stage=$(mktemp -d /tmp/blit-package-gate.XXXXXX)
+stage=$(mktemp -d "${TMPDIR:-/tmp}/blit-package-gate.XXXXXX")
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT HUP INT TERM
 dpkg-deb -x "$package" "$stage"
@@ -269,7 +269,7 @@ if [ -f "$sources_package" ]; then
     test "$(dpkg-deb -f "$sources_package" Package)" = blit-font-sources
     test "$(dpkg-deb -f "$sources_package" Architecture)" = all
     test "$(dpkg-deb -f "$sources_package" Version)" = 20120503-1
-    sstage=$(mktemp -d /tmp/blit-sources-gate.XXXXXX)
+    sstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-sources-gate.XXXXXX")
     trap 'rm -rf "$stage" "$sstage"' EXIT HUP INT TERM
     dpkg-deb -x "$sources_package" "$sstage"
     sdoc=$sstage/usr/share/doc/blit-font-sources
@@ -319,7 +319,7 @@ if [ -f "$compositor_package" ]; then
         exit 1
     }
     dpkg-deb -f "$compositor_package" Description | grep -Fq 'ADR 0228'
-    cstage=$(mktemp -d /tmp/blit-compositor-gate.XXXXXX)
+    cstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-compositor-gate.XXXXXX")
     trap 'rm -rf "$stage" "${sstage:-}" "${gstage:-}" "$cstage"' EXIT HUP INT TERM
     dpkg-deb -x "$compositor_package" "$cstage"
     files=$(cd "$cstage" && find . -type f | sort | tr '\n' ' ')
@@ -379,7 +379,7 @@ fi
 # release ritual runs it once.
 reproducible=skipped
 if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
-    negative=$(mktemp /tmp/blit-package-negative.XXXXXX)
+    negative=$(mktemp "${TMPDIR:-/tmp}/blit-package-negative.XXXXXX")
     if BLIT_HIBR_ROOT= "$root/packaging/build-deb.sh" \
            "$(dirname "$negative")" >"$negative" 2>&1; then
         echo "PACKAGE_ARTIFACT_FAIL package build accepted missing BLIT_HIBR_ROOT" >&2
@@ -392,7 +392,7 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
         exit 1
     }
     rm -f "$negative"
-    rebuild=$(mktemp -d /tmp/blit-package-rebuild.XXXXXX)
+    rebuild=$(mktemp -d "${TMPDIR:-/tmp}/blit-package-rebuild.XXXXXX")
     if BLIT_HIBR_ROOT=${BLIT_HIBR_ROOT:-} \
        BLIT_PACKAGE_DOCUMENTATION_COMMIT="$documentation_commit" \
        "$root/packaging/build-deb.sh" \

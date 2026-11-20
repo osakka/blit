@@ -12,8 +12,8 @@ PORT=${BLIT_GATE_PORT:-19246}
 PORT=$(gate_port "$PORT")
 FONT=${BLIT_GATE_FONT:-$ROOT/assets/fonts/Blit-Terminus16.psf}
 PROBE=$ROOT/build/tests/adapter_coalesce_gate
-LOG=$(mktemp /tmp/blit-coalesce-gate.XXXXXX)
-SESSION=$(mktemp /tmp/blit-coalesce-session.XXXXXX)
+LOG=$(mktemp "${TMPDIR:-/tmp}/blit-coalesce-gate.XXXXXX")
+SESSION=$(mktemp "${TMPDIR:-/tmp}/blit-coalesce-session.XXXXXX")
 server_pid=
 cleanup() {
     gate_display_cleanup

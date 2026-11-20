@@ -21,7 +21,7 @@ fi
 
 "$generator" --check "$package" "$manifest"
 
-generated=$(mktemp /tmp/blit-release-manifest.XXXXXX)
+generated=$(mktemp "${TMPDIR:-/tmp}/blit-release-manifest.XXXXXX")
 trap 'rm -f "$generated"' EXIT HUP INT TERM
 source_commit=$(sed -n 's/^source_commit: //p' "$manifest" | sed -n '1p')
 documentation_commit=$(sed -n 's/^package_documentation_commit: //p' "$manifest" | sed -n '1p')
@@ -37,7 +37,7 @@ done <"$generated"
 # checked; a failed run, or a run of other or uncommitted source, is refused
 # by the recorder, and a tampered result by the check.
 recorder=$root/tools/release/record-gates.sh
-work=$(mktemp -d /tmp/blit-record-gates.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/blit-record-gates.XXXXXX")
 trap 'rm -f "$generated"; rm -rf "$work"' EXIT HUP INT TERM
 cp "$manifest" "$work/m.yaml"
 sed -i '/^gates_/d' "$work/m.yaml"

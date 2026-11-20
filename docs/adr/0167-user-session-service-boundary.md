@@ -1,6 +1,11 @@
 # ADR 0167: shared user-session sockets and bounded service retries
 
 - Status: accepted
+- Note: Since 0.3.128 the server makes the private log directory itself, under
+  `TMPDIR` (else `/tmp`), and removes it when the session ends if no log was
+  written there; a written log keeps its directory, as decided here. 2,885
+  empty directories, one per Hibr session started through the API, had
+  collected on the build host.
 - Date: 2026-10-20
 - Tracking: [Blit 115](https://git.home.arpa/itdlabs/blit/issues/115),
   [Hibr 320](https://git.home.arpa/itdlabs/hibr/issues/320)

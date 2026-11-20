@@ -10,6 +10,7 @@
 # sixels, scrolling each one off, then one more, and requires the last one
 # to be on screen and nothing to have been rejected.
 
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'timeout'
@@ -19,7 +20,7 @@ require_relative 'gate_server'
 port = gate_port(Integer(ENV.fetch('BLIT_SIXEL_SLOT_PORT', '19235')))
 base = URI("http://127.0.0.1:#{port}")
 binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
-log = "/tmp/blit-sixel-slot-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-sixel-slot-#{Process.pid}.log"
 env = {
   **gate_display_env,
   

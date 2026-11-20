@@ -10,6 +10,7 @@
 #   explicit black on a terminal whose default is not black.
 # Hibr's wallpaper is z = -2^30 - 1 and relies on all of it.
 
+require 'tmpdir'
 require 'base64'
 require 'json'
 require 'net/http'
@@ -20,7 +21,7 @@ require_relative 'test_profile'
 port = gate_port(Integer(ENV.fetch('BLIT_BAND_GATE_PORT', '19231')))
 base = URI("http://127.0.0.1:#{port}")
 binary = ENV.fetch('BLIT_GATE_BINARY', 'build/blit/blit-server')
-log = "/tmp/blit-band-gate-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-band-gate-#{Process.pid}.log"
 env = TestProfile.environment
 pid = gate_spawn(env, binary, port.to_s, out: log, err: [:child, :out])
 

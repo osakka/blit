@@ -5,6 +5,7 @@
 # The pointer target is selected from global coordinates and pane geometry;
 # explicit routes remain a separate API feature for dedicated probe workloads.
 
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'timeout'
@@ -14,7 +15,7 @@ require_relative 'gate_server'
 
 port = gate_port(Integer(ENV.fetch('BLIT_POINTER_TARGET_PORT', '19256')))
 base = URI("http://127.0.0.1:#{port}")
-log = "/tmp/blit-pointer-target-#{Process.pid}.log"
+log = "#{Dir.tmpdir}/blit-pointer-target-#{Process.pid}.log"
 pid = gate_spawn({**gate_display_env,
                      
                      },

@@ -38,7 +38,7 @@ test -f "$comp_new" || fail "no $comp_new beside $blit_new"
 old=${version%-1}-0
 [ "$old" != "$version" ] || fail "version $version does not end in -1"
 
-work=$(mktemp -d /tmp/blit-update-pair.XXXXXX)
+work=$(mktemp -d "${TMPDIR:-/tmp}/blit-update-pair.XXXXXX")
 socket=$work/update.sock
 helper=$work/blit-update-helper
 helper_pid=

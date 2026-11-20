@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 # Schema/API regression gate for runtime font selection and logical scaling.
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'timeout'
@@ -12,7 +13,7 @@ port = gate_port(Integer(ENV.fetch('BLIT_FONT_API_PORT','18995')))
 # console fonts this used to find installed on the host are retired.
 env = TestProfile.environment.merge('BLIT_FONT_ROOT' => File.expand_path('../../assets/fonts', __dir__))
 pid = gate_spawn(env, TestProfile.binary, port.to_s,
-                    out: "/tmp/blit-font-api-gate-#{Process.pid}.log", err: [:child, :out])
+                    out: "#{Dir.tmpdir}/blit-font-api-gate-#{Process.pid}.log", err: [:child, :out])
 at_exit do
   Process.kill('TERM', pid) rescue nil
   Process.wait(pid) rescue nil

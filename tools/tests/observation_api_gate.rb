@@ -5,6 +5,7 @@
 # aggregate: it must be valid JSON, contain every declared state plane, and
 # agree with the focused identity/session resources it composes.
 
+require 'tmpdir'
 require 'json'
 require 'net/http'
 require 'timeout'
@@ -58,7 +59,7 @@ server = gate_spawn({
   'BLIT_LOGIN_AUTOSTART' => '0',
   'BLIT_EXPECT_DESKTOP' => '0',
   'BLIT_PSF_FONT' => FONT,
-}, BINARY, PORT.to_s, out: "/tmp/blit-observation-api-gate-#{Process.pid}.log", err: [:child, :out])
+}, BINARY, PORT.to_s, out: "#{Dir.tmpdir}/blit-observation-api-gate-#{Process.pid}.log", err: [:child, :out])
 
 at_exit do
   Process.kill('TERM', server) rescue nil
