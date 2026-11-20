@@ -80,6 +80,12 @@ const BlitFontGrid *blit_raster_master(const BlitRaster *raster, int *crisp);
 /* pen: the cell's icon pen (above); an unknown pen returns 0. */
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterIconPen pen, BlitRasterGlyph *glyph);
+/* ADR 0240: the glyph a bold cell draws, before the renderer's one-pixel
+   overstrike. The regular glyph, except one whose ink reaches its last
+   column, which comes narrowed by a column so the overstrike keeps its
+   shape. bold 0 is blit_raster_get. */
+int blit_raster_get_styled(BlitRaster *raster, uint32_t scalar, int columns,
+                           BlitRasterIconPen pen, int bold, BlitRasterGlyph *glyph);
 /* ADR 0211, 0212: a pen-drawn glyph's plane for one pen (1 FG, 2 LINE, 3 MIX,
    as blit_window_glyphs.h numbers them), coverage, one cell: a Slate window
    glyph, or a Slate or capsule control. */
@@ -90,6 +96,8 @@ int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
    terminal input or choose a cluster's column allocation. */
 int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
                             BlitRasterGlyph *glyph);
+int blit_raster_get_cluster_styled(BlitRaster *raster, const BlitCellCluster *cluster,
+                                   int bold, BlitRasterGlyph *glyph);
 size_t blit_raster_cached_bytes(const BlitRaster *raster);
 unsigned long blit_raster_render_count(const BlitRaster *raster);
 /* The glyph cache's hits and misses since the raster was made. */

@@ -282,7 +282,7 @@ static const KmsSprite *kms_sprite(BlitKms *kms, KmsGlesResources *r,
     if (!key.plane && !key.count && font && font->raster_get && font->raster_cell_width > 0) {
         BlitRasterGlyph glyph;
         if (font->raster_get(font->raster_state, cp, width > font->raster_cell_width ? 2 : 1,
-                             key.pen, &glyph) &&
+                             key.pen, bold, &glyph) &&
             glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED)
             premultiplied = 1;
     }

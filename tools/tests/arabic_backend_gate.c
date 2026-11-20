@@ -37,7 +37,7 @@ static void paint_reference(int cursor)
         BlitCellCluster key;
         BlitRasterGlyph g;
         CHECK(blit_cell_cluster_init(&key,cps[row][col],marks[row][col],counts[row][col],1));
-        CHECK(font->raster_cluster_get(font->raster_state,&key,&g));
+        CHECK(font->raster_cluster_get(font->raster_state,&key,0,&g));
         for(y=0;y<g.height;++y) for(x=0;x<g.width;++x) {
             int dx=ox+col*cw+g.ink_offset_x+x;
             int dy=oy+row*ch+g.ink_offset_y+y;

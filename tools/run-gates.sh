@@ -498,6 +498,7 @@ suite_font() {
         "${BLIT_GATE_COLOUR:-$ROOT/assets/fonts/NotoColorEmoji.ttf}"
     run_gate font_icon_colour_settings_gate.rb ruby tools/tests/font_icon_colour_settings_gate.rb
     run_gate font_kms_raster sh tools/tests/font_backend_raster_gate.sh
+    run_gate bold_shape sh tools/tests/bold_shape_gate.sh
     run_gate retro_outline_raster sh tools/tests/font_raster_gate.sh \
         "$FONT" "$ROOT/assets/fonts/text/3270-Regular.ttf" \
         "$ROOT/assets/fonts/NotoColorEmoji.ttf" 20

@@ -1564,15 +1564,85 @@ static unsigned colour_cluster_glyph(BlitRaster *raster, const BlitCellCluster *
    glyph the pen is not looked at, so text, chrome and emoji never fragment. */
 #define RASTER_PEN_SHIFT 21
 
+/* RASTER_WAYS bounded full-key comparisons; collisions may coexist. Ages are
+   per-set ranks, not an ever-growing clock. A miss leaves the set alone. */
+static int cache_hit(BlitRaster *raster, const BlitCellCluster *key, BlitRasterGlyph *glyph)
+{
+    unsigned slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS), way;
+    RasterEntry *set = &raster->cache[slot * RASTER_WAYS];
+    for (way = 0; way < RASTER_WAYS; ++way) {
+        RasterEntry *entry = &set[way];
+        if (entry->valid && blit_cell_cluster_equal(&entry->key, key)) {
+            unsigned previous_age = entry->age, other;
+            for (other = 0; other < RASTER_WAYS; ++other)
+                if (set[other].valid && set[other].age < previous_age)
+                    ++set[other].age;
+            entry->age = 0;
+            *glyph = entry->glyph;
+            ++raster->hits;
+            return 1;
+        }
+    }
+    ++raster->misses;
+    return 0;
+}
+
+/* Keep a made glyph (its pixels pass to the cache, or are freed on
+   failure) in its key's set, in place of that set's oldest. */
+static int cache_store(BlitRaster *raster, RasterEntry *made, BlitRasterGlyph *glyph)
+{
+    unsigned slot = (unsigned)(blit_cell_cluster_hash(&made->key) % RASTER_SETS);
+    RasterEntry *set = &raster->cache[slot * RASTER_WAYS], *entry;
+    unsigned way, chosen = 0;
+    size_t bytes = (size_t)made->glyph.stride * made->glyph.height, old_bytes;
+    if (bytes > RASTER_MAX_BYTES) { free(made->pixels); return 0; }
+    for (way = 0; way < RASTER_WAYS; ++way) {
+        if (!set[way].valid) { chosen = way; break; }
+        if (set[way].age > set[chosen].age) chosen = way;
+    }
+    entry = &set[chosen];
+    old_bytes = entry->valid ? (size_t)entry->glyph.stride * entry->glyph.height : 0;
+    /* Only after a successful raster: reclaim resident pixels round-robin
+       across sets when larger glyphs exhaust the byte budget. Never reject
+       a supported glyph merely because other cached glyphs occupy it. */
+    while (raster->bytes - old_bytes + bytes > RASTER_MAX_BYTES) {
+        unsigned victim_slot = raster->reclaim_slot;
+        RasterEntry *victim = &raster->cache[victim_slot];
+        raster->reclaim_slot = (victim_slot + 1) % RASTER_SLOTS;
+        if (victim != entry && victim->valid) {
+            unsigned other, start = victim_slot / RASTER_WAYS * RASTER_WAYS;
+            for (other = start; other < start + RASTER_WAYS; ++other)
+                if (raster->cache[other].valid && raster->cache[other].age > victim->age)
+                    --raster->cache[other].age;
+            raster->bytes -= (size_t)victim->glyph.stride * victim->glyph.height;
+            free(victim->pixels);
+            memset(victim, 0, sizeof(*victim));
+        }
+    }
+    made->valid = 1;
+    made->age = 0;
+    made->glyph.pixels = made->pixels;
+    for (way = 0; way < RASTER_WAYS; ++way)
+        if (way != chosen && set[way].valid) ++set[way].age;
+    free(entry->pixels);
+    *entry = *made;
+    raster->bytes = raster->bytes - old_bytes + bytes;
+    ++raster->renders;
+    *glyph = entry->glyph;
+    return 1;
+}
+
+static int raster_get_bold_key(BlitRaster *raster, const BlitCellCluster *lookup,
+                               BlitRasterIconPen pen, BlitRasterGlyph *glyph);
+
 static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
                           BlitRasterIconPen pen, BlitRasterGlyph *glyph)
 {
-    RasterEntry next, *entry;
+    RasterEntry next;
     BlitCellCluster pen_key;
     const BlitCellCluster *key = lookup;
-    size_t bytes, old_bytes;
-    unsigned slot, way, chosen = 0, colour_index = 0;
-    RasterEntry *set;
+    size_t bytes;
+    unsigned colour_index = 0;
     uint32_t scalar = key->scalars[0];
     int columns = key->columns;
     int arabic = raster->arabic && arabic_scalar(scalar);
@@ -1599,29 +1669,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
         pen_key.scalars[0] |= (uint32_t)icon_pen << RASTER_PEN_SHIFT;
         key = &pen_key;
     }
-    slot = (unsigned)(blit_cell_cluster_hash(key) % RASTER_SETS);
-    set = &raster->cache[slot * RASTER_WAYS];
-    /* RASTER_WAYS bounded full-key comparisons; collisions may coexist. Ages are
-       per-set ranks, not an ever-growing clock. Failure leaves the set alone. */
-    for (way = 0; way < RASTER_WAYS; ++way) {
-        entry = &set[way];
-        if (entry->valid && blit_cell_cluster_equal(&entry->key, key)) {
-            unsigned previous_age = entry->age, other;
-            for (other = 0; other < RASTER_WAYS; ++other)
-                if (set[other].valid && set[other].age < previous_age)
-                    ++set[other].age;
-            entry->age = 0;
-            *glyph = entry->glyph;
-            ++raster->hits;
-            return 1;
-        }
-    }
-    ++raster->misses;
-    for (way = 0; way < RASTER_WAYS; ++way) {
-        if (!set[way].valid) { chosen = way; break; }
-        if (set[way].age > set[chosen].age) chosen = way;
-    }
-    entry = &set[chosen];
+    if (cache_hit(raster, key, glyph)) return 1;
     memset(&next, 0, sizeof(next));
     next.key = *key;
     next.glyph.width = raster->width * columns;
@@ -1652,7 +1700,6 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
         colour_index = FT_Get_Char_Index(raster->colour, scalar);
     next.glyph.stride = next.glyph.width * (int)next.glyph.format;
     bytes = (size_t)next.glyph.stride * next.glyph.height;
-    old_bytes = entry->valid ? (size_t)entry->glyph.stride * entry->glyph.height : 0;
     if (bytes > RASTER_MAX_BYTES) return 0;
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
@@ -1715,34 +1762,19 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
                     fallback_coverage(font, index, scalar, x, y,
                         next.glyph.width, next.glyph.height, raster->outline != NULL);
     }
-    bytes = (size_t)next.glyph.stride * next.glyph.height;
-    if (bytes > RASTER_MAX_BYTES) { free(next.pixels); return 0; }
-    /* Only after a successful raster: reclaim resident pixels round-robin
-       across sets when larger glyphs exhaust the byte budget. Never reject
-       a supported glyph merely because other cached glyphs occupy it. */
-    while (raster->bytes - old_bytes + bytes > RASTER_MAX_BYTES) {
-        unsigned victim_slot = raster->reclaim_slot;
-        RasterEntry *victim = &raster->cache[victim_slot];
-        raster->reclaim_slot = (victim_slot + 1) % RASTER_SLOTS;
-        if (victim != entry && victim->valid) {
-            unsigned other, start = victim_slot / RASTER_WAYS * RASTER_WAYS;
-            for (other = start; other < start + RASTER_WAYS; ++other)
-                if (raster->cache[other].valid && raster->cache[other].age > victim->age)
-                    --raster->cache[other].age;
-            raster->bytes -= (size_t)victim->glyph.stride * victim->glyph.height;
-            free(victim->pixels);
-            memset(victim, 0, sizeof(*victim));
-        }
-    }
-    next.valid = 1;
-    for (way = 0; way < RASTER_WAYS; ++way)
-        if (way != chosen && set[way].valid) ++set[way].age;
-    free(entry->pixels);
-    *entry = next;
-    raster->bytes = raster->bytes - old_bytes + bytes;
-    ++raster->renders;
-    *glyph = entry->glyph;
-    return 1;
+    return cache_store(raster, &next, glyph);
+}
+
+int blit_raster_get_cluster_styled(BlitRaster *raster, const BlitCellCluster *cluster,
+                                   int bold, BlitRasterGlyph *glyph)
+{
+    BlitCellCluster key;
+    if (!raster || !glyph || !cluster || !cluster->length ||
+        cluster->length > BLIT_CLUSTER_MAX_SCALARS ||
+        !blit_cell_cluster_init(&key, cluster->scalars[0], cluster->scalars + 1,
+                                cluster->length - 1, cluster->columns)) return 0;
+    return bold ? raster_get_bold_key(raster, &key, BLIT_RASTER_ICON_COLOUR, glyph) :
+        raster_get_key(raster, &key, BLIT_RASTER_ICON_COLOUR, glyph);
 }
 
 int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,
@@ -1787,6 +1819,82 @@ int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
     return 1;
 }
 
+/* ADR 0240: bold is the renderer's overstrike, the glyph again one pixel
+   to the right with its last column dropped. A glyph whose ink already
+   reaches its last column has no room for that: the overstrike lands on
+   the soft edge and flattens it (Hack's full-width U+25CF became a D).
+   Such a shape's bold form is the same glyph narrowed by area into one
+   column less, so the overstrike brings it back to its own width and shape. Only shapes
+   and symbols (arrows to the symbol blocks, U+2190-2BFF, and the bullets):
+   text keeps the plain overstrike, whose stems stay whole pixels where a
+   narrowed letter's would not (FreeType does not hint x). Cell geometry (box drawing, blocks, braille, Powerline, window
+   chrome, bar corners) is meant to meet its neighbours, and Blit's icons
+   span cells; they, colour glyphs, Arabic (its ink may leave the cell) and
+   any glyph with room keep their regular form, so every other bold cell
+   is exactly as before. */
+#define RASTER_BOLD_BIT (1U << 23)
+#define RASTER_BOLD_EDGE 64
+
+static int bold_needs_room(const BlitRaster *raster, const BlitCellCluster *key,
+                           const BlitRasterGlyph *g)
+{
+    uint32_t scalar = key->scalars[0];
+    int y;
+    if (!((scalar >= 0x2190 && scalar <= 0x2bff) || scalar == 0x2022 ||
+          scalar == 0x2023 || scalar == 0x2043)) return 0;
+    if (g->format != BLIT_RASTER_COVERAGE || g->width < 4 || g->ink_offset_x ||
+        g->ink_offset_y || protected_geometry(scalar) || invisible_format(scalar) ||
+        bar_corner(scalar) || blit_chrome_glyph(scalar) ||
+        (raster->arabic && arabic_scalar(scalar)) ||
+        scalar >= 0x100000 || scalar == 0x270e) return 0;
+    for (y = 0; y < g->height; ++y)
+        if (g->pixels[y * g->stride + g->width - 1] >= RASTER_BOLD_EDGE) return 1;
+    return 0;
+}
+
+static int raster_get_bold_key(BlitRaster *raster, const BlitCellCluster *lookup,
+                               BlitRasterIconPen pen, BlitRasterGlyph *glyph)
+{
+    BlitRasterGlyph regular;
+    RasterEntry made;
+    int x, y, narrow;
+    if (!raster_get_key(raster, lookup, pen, &regular)) return 0;
+    if (!bold_needs_room(raster, lookup, &regular)) { *glyph = regular; return 1; }
+    memset(&made, 0, sizeof(made));
+    made.key = *lookup;
+    made.key.scalars[0] |= RASTER_BOLD_BIT;
+    if (cache_hit(raster, &made.key, glyph)) return 1;
+    made.glyph = regular;
+    made.pixels = calloc(1, (size_t)regular.stride * regular.height);
+    if (!made.pixels) return 0;
+    narrow = regular.width - 1;
+    /* Narrowed by area: a shape has no stems to keep on whole pixels, and
+       an outline drawn narrower leaned under light hinting. Read before
+       cache_store: the regular entry may be the one it replaces. */
+    for (y = 0; y < regular.height; ++y)
+        for (x = 0; x < narrow; ++x) {
+            /* Output column x covers source [x*w/n, (x+1)*w/n), in units of 1/n. */
+            long from = (long)x * regular.width, to = (long)(x + 1) * regular.width, sum = 0, at;
+            for (at = from / narrow; at < regular.width && at * narrow < to; ++at) {
+                long lo = at * narrow > from ? at * narrow : from;
+                long hi = (at + 1) * narrow < to ? (at + 1) * narrow : to;
+                if (hi > lo) sum += (hi - lo) * regular.pixels[y * regular.stride + at];
+            }
+            made.pixels[y * regular.stride + x] = (unsigned char)((sum + regular.width / 2) / regular.width);
+        }
+    return cache_store(raster, &made, glyph);
+}
+
+int blit_raster_get_styled(BlitRaster *raster, uint32_t scalar, int columns,
+                           BlitRasterIconPen pen, int bold, BlitRasterGlyph *glyph)
+{
+    BlitCellCluster key;
+    if (!raster || !glyph || pen < BLIT_RASTER_ICON_COLOUR || pen > BLIT_RASTER_ICON_WHITE ||
+        !blit_cell_cluster_init(&key, scalar, NULL, 0, columns)) return 0;
+    return bold ? raster_get_bold_key(raster, &key, pen, glyph) :
+        raster_get_key(raster, &key, pen, glyph);
+}
+
 int blit_raster_get(BlitRaster *raster, uint32_t scalar, int columns,
                     BlitRasterIconPen pen, BlitRasterGlyph *glyph)
 {
@@ -1820,17 +1928,17 @@ int blit_raster_baseline(const BlitRaster *raster)
 unsigned long blit_raster_render_count(const BlitRaster *raster)
 { return raster ? raster->renders : 0; }
 
-static int attached_get(void *state, uint32_t scalar, int columns, int pen,
+static int attached_get(void *state, uint32_t scalar, int columns, int pen, int bold,
                          BlitRasterGlyph *glyph)
-{ return blit_raster_get((BlitRaster *)state, scalar, columns, (BlitRasterIconPen)pen, glyph); }
+{ return blit_raster_get_styled((BlitRaster *)state, scalar, columns, (BlitRasterIconPen)pen, bold, glyph); }
 static int attached_plane_get(void *state, uint32_t scalar, int plane,
                               BlitRasterGlyph *glyph)
 { return blit_raster_get_window_plane((BlitRaster *)state, scalar, plane, glyph); }
 static void attached_free(void *state)
 { blit_raster_close((BlitRaster *)state); }
-static int attached_cluster_get(void *state, const BlitCellCluster *key,
+static int attached_cluster_get(void *state, const BlitCellCluster *key, int bold,
                                  BlitRasterGlyph *glyph)
-{ return blit_raster_get_cluster((BlitRaster *)state, key, glyph); }
+{ return blit_raster_get_cluster_styled((BlitRaster *)state, key, bold, glyph); }
 void blit_raster_attach(BlitFont *font, BlitRaster *raster)
 {
     if (font->raster_state && font->raster_free)

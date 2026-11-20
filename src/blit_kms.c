@@ -1004,9 +1004,11 @@ static void draw_cell_raster(KmsOutput *output, const BlitFont *font,
     }
 }
 
+/* `bold` asks the raster for the glyph a bold cell draws (ADR 0240); the
+   overstrike itself is the caller's second draw, one pixel right. */
 static void draw_glyph(KmsOutput *output, const BlitFont *font,
                        uint32_t codepoint, int x, int y, int cw, int ch,
-                       uint32_t color, int lean, int trim, int pen)
+                       uint32_t color, int lean, int trim, int pen, int bold)
 {
     int glyph_row;
     int glyph_column;
@@ -1016,7 +1018,7 @@ static void draw_glyph(KmsOutput *output, const BlitFont *font,
     if (font && font->raster_get && font->raster_blend) {
         BlitRasterGlyph raster;
         int columns = cw > font->raster_cell_width ? 2 : 1;
-        if (font->raster_get(font->raster_state, codepoint, columns, pen, &raster)) {
+        if (font->raster_get(font->raster_state, codepoint, columns, pen, bold, &raster)) {
             draw_cell_raster(output, font, &raster, x, y, cw, ch, color, lean, trim);
             return;
         }
@@ -1083,7 +1085,7 @@ static void draw_window_cell(KmsOutput *output, const BlitFont *font, uint32_t c
     BlitRasterGlyph raster;
     int i;
     if (!font || !font->raster_plane_get || !font->raster_blend) {
-        draw_glyph(output, font, cp, x, y, cw, ch, pens->fg, 0, 0, 0);
+        draw_glyph(output, font, cp, x, y, cw, ch, pens->fg, 0, 0, 0, 0);
         return;
     }
     for (i = 0; i < 3; ++i)
@@ -1131,15 +1133,15 @@ static void draw_cell_glyphs(KmsOutput *output, const BlitFont *font,
     if (count && font && font->raster_cluster_get && font->raster_blend &&
         blit_cell_cluster_init(&key, cp, marks, count,
                                cw > font->raster_cell_width ? 2 : 1) &&
-        font->raster_cluster_get(font->raster_state, &key, &raster)) {
+        font->raster_cluster_get(font->raster_state, &key, bold, &raster)) {
         draw_cell_raster(output, font, &raster, x, y, cw, ch, fg, lean, 0);
         if (bold) draw_cell_raster(output, font, &raster, x + 1, y, cw, ch, fg, lean, 1);
         return;
     }
-    draw_glyph(output, glyph_font, cp, x, y, cw, ch, fg, lean, 0, pen);
-    if (bold) draw_glyph(output, glyph_font, cp, x + 1, y, cw, ch, fg, lean, 1, pen);
+    draw_glyph(output, glyph_font, cp, x, y, cw, ch, fg, lean, 0, pen, bold);
+    if (bold) draw_glyph(output, glyph_font, cp, x + 1, y, cw, ch, fg, lean, 1, pen, 1);
     if (marks) for (i = 0; i < count && i < BLIT_MAX_COMBINING; ++i)
-        draw_glyph(output, font, marks[i], x, y, cw, ch, fg, lean, 0, 0);
+        draw_glyph(output, font, marks[i], x, y, cw, ch, fg, lean, 0, 0, 0);
 }
 
 #define KMS_GRAPHICS_Z_UNDER_BACKGROUND (-1073741824)

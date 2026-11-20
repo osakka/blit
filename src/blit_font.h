@@ -28,8 +28,9 @@ typedef struct BlitFont {
        loader and standalone legacy KMS gates independent of FreeType. */
     void *raster_state;
     /* scalar, columns, the cell's icon pen (ADR 0221: BlitRasterIconPen), glyph. */
-    int (*raster_get)(void *, uint32_t, int, int, struct BlitRasterGlyph *);
-    int (*raster_cluster_get)(void *, const BlitCellCluster *, struct BlitRasterGlyph *);
+    /* scalar, columns, icon pen, bold (ADR 0240), glyph */
+    int (*raster_get)(void *, uint32_t, int, int, int, struct BlitRasterGlyph *);
+    int (*raster_cluster_get)(void *, const BlitCellCluster *, int, struct BlitRasterGlyph *);
     /* ADR 0211: one pen's plane of a Slate window glyph. */
     int (*raster_plane_get)(void *, uint32_t, int, struct BlitRasterGlyph *);
     void (*raster_free)(void *);

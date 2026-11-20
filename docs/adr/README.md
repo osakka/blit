@@ -265,6 +265,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0237 — Player glyphs -- LCD digits, LED meters, sliders, transport, discs](0237-player-glyphs.md)
 - [0238 — TCC compiles, the system linker links, and Blit writes its own crash backtrace](0238-tcc-compiles-the-system-linker-links.md)
 - [0239 — Control strings are read by character, C1 is one control raw or encoded, and CAN/SUB end a string](0239-control-strings-read-by-character.md)
+- [0240 — Bold keeps the shape of a glyph that fills its cell](0240-bold-keeps-a-cell-filling-glyphs-shape.md)
 
 ## Status
 
