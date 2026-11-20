@@ -1117,11 +1117,17 @@ cells = cell_map(snapshot)
 assert_equal(%w[bar bar thin], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
              'SGR 51:2 is the Slate bar, 51:4 its old alias (ADR 0211), and 51 replaces them')
 raise 'SGR 54 left d framed' if cells.fetch([3, 0]).key?('style')
-snapshot = run_case(base, 'framed-rule-sgr', "printf '\\033[51:5ma\\033[51:7mb\\033[51:5mc\\033[54md'")
+snapshot = run_case(base, 'framed-rule-sgr', "printf '\\033[51:5ma\\033[51:9mb\\033[51:5mc\\033[54md'")
 cells = cell_map(snapshot)
 assert_equal(%w[rule thin rule], [0, 1, 2].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
-             'SGR 51:5 is the bottom rule, and an unknown sub-parameter is plain 51')
+             'SGR 51:5 is the bottom rule, and an unknown sub-parameter (51:9) is plain 51')
 raise 'SGR 54 left d ruled' if cells.fetch([3, 0]).key?('style')
+# ADR 0237: 51:6 and 51:7 are a key's raised and pressed bevel.
+snapshot = run_case(base, 'framed-key-sgr', "printf '\\033[51:6ma\\033[51:7mb\\033[54mc'")
+cells = cell_map(snapshot)
+assert_equal(%w[raised pressed], [0, 1].map { |x| cells.fetch([x, 0]).fetch('style').fetch('framed') },
+             'SGR 51:6 is a raised key, 51:7 a pressed one')
+raise 'SGR 54 left c keyed' if cells.fetch([2, 0]).key?('style')
 
 # Framed survives what other attributes survive: scrolling into scrollback
 # and back, and the scrollback view.
