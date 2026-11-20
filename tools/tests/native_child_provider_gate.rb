@@ -26,12 +26,22 @@ Dir.mktmpdir('blit-child-provider') do |home|
   end
   # Use a fixture session entrypoint, not a second desktop or startup engine.
   fixture=File.join(home,'session.hibr')
-  File.write(fixture,'printf "RC=%s;PROVIDER=%s\\n" "${HIBR_RC-unset}" "$BLIT_HIBR_PROVIDER"')
+  File.write(fixture,'printf "RC=%s;PROVIDER=%s;TERMMS=%s\\n" "${HIBR_RC-unset}" "$BLIT_HIBR_PROVIDER" "${DT_TERMMS-unset}"')
   [nil,rc].each do |explicit|
     out,err,status=Open3.capture3(env.merge('HIBR_RC'=>explicit,'BLIT_HIBR_PROVIDER'=>'terminal',
       'BLIT_HIBR_DESKTOP_SESSION'=>fixture),'/usr/bin/hibr',launcher)
     raise "launcher failed: #{err}" unless status.success?
     raise "native launcher injected/changed RC: #{out}" unless out.include?("RC=#{explicit || 'unset'};PROVIDER=terminal")
   end
+  # Gitea #164: DT_TERMMS is Hibr's setting (Control Panel > Desktop > Frames
+  # For Output, ADR 0229): the launcher leaves it alone -- unset stays unset,
+  # so Hibr's default and the person's saved value apply, and a caller's
+  # value reaches the desktop unchanged.
+  [[nil,'unset'],['33','33']].each do |given,want|
+    out,err,status=Open3.capture3(env.merge('BLIT_HIBR_PROVIDER'=>'terminal','DT_TERMMS'=>given,
+      'BLIT_HIBR_DESKTOP_SESSION'=>fixture),'/usr/bin/hibr',launcher)
+    raise "launcher failed: #{err}" unless status.success?
+    raise "launcher changed DT_TERMMS (given #{given.inspect}): #{out}" unless out.include?("TERMMS=#{want}")
+  end
 end
-puts 'NATIVE_CHILD_PROVIDER_PASS native=console stale_rc=safe explicit_api=console_blit user_rc=preserved'
+puts 'NATIVE_CHILD_PROVIDER_PASS native=console stale_rc=safe explicit_api=console_blit user_rc=preserved termms=hibr_owned'

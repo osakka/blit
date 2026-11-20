@@ -122,8 +122,9 @@ screen and leaves no such entry.
   they are unset, because the login boundary starts the desktop with a clean
   environment; without them Hibr falls back to half-block wallpaper
   ([ADR 0097](adr/0097-reassert-hibr-terminal-contract-after-login.md)).
-- It sets `DT_TERMMS=0` unless the caller set it: Blit already paces
-  redraws to the display, so Hibr's 70 ms throttle is not needed.
+- It leaves `DT_TERMMS` alone: how far apart Hibr holds frames woken by
+  program output is Hibr's own setting (Control Panel > Desktop > Frames
+  For Output), and a caller's value passes through unchanged (Gitea #164).
 - For a join with `BLIT_HIBR_PANE_ROW` and `BLIT_HIBR_PANE_COL`, it runs
   `hold attach` at those coordinates and never moves the primary.
 

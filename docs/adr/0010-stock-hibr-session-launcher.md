@@ -1,6 +1,11 @@
 # ADR 0010: Launch the stock Hibr session in one module-owning process
 
 - Status: accepted
+- Note: The `DT_TERMMS` default of 0 below was removed in 0.3.128 (Gitea
+  #164). It stopped reaching the desktop on 2026-10-16, when the default path
+  began to `exec` Hibr without exporting it, and Hibr has since made the
+  value its own Control Panel setting with a measured default (70 ms; ADR
+  0229: one owner per concern).
 - Note: production-path wording amended by ADR 0069
 - Date: 2026-10-07
 

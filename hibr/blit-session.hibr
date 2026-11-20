@@ -115,11 +115,9 @@ fi
 if [ "$provider" = "api" ] && [ "$blit_join" = 0 ]; then
 	console open || exit 1
 fi
-# Hibr's stock desktop defaults DT_TERMMS to 70 ms, which is suitable for a
-# local terminal but caps program-driven redraws below a display refresh.
-# Blit's scheduler already applies the display's refresh interval, so remove
-# that second throttle by default while preserving an explicit caller choice.
-DT_TERMMS=${DT_TERMMS-0}
+# DT_TERMMS (how far apart frames woken by program output are held) is
+# Hibr's own setting, Control Panel > Desktop > Frames For Output, with a
+# measured default; Blit leaves it alone (Gitea #164, ADR 0229).
 if [ "$provider" = "terminal" ]; then
 	exec "$HIBR" "$desktop" "$@"
 fi
