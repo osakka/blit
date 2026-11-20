@@ -1944,6 +1944,65 @@ run_session_field_case(base, 'osc-title-bel', "printf '\\033]0;bel title\\007'",
 run_session_field_case(base, 'osc-title-st',
                "printf '\\033]2;st title\\033'; printf '\\\\'",
                'title', 'st title')
+# A UTF-8 string control: a byte 0x9C inside a character (东 is E4 B8 9C)
+# is part of it, not ST. Only a 0x9C where a character would start is.
+run_session_field_case(base, 'osc-title-utf8-9c',
+                       "printf '\\033]2;\\344\\270\\234\\344\\272\\254 \\304\\234\\007'",
+                       'title', "\u4e1c\u4eac \u011c")
+# Gitea #178: every C1 control works UTF-8 encoded as it does raw -- ST
+# (U+009C) ends a string, SS2 (U+008E) and SS3 (U+008F) shift one character.
+run_session_field_case(base, 'osc-title-utf8-st',
+                       "printf '\\033]2;utf8 st\\302\\234'",
+                       'title', 'utf8 st')
+snapshot = run_case(base, 'utf8-c1-ss2-ss3',
+                    "printf '\\033*0\\302\\216q\\033+0\\302\\217qq'")
+assert_equal("\u2500\u2500q", row_text(snapshot)[0, 3],
+             'UTF-8 encoded SS2 and SS3 shift one character each, as raw ones do')
+# Gitea #179: CAN and SUB end a control string without acting on it (VT100,
+# ECMA-48): the title stays as it was, and what follows is text.
+run_session_field_case(base, 'osc-title-can',
+                       "printf '\\033]2;kept\\007\\033]2;lost\\030\\007'",
+                       'title', 'kept')
+snapshot = run_case(base, 'osc-sub-then-text', "printf '\\033]2;lost\\032text'")
+assert_equal('text', row_text(snapshot)[0, 4], 'SUB ends an OSC and what follows is text')
+# Gitea #178: each of the 13 C1 controls docs/terminal.md lists does the same
+# raw as UTF-8 encoded. One scene per control, written both ways; the screens
+# must match, and the scene must show the control acted (it differs from the
+# same text with the control left out).
+c1_scenes = {
+  0x84 => ['A', 'B'], 0x85 => ['A', 'B'], 0x88 => ['  ', "\\r\\tX"],
+  0x8d => ["\\n\\nA", 'B'],
+  0x8e => ["\\033*0", 'qq'], 0x8f => ["\\033+0", 'qq'],
+  0x9b => ['', '2;3HX'],
+  0x90 => ['', "\\$q\\\"p\\033\\\\X"], 0x98 => ['', "hidden\\033\\\\X"],
+  0x9d => ['', "2;t\\007X"], 0x9e => ['', "hidden\\033\\\\X"], 0x9f => ['', "hidden\\033\\\\X"],
+  0x9c => ['A', 'B']
+}
+c1_scenes.each do |code, (before, after)|
+  raw = format('\\%03o', code)
+  utf8 = format('\\302\\%03o', code)
+  # Where each character is, not only what: IND moves B down a row.
+  placed = ->(snap) { cell_map(snap).select { |_, c| c.fetch('text') != ' ' && !c.fetch('text').empty? }.map { |k, c| [k, c.fetch('text')] }.sort }
+  shown = ->(c1) { placed.call(run_case(base, format('c1-%02x', code), "printf '#{before}#{c1}#{after}'", width: 12, height: 4)) }
+  raw_screen = shown.call(raw)
+  assert_equal(raw_screen, shown.call(utf8), format('C1 0x%02X raw and UTF-8 encoded', code))
+  next if code == 0x9c # ST with no string open does nothing, by design
+  check_differs = placed.call(run_case(base, format('c1-%02x-none', code), "printf '#{before}#{after}'", width: 12, height: 4))
+  raise format('C1 0x%02X did nothing: %p', code, raw_screen) if raw_screen == check_differs
+end
+# Gitea #181: a character split across reads, inside a string. 东 written a
+# byte at a time, and a UTF-8 encoded ST split between its two bytes.
+run_session_field_case(base, 'osc-title-split-read',
+                       "printf '\\033]2;\\344'; sleep 0.05; printf '\\270'; sleep 0.05; printf '\\234!\\007'",
+                       'title', "\u4e1c!")
+# The title field holds 127 bytes: a longer title is cut at a character
+# boundary, never inside 东 (126 ASCII bytes and then E4 B8 9C).
+run_session_field_case(base, 'osc-title-cut-at-character',
+                       "printf '\\033]2;#{'a' * 126}\\344\\270\\234\\007'",
+                       'title', 'a' * 126)
+run_session_field_case(base, 'osc-title-split-st',
+                       "printf '\\033]2;split\\302'; sleep 0.05; printf '\\234'",
+                       'title', 'split')
 run_session_field_case(base, 'osc-clipboard-set',
                        "printf '\\033]52;c;SGVsbG8=\\007'",
                        'clipboard', 'c;SGVsbG8=')

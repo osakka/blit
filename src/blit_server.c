@@ -10815,8 +10815,23 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
     command = atoi(session->terminal_string);
     payload = separator + 1;
     if (command == 0 || command == 1 || command == 2) {
+        size_t kept, last;
+        size_t consumed;
+        uint32_t codepoint;
         snprintf(session->terminal_title, sizeof(session->terminal_title),
                  "%s", payload);
+        /* A title longer than the field is cut at a character boundary,
+           never inside one: the API returns it as JSON text. */
+        kept = strlen(session->terminal_title);
+        if (kept < strlen(payload)) {
+            last = kept;
+            while (last > 0 && ((unsigned char)session->terminal_title[last - 1] & 0xc0) == 0x80)
+                --last;
+            if (last > 0 && (unsigned char)session->terminal_title[last - 1] >= 0xc0 &&
+                !utf8_decode((const unsigned char *)session->terminal_title + last - 1,
+                             kept - (last - 1), &consumed, &codepoint))
+                session->terminal_title[last - 1] = '\0';
+        }
     } else if (command == 22) {
         terminal_apply_pointer_shape(session, payload);
     } else if (command == 4) {
@@ -15179,10 +15194,25 @@ static int terminal_extend_emoji(BlitSession *session, BlitSurface *surface,
     return 1;
 }
 
+/* The C1 controls the parser acts on (docs/terminal.md): IND, NEL, HTS,
+   RI, SS2, SS3, DCS, SOS, CSI, ST, OSC, PM, APC. ST outside a string is
+   read and dropped. */
+static int terminal_c1_known(unsigned char c)
+{
+    switch (c) {
+    case 0x84: case 0x85: case 0x88: case 0x8d: case 0x8e: case 0x8f:
+    case 0x90: case 0x98: case 0x9b: case 0x9c: case 0x9d: case 0x9e: case 0x9f:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                                    BlitSurface *surface,
                                    const unsigned char *data, size_t length)
 {
+    size_t c1_width = 1;
     unsigned char combined[sizeof(session->terminal_utf8_pending) +
                            BLIT_TERMINAL_PARSE_CHUNK_BYTES];
     size_t offset = 0;
@@ -15327,7 +15357,11 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             ++offset;
             continue;
         }
-        if (session->terminal_escape == 3 && byte != 0x1b && byte != 0x9c &&
+        /* The fast path takes exactly the bytes its run takes (plain ASCII
+           data), so a run is never empty: anything else goes to the slow
+           path below, a byte at a time or a character at a time. */
+        if (session->terminal_escape == 3 && byte < 0x80 && byte != 0x1b &&
+            byte != 0x18 && byte != 0x1a &&
             !(byte == '\a' && session->terminal_string_type == ']')) {
             /* The body of a string control (a Kitty image chunk is 4 KB of
                base64) is copied in one run up to its next possible
@@ -15339,15 +15373,15 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             size_t run;
             size_t space = sizeof(session->terminal_string) - 1 -
                 (size_t)session->terminal_string_length;
-            stop = memchr(start, 0x1b, (size_t)(end - start));
-            if (stop == NULL) stop = end;
-            {
-                const unsigned char *st = memchr(start, 0x9c, (size_t)(stop - start));
-                if (st != NULL) stop = st;
-            }
-            if (session->terminal_string_type == ']') {
-                const unsigned char *bell = memchr(start, '\a', (size_t)(stop - start));
-                if (bell != NULL) stop = bell;
+            /* The run is plain ASCII data: it stops at ESC, CAN and SUB
+               (which end a string, Gitea #179), at BEL for an OSC, and at
+               any byte from 0x80, which the slow path below reads as a
+               character (Gitea #181: a 0x9C inside 东, E4 B8 9C, is not ST). */
+            for (stop = start; stop < end; ++stop) {
+                unsigned char b = *stop;
+                if (b >= 0x80 || b == 0x1b || b == 0x18 || b == 0x1a ||
+                    (b == '\a' && session->terminal_string_type == ']'))
+                    break;
             }
             run = (size_t)(stop - data);
             (void)space;
@@ -15356,6 +15390,47 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             continue;
         }
         if (session->terminal_escape == 3) {
+            /* A string body is read a character at a time where it is not
+               ASCII (Gitea #181): ST is U+009C at a character boundary, raw
+               (9C) or UTF-8 encoded (C2 9C); a 9C inside a character is
+               data; an incomplete character waits for the next read, as
+               text does. */
+            if (byte >= 0x80 && byte != 0x9c) {
+                size_t consumed;
+                uint32_t codepoint;
+                if (utf8_decode(data + offset, length - offset, &consumed, &codepoint)) {
+                    if (codepoint == 0x009cU) {
+                        if (session->terminal_string_type == ']')
+                            terminal_apply_osc(session, surface);
+                        else
+                            terminal_apply_string(runtime, session, surface);
+                        terminal_string_reset(session);
+                        session->terminal_escape = 0;
+                    } else {
+                        terminal_string_append(session, data + offset, consumed);
+                    }
+                    offset += consumed;
+                    continue;
+                }
+                if (utf8_prefix_is_incomplete(data + offset, length - offset)) {
+                    size_t pending = length - offset;
+                    memcpy(session->terminal_utf8_pending, data + offset, pending);
+                    session->terminal_utf8_pending_length = (int)pending;
+                    break;
+                }
+                /* Not UTF-8: kept as the byte it is, as before. */
+                terminal_string_append(session, &byte, 1);
+                ++offset;
+                continue;
+            }
+            if (byte == 0x18 || byte == 0x1a) {
+                /* Gitea #179: CAN and SUB end a control string without
+                   acting on it (VT100, ECMA-48); what follows is text. */
+                terminal_string_reset(session);
+                session->terminal_escape = 0;
+                ++offset;
+                continue;
+            }
             if (byte == 0x9c) {
                 if (session->terminal_string_type == ']')
                     terminal_apply_osc(session, surface);
@@ -15375,6 +15450,12 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             continue;
         }
         if (session->terminal_escape == 4) {
+            if (byte == 0x18 || byte == 0x1a) {
+                terminal_string_reset(session);
+                session->terminal_escape = 0;
+                ++offset;
+                continue;
+            }
             if (byte == '\\') {
                 if (session->terminal_string_type == ']')
                     terminal_apply_osc(session, surface);
@@ -15466,6 +15547,18 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             ++offset;
             continue;
         }
+        /* Gitea #178: a C1 control is the same control raw (one byte) or
+           UTF-8 encoded (C2 80..C2 9F): the encoded form is read here as
+           its byte and consumes both, so the one dispatch below serves the
+           two, and neither can drift from the other. A C2 at the end of a
+           read waits with the rest of an incomplete character. */
+        c1_width = 1;
+        if (byte == 0xc2 && offset + 1 < length &&
+            terminal_c1_known(data[offset + 1])) {
+            byte = data[offset + 1];
+            c1_width = 2;
+            session->terminal_cluster_active = 0;
+        }
         if (byte == 0x1b) {
             session->terminal_wrap_pending = 0;
             session->terminal_escape = 1;
@@ -15474,7 +15567,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             session->terminal_wrap_pending = 0;
             session->terminal_escape = 2;
             session->terminal_csi_length = 0;
-            ++offset;
+            offset += c1_width;
         } else if (byte == 0x9d || byte == 0x90 || byte == 0x98 ||
                    byte == 0x9e || byte == 0x9f) {
             session->terminal_wrap_pending = 0;
@@ -15483,7 +15576,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             session->terminal_string_type = byte == 0x9d ? ']' :
                 byte == 0x90 ? 'P' : byte == 0x98 ? 'X' :
                 byte == 0x9e ? '^' : '_';
-            ++offset;
+            offset += c1_width;
         } else if (byte == '\r') {
             mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
             /* CR returns to the left margin when the cursor is inside the
@@ -15529,7 +15622,7 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             /* C1 IND: index without carriage return. */
             terminal_index(session, surface);
             session->terminal_wrap_pending = 0;
-            ++offset;
+            offset += c1_width;
         } else if (byte == 0x85) {
             /* C1 NEL: next line, equivalent to CR followed by IND. */
             mark_cursor_damage(surface, surface->cursor_x,
@@ -15537,23 +15630,26 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
             surface->cursor_x = 0;
             terminal_index(session, surface);
             session->terminal_wrap_pending = 0;
-            ++offset;
+            offset += c1_width;
         } else if (byte == 0x88) {
             /* C1 HTS: set a tab stop at the current column. */
             if (surface->cursor_x >= 0 &&
                 surface->cursor_x < surface->width)
                 surface->tab_stops[surface->cursor_x] = 1;
             session->terminal_wrap_pending = 0;
-            ++offset;
+            offset += c1_width;
         } else if (byte == 0x8d) {
             /* C1 RI: reverse index within the active scroll region. */
             terminal_reverse_index(session, surface);
             session->terminal_wrap_pending = 0;
-            ++offset;
+            offset += c1_width;
         } else if (byte == 0x8e || byte == 0x8f) {
             /* C1 SS2, SS3. */
             session->terminal_charset_single_shift = byte == 0x8e ? 2 : 3;
-            ++offset;
+            offset += c1_width;
+        } else if (byte == 0x9c) {
+            /* C1 ST with no string open: read and dropped. */
+            offset += c1_width;
         } else if (byte >= 0x20) {
             size_t consumed;
             uint32_t codepoint;
@@ -15582,50 +15678,6 @@ static int terminal_consume_chunk(BlitRuntime *runtime, BlitSession *session,
                    canonical surface matches Hibr/xterm/VTE instead of
                    inventing an ASCII question mark. */
                 codepoint = 0xfffdU;
-            } else if (codepoint == 0x009bU) {
-                session->terminal_cluster_active = 0;
-                /* UTF-8 encodes the C1 CSI control as C2 9B.  Hibr emits
-                   controls through the UTF-8 PTY contract, so recognize the
-                   decoded form before treating it as a printable cell. */
-                session->terminal_escape = 2;
-                session->terminal_csi_length = 0;
-                offset += consumed;
-                continue;
-            } else if (codepoint == 0x009dU || codepoint == 0x0090U ||
-                       codepoint == 0x0098U || codepoint == 0x009eU ||
-                       codepoint == 0x009fU) {
-                session->terminal_cluster_active = 0;
-                /* Likewise recognize UTF-8 encoded string-control introducers
-                   (OSC, DCS, SOS, PM, and APC) at the parser boundary. */
-                session->terminal_escape = 3;
-                terminal_string_reset(session);
-                session->terminal_string_type = codepoint == 0x009dU ? ']' :
-                    codepoint == 0x0090U ? 'P' : codepoint == 0x0098U ? 'X' :
-                    codepoint == 0x009eU ? '^' : '_';
-                offset += consumed;
-                continue;
-            } else if (codepoint == 0x0084U || codepoint == 0x0085U ||
-                       codepoint == 0x0088U || codepoint == 0x008dU) {
-                session->terminal_cluster_active = 0;
-                /* The non-string C1 motion controls have the same semantics
-                   whether received as a raw byte or UTF-8 encoded scalar. */
-                if (codepoint == 0x0084U)
-                    terminal_index(session, surface);
-                else if (codepoint == 0x0085U) {
-                    mark_cursor_damage(surface, surface->cursor_x,
-                                       surface->cursor_y);
-                    surface->cursor_x = 0;
-                    terminal_index(session, surface);
-                } else if (codepoint == 0x0088U) {
-                    if (surface->cursor_x >= 0 &&
-                        surface->cursor_x < surface->width)
-                        surface->tab_stops[surface->cursor_x] = 1;
-                } else {
-                    terminal_reverse_index(session, surface);
-                }
-                session->terminal_wrap_pending = 0;
-                offset += consumed;
-                continue;
             } else if (terminal_extend_emoji(session, surface, codepoint)) {
                 offset += consumed;
                 continue;

@@ -31,9 +31,9 @@ Programs started in a session get `TERM=xterm-kitty` and
 | BS, HT, CR | As usual; HT stops at the right margin. |
 | LF, VT, FF | Line feed; also a carriage return when LNM (mode 20) is set. |
 | SO, SI | Invoke G1 / G0. |
-| CAN, SUB | Cancel a sequence in progress. |
+| CAN, SUB | Cancel a sequence in progress: a CSI, an ESC sequence, or a control string (OSC, DCS, APC, SOS, PM), which ends without being acted on ([ADR 0239](adr/0239-control-strings-read-by-character.md)). |
 | BEL, ENQ, NUL, DEL | Ignored: no bell, no answerback. |
-| 8-bit C1 | IND, NEL, HTS, RI, SS2, SS3, DCS, SOS, CSI, ST, OSC, PM, APC (raw or UTF-8 encoded). SOS and PM are read and discarded. |
+| 8-bit C1 | IND, NEL, HTS, RI, SS2, SS3, DCS, SOS, CSI, ST, OSC, PM, APC, raw or UTF-8 encoded alike; inside a control string a 0x9C that is part of a UTF-8 character is text, not ST (ADR 0239). SOS and PM are read and discarded. |
 
 ## Escape sequences
 
