@@ -9,6 +9,43 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-20: 0.3.127 pictures at a pixel size; keys; big discs
+
+- **Kitty placements at a pixel size (#159, for hibr #600):** `W=` and `T=`
+  give a placement's width and height in pixels, both or neither, 1-16384,
+  never with `c`/`r`. kitty_placement_gate covers them.
+- **Keys (ADR 0237):** one-row raised and pressed keys, U+1003D1-1003D4,
+  their ends in the cell's pens, and SGR 51:6/51:7 for the bevel across a
+  key's middle. A pressed key's glyph drops 1 px in both compositors.
+  window_style_gate draws both on the CPU and GLES renderers.
+  terminal_conformance now uses 51:9 as its unknown sub-parameter (51:7 is
+  pressed) and checks 51:6/51:7 through the cells API.
+- **Big now-playing discs (ADR 0237):** four cells by two rows, the size
+  the approved preview drew, U+1003D5-100494. Icons can now span rows (the
+  catalogue's `rows`/`row`, the icon font's BLrw table). custom_icon_gate
+  checks a multi-row icon's ink and colour whole; the font suite passes 51.
+- **Gates:** `gates_all` 197/11, `gates_renderer` 88/1 and
+  `gates_renderer-gles` 68/0, all on 5b384dd, the shipped commit.
+  - The first `all` run on 5b384dd failed kms_frame_timing_gate (late
+    compose 49 against 58 frames/s, under load). It passed alone three
+    times at load 5, and the `all` rerun on a quiet host passed it.
+- **Release environment (Debian 13):** compositor_gate, xwayland_gate and
+  update_pair pass.
+- **Live, the mini PC:** the update was verified. The smoke check failed:
+  before, 3 panes showed a surface; after, 1.
+  - **The cause is the check, not 0.3.127.** A restart signs the desktop
+    out by design (ADR 0205), and Hibr keeps it held; only a sign-in brings
+    it back. Hibr's log shows the owner signed in 11-15 s after each of the
+    0.3.124, 0.3.125 and 0.3.126 deploys. That is why "as many panes as
+    before" passed then. 0.3.127 was deployed with nobody at the machine.
+  - Afterwards: 2 displays up, frames advancing, the login screen up and
+    waiting for a password, and Hibr's held desktop intact.
+  - update-live.sh now also accepts a box that was signed in and is back at
+    its login screen. update_live_smoke_gate (lifecycle suite) covers that
+    reading against a fake server, and the new reading reports the mini PC
+    as it is now as healthy.
+- **Published** to hibr-apt under HOLD/done with my-vpn-ea.
+
 ## 2026-11-19: 0.3.126 player glyphs; display modes across hot-plug
 
 - **Player glyphs (ADR 0237):** the owner-approved preview, built. They are

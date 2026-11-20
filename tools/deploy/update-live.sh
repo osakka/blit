@@ -84,17 +84,25 @@ curl_auth() {
 }
 
 # Gitea #27: the box as it is, for the smoke check after the update:
-# "<displays ready> <display count> <panes showing a surface> <frames>".
+# "<displays ready> <display count> <panes showing a surface> <frames>
+# <login screen up>". The last is 1 when the login screen is running in a
+# pane and waiting for a password: a restart signs the desktop out by design
+# (ADR 0205; Hibr keeps it held), so a box that was signed in comes back to
+# its login screen, and only a person signing in brings the desktop back.
 smoke_state() {
     server=$(curl_auth --max-time 8 --fail "$base_url/v1/server") || return 1
     topology=$(curl_auth --max-time 8 --fail "$base_url/v1/topology") || return 1
     runtime=$(curl_auth --max-time 8 --fail "$base_url/v1/diagnostics/runtime") || return 1
-    printf '%s\n%s\n%s\n' "$server" "$topology" "$runtime" | python3 -c '
+    login=$(curl_auth --max-time 8 "$base_url/v1/login") || login='{}'
+    printf '%s\n%s\n%s\n%s\n' "$server" "$topology" "$runtime" "$login" | python3 -c '
 import json, sys
-server, topology, runtime = (json.loads(line) for line in sys.stdin.read().splitlines()[:3])
+server, topology, runtime, login = (json.loads(line or "{}") for line in sys.stdin.read().splitlines()[:4])
 attached = sum(1 for p in topology.get("panes", []) if p.get("surface_id"))
-print("%d %d %d %d" % (server["display_backend"]["ready"], server["display_count"], attached,
-                       runtime["performance"]["frames"]))'
+session = login.get("session") or {}
+login_up = int(login.get("state") == "running" and bool(session.get("surface_id")) and
+               (login.get("desktop") or {}).get("reason") == "authentication_required")
+print("%d %d %d %d %d" % (server["display_backend"]["ready"], server["display_count"], attached,
+                          runtime["performance"]["frames"], login_up))'
 }
 
 before=$(smoke_state) || {
@@ -173,8 +181,12 @@ done
 }
 
 # The smoke check (Gitea #27): within 60 s the box is as it was -- the same
-# displays up, a surface in as many panes (the desktop came back), and its
-# frames advancing when it has displays.
+# displays up, a surface in as many panes (the desktop came back) or, for a
+# box that was signed in, its login screen up waiting for the password, and
+# its frames advancing when it has displays. The deploys of 0.3.124-0.3.126
+# passed the old "as many panes" rule only because the owner signed in within
+# seconds each time (Hibr's log: "signed in at the login screen"); 0.3.127
+# was deployed with nobody there, and the check failed a healthy box.
 set -- $before
 b_ready=$1 b_displays=$2 b_attached=$3
 i=0
@@ -182,7 +194,8 @@ while [ "$i" -lt 60 ]; do
     if now=$(smoke_state); then
         set -- $now
         first_frames=$4
-        if [ "$1" = "$b_ready" ] && [ "$2" = "$b_displays" ] && [ "$3" -ge "$b_attached" ]; then
+        if [ "$1" = "$b_ready" ] && [ "$2" = "$b_displays" ] &&
+           { [ "$3" -ge "$b_attached" ] || [ "$5" = 1 ]; }; then
             if [ "$b_ready" = 0 ]; then
                 echo "smoke passed: API only, as before; $3 panes showing a surface"
                 exit 0
@@ -191,7 +204,11 @@ while [ "$i" -lt 60 ]; do
             if later=$(smoke_state); then
                 set -- $later
                 [ "$4" -gt "$first_frames" ] && {
-                    echo "smoke passed: $2 displays up, $3 panes showing a surface (before $b_attached), frames advancing ($first_frames -> $4)"
+                    if [ "$3" -ge "$b_attached" ]; then
+                        echo "smoke passed: $2 displays up, $3 panes showing a surface (before $b_attached), frames advancing ($first_frames -> $4)"
+                    else
+                        echo "smoke passed: $2 displays up, the login screen up (the desktop, $b_attached panes before, waits for a sign-in), frames advancing ($first_frames -> $4)"
+                    fi
                     exit 0
                 }
             fi
@@ -201,5 +218,5 @@ while [ "$i" -lt 60 ]; do
     i=$((i + 1))
 done
 echo "smoke failed: installed Blit $version, but the box is not as it was within 60 s:" \
-     "before (ready displays panes-with-surface frames) $before, now ${now:-unreadable}" >&2
+     "before (ready displays panes-with-surface frames login-screen-up) $before, now ${now:-unreadable}" >&2
 exit 1
