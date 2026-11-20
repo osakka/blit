@@ -104,6 +104,8 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Box drawing, blocks, Braille and Powerline drawn to fit the cell exactly | 0.2.32–0.2.36 | 0164, 0191 | Tested |
 | Colour emoji (Noto Color Emoji, Emoji 18.0) | 0.1.574 | 0157–0160 | Used |
 | Arabic with shaping, positioned marks and Arabic-Indic digits | 0.1.588 | 0174 | Tested |
+| Arabic shaped as words, as a browser does: each run of Hibr's cells is one word in Noto Naskh Arabic, joined, with its tashkeel, drawn into exactly the cells it was given (`arabic: naskh`, the default; `modern` keeps one letter per cell), on the CPU and the GPU, outline and pixel fonts alike | 0.3.129 | 0241 | Tested (`arabic_word_text_gate`, `arabic_word_slice_gate`, `arabic_word_view_gate`, `gles_compose_gate`, `modern_font_api_gate`) |
+| Bold keeps a shape that fills its cell (Hack's window buttons were D-shaped): the shape narrowed by a column before the overstrike; text bold as before | 0.3.129 | 0240 | Tested (`bold_shape_gate`) |
 | Blit's own colour icons: Wi-Fi, battery, volume, power, pen, telephones, the hui badge | 0.1.588–0.2.45 | 0172, 0196, 0197 | Used |
 | File-manager icons: 63 kinds, folders in four colourways | 0.3.4–0.3.9 | 0201 | Used |
 | Retro Mac-style window chrome glyph sets, Chalk (one colour) and Slate (the cell's own colours since 0.3.39), one per part (title bar, frame, dialog, buttons) so they mix; SGR 51 framed labels and titles | 0.3.36–0.3.39 | 0210, 0211 | Tested |
