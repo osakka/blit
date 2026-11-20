@@ -325,6 +325,67 @@ int main(void)
             compare("title bar buttons at the right edge", &kms, out, &view);
         }
     }
+    /* ADR 0241: Arabic words, shaped and drawn as slices of one sprite per
+       word: a clean frame (bold, italic and a colour change mid-word), the
+       block cursor mid-word, and damage on one letter -- changed, then
+       turned into a space -- which widens to its whole word. */
+    {
+        static uint32_t combining[COLS * ROWS * BLIT_MAX_COMBINING];
+        static unsigned char counts[COLS * ROWS];
+        /* the bismillah, and "al-salamu alaykum", in Hibr's visual cells */
+        static const uint32_t line1[][3] = {
+            {0xfee2,0x650,0},{0xfef4,0,0},{0xfea3,0x650,0},{0xfeae,0x64e,0x651},{0xfedf,0,0},{0xfe8d,0,0},
+            {0x20,0,0},{0xfee6,0x650,0},{0xfee4,0x670,0},{0xfea3,0x652,0},{0xfeae,0x64e,0x651},{0xfedf,0,0},
+            {0xfe8d,0,0},{0x20,0,0},{0xfeea,0x650,0},{0xfee0,0,0},{0xfedf,0,0},{0xfe8d,0,0},{0x20,0,0},
+            {0xfee2,0x650,0},{0xfeb4,0x652,0},{0xfe91,0x650,0} };
+        static const uint32_t line2[] = { 0xfee2,0xfedc,0xfef4,0xfee0,0xfecb,0x20,0xfee1,0xfefc,0xfeb4,0xfedf,0xfe8d };
+        BlitRaster *raster = blit_raster_open(&font, "assets/fonts/text/Hack-Regular.ttf",
+                                              "assets/fonts/NotoColorEmoji.ttf", 11, 22);
+        int k, m;
+        if (raster == NULL || !blit_raster_set_arabic(raster, "assets/fonts/BlitArabicModern.ttf") ||
+            !blit_raster_set_arabic_words(raster, "assets/fonts/NotoNaskhArabic-Regular.ttf")) {
+            fprintf(stderr, "GLES_COMPOSE_FAIL the Arabic words raster does not open\n");
+            return 1;
+        }
+        blit_raster_attach(&font, raster);
+        reset();
+        memset(combining, 0, sizeof(combining));
+        memset(counts, 0, sizeof(counts));
+        view.cell_width = 11; view.cell_height = 22; view.columns = 29; view.rows = 7;
+        view.combining = combining; view.combining_count = counts;
+        for (k = 0; k < 22; ++k) {
+            int i = 1 * COLS + 2 + k;
+            codepoints[i] = line1[k][0] == 0x20 ? 0 : line1[k][0];
+            for (m = 1; m < 3 && line1[k][m]; ++m) {
+                combining[i * BLIT_MAX_COMBINING + m - 1] = line1[k][m];
+                counts[i] = (unsigned char)m;
+            }
+        }
+        for (k = 0; k < 11; ++k) codepoints[3 * COLS + 2 + k] = line2[k] == 0x20 ? 0 : line2[k];
+        for (k = 2; k < 7; ++k) attributes[3 * COLS + k] = 1;                 /* bold word */
+        for (k = 8; k < 13; ++k) attributes[5 * COLS + k] = 128;               /* italic word */
+        for (k = 0; k < 5; ++k) codepoints[5 * COLS + 8 + k] = line2[6 + k];
+        foreground[1 * COLS + 10] = 0xff8040 + 1;                              /* colour mid-word */
+        text(14, 3, "Latin", 0, 0, 0);
+        view.cursor_visible = 0; view.surface_revision = 30;
+        compare("arabic words", &kms, out, &view);
+        view.cursor_visible = 1; view.cursor_style = 1;
+        view.cursor_x = 9; view.cursor_y = 1; view.surface_revision = 31;
+        compare("block cursor mid-word", &kms, out, &view);
+        view.cursor_visible = 0;
+        codepoints[1 * COLS + 11] = 0xfeb3;
+        view.surface_revision = 32;
+        compare_damage("damage: one letter of a word", &kms, out, &view, 11, 1, 1, 1);
+        codepoints[3 * COLS + 4] = 0;
+        view.surface_revision = 33;
+        compare_damage("damage: a letter becomes a space", &kms, out, &view, 4, 3, 1, 1);
+        /* The far end of a six-cell word, beyond the companion's ink margins:
+           only the word's widening redraws its other end. */
+        codepoints[1 * COLS + 7] = 0xfe8e;
+        view.surface_revision = 34;
+        compare_damage("damage: the far end of a long word", &kms, out, &view, 7, 1, 1, 1);
+        view.combining = NULL; view.combining_count = NULL;
+    }
     /* Scaled images, as a wallpaper is: odd ratios up and down. */
     {
         static const int sizes[][2] = { {37, 23}, {9, 41}, {200, 120}, {13, 13} };

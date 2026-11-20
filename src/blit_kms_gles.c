@@ -532,13 +532,110 @@ static int kms_sprite_pen(const BlitKmsSurfaceView *view, int index)
     return KMS_ICON_PEN(view->attributes[index]);
 }
 
+/* ADR 0241: a run's shaped word as one sprite, the raster's whole canvas
+   (coverage, uploaded as it is), keyed by the canvas's serial: a word the
+   raster draws again has a new serial, so a sprite never stands for
+   another word. plane -1 marks a word sprite. */
+static const KmsSprite *kms_word_sprite(BlitKms *kms, KmsGlesResources *r, const BlitFont *font,
+                                        const BlitCellWord *word, int bold, int ch)
+{
+    KmsSprite key, *slot;
+    BlitRasterGlyph whole;
+    unsigned long long serial;
+    unsigned start, probe;
+    long long made;
+    int x, y;
+    if (!font->raster_word_get(font->raster_state, word, -1, bold, &whole, &serial)) return NULL;
+    memset(&key, 0, sizeof(key));
+    key.plane = -1;
+    key.cp = (uint32_t)serial;
+    key.marks[0] = (uint32_t)(serial >> 32);
+    key.count = 1;
+    key.bold = bold; key.height = ch; key.width = whole.width;
+    key.font = font; key.font_data = font->data; key.raster = font->raster_state;
+    start = kms_sprite_hash(&key) % KMS_SPRITE_SLOTS;
+    for (probe = 0; probe < KMS_SPRITE_SLOTS; ++probe) {
+        KmsSprite *s = &r->sprites[(start + probe) % KMS_SPRITE_SLOTS];
+        if (!s->used) break;
+        if (kms_sprite_same(s, &key)) return s;
+    }
+    if (r->sprite_count >= KMS_SPRITE_SLOTS * 3 / 4) kms_atlas_reset(r);
+    made = kms_now_us();
+    key.used = 1;
+    if (whole.height > 0 && whole.width > 0) {
+        size_t pixels = (size_t)whole.width * whole.height;
+        if (pixels > r->scratch_pixels) {
+            free(r->scratch_black); free(r->scratch_white); free(r->sprite_pixels);
+            r->scratch_black = malloc(pixels * 4);
+            r->scratch_white = malloc(pixels * 4);
+            r->sprite_pixels = malloc(pixels * 4);
+            r->scratch_pixels = r->scratch_black && r->scratch_white && r->sprite_pixels ? pixels : 0;
+            if (r->scratch_pixels == 0) return NULL;
+        }
+        key.w = whole.width; key.h = whole.height;
+        key.dx = 0; key.dy = whole.ink_offset_y;
+        key.mode = BLIT_GLES_COVERAGE;
+        for (y = 0; y < key.h; ++y)
+            for (x = 0; x < key.w; ++x) {
+                unsigned char c = whole.pixels[y * whole.stride + x];
+                unsigned char *out = r->sprite_pixels + ((size_t)y * key.w + x) * 4;
+                out[0] = out[1] = out[2] = out[3] = c;
+            }
+        if (kms_atlas_place(r, key.w, key.h, &key.atlas_x, &key.atlas_y) < 0) {
+            kms_atlas_reset(r);
+            if (kms_atlas_place(r, key.w, key.h, &key.atlas_x, &key.atlas_y) < 0) return NULL;
+        }
+        if (blit_gles_texture_update(kms->gles, r->atlas, 4, key.atlas_x, key.atlas_y,
+                                     key.w, key.h, r->sprite_pixels, key.w * 4) < 0)
+            return NULL;
+        ++r->sprites_rendered;
+    }
+    for (probe = 0; probe < KMS_SPRITE_SLOTS; ++probe) {
+        slot = &r->sprites[(start + probe) % KMS_SPRITE_SLOTS];
+        if (!slot->used) break;
+    }
+    r->upload_us += kms_now_us() - made;
+    if (probe == KMS_SPRITE_SLOTS) return NULL;
+    *slot = key;
+    ++r->sprite_count;
+    return slot;
+}
+
 static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
-                           const BlitKmsSurfaceView *view, int index,
+                           const BlitKmsSurfaceView *view, KmsRowWords *rw, int index,
                            int x, int y, int width, int ch, uint32_t fg,
                            int lean, int bold)
 {
     uint32_t attr = view->attributes[index];
-    const KmsSprite *sprite = kms_sprite(kms, r, kms->font,
+    const BlitFont *font = kms->font;
+    const KmsSprite *sprite;
+    int row = index / view->stride, column = index % view->stride;
+    /* ADR 0241: a cell of a run draws its sub-rectangle of the word's
+       sprite, as draw_cell_ink draws its slice. */
+    if (font && font->raster_word_get && rw && kms_row_words(view, row, rw) &&
+        rw->run_of[column] >= 0) {
+        int run = rw->run_of[column], cw = font->raster_cell_width, offset;
+        if (rw->word_run != run) {
+            memset(&rw->word, 0, sizeof(rw->word));
+            rw->word.kind = rw->runs[run].kind;
+            rw->word.count = rw->runs[run].count;
+            memcpy(rw->word.cells, &rw->clusters[rw->runs[run].start],
+                   (size_t)rw->word.count * sizeof(BlitCellCluster));
+            rw->word_run = run;
+        }
+        sprite = kms_word_sprite(kms, r, font, &rw->word, bold, ch);
+        if (sprite) {
+            offset = (column - rw->runs[run].start) * cw;
+            if (sprite->w > offset && sprite->h > 0) {
+                int w = sprite->w - offset < cw ? sprite->w - offset : cw;
+                blit_gles_quad(kms->gles, sprite->mode, r->atlas, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE,
+                               sprite->atlas_x + offset, sprite->atlas_y, w, sprite->h,
+                               x, y + sprite->dy, w, sprite->h, fg);
+            }
+            return;
+        }
+    }
+    sprite = kms_sprite(kms, r, kms->font,
         (attr & KMS_ATTR_WIDE) ? kms->wide_font : NULL,
         view->codepoints[index] ? view->codepoints[index] : ' ',
         view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
@@ -647,6 +744,7 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
     int src_row0 = 0, src_row1 = view->rows, src_col0 = 0, src_col1 = view->columns;
     int cx0 = x0, cy0 = y0, cx1 = x1, cy1 = y1;
     int overhang = blit_font_has_overhang(font);
+    static KmsRowWords row_words;
     (void)output;
     if (view->columns < 1 || view->rows < 1) return;
     if (partial) {
@@ -656,6 +754,8 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
         last_row = dy1 > view->rows ? view->rows : dy1;
         last_column = dx1 > view->columns ? view->columns : dx1;
         if (last_row <= first_row || last_column <= first_column) return;
+        /* ADR 0241: as draw_view, a word's slices change together. */
+        kms_words_widen(font, view, &row_words, &first_column, &last_column, first_row, last_row);
         ink = blit_ink_region(font, first_column, first_row, last_column, last_row,
                               view->columns, view->rows);
         first_column = ink.x0; first_row = ink.y0;
@@ -739,8 +839,8 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
             if (blit_chrome_colour(cp))
                 kms_gles_window_glyph(kms, r, cp, x, y, width, ch, &pens);
             else
-                kms_gles_glyph(kms, r, view, index, x, y + (KMS_FRAMED_PRESSED(attr) ? 1 : 0), width, ch, fg,
-                               lean, (attr & 1) != 0);
+                kms_gles_glyph(kms, r, view, &row_words, index, x, y + (KMS_FRAMED_PRESSED(attr) ? 1 : 0),
+                               width, ch, fg, lean, (attr & 1) != 0);
             /* Underline and strike are clipped to the region, as fill_rect
                is in draw_view. */
             if (attr & (4 | 512)) {
@@ -819,13 +919,13 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
                         if (!view->codepoints[at] ||
                             (a & (KMS_ATTR_CONTINUATION | KMS_ATTR_CONCEAL)))
                             continue;
-                        kms_gles_glyph(kms, r, view, at, x0 + sx * cw, y0 + sy * ch,
+                        kms_gles_glyph(kms, r, view, &row_words, at, x0 + sx * cw, y0 + sy * ch,
                                        (a & KMS_ATTR_WIDE) ? cw * 2 : cw, ch, cursor_bg,
                                        (a & KMS_ATTR_ITALIC) ? italic_lean : 0, (a & 1) != 0);
                     }
                 blit_gles_clip(kms->gles, x0, y0, x1 - x0, y1 - y0);
             } else if (cursor_cp != 0 && cursor_cp != ' ' && !(cursor_attr & KMS_ATTR_CONCEAL))
-                kms_gles_glyph(kms, r, view, cursor_index, cursor_x, cursor_y,
+                kms_gles_glyph(kms, r, view, &row_words, cursor_index, cursor_x, cursor_y,
                                cw * cursor_cells, ch, cursor_bg,
                                (cursor_attr & KMS_ATTR_ITALIC) ? italic_lean : 0,
                                (cursor_attr & 1) != 0);
