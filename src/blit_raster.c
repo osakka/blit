@@ -2253,6 +2253,9 @@ static void attached_free(void *state)
 static int attached_cluster_get(void *state, const BlitCellCluster *key, int bold,
                                  BlitRasterGlyph *glyph)
 { return blit_raster_get_cluster_styled((BlitRaster *)state, key, bold, glyph); }
+static int attached_word_get(void *state, const struct BlitCellWord *word, int index, int bold,
+                             BlitRasterGlyph *glyph, unsigned long long *serial)
+{ return blit_raster_get_word((BlitRaster *)state, word, index, bold, glyph, serial); }
 void blit_raster_attach(BlitFont *font, BlitRaster *raster)
 {
     if (font->raster_state && font->raster_free)
@@ -2269,7 +2272,12 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster)
     font->raster_max_height = raster ? raster->height * (raster->arabic ? 3 : 1) : 0;
     font->raster_ink_left = raster && raster->arabic ? 2 : 0;
     font->raster_ink_right = raster && raster->arabic ? 3 : 0;
-    font->raster_ink_top = font->raster_ink_bottom = raster && raster->arabic ? 1 : 0;
+    /* ADR 0241: a word's canvas may take a row above and below. */
+    font->raster_ink_top = font->raster_ink_bottom =
+        raster && (raster->arabic || raster->words) ? 1 : 0;
+    if (raster && raster->words && font->raster_max_height < raster->height * 3)
+        font->raster_max_height = raster->height * 3;
+    font->raster_word_get = raster && raster->words ? attached_word_get : NULL;
 }
 
 /* Exact rounded product/255 for two8-bit operands. Maximum intermediate is

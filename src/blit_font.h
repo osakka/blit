@@ -33,6 +33,10 @@ typedef struct BlitFont {
     int (*raster_cluster_get)(void *, const BlitCellCluster *, int, struct BlitRasterGlyph *);
     /* ADR 0211: one pen's plane of a Slate window glyph. */
     int (*raster_plane_get)(void *, uint32_t, int, struct BlitRasterGlyph *);
+    /* ADR 0241: cell `index` (-1: whole) of a run shaped as a word, bold,
+       glyph, the canvas's serial; NULL without a word face. */
+    int (*raster_word_get)(void *, const struct BlitCellWord *, int, int,
+                           struct BlitRasterGlyph *, unsigned long long *);
     void (*raster_free)(void *);
     uint32_t (*raster_blend)(const struct BlitRasterGlyph *, int, int,
                             uint32_t, uint32_t);

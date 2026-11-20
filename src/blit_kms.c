@@ -6,6 +6,7 @@
 #include "blit_raster.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
+#include "blit_cell_word.h"
 #include "blit_control_glyphs.h"
 
 #include <errno.h>
@@ -1144,6 +1145,121 @@ static void draw_cell_glyphs(KmsOutput *output, const BlitFont *font,
         draw_glyph(output, font, marks[i], x, y, cw, ch, fg, lean, 0, 0, 0);
 }
 
+/* ADR 0241: a row's runs of Arabic cells, made once per row and frame, and
+   the key of the run being drawn, made once per run. */
+typedef struct {
+    int row, columns, run_count, word_run;
+    BlitCellCluster *clusters;            /* one per column */
+    const BlitCellCluster **cells;        /* NULL: not Arabic */
+    int *run_of;                          /* column -> run, -1 */
+    BlitWordRun *runs;
+    BlitCellWord word;                    /* runs[word_run]'s key */
+} KmsRowWords;
+
+static void kms_row_words_free(KmsRowWords *rw)
+{
+    free(rw->clusters); free(rw->cells); free(rw->run_of); free(rw->runs);
+    memset(rw, 0, sizeof(*rw));
+}
+
+/* Fill rw for `row` (no-op when it already holds it). 0 on failure, when
+   the caller draws cell by cell. */
+static int kms_row_words(const BlitKmsSurfaceView *view, int row, KmsRowWords *rw)
+{
+    int column;
+    if (rw->clusters && rw->row == row && rw->columns == view->columns) return 1;
+    if (!rw->clusters || rw->columns != view->columns) {
+        kms_row_words_free(rw);
+        rw->clusters = calloc((size_t)view->columns, sizeof(*rw->clusters));
+        rw->cells = calloc((size_t)view->columns, sizeof(*rw->cells));
+        rw->run_of = calloc((size_t)view->columns, sizeof(*rw->run_of));
+        rw->runs = calloc((size_t)view->columns, sizeof(*rw->runs));
+        if (!rw->clusters || !rw->cells || !rw->run_of || !rw->runs) { kms_row_words_free(rw); return 0; }
+        rw->columns = view->columns;
+    }
+    rw->row = row;
+    rw->word_run = -1;
+    for (column = 0; column < view->columns; ++column) {
+        int index = row * view->stride + column;
+        uint32_t cp = view->codepoints[index], attr = view->attributes[index];
+        unsigned count = view->combining_count ? view->combining_count[index] : 0;
+        rw->cells[column] = NULL;
+        rw->run_of[column] = -1;
+        if (!cp || cp == ' ' || (attr & (KMS_ATTR_WIDE | KMS_ATTR_CONTINUATION))) continue;
+        if (count > BLIT_MAX_COMBINING) count = BLIT_MAX_COMBINING;
+        if (blit_cell_cluster_init(&rw->clusters[column], cp,
+                                   count && view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
+                                   count, 1) &&
+            blit_cell_word_kind(&rw->clusters[column]) != BLIT_WORD_NONE)
+            rw->cells[column] = &rw->clusters[column];
+    }
+    rw->run_count = blit_cell_word_runs(rw->cells, view->columns, rw->runs, view->columns);
+    {
+        int r, c;
+        for (r = 0; r < rw->run_count; ++r)
+            for (c = rw->runs[r].start; c < rw->runs[r].start + rw->runs[r].count; ++c) rw->run_of[c] = r;
+    }
+    return 1;
+}
+
+/* Widen [*x0, *x1) so that, on rows [y0, y1), it holds every run of Arabic
+   cells it contains or touches (a cell that stopped being a letter changes
+   the words beside it). A no-op without a word face or Arabic. */
+static void kms_words_widen(const BlitFont *font, const BlitKmsSurfaceView *view, KmsRowWords *rw,
+                            int *x0, int *x1, int y0, int y1)
+{
+    int changed = 1, row, r;
+    if (!font || !font->raster_word_get) return;
+    while (changed) {
+        changed = 0;
+        for (row = y0; row < y1; ++row) {
+            if (!kms_row_words(view, row, rw)) return;
+            for (r = 0; r < rw->run_count; ++r) {
+                int start = rw->runs[r].start, end = start + rw->runs[r].count;
+                if (end < *x0 || start > *x1) continue;       /* not touching */
+                if (start < *x0) { *x0 = start; changed = 1; }
+                if (end > *x1) { *x1 = end; changed = 1; }
+            }
+        }
+    }
+}
+
+/* The one dispatch for a cell's ink, the cell loop's and the block
+   cursor's: a cell in a run of Arabic draws its slice of the shaped word
+   (bold made on the word, drawn upright: a Latin slant has no meaning for
+   Naskh and leaning slices apart would break the word), anything else
+   draw_cell_glyphs. */
+static void draw_cell_ink(KmsOutput *output, const BlitFont *font, const BlitFont *wide_font,
+                          const BlitKmsSurfaceView *view, KmsRowWords *rw, int row, int column,
+                          int x, int y, int cw, int ch, uint32_t fg, int lean, int bold, int pen)
+{
+    int index = row * view->stride + column;
+    uint32_t cp = view->codepoints[index] ? view->codepoints[index] : ' ';
+    uint32_t attr = view->attributes[index];
+    if (font && font->raster_word_get && font->raster_blend && rw &&
+        kms_row_words(view, row, rw) && rw->run_of[column] >= 0) {
+        int r = rw->run_of[column];
+        BlitRasterGlyph slice;
+        if (rw->word_run != r) {
+            memset(&rw->word, 0, sizeof(rw->word));
+            rw->word.kind = rw->runs[r].kind;
+            rw->word.count = rw->runs[r].count;
+            memcpy(rw->word.cells, &rw->clusters[rw->runs[r].start],
+                   (size_t)rw->word.count * sizeof(BlitCellCluster));
+            rw->word_run = r;
+        }
+        if (font->raster_word_get(font->raster_state, &rw->word, column - rw->runs[r].start,
+                                  bold, &slice, NULL)) {
+            if (slice.height) draw_cell_raster(output, font, &slice, x, y, cw, ch, fg, 0, 0);
+            return;
+        }
+    }
+    draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL, cp,
+                     view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
+                     view->combining_count ? view->combining_count[index] : 0,
+                     x, y, (attr & KMS_ATTR_WIDE) ? cw * 2 : cw, ch, fg, lean, bold, pen);
+}
+
 #define KMS_GRAPHICS_Z_UNDER_BACKGROUND (-1073741824)
 
 /* The image is clipped to [clip_x0,clip_x1) x [clip_y0,clip_y1), an absolute
@@ -1378,6 +1494,7 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
     uint32_t floor_colour = view->default_background;
     /* ADR 0226: the frame's draw list grows with the pictures; kept. */
     static BlitGraphicsDrawList list;
+    static KmsRowWords row_words;
     BlitGraphicsDraw *draws = NULL;
     int draw_count = 0;
     int draw_index;
@@ -1397,6 +1514,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
         if (last_column > view->columns) last_column = view->columns;
     }
     if (last_row <= first_row || last_column <= first_column) return;
+    /* ADR 0241: a word's slices change together. */
+    kms_words_widen(font, view, &row_words, &first_column, &last_column, first_row, last_row);
     ink = blit_ink_region(font, first_column, first_row, last_column, last_row,
                            view->columns, view->rows);
     first_column = ink.x0; first_row = ink.y0;
@@ -1517,13 +1636,10 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                the primary one, whose substitute is the visible marker. */
             if (!(attr & KMS_ATTR_CONTINUATION) && blit_chrome_colour(cp))
                 draw_window_cell(output, font, cp, x, y, glyph_width, ch, &pens);
-            else if (!(attr & KMS_ATTR_CONTINUATION)) {
-                draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL,
-                    cp, view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
-                    view->combining_count ? view->combining_count[index] : 0,
-                    x, y + (KMS_FRAMED_PRESSED(attr) ? 1 : 0), glyph_width, ch, fg, lean, (attr & 1) != 0,
+            else if (!(attr & KMS_ATTR_CONTINUATION))
+                draw_cell_ink(output, font, wide_font, view, &row_words, row, column,
+                    x, y + (KMS_FRAMED_PRESSED(attr) ? 1 : 0), cw, ch, fg, lean, (attr & 1) != 0,
                     KMS_ICON_PEN(attr));
-            }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
                 if (y + ch - 1 >= clip_y0 && y + ch - 1 < clip_y1) {
                     int left = x > clip_x0 ? x : clip_x0;
@@ -1617,11 +1733,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                         uint32_t a=view->attributes[at];
                         uint32_t cp=view->codepoints[at];
                         if (!cp || (a & (KMS_ATTR_CONTINUATION|KMS_ATTR_CONCEAL))) continue;
-                        draw_cell_glyphs(output,font,(a & KMS_ATTR_WIDE)?wide_font:NULL,
-                            cp,view->combining?view->combining+at*BLIT_MAX_COMBINING:NULL,
-                            view->combining_count?view->combining_count[at]:0,
-                            view->origin_x+sx*cw,view->origin_y+sy*ch,
-                            (a & KMS_ATTR_WIDE)?cw*2:cw,ch,cursor_bg,
+                        draw_cell_ink(output,font,wide_font,view,&row_words,sy,sx,
+                            view->origin_x+sx*cw,view->origin_y+sy*ch,cw,ch,cursor_bg,
                             (a & KMS_ATTR_ITALIC)?italic_lean:0,(a & 1)!=0,KMS_ICON_PEN(a));
                     }
                 output->glyph_clip_active = 0;

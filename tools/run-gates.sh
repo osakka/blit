@@ -471,6 +471,7 @@ suite_font() {
     run_gate arabic_word_gate.py python3 tools/tests/arabic_word_gate.py
     run_gate arabic_word_text ruby tools/tests/arabic_word_text_gate.rb
     run_gate arabic_word_slice ruby tools/tests/arabic_word_slice_gate.rb
+    run_gate arabic_word_view ruby tools/tests/arabic_word_view_gate.rb
     run_gate arabic_kms_ink ruby tools/tests/arabic_backend_gate.rb
     run_gate emoji_corpus_gate.rb ruby tools/tests/emoji_corpus_gate.rb
     run_gate emoji_presentation_gate.rb ruby tools/tests/emoji_presentation_gate.rb
