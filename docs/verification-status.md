@@ -9,6 +9,35 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-20: 0.3.128 a backlog pass: /tmp, the parser's strings, package floors
+
+- **/tmp no longer collects Blit's leftovers.** The server removes a Hibr
+  session's empty private log directory (ADR 0167 note), and every gate runs
+  in its run's own TMPDIR. A full run left no new /tmp/blit-* entry; the
+  owner approved clearing the 6,050 old ones.
+- **Control strings by character (ADR 0239, Gitea #178, #179, #181).** A
+  UTF-8 character with a 0x9C byte (东) no longer ends an OSC title; C1
+  controls behave the same raw and UTF-8 encoded; CAN and SUB end a string;
+  an over-long title is cut at a character boundary.
+- **Package floors (#165).** Depends come from dpkg-shlibdeps merged with
+  the build minimums: libc6 (>= 2.38) for both packages, among others.
+  package_artifact_gate checks the glibc floor; a pipefail/`grep -q` race
+  that silently failed it in the release build is gone. The owner's mini
+  PC has glibc 2.41.
+- **Smaller fixes:** blit-session.hibr leaves DT_TERMMS to Hibr (#164); two
+  API error details (#167); probes take their host (#168); the shutdown
+  gate checks the token (#176); blit.env's advice survives an upgrade
+  (#180, update_pair_gate keeps an operator's BLIT_EXPECT_DESKTOP=0).
+- **Gates:** `gates_all` 198/11, `gates_renderer` 88/1, `gates_renderer-gles`
+  68/0, all on 64a79ea, the shipped commit. Earlier `all` runs failed
+  mask_gate once (3/3 alone) and two timing gates at load 17 (another
+  session's suites); the recorded run was in a quiet window hibr held.
+- **Release environment (Debian 13):** compositor_gate, xwayland_gate, the
+  packaging suite and update_pair (six cases, the operator's setting kept).
+- **Live, the mini PC:** the update was verified; the smoke check passed at
+  the login screen (2 displays up, frames advancing), the desktop held.
+- **Published** to hibr-apt (5affd57) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-20: 0.3.127 pictures at a pixel size; keys; big discs
 
 - **Kitty placements at a pixel size (#159, for hibr #600):** `W=` and `T=`
