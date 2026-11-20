@@ -28,7 +28,7 @@
 
 enum { BLIT_WORD_NONE = 0, BLIT_WORD_LETTERS, BLIT_WORD_DIGITS, BLIT_WORD_SINGLE };
 
-typedef struct {
+typedef struct BlitCellWord {
     int kind, count;
     BlitCellCluster cells[BLIT_WORD_MAX_CELLS];   /* visual order */
 } BlitCellWord;
@@ -90,6 +90,40 @@ static uint32_t blit_cell_word_hash(const BlitCellWord *word)
     for (i = 0; i < word->count; ++i)
         hash = (hash ^ blit_cell_cluster_hash(&word->cells[i])) * 16777619U;
     return hash;
+}
+
+typedef struct { int start, count, kind; } BlitWordRun;
+
+/* A row's runs, left to right, in one pass over its cells (`cells[i]`
+   NULL, or a cluster with no scalar, is not Arabic: a space, a wide cell's
+   continuation, Latin). A run of letters longer than BLIT_WORD_MAX_CELLS
+   is cut into pieces counted from its right end, the word's logical start;
+   a run of digits from its left. Returns the number of runs, at most cap. */
+static int blit_cell_word_runs(const BlitCellCluster *const *cells, int count,
+                               BlitWordRun *runs, int cap)
+{
+    int c = 0, n = 0;
+    while (c < count && n < cap) {
+        int kind = cells[c] ? blit_cell_word_kind(cells[c]) : BLIT_WORD_NONE, end = c + 1;
+        if (kind == BLIT_WORD_NONE) { ++c; continue; }
+        if (kind != BLIT_WORD_SINGLE)
+            while (end < count && cells[end] && blit_cell_word_kind(cells[end]) == kind) ++end;
+        if (kind == BLIT_WORD_LETTERS) {
+            int first = (end - c) % BLIT_WORD_MAX_CELLS;
+            if (first && n < cap) { runs[n].start = c; runs[n].count = first; runs[n++].kind = kind; c += first; }
+            while (c < end && n < cap) {
+                runs[n].start = c; runs[n].count = BLIT_WORD_MAX_CELLS; runs[n++].kind = kind;
+                c += BLIT_WORD_MAX_CELLS;
+            }
+        } else
+            while (c < end && n < cap) {
+                int length = end - c < BLIT_WORD_MAX_CELLS ? end - c : BLIT_WORD_MAX_CELLS;
+                runs[n].start = c; runs[n].count = length; runs[n++].kind = kind;
+                c += length;
+            }
+        c = end;
+    }
+    return n;
 }
 
 /* Which neighbours a cell's form joins, logically: bit 0 the letter before,

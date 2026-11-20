@@ -79,6 +79,20 @@ const char *blit_raster_arabic_family(const BlitRaster *raster);
 int blit_raster_set_arabic_words(BlitRaster *raster, const char *path);
 const char *blit_raster_arabic_words_path(const BlitRaster *raster);
 const char *blit_raster_arabic_words_family(const BlitRaster *raster);
+/* ADR 0241: cell `index` of a run's shaped word, as a glyph whose pixels
+   are a view into the word's canvas: one cell wide, the canvas's stride,
+   no sideways offset, `ink_offset_y` the canvas's top (it may overhang a
+   row above and below). index -1 is the whole canvas. Bold is made on the
+   whole word; the renderer adds no overstrike. `serial` names the canvas
+   and variant, never reused. 0: no word face, or the face lacks a scalar
+   of the word (draw its cells one by one). Pixels stay valid until the
+   next word lookup or close. */
+struct BlitCellWord;
+int blit_raster_get_word(BlitRaster *raster, const struct BlitCellWord *word, int index, int bold,
+                         BlitRasterGlyph *glyph, unsigned long long *serial);
+void blit_raster_word_counts(const BlitRaster *raster, unsigned long long *hits,
+                             unsigned long long *misses, size_t *bytes,
+                             unsigned long long *dropped);
 int blit_raster_baseline(const BlitRaster *raster);
 /* ADR 0227: the design cell of the master a font of masters is drawn with,
    and whether the cell height is a whole multiple of it (crisp) or not

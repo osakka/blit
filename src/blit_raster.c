@@ -28,6 +28,21 @@ typedef struct {
     BlitRasterGlyph glyph;
 } RasterEntry;
 
+/* ADR 0241: a shaped word's canvas, `width` (its cells) by `height` rows
+   from `top` (rows from the cell's top; negative above it), regular and,
+   once asked for, bold. `missing`: the face lacks a scalar of the word; its
+   cells are drawn one by one as before. */
+struct RasterWord {
+    BlitCellWord *key;
+    int valid, missing, width, height, top;
+    unsigned age;
+    unsigned long long serial;
+    unsigned char *pixels[2];
+};
+#define WORD_SETS 2048
+#define WORD_WAYS 4
+#define WORD_MAX_BYTES (32U * 1024U * 1024U)
+
 struct BlitRaster {
     BlitFont fallback;
     int pixel;  /* a pixel font's raster: blit_raster_open_pixel (ADR 0199) */
@@ -57,6 +72,10 @@ struct BlitRaster {
     hb_buffer_t *words_buffer;
     double words_alef_top;
     char words_path[1024];
+    struct RasterWord *word_cache;          /* WORD_SETS x WORD_WAYS */
+    size_t word_bytes;
+    unsigned word_reclaim;
+    unsigned long long word_serial, word_hits, word_misses, word_dropped;
     /* ADR 0218: how text glyphs are hinted. Zero is full, what text always did. */
     BlitRasterHinting hinting;
     /* ADR 0227: the master drawing a font of masters (its design cell; zero
@@ -100,6 +119,15 @@ void blit_raster_close(BlitRaster *raster)
     if (raster->colour_font) hb_font_destroy(raster->colour_font);
     if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
     if (raster->arabic_buffer) hb_buffer_destroy(raster->arabic_buffer);
+    if (raster->word_cache) {
+        unsigned w;
+        for (w = 0; w < WORD_SETS * WORD_WAYS; ++w) {
+            free(raster->word_cache[w].key);
+            free(raster->word_cache[w].pixels[0]);
+            free(raster->word_cache[w].pixels[1]);
+        }
+        free(raster->word_cache);
+    }
     if (raster->words_font) hb_font_destroy(raster->words_font);
     if (raster->words_buffer) hb_buffer_destroy(raster->words_buffer);
     if (raster->words) FT_Done_Face(raster->words);
@@ -450,6 +478,8 @@ int blit_raster_set_arabic_words(BlitRaster *raster, const char *path)
     if (font == hb_font_get_empty() ||
         !hb_buffer_pre_allocate(buffer, BLIT_WORD_MAX_TEXT)) goto fail;
     hb_ft_font_set_load_flags(font, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+    raster->word_cache = calloc(WORD_SETS * WORD_WAYS, sizeof(*raster->word_cache));
+    if (!raster->word_cache) goto fail;
     raster->words = face;
     raster->words_font = font;
     raster->words_buffer = buffer;
@@ -467,6 +497,238 @@ const char *blit_raster_arabic_words_path(const BlitRaster *raster)
 { return raster && raster->words ? raster->words_path : NULL; }
 const char *blit_raster_arabic_words_family(const BlitRaster *raster)
 { return raster && raster->words ? raster->words->family_name : NULL; }
+
+static int floor_26_6(long v) { return v >= 0 ? (int)(v / 64) : -(int)((-v + 63) / 64); }
+static unsigned char word_over(unsigned char under, unsigned in)
+{ return (unsigned char)(in + (under * (255 - in) + 127) / 255); }
+
+/* Shape the word's text at `size` px: its glyphs, advance and ink box in
+   26.6 (x from the pen's start, y up). 0 on failure; *missing when the
+   face lacks a scalar. */
+static int word_shape(BlitRaster *raster, const uint32_t *text, int length, int rtl, double size,
+                      long *advance, long box[4], int *missing)
+{
+    hb_glyph_info_t *info;
+    hb_glyph_position_t *pos;
+    unsigned count, i;
+    long pen = 0;
+    if (FT_Set_Char_Size(raster->words, 0, (FT_F26Dot6)(size * 64 + 0.5), 72, 72)) return 0;
+    hb_ft_font_changed(raster->words_font);
+    hb_buffer_clear_contents(raster->words_buffer);
+    hb_buffer_add_utf32(raster->words_buffer, text, length, 0, length);
+    hb_buffer_set_direction(raster->words_buffer, rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+    hb_buffer_set_script(raster->words_buffer, HB_SCRIPT_ARABIC);
+    hb_buffer_set_language(raster->words_buffer, hb_language_from_string("ar", -1));
+    hb_shape(raster->words_font, raster->words_buffer, NULL, 0);
+    if (!hb_buffer_allocation_successful(raster->words_buffer)) return 0;
+    info = hb_buffer_get_glyph_infos(raster->words_buffer, &count);
+    pos = hb_buffer_get_glyph_positions(raster->words_buffer, NULL);
+    *missing = 0;
+    box[0] = box[1] = 1L << 40; box[2] = box[3] = -(1L << 40);
+    for (i = 0; i < count; ++i) {
+        hb_glyph_extents_t e;
+        if (!info[i].codepoint) *missing = 1;
+        if (hb_font_get_glyph_extents(raster->words_font, info[i].codepoint, &e) && e.width && e.height) {
+            long gx = pen + pos[i].x_offset + e.x_bearing, gy = pos[i].y_offset + e.y_bearing;
+            if (gx < box[0]) box[0] = gx;
+            if (gx + e.width > box[2]) box[2] = gx + e.width;
+            if (gy > box[3]) box[3] = gy;
+            if (gy + e.height < box[1]) box[1] = gy + e.height;
+        }
+        pen += pos[i].x_advance;
+    }
+    if (box[2] < box[0]) box[0] = box[1] = box[2] = box[3] = 0;
+    *advance = pen;
+    return 1;
+}
+
+/* Draw `word` into `out`: shaped in the word face with the alef's top at
+   the text font's cap height, on the text baseline; shrunk as a whole
+   only if its advance or its ink is wider than its cells; its advance
+   centred, then moved just enough to keep its ink inside. The canvas is
+   its cells wide and three rows high (a row of overhang above and below),
+   cropped to its ink; ink beyond that is counted, never drawn elsewhere. */
+static int word_draw(BlitRaster *raster, const BlitCellWord *word, struct RasterWord *out)
+{
+    uint32_t text[BLIT_WORD_MAX_TEXT];
+    int at[BLIT_WORD_MAX_TEXT];
+    int length = blit_cell_word_text(word, text, at, BLIT_WORD_MAX_TEXT);
+    int rtl = word->kind != BLIT_WORD_DIGITS, pass, missing = 0, i, x, y;
+    int W = word->count * raster->width, H = 3 * raster->height, first = H, last = -1;
+    long room = (long)W * 64, advance = 0, box[4], origin, pen = 0;
+    double size;
+    unsigned char *canvas;
+    hb_glyph_info_t *info;
+    hb_glyph_position_t *pos;
+    unsigned count;
+    if (length <= 0 || raster->words_alef_top <= 0) return 0;
+    size = (double)raster->cap * raster->words->units_per_EM / raster->words_alef_top;
+    for (pass = 0; pass < 8; ++pass) {
+        long need;
+        if (!word_shape(raster, text, length, rtl, size, &advance, box, &missing)) return 0;
+        if (missing) { out->missing = 1; return 1; }
+        need = advance > box[2] - box[0] ? advance : box[2] - box[0];
+        if (need <= room) break;
+        size *= (double)room / need * 0.999;
+    }
+    origin = (room - advance) / 2;
+    if (origin + box[0] < 0) origin = -box[0];
+    if (origin + box[2] > room) origin = room - box[2];
+    canvas = calloc((size_t)W * H, 1);
+    if (!canvas) return 0;
+    info = hb_buffer_get_glyph_infos(raster->words_buffer, &count);
+    pos = hb_buffer_get_glyph_positions(raster->words_buffer, NULL);
+    for (i = 0; i < (int)count; ++i) {
+        long px = origin + pen + pos[i].x_offset, py = pos[i].y_offset;
+        int left = floor_26_6(px), top = floor_26_6(py), bx, by;
+        FT_Vector delta;
+        FT_Bitmap *bitmap;
+        delta.x = px - left * 64L; delta.y = py - top * 64L;
+        FT_Set_Transform(raster->words, NULL, &delta);
+        if (FT_Load_Glyph(raster->words, info[i].codepoint,
+                          FT_LOAD_RENDER | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP)) {
+            FT_Set_Transform(raster->words, NULL, NULL);
+            free(canvas);
+            return 0;
+        }
+        FT_Set_Transform(raster->words, NULL, NULL);
+        bitmap = &raster->words->glyph->bitmap;
+        if (bitmap->pixel_mode != FT_PIXEL_MODE_GRAY || bitmap->pitch < 0) { free(canvas); return 0; }
+        bx = left + raster->words->glyph->bitmap_left;
+        by = raster->height + raster->baseline - top - raster->words->glyph->bitmap_top;
+        for (y = 0; y < (int)bitmap->rows; ++y)
+            for (x = 0; x < (int)bitmap->width; ++x) {
+                unsigned in = bitmap->buffer[y * bitmap->pitch + x];
+                int cx = bx + x, cy = by + y;
+                if (!in) continue;
+                if (cx < 0 || cx >= W || cy < 0 || cy >= H) { raster->word_dropped += in; continue; }
+                canvas[cy * W + cx] = word_over(canvas[cy * W + cx], in);
+            }
+        pen += pos[i].x_advance;
+    }
+    for (y = 0; y < H; ++y)
+        for (x = 0; x < W; ++x)
+            if (canvas[y * W + x]) { if (y < first) first = y; last = y; break; }
+    if (last < 0) { first = raster->height; last = raster->height - 1; }
+    out->width = W;
+    out->top = first - raster->height;
+    out->height = last - first + 1;
+    out->pixels[0] = malloc((size_t)W * (out->height > 0 ? out->height : 1));
+    if (!out->pixels[0]) { free(canvas); return 0; }
+    if (out->height > 0) memcpy(out->pixels[0], canvas + (size_t)first * W, (size_t)W * out->height);
+    free(canvas);
+    return 1;
+}
+
+/* Bold, on the whole word: the renderer's one-pixel overstrike (ADR 0240),
+   so a slice's first column takes the previous cell's ink, and nothing
+   passes the word's last column. */
+static unsigned char *word_bold(const struct RasterWord *w)
+{
+    unsigned char *bold = malloc((size_t)w->width * (w->height > 0 ? w->height : 1));
+    int x, y;
+    if (!bold) return NULL;
+    for (y = 0; y < w->height; ++y)
+        for (x = 0; x < w->width; ++x) {
+            unsigned char c = w->pixels[0][y * w->width + x];
+            if (x > 0) c = word_over(c, w->pixels[0][y * w->width + x - 1]);
+            bold[y * w->width + x] = c;
+        }
+    return bold;
+}
+
+static size_t word_size(const struct RasterWord *w)
+{
+    size_t one = (size_t)w->width * (w->height > 0 ? w->height : 1);
+    return (w->pixels[0] ? one : 0) + (w->pixels[1] ? one : 0) + sizeof(BlitCellWord);
+}
+
+static void word_free(BlitRaster *raster, struct RasterWord *w)
+{
+    if (!w->valid) return;
+    raster->word_bytes -= word_size(w);
+    free(w->key); free(w->pixels[0]); free(w->pixels[1]);
+    memset(w, 0, sizeof(*w));
+}
+
+/* The cached word, drawn on a miss; NULL on failure. */
+static struct RasterWord *word_find(BlitRaster *raster, const BlitCellWord *word)
+{
+    unsigned set = blit_cell_word_hash(word) % WORD_SETS, way, chosen = 0, other;
+    struct RasterWord *ways = &raster->word_cache[set * WORD_WAYS], made, *entry;
+    for (way = 0; way < WORD_WAYS; ++way)
+        if (ways[way].valid && blit_cell_word_equal(ways[way].key, word)) {
+            unsigned previous = ways[way].age;
+            for (other = 0; other < WORD_WAYS; ++other)
+                if (ways[other].valid && ways[other].age < previous) ++ways[other].age;
+            ways[way].age = 0;
+            ++raster->word_hits;
+            return &ways[way];
+        }
+    ++raster->word_misses;
+    memset(&made, 0, sizeof(made));
+    if (!word_draw(raster, word, &made)) return NULL;
+    made.key = malloc(sizeof(BlitCellWord));
+    if (!made.key) { free(made.pixels[0]); return NULL; }
+    *made.key = *word;
+    made.valid = 1;
+    made.serial = ++raster->word_serial;
+    for (way = 0; way < WORD_WAYS; ++way) {
+        if (!ways[way].valid) { chosen = way; break; }
+        if (ways[way].age > ways[chosen].age) chosen = way;
+    }
+    entry = &ways[chosen];
+    word_free(raster, entry);
+    /* Past the byte budget, reclaim round-robin across sets, never the
+       slot being filled. */
+    while (raster->word_bytes + word_size(&made) > WORD_MAX_BYTES) {
+        struct RasterWord *victim = &raster->word_cache[raster->word_reclaim];
+        raster->word_reclaim = (raster->word_reclaim + 1) % (WORD_SETS * WORD_WAYS);
+        if (victim != entry) word_free(raster, victim);
+    }
+    for (way = 0; way < WORD_WAYS; ++way)
+        if (way != chosen && ways[way].valid) ++ways[way].age;
+    *entry = made;
+    raster->word_bytes += word_size(entry);
+    return entry;
+}
+
+int blit_raster_get_word(BlitRaster *raster, const BlitCellWord *word, int index, int bold,
+                         BlitRasterGlyph *glyph, unsigned long long *serial)
+{
+    struct RasterWord *w;
+    if (!raster || !raster->words || !raster->word_cache || !word || !glyph ||
+        word->count < 1 || word->count > BLIT_WORD_MAX_CELLS || word->kind == BLIT_WORD_NONE ||
+        index < -1 || index >= word->count) return 0;
+    w = word_find(raster, word);
+    if (!w || w->missing) return 0;
+    if (bold && !w->pixels[1]) {
+        size_t before = word_size(w);
+        if (!(w->pixels[1] = word_bold(w))) return 0;
+        raster->word_bytes += word_size(w) - before;
+    }
+    memset(glyph, 0, sizeof(*glyph));
+    glyph->pixels = w->height > 0 ? w->pixels[bold ? 1 : 0] + (index > 0 ? index * raster->width : 0) : NULL;
+    glyph->width = index < 0 ? w->width : raster->width;
+    glyph->height = w->height > 0 ? w->height : 0;
+    glyph->stride = w->width;
+    glyph->ink_offset_x = 0;
+    glyph->ink_offset_y = w->top;
+    glyph->baseline = raster->baseline - w->top;
+    glyph->format = BLIT_RASTER_COVERAGE;
+    if (serial) *serial = w->serial * 2 + (bold ? 1 : 0);
+    return 1;
+}
+
+void blit_raster_word_counts(const BlitRaster *raster, unsigned long long *hits,
+                             unsigned long long *misses, size_t *bytes,
+                             unsigned long long *dropped)
+{
+    if (hits) *hits = raster ? raster->word_hits : 0;
+    if (misses) *misses = raster ? raster->word_misses : 0;
+    if (bytes) *bytes = raster ? raster->word_bytes : 0;
+    if (dropped) *dropped = raster ? raster->word_dropped : 0;
+}
 
 int blit_raster_set_arabic(BlitRaster *raster, const char *path)
 {
