@@ -110,20 +110,15 @@ whose pixels point into the canvas, `width` one cell, `stride` the word's,
 belongs to exactly one slice, so slices drawn independently, each into its
 own cell, make the whole word with nothing blended twice.
 
-**Bold and italic are made on the word,** as variants of the canvas made
-when first asked for (regular, bold, italic, bold italic):
+**Bold is made on the word**, as a variant of the canvas made when first
+asked for: the renderer's one-pixel overstrike (ADR 0240) applied to the
+whole canvas, so a slice's first column gets the previous cell's ink and
+nothing passes the word's last column. A bold cell draws its slice from
+that variant, once; the renderer adds no overstrike to word slices. A word
+can be bold in some cells only.
 
-- bold is the renderer's one-pixel overstrike (ADR 0240) applied to the
-  whole canvas, so a slice's first column gets the previous cell's ink;
-- italic is the renderer's lean (`glyph_row_lean`, by row from the cell's
-  top) applied to the whole canvas, which grows by the lean on the right;
-  the last cell's slice carries those extra columns, as any italic glyph
-  overhangs its cell.
-
-A styled cell draws its slice from that variant, once; the renderer's own
-overstrike and lean are skipped for word slices. So the GPU's rectangular
-quads and the CPU agree, and a word can be bold or italic in some cells
-only.
+**Italic words are drawn upright.** A Latin slant has no meaning for Naskh,
+and leaning each slice by itself would break the word apart at every cell.
 
 **The renderer.** `draw_view`, `kms_gles_view` and the block cursor ask
 for an Arabic cell's ink through one helper that knows the row, not just
@@ -138,10 +133,11 @@ is widened, on its rows, to every run that contains or touches a damaged
 column (one column either side: a cell that stopped being a letter
 shortens the words beside it). The widening reads the new cells only,
 which is enough because an undamaged cell did not change. The widened
-rectangle then goes through `blit_ink_region` as before. With no sideways
-ink, `raster_ink_left` and `raster_ink_right` drop from 2 and 3 cells to 0
-for Arabic, and the halo around a damaged rectangle from 3-4 columns to the
-one column italic and bold need.
+rectangle then goes through `blit_ink_region` as before. The Arabic
+companion's ink margins (2 cells left, 3 right, 1 above and below) stay:
+a run the word face refuses is drawn per cell with the companion, whose ink
+overhangs. With a word face and no companion (a pixel font), the margins
+are a row above and below.
 
 **The cursor** marks its cell: the block cursor redraws, in the cursor's
 background, the part of the word inside the cursor cell (and any overhang
@@ -158,15 +154,11 @@ ink. It does not move to where the letter's ink is.
   Arabic is about 7 MB. Past 8192 distinct words on screen (only small cells
   on a large screen get there) the least recently drawn are drawn again
   when next needed, about 50 us each, and the counters report it.
-- *GPU:* word sprites live in their own atlas, one for the device like the
-  glyph atlas, sized from the outputs' total area (a full screen of words
-  needs about 0.8 of the screen's area): 2048 square up to one 1920x1080
-  screen, 4096 square up to 3840x2160 or several smaller. A re-drawn word
-  has a new serial, so its old sprite stays until the word atlas is full
-  and is emptied whole, as the glyph atlas is today. A word atlas emptied
-  twice within one frame cannot hold that frame's words: the output goes
-  back to the CPU compositor with the reason recorded (`kms_gles_detach`,
-  as for any GPU resource failure), and nothing is drawn missing.
+- *GPU:* a word is one sprite in the glyph atlas, the canvas uploaded as
+  coverage and keyed by its serial; each cell draws its sub-rectangle as a
+  quad. A full 1920x1080 screen of Arabic at 22 px is about 1,500 word
+  sprites, not 8,500 slices. A re-drawn word has a new serial, so its old
+  sprite stays until the atlas is full and emptied whole, as it is today.
 
 **The font.** Noto Naskh Arabic 2.021 (OFL 1.1, the upstream release's
 unhinted face: Blit draws Arabic unhinted) ships unmodified in
@@ -255,13 +247,26 @@ lacks (U+08FF), every cell height 8-64 (cell width (8h+8)/16), for Hack,
   fitting by advance only (154 pixels outside their cells), the per-cell
   bold overstrike (797 pixels), no ZWJ/ZWNJ (285 wrong forms).
 
-Decided but not yet drawn by the prototype: pixel fonts (Terminus),
-italic, marks-only cells and runs longer than 32 cells. Its own cursor
-check only re-read the slices, so it proves nothing; the cursor is judged
-from a picture of block cursors mid-word at 22 px and from the drift
-figures above. The landing gate is `tools/tests/arabic_word_slice_gate.sh`:
-these checks through the raster's own word cache for every shipped font,
-italic and a pixel font included, incremental against clean frames through
-`draw_view` (a letter changed, a cell turned to a space), and GLES against
-CPU. Not accepted until that gate passes and the owner has seen the look on
-the mini PC.
+Landed (2026-11-20), each failing on a broken build:
+
+- `arabic_word_text_gate`: every specimen's runs read back as its logical
+  text, 15 words of 15, no joiner in a whole word; a cut word keeps its
+  joins, letters left apart stay apart (fails with the letters left in
+  visual order, and without the cut word's ZWJ);
+- `arabic_word_slice_gate`, every shipped text font, heights 8-64: 5,700
+  words, 30,210 slices composing their words exactly, 1,425 words keeping
+  their tashkeel's ink, 285 refusals of a mark the face lacks (a Latin
+  acute on a beh: Noto Naskh 2.021 has every Arabic mark), no ink dropped,
+  bold the whole word's overstrike, and words unlike their cells shaped one
+  by one (fails with a slice one pixel off, and with words two rows low);
+- `arabic_word_view_gate`, through `draw_view`: 323 words placed exactly,
+  551 one-cell edits equal to clean frames, the block cursor on 1,083
+  letters changing nothing outside its cell (361 edits differ without the
+  damage widening);
+- `gles_compose_gate`: the GPU equals the CPU for words with bold, italic
+  and a colour change mid-word, the cursor mid-word, and damage on one
+  letter, a letter turned into a space and the far end of a six-cell word
+  (fails with a sub-rectangle one pixel off, and without the GPU's
+  widening).
+
+Not accepted until the owner has seen the look on the mini PC.
