@@ -44,7 +44,7 @@ read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
     its login screen. update_live_smoke_gate (lifecycle suite) covers that
     reading against a fake server, and the new reading reports the mini PC
     as it is now as healthy.
-- **Published** to hibr-apt under HOLD/done with my-vpn-ea.
+- **Published** to hibr-apt (c1420d3) under HOLD/done with my-vpn-ea.
 
 ## 2026-11-19: 0.3.126 player glyphs; display modes across hot-plug
 
