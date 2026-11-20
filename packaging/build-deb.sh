@@ -325,8 +325,9 @@ BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token
 # Issue #55. This package exists to present a desktop, so an output with
 # nothing on it is a fault a monitor should see rather than a warning it has
 # to interpret. Blit reports the warning either way; this turns it into an
-# error after a grace window long enough for a desktop to start. Remove the
-# line on a host that deliberately runs Blit with no session.
+# error after a grace window long enough for a desktop to start. On a host
+# that deliberately runs Blit with no session, set it to 0 (an upgrade adds
+# back a line that is missing, and keeps one that is set; Gitea #180).
 BLIT_EXPECT_DESKTOP=1
 # Issue #83. Keep one root-owned Hibr login manager on the primary pane. Hibr
 # authenticates and drops the selected desktop or shell; Blit retains KMS and

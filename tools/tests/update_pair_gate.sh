@@ -18,6 +18,8 @@
 #   4. both at -0; the pair at -1                      -> both -1, apt-get check clean
 #   5. blit -0 only; the pair at -1                    -> blit -1, compositor still absent
 #   6. a path outside the staging directory           -> refused, and the file kept
+# and with case 4, an operator's BLIT_EXPECT_DESKTOP=0 in /etc/blit/blit.env
+# is still 0, in one line, after the upgrade (Gitea #180).
 # After every answer, installed or refused, the staged files are gone.
 set -eu
 
@@ -153,8 +155,13 @@ expect_refused bad-sha "SHA-256" \
     "$(ask "$blit_new" 0000000000000000000000000000000000000000000000000000000000000000 \
         "$comp_new" "$(sha "$comp_new")")"
 
+sed -i 's/^BLIT_EXPECT_DESKTOP=.*/BLIT_EXPECT_DESKTOP=0/' /etc/blit/blit.env
+grep -q '^BLIT_EXPECT_DESKTOP=0$' /etc/blit/blit.env || fail "pair: could not set BLIT_EXPECT_DESKTOP=0"
 answer=$(ask "$blit_new" "$(sha "$blit_new")" "$comp_new" "$(sha "$comp_new")")
 [ "$answer" = OK ] || fail "pair: expected OK, got '$answer'"
+[ "$(grep -c '^BLIT_EXPECT_DESKTOP=' /etc/blit/blit.env)" = 1 ] &&
+    grep -q '^BLIT_EXPECT_DESKTOP=0$' /etc/blit/blit.env ||
+    fail "pair: the upgrade changed an operator's BLIT_EXPECT_DESKTOP=0: $(grep '^BLIT_EXPECT_DESKTOP' /etc/blit/blit.env | tr '\n' ' ')"
 [ "$(state)" = "blit=$version blit-compositor=$version" ] || fail "pair: $(state)"
 apt-get check >"$work/check.log" 2>&1 || { cat "$work/check.log" >&2; fail "pair: apt-get check"; }
 echo "case pair: $(state); apt-get check clean"
@@ -177,4 +184,4 @@ esac
 [ -f "$outside" ] || fail "outside: the helper deleted a file it was not given to stage"
 echo "case outside: refused; the file kept"
 
-echo "UPDATE_PAIR_GATE_PASS version=$version cases=6"
+echo "UPDATE_PAIR_GATE_PASS version=$version cases=6 kept_operator_env=1"
