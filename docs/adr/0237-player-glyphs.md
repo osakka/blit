@@ -95,3 +95,21 @@ the dark edge the underline colour (SGR 58).
 - window_style_gate draws a raised and a pressed key on the CPU and GLES
   compositors: the bands' colours and widths, each end's sides and corners,
   and the pressed `H` exactly 1 px below the raised one.
+
+## Amended 2026-11-20 (0.3.127): big discs, icons over rows
+
+The owner approved bigger now-playing discs. The preview drew them about 38 px
+across at the 12 x 24 cell, which is four cells by two rows; a 2 x 2 block (24
+px wide) could not hold that, so they are 4 x 2: `<kind>-big-<f>-r<row>c<col>`,
+U+1003D5 + 64 kind + 8 f + 4 row + col (disc, vinyl, cassette; frames 0-7),
+U+1003D5-100494, the same drawings as the two-cell discs.
+
+Icons could span columns (ADR 0197), not rows. Now an icon can span both:
+the catalogue's `rows` and `row`, and a private 'BLrw' table in the icon font
+(glyph id, rows, row, written by build-blit-icons.py) that the raster reads
+when it opens the font. Such a part is fitted to all its rows (80% of their
+height, as a one-row icon is to one) and placed by its row, an inner top or
+bottom edge being its neighbour row's, as an inner side is its neighbour
+column's. custom_icon_gate checks a multi-row icon's ink and colour whole (a
+corner part may be empty at a small cell); icon_clip_gate allows ink toward a
+neighbour row. Rendered at 12 x 24, the parts join without a seam.

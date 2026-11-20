@@ -435,6 +435,9 @@ the catalogue (`GET /v1/fonts/icons`) and [special additions](fonts/special.md).
   SGR 54, and use `key-pressed-left`/`-right` for a pressed key's ends.
 - **Now playing**: `disc-<f>`, `vinyl-<f>`, `cassette-<f>`, each `-left` and
   `-right`, in their own colours; step `f` 0-7 while playing, 0 when stopped.
+  Bigger (0.3.127): `disc-big-<f>-r<row>c<col>` and the same for `vinyl` and
+  `cassette`, four cells by two rows, `r0c0`-`r0c3` on one row and
+  `r1c0`-`r1c3` below.
 
 ## Discover first; retain a fallback
 

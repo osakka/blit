@@ -24,8 +24,8 @@
    two-column Wi-Fi (1-4, off) and volume (0-3) icons, U+1002EC-1002F3 the two-column classic phones (off, wait, on, ring) and U+1002F4-100309 the two-column batteries (0-4, charging 0-4, ac), colour icons. U+10030A-100313 are the
    full-screen and sticky boxes (ADR 0224), which window_glyph_gate holds; U+100314-10037C the player cell glyphs
    (ADR 0237, player_glyph_gate), U+10037D-1003D0 the transport and now-playing icons and U+1003D1-1003D4
-   the key ends (window_style_gate). */
-#define NEXT_FREE 0x1003D5U
+   the key ends (window_style_gate) and U+1003D5-100494 the big discs. */
+#define NEXT_FREE 0x100495U
 
 /* Pens are used by Slate's checkbox (the 4th to 6th glyph) and from the
    Slate switch on (the 11th): written out here, not read from the header. */

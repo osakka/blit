@@ -17,6 +17,11 @@ int main(int argc, char **argv)
     BlitFont font;
     int size = 0, samples = 0;
     unsigned cp = 0, required[512], distinct[512], live[1024], retired[1024];
+    /* ADR 0237: an icon over several rows is checked whole: each part's
+       group is its icon's first codepoint (0 for an icon on one row), and
+       its parts together must have ink in colour, as a one-row icon must. */
+    unsigned group[1024], group_mark;
+    static unsigned char group_ink[0x495], group_colour[0x495];
     int required_count = 0, distinct_count = 0, live_count = 0, retired_count = 0,
         ui_samples = 0, script_samples = 0, at;
     /* ADR 0195: what the glyph stack adds to any font -- an overhanging
@@ -43,7 +48,10 @@ int main(int argc, char **argv)
        (ADR 0201): read, not written here as ranges. */
     input = fopen(argv[6], "r");
     if (!input) return 2;
-    while (live_count < 1024 && fscanf(input, "%x", &cp) == 1) live[live_count++] = cp;
+    while (live_count < 1024 && fscanf(input, "%x %x", &cp, &group_mark) == 2) {
+        group[live_count] = group_mark;
+        live[live_count++] = cp;
+    }
     fclose(input);
     input = fopen(argv[7], "r");
     if (!input) return 2;
@@ -54,8 +62,8 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        /* Indexed by codepoint - U+100000: the icons run to U+1003D0 (cassette-7-right, ADR 0237). */
-        unsigned hashes[0x3D1];
+        /* Indexed by codepoint - U+100000: the icons run to U+100494 (cassette-big-7-r1c3, ADR 0237). */
+        unsigned hashes[0x495];
         int partial_icons = 0;
         int seam[2][96], reach[2], tall[2];
         int index;
@@ -123,7 +131,13 @@ int main(int argc, char **argv)
                of every drawing: one made only of straight rectangles can
                land exactly on whole pixels (the USB stick's right half does
                at 20 px). */
-            CHECK(ink && colour);
+            if (group[at]) {
+                CHECK(group[at] - 0x100000 < sizeof(group_ink));
+                group_ink[group[at] - 0x100000] |= ink > 0;
+                group_colour[group[at] - 0x100000] |= colour > 0;
+            } else {
+                CHECK(ink && colour);
+            }
             partial_icons += partial > 0;
             CHECK(cp - 0x100000 < sizeof(hashes) / sizeof(hashes[0]));
             hashes[cp - 0x100000] = hash;
@@ -189,6 +203,14 @@ int main(int argc, char **argv)
                 }
         }
         CHECK(partial_icons > 0);
+        /* Each multi-row icon, its parts together: ink, in colour. */
+        for (at = 0; at < live_count; ++at)
+            if (group[at]) {
+                cp = live[at];
+                CHECK(group_ink[group[at] - 0x100000] && group_colour[group[at] - 0x100000]);
+            }
+        memset(group_ink, 0, sizeof(group_ink));
+        memset(group_colour, 0, sizeof(group_colour));
         /* Two-column icons are told apart whole -- a plain half of one page
            may match another's -- and from 16 px, below which two icons can
            honestly round to the same pixels: one per file drawing -- each

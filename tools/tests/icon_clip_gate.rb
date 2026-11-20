@@ -56,10 +56,11 @@ catalogue = JSON.parse(File.read('assets/fonts/icons/catalogue.json'))
 spec = []
 catalogue.fetch('icons').each do |i|
   columns = i.fetch('columns', 1)
-  spec << ["icon-#{columns > 1 ? 'span' : 'single'}", i['codepoint'].to_i(16), columns, i.fetch('column', 0), i['id']]
+  spec << ["icon-#{columns > 1 ? 'span' : 'single'}", i['codepoint'].to_i(16), columns, i.fetch('column', 0),
+           i.fetch('rows', 1), i.fetch('row', 0), i['id']]
 end
 # A text glyph can span columns too (ADR 0237's two-cell transport buttons).
-catalogue.fetch('text_glyphs', []).each { |i| spec << ['text-glyph', i['codepoint'].to_i(16), i.fetch('columns', 1), i.fetch('column', 0), i['id']] }
+catalogue.fetch('text_glyphs', []).each { |i| spec << ['text-glyph', i['codepoint'].to_i(16), i.fetch('columns', 1), i.fetch('column', 0), 1, 0, i['id']] }
 JSON.parse(File.read('assets/fonts/hibr-ui-glyphs.json')).fetch('scalars').each do |s|
   spec << ['hibr-ui', s.to_i(16), 1, 0, 'ui']
 end
@@ -92,7 +93,13 @@ Dir.mktmpdir('blit-icon-clip') do |work|
   text = text.gsub('"../vendor/', "\"#{ROOT}/vendor/")
   File.write(File.join(work, 'probe.c'),
              "#{text}\n#include \"#{ROOT}/tools/tests/icon_clip_gate.c\"\n")
-  File.write(File.join(work, 'spec'), spec.map { |k, c, n, col, l| "#{k} #{c.to_s(16)} #{n} #{col} #{l}\n" }.join)
+  # Each line: kind, codepoint, columns, column, rows, row, label -- an
+  # entry with no rows given is one row.
+  File.write(File.join(work, 'spec'), spec.map do |e|
+    k, c, n, col, *rest = e
+    rows, row, l = rest.length == 3 ? rest : [1, 0, rest[0]]
+    "#{k} #{c.to_s(16)} #{n} #{col} #{rows} #{row} #{l}\n"
+  end.join)
   binary = File.join(work, 'gate')
   fail!('the harness does not compile') unless system('tcc', '-O2', '-std=c99', *freetype, "-I#{ROOT}/src",
     File.join(work, 'probe.c'), "#{ROOT}/src/blit_font.c",

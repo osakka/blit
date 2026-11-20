@@ -38,7 +38,9 @@ Dir.chdir(root) do
      (0..4).map { |l| "battery-wide-#{l}" } + (0..4).map { |l| "battery-wide-#{l}-charging" } + %w[battery-wide-ac] +
      # ADR 0237: the now-playing discs, eight frames each.
      %w[disc vinyl cassette].flat_map { |k| (0..7).map { |f| "#{k}-#{f}" } })
-      .flat_map { |i| ["#{i}-left", "#{i}-right"] }
+      .flat_map { |i| ["#{i}-left", "#{i}-right"] } +
+    # ADR 0237: the big discs, four cells by two rows a frame.
+    %w[disc vinyl cassette].flat_map { |k| (0..7).flat_map { |f| (0..1).flat_map { |r| (0..3).map { |c| "#{k}-big-#{f}-r#{r}c#{c}" } } } }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
   # ADR 0214: the outer-edge frame is cell geometry at U+1002AE-1002B6, clear
   # of the icons and every retired range; a deprecated glyph names live,
@@ -68,7 +70,13 @@ Dir.chdir(root) do
     # One codepoint per distinct file drawing (ADR 0201): a kind's colour
     # slots may share one drawing, but no two drawings may look alike.
     live = File.join(work, 'live.txt')
-    File.write(live, icons.fetch('icons').map { |i| i['codepoint'] }.join("\n") + "\n")
+    # Each live icon with its group: a multi-row icon's parts name its first
+    # part (ADR 0237), every other icon 0.
+    firsts = {}
+    icons.fetch('icons').each { |i| firsts[i['source'] + '/big'] ||= i['codepoint'] if i.fetch('rows', 1) > 1 }
+    File.write(live, icons.fetch('icons').map { |i|
+      "#{i['codepoint']} #{i.fetch('rows', 1) > 1 ? firsts[i['source'] + '/big'] : '0'}"
+    }.join("\n") + "\n")
     gone = File.join(work, 'retired.txt')
     File.write(gone, retired.map { |c| c.to_s(16) }.join("\n") + "\n")
     distinct = File.join(work, 'distinct.txt')

@@ -69,7 +69,7 @@ static const char *face_name(const BlitRaster *r, FT_Face f)
     return "other";
 }
 
-typedef struct { char kind[24]; unsigned cp; int columns, column; char label[64]; } Item;
+typedef struct { char kind[24]; unsigned cp; int columns, column, rows, row; char label[64]; } Item;
 
 static ClipProbe prev_part;
 static int prev_ok;
@@ -109,6 +109,10 @@ static int sweep(BlitRaster *r, const Item *it, int w, int h)
     if (it->columns > 1) {                  /* ink toward a neighbour is the design */
         if (it->column > 0) l = 0;
         if (it->column < it->columns - 1) rr = 0;
+    }
+    if (it->rows > 1) {                     /* and toward a neighbour row (ADR 0237) */
+        if (it->row > 0) t = 0;
+        if (it->row < it->rows - 1) b = 0;
     }
     if (getenv("ICON_CLIP_TRACE") && probe.calls)
         printf("TRACE %s U+%X %s %dx%d col=%d/%d left=%d top=%d bitmap=%dx%d calls=%d\n", it->kind, it->cp,
@@ -160,7 +164,9 @@ int main(int argc, char **argv)
     while (fgets(line, sizeof line, spec)) {
         Item it;
         memset(&it, 0, sizeof it);
-        if (sscanf(line, "%23s %x %d %d %63s", it.kind, &it.cp, &it.columns, &it.column, it.label) < 4) continue;
+        it.rows = 1; it.row = 0;
+        if (sscanf(line, "%23s %x %d %d %d %d %63s", it.kind, &it.cp, &it.columns, &it.column, &it.rows, &it.row,
+                   it.label) < 6) continue;
         if (count == cap) { cap = cap ? cap * 2 : 512; items = realloc(items, cap * sizeof *items); }
         items[count++] = it;
     }

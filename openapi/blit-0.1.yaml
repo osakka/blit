@@ -2211,6 +2211,17 @@ components:
           type: integer
           minimum: 0
           description: This entry's place in the span, from 0.
+        rows:
+          type: integer
+          minimum: 2
+          description: >-
+            How many rows the icon spans (from 0.3.127, ADR 0237): its
+            entries are written in `columns` cells on each of `rows` rows,
+            row 0 on top.
+        row:
+          type: integer
+          minimum: 0
+          description: This entry's row in the icon, from 0.
         deprecated:
           type: boolean
           const: true

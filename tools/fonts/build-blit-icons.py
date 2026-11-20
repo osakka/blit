@@ -14,6 +14,10 @@ one drawing: each part carries the whole outline, drawn across the span
 and shifted left by its column. Each part's advance is the span's
 (600 per column), which is how the renderer knows it; its ink's centre
 must lie within its own column's share, which is how it knows the column.
+An icon that also spans rows (ADR 0237: `rows`, `row` in the catalogue) is
+one codepoint per cell: the same outline in each of its rows, and the
+private 'BLrw' table naming each such part's glyph, rows and row, which is
+how the renderer fits it to all its rows and places this one.
 
 A monochrome pen says state by shape (ADR 0220), so the shape is decided here,
 from the SVG's own structure, and the renderer only chooses the pen. An icon
@@ -41,8 +45,11 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import struct
+
 import fontTools
 from fontTools.colorLib.builder import buildCOLR, buildCPAL
+from fontTools.ttLib.tables.DefaultTable import DefaultTable
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.areaPen import AreaPen
 from fontTools.pens.reverseContourPen import ReverseContourPen
@@ -70,6 +77,7 @@ glyphs = {'.notdef': TTGlyphPen(None).glyph()}
 cmap = {}
 layers, palette = {}, []
 advances = {}
+row_parts = {}
 SVG = '{http://www.w3.org/2000/svg}path'
 
 
@@ -169,6 +177,8 @@ for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
             store(name + '.mono', mono)
             advances[name + '.mono'] = ADVANCE * columns
     cmap[cp] = name
+    if icon.get('rows', 1) > 1:
+        row_parts[name] = (icon['rows'], icon['row'])
     # The standard writing pencil stays monochrome and themed; the
     # private-use glyph is its intrinsic-colour counterpart.
     if 'text_alias' in icon:
@@ -194,6 +204,11 @@ font['head'].created = font['head'].modified = 0
 font['OS/2'].panose.bProportion = 9  # monospaced
 font['COLR'] = buildCOLR(layers, version=0, glyphMap=font.getReverseGlyphMap())
 font['CPAL'] = buildCPAL([palette])
+if row_parts:
+    rows_table = DefaultTable('BLrw')
+    entries = sorted((font.getGlyphID(n), r, row) for n, (r, row) in row_parts.items())
+    rows_table.data = struct.pack('>H', len(entries)) + b''.join(struct.pack('>HBB', g, r, row) for g, r, row in entries)
+    font['BLrw'] = rows_table
 font.save(args.output, reorderTables=True)
 print(f'BLIT_ICONS_BUILD_PASS glyphs={len(cmap)} colour={len(layers)} '
       f'sha256={hashlib.sha256(args.output.read_bytes()).hexdigest()}')

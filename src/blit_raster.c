@@ -40,6 +40,11 @@ struct BlitRaster {
        and the height of the box every icon is drawn in. A part spanning
        columns has an advance of its span in columns. */
     double icon_advance, icon_cap;
+    /* ADR 0237: the icon font's parts that span rows ('BLrw': glyph id,
+       rows, row), sorted by glyph id; an icon spans columns by its advance
+       and rows by this. */
+    struct { unsigned short glyph; unsigned char rows, row; } icon_rows[512];
+    int icon_row_count;
     hb_font_t *arabic_font;
     hb_buffer_t *arabic_buffer;
     int arabic_baseline;
@@ -161,6 +166,26 @@ static void open_stack(BlitRaster *raster, const char *colour_path)
             advance > 0 ? (double)advance : raster->icons->units_per_EM * 0.6;
         raster->icon_cap = icon_os2 && icon_os2->sCapHeight > 0 ?
             (double)icon_os2->sCapHeight : raster->icons->units_per_EM * 0.7;
+        {
+            /* uint16 count, then count x {uint16 glyph, uint8 rows, uint8 row},
+               big-endian, glyph ids ascending (build-blit-icons.py). */
+            FT_ULong length = 0;
+            unsigned char *table;
+            if (!FT_Load_Sfnt_Table(raster->icons, FT_MAKE_TAG('B', 'L', 'r', 'w'), 0, NULL, &length) &&
+                length >= 2 && length <= 2 + 4 * 512 && (table = malloc(length)) != NULL) {
+                if (!FT_Load_Sfnt_Table(raster->icons, FT_MAKE_TAG('B', 'L', 'r', 'w'), 0, table, &length)) {
+                    int count = table[0] << 8 | table[1], k;
+                    if (2 + 4 * (FT_ULong)count <= length)
+                        for (k = 0; k < count && k < 512; ++k) {
+                            raster->icon_rows[k].glyph = (unsigned short)(table[2 + 4 * k] << 8 | table[3 + 4 * k]);
+                            raster->icon_rows[k].rows = table[4 + 4 * k];
+                            raster->icon_rows[k].row = table[5 + 4 * k];
+                            raster->icon_row_count = k + 1;
+                        }
+                }
+                free(table);
+            }
+        }
     }
     raster->nerd = stack_face(raster, colour_path, length, "SymbolsNerdFontMono-Regular.ttf");
     for (i = 0; i < 3; ++i) raster->symbols[i] = stack_face(raster, colour_path, length, symbols[i]);
@@ -1111,13 +1136,38 @@ static int fitted_box(FT_Face face, FT_UInt index, int colour, FT_BBox *box)
     return 1;
 }
 
+/* An icon part's rows (1 unless it spans rows) and its row. */
+static int icon_part_rows(const BlitRaster *raster, FT_UInt index, int *row)
+{
+    int lo = 0, hi = raster->icon_row_count - 1;
+    *row = 0;
+    while (lo <= hi) {
+        int mid = (lo + hi) / 2;
+        if (raster->icon_rows[mid].glyph == index) {
+            *row = raster->icon_rows[mid].row;
+            return raster->icon_rows[mid].rows > 1 ? raster->icon_rows[mid].rows : 1;
+        }
+        if (raster->icon_rows[mid].glyph < index) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return 1;
+}
+
 /* Where a fitted glyph's origin goes for a given scale: the glyph centred
    on the cell (or the span), icons on half the cap height, symbols on
    their own baseline unless that leaves the cell. */
 static void fitted_origin(const BlitRaster *raster, int rule, int span, int column,
-                          const FT_BBox *box, double fit, int w, int h,
+                          int rows, int row, const FT_BBox *box, double fit, int w, int h,
                           double *ox, double *oy)
 {
+    if (rows > 1) {
+        /* ADR 0237: centred on the block of rows, this part its row of it:
+           the upper rows move the drawing down, the lower ones up. */
+        double one = raster->icon_advance, step = w * 64.0 - fit * one * 64.0;
+        *ox = (floor(span / 2.0 * step + 0.5) - floor(column * step + 0.5)) / 64.0;
+        *oy = raster->cap / 2.0 - fit * raster->icon_cap / 2.0 + (row - (rows - 1) / 2.0) * h;
+        return;
+    }
     if (span > 1) {
         /* The whole icon's origin on the 26.6 grid, and the column's shift
            from it, which the quantised scale (see draw_fitted) makes a whole
@@ -1156,7 +1206,7 @@ static int draw_fitted_glyph(BlitRaster *raster, FT_Face face, int rule, FT_UInt
     FT_Bitmap *bitmap;
     double natural, fit, bw, bh, ox, oy, limit;
     int w = entry->glyph.width, h = entry->glyph.height, left, top, x, y, failed, span = 1;
-    int column = 0, attempt, found;
+    int column = 0, attempt, found, rows = 1, row = 0;
     if (!face || !index) return 0;
     /* The glyph is placed by `measure`, which is the glyph itself unless a
        partner (an icon's monochrome shape) must sit exactly where its
@@ -1181,7 +1231,9 @@ static int draw_fitted_glyph(BlitRaster *raster, FT_Face face, int rule, FT_UInt
                its ink would not fit the span. */
             double one = raster->icon_advance;
             column = (int)floor((span * one / 2.0 - (box.xMin + box.xMax) / 2.0) / one + 0.5);
-            fit = 0.8 * h / raster->icon_cap;
+            if (face == raster->icons) rows = icon_part_rows(raster, measure, &row);
+            /* A part of an icon over several rows is fitted to all of them. */
+            fit = 0.8 * rows * h / raster->icon_cap;
             if (0.95 * span * w / bw < fit) fit = 0.95 * span * w / bw;
             goto render;
         }
@@ -1210,7 +1262,7 @@ render:
             if (size < 1) size = 1;
             fit = (double)size / (face->units_per_EM * 64.0);
         }
-        fitted_origin(raster, rule, span, column, &box, fit, w, h, &ox, &oy);
+        fitted_origin(raster, rule, span, column, rows, row, &box, fit, w, h, &ox, &oy);
         if (FT_Set_Char_Size(face, 0, (FT_F26Dot6)size, 72, 72))
             return -1;
         left = (int)floor(ox);
@@ -1232,10 +1284,13 @@ render:
         over_x = (span > 1 ? ((column == 0 ? left < 0 : 0) ||
                               (column == span - 1 ? left + (int)bitmap->width > w : 0)) :
                   left < 0 || left + (int)bitmap->width > w);
-        over_y = top < 0 || top + (int)bitmap->rows > h;
+        /* Over a row's edge likewise: an inner side is its neighbour row's. */
+        over_y = rows > 1 ? (row == 0 && top < 0) || (row == rows - 1 && top + (int)bitmap->rows > h) :
+                 top < 0 || top + (int)bitmap->rows > h;
         if (!over_x && !over_y) break;
         if ((int)bitmap->width > avail_x) shrink = (double)avail_x / bitmap->width;
-        if ((int)bitmap->rows > h && (double)h / bitmap->rows < shrink) shrink = (double)h / bitmap->rows;
+        if ((int)bitmap->rows > rows * h && (double)(rows * h) / bitmap->rows < shrink)
+            shrink = (double)(rows * h) / bitmap->rows;
         if (shrink < 1.0) { fit *= shrink * 0.98; continue; }
         if (span > 1) return 0;     /* the parts of a family are not slid apart */
         /* It fits, but sits askew: slide it in, whole pixels, no ink lost. */

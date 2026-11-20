@@ -66,7 +66,7 @@ check(mine.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'a contr
 icon_codes = catalogue.fetch('icons').map { |i| i['codepoint'].to_i(16) }
 retired = catalogue.fetch('retired').flat_map { |r| (r['from'].to_i(16)..r['to'].to_i(16)).to_a }
 check(((FIRST...NEXT_FREE).to_a & (icon_codes + retired)).empty?, 'a control reuses an icon or retired codepoint')
-NEXT_FREE_ALL = 0x1003D5 # past the key ends, the player glyphs and icons (ADR 0237), and before them the outer-edge frame (ADR 0214), the pressed states (ADR 0219), the hui mark, wiretap, the minimise boxes (ADR 0222), Wi-Fi signal and cellular, the two-column Wi-Fi and volume, the two-column classic phones, the two-column batteries, and the full-screen and sticky boxes (ADR 0224)
+NEXT_FREE_ALL = 0x100495 # past the big discs (U+1003D5-100494), past the key ends, the player glyphs and icons (ADR 0237), and before them the outer-edge frame (ADR 0214), the pressed states (ADR 0219), the hui mark, wiretap, the minimise boxes (ADR 0222), Wi-Fi signal and cellular, the two-column Wi-Fi and volume, the two-column classic phones, the two-column batteries, and the full-screen and sticky boxes (ADR 0224)
 check((icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).none? { |c| c >= NEXT_FREE_ALL },
       "something is mapped at or past U+#{NEXT_FREE_ALL.to_s(16).upcase}, the next free codepoint")
 
