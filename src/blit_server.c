@@ -4780,21 +4780,17 @@ static int display_index_by_id(const BlitRuntime *runtime, const char *id)
 
 /* One display in the ADR 0064 envelope.
  *
- * `configuration` is empty, and that is the decision rather than an
- * omission: selecting a mode changes the render output size and therefore
- * every surface on the display, and a Hibr desktop's cells come from its
- * owner (ADR 0063), so Blit cannot repaint one at a new size by itself. Mode
- * selection needs a resize protocol with the owner, which is its own ticket.
- * The modes are reported so a controller can show them; the write that
- * applies one does not exist yet, and saying so beats a property that
- * accepts a value and does nothing. */
+ * A mode changes the render output size and therefore every surface on the
+ * display, and a Hibr desktop's cells come from its owner (ADR 0063). Since
+ * 0.3.125 a mode is written through `configuration.mode`, tried and kept
+ * (ADR 0236, Gitea #60): the display, its panes and their sessions are
+ * resized as a replug at that mode would resize them. */
 /* ---- issue #69: what this backend and this hardware actually permit ----
  *
- * ADR 0064 left a display's `configuration` empty on purpose, and the empty
- * object was honest: a mode change resizes every surface, and a Hibr desktop's
- * cells come from its owner, so it needs issue #60's resize protocol first.
- * What is left over is the settings that resize nothing, and they divide by
- * who is allowed to perform them:
+ * ADR 0064 left a display's `configuration` empty on purpose: a mode change
+ * resizes every surface, and a Hibr desktop's cells come from its owner. The
+ * mode came with ADR 0236 (0.3.125). The settings that resize nothing divide
+ * by who is allowed to perform them:
  *
  *   rotation    a render transform. Native KMS composes straight into the
  *               connector's framebuffer and has none, so it is refused
@@ -20765,7 +20761,7 @@ static int apply_input_device_configuration(BlitRuntime *runtime,
         char detail[256];
         snprintf(detail, sizeof(detail),
                  "A device configuration carries \"%s\", which is not a "
-                 "writable property. GET /v1/input-devices shows each "
+                 "writable property. GET /v1/input/devices/{id} shows each "
                  "device's own writable configuration.", rejected);
         config_problem(problem, 400, "Bad Request", "invalid_device_property",
                                 detail);
@@ -21678,9 +21674,9 @@ static int apply_display_configuration(BlitRuntime *runtime,
         char detail[320];
         snprintf(detail, sizeof(detail),
                  "A display configuration carries \"%s\", which is not a "
-                 "writable property. Writable: rotation, zoom, and "
-                 "brightness_percent where a backlight exists. A mode change "
-                 "resizes every surface and needs issue #60.", rejected);
+                 "writable property. Writable: mode, zoom, rotation (0 only) "
+                 "and brightness_percent where a backlight exists; "
+                 "`capabilities` says which this display can perform.", rejected);
         config_problem(problem, 400, "Bad Request", "invalid_display_property",
                        detail);
         return 0;

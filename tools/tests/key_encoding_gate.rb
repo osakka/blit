@@ -272,6 +272,9 @@ response = request('PATCH', "/v1/input/devices/#{DEVICE_A}",
                    'configuration' => { 'keymap' => { 'base' => 'us', 'keys' => {} } })
 failures << "a keymap override was not refused: #{response.code} #{response.body}" unless
   response.code == '400' && response.body.include?('invalid_device_property')
+# Gitea #167: the refusal points at a route the server serves.
+failures << "the refusal names a route that does not exist: #{response.body}" unless
+  response.body.include?('/v1/input/devices/') && !response.body.include?('/v1/input-devices')
 
 # xkb `us`: the key beside Left Shift on an ISO keyboard types < and >, and
 # Right Alt is Alt (its ESC prefix), where Blit's own table had nothing and

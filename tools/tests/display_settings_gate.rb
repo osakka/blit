@@ -159,6 +159,9 @@ Dir.mktmpdir('blit-display') do |root|
     check(code == 400, "a power change -> #{code}")
     check(problem.to_h['code'] == 'invalid_display_property',
           "power refusal code: #{problem.inspect}")
+    # Gitea #167: the detail lists what is writable now, mode included.
+    check(problem.to_h['detail'].to_s.include?('mode') && !problem.to_h['detail'].to_s.include?('#60'),
+          "the refusal's detail is out of date: #{problem.to_h['detail'].inspect}")
   end
 
   # ---- a fabricated backlight --------------------------------------------
