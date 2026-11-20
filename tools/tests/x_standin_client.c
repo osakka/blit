@@ -56,6 +56,10 @@
         the top-level's FocusOut does not close it, and when it goes X
         reverts the focus to the root
 
+   With $XSTANDIN_OR_ONLY "WxH@X,Y" its window is instead override-redirect,
+   WxH at X,Y, its only window -- as some games' full-screen windows are
+   (Gitea #175).
+
    Focus (ADR 0228, `WINDOW activate`): with $XSTANDIN_FOCUS_AT_START
    `take` it takes X's focus onto its window itself (SetInputFocus) a
    second after the window is mapped, and again at each of its window's
@@ -1364,6 +1368,20 @@ int main(int argc, char **argv)
     }
     dnd_start();
     dragout_init();
+    {
+        const char *only = getenv("XSTANDIN_OR_ONLY");
+        unsigned ow, oh;
+        int ox, oy;
+        if (only && sscanf(only, "%ux%u@%d,%d", &ow, &oh, &ox, &oy) == 4) {
+            uint32_t on = 1, geometry[4];
+            geometry[0] = (uint32_t)ox; geometry[1] = (uint32_t)oy;
+            geometry[2] = ow; geometry[3] = oh;
+            xcb_change_window_attributes(conn, window, XCB_CW_OVERRIDE_REDIRECT, &on);
+            xcb_configure_window(conn, window, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+                                 XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT, geometry);
+            width = ow; height = oh;
+        }
+    }
     xcb_map_window(conn, window);
     xcb_flush(conn);
 

@@ -2799,6 +2799,13 @@ It speaks the frame channel above as a producer, with these additions.
     `xterm`, `hand2`, or the CSS names GTK asks for), when Blit's pointer
     vocabulary has it -- its OSC 22 names take the X names as aliases --
     else `default`; `none` while X hides it.
+  - An override-redirect window that covers a display exactly, or the
+    whole X screen -- a game's full-screen window -- is a window of its
+    own (0.3.129, Gitea #175): `WINDOW new <id> 0`, `decor client` and
+    `WINDOW fullscreen <id> on`, whatever X window is under it; the
+    desktop grants or refuses full screen as for any program. Any other
+    override-redirect window that belongs to no shown X window (a
+    toolkit's hidden helper, a notification) is not shown.
   - An override-redirect window (an X menu, dropdown or tooltip) is a
     `WINDOW popup <id> <parent> <x> <y>`, as an `xdg_popup` is, and the
     desktop joins it to its top-level's route with `INPUT member` as for

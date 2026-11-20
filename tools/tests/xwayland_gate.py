@@ -1598,6 +1598,112 @@ def x_restart_part(desk, standin, env, clip_dir, log, work, xpid):
 KEY_B = 48
 
 
+def x_or_only_part(desk, standin, env, log, work):
+    """Gitea #175: an override-redirect window that covers a display -- a
+    game's full-screen window -- is a window of its own, drawn by its program
+    (`decor client`) and asking for full screen, even over another X window
+    of the same screen (not a popup of it); it draws, takes a key and a
+    click. A small override-redirect window that belongs to no shown X
+    window (a toolkit's hidden helper, a notification) is not shown.
+    Returns its summary."""
+    desk.send('WINDOW layout DP-1 0 0 1920 1080 0')
+    desk.send('WINDOW layout end')
+    desk.quiet(0.5)
+
+    def lines_until(done, wait=15):
+        lines = []
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            got = desk.next(0.5)
+            if got is None:
+                if done(lines):
+                    return lines
+                continue
+            if got[0] == 'frame':
+                lines.append(('frame', got[1]))
+                os.close(got[2])
+                continue
+            lines.append(got[1])
+            if done(lines):
+                return lines
+        return lines
+
+    def new_id(lines):
+        for l in lines:
+            m = re.match(r'WINDOW new (\d+) 0$', l) if isinstance(l, str) else None
+            if m:
+                return int(m.group(1))
+        return None
+
+    def gone(wid):
+        got = lines_until(lambda ls: 'WINDOW gone %d' % wid in ls, 10)
+        check('WINDOW gone %d' % wid in got, 'window %d was not gone after its program ended' % wid)
+
+    # Another X program's window first, under where the game will be.
+    under_path = os.path.join(work, 'xstandin-under.out')
+    under = cg.start([standin, 'Underneath'], env, open(under_path, 'w'))
+    game_path = os.path.join(work, 'xstandin-game.out')
+    game = None
+    try:
+        got = lines_until(lambda ls: new_id(ls) is not None and any(
+            isinstance(l, str) and l.startswith('WINDOW decor') for l in ls))
+        uid = new_id(got)
+        check(uid is not None, lambda: 'the window underneath was not shown:\n' + log())
+        desk.send('WINDOW size %d 400 300 activated' % uid)
+        lines_until(lambda ls: False, 1)
+        game = cg.start([standin, 'Full-screen game'], dict(env, XSTANDIN_OR_ONLY='1920x1080@0,0'),
+                        open(game_path, 'w'))
+        got = lines_until(lambda ls: new_id(ls) is not None and 'WINDOW fullscreen %d on' % new_id(ls) in ls)
+        check(not any(isinstance(l, str) and l.startswith('WINDOW popup') for l in got),
+              lambda: 'the full-screen window became a popup of the one underneath:\n%s' % got)
+        gid = new_id(got)
+        check(gid is not None and gid != uid, lambda: 'the full-screen window was not shown:\n%s\n%s' % (got, log()))
+        check('WINDOW decor %d client' % gid in got, lambda: 'not drawn by its program (decor client):\n%s' % got)
+        check('WINDOW fullscreen %d on' % gid in got, lambda: 'no full screen asked:\n%s' % got)
+        # The desktop grants it: it draws at the display's size, takes a key and a click.
+        desk.send('WINDOW size %d 400 300' % uid)
+        desk.send('WINDOW size %d 1920 1080 activated' % gid)
+        wait_for(lambda: (lines_until(lambda ls: True, 0.3), gid in desk.input_socks)[1],
+                 lambda: 'no INPUT sock for the full-screen window %d' % gid)
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[gid])
+        try:
+            gp = lambda: open(game_path).read()
+            route.sendall(('INPUT key %d %d press\nINPUT frame %d 1\nINPUT key %d %d release\nINPUT frame %d 2\n'
+                           % (BLIT_PICTURE, KEY_A, BLIT_PICTURE, BLIT_PICTURE, KEY_A, BLIT_PICTURE)).encode())
+            wait_for(lambda: 'XSTANDIN key %d\n' % (KEY_A + 8) in gp(),
+                     lambda: 'the key did not reach the full-screen window:\n' + gp())
+            route.sendall(('INPUT ptr %d 100.00 100.00\nINPUT frame %d 3\nINPUT btn %d 272 press\nINPUT frame %d 4\n'
+                           'INPUT btn %d 272 release\nINPUT frame %d 5\n'
+                           % ((BLIT_PICTURE,) * 6)).encode())
+            wait_for(lambda: 'XSTANDIN button 1 100,100' in gp(),
+                     lambda: 'the click did not reach the full-screen window:\n' + gp())
+        finally:
+            route.close()
+        check('X: override-redirect window' in log() and 'covers a display: a full-screen window' in log(),
+              lambda: 'the log does not say it covers a display:\n' + log())
+    finally:
+        for client in (game, under):
+            if client is not None:
+                client.terminate()
+                client.wait()
+    gone(gid)
+    gone(uid)
+    # A small one that belongs to nothing shown stays hidden.
+    small_path = os.path.join(work, 'xstandin-small.out')
+    small = cg.start([standin, 'Small helper'], dict(env, XSTANDIN_OR_ONLY='300x200@50,60'), open(small_path, 'w'))
+    try:
+        got = lines_until(lambda ls: False, 3)
+        check(new_id(got) is None, lambda: 'a small override-redirect window was shown:\n%s' % got)
+        wait_for(lambda: '300x200 at 50,60 belongs to no shown X window: not shown' in log(),
+                 lambda: 'the small window\'s "not shown" is not in the log:\n' + log())
+    finally:
+        small.terminate()
+        small.wait()
+    lines_until(lambda ls: False, 1)
+    return 'or_only=fullscreen_over_another,key,click,small_hidden'
+
+
 def x_layout_part(desk, lines_to, printed, log):
     """The desktop's display layout in X (docs/api.md, "Program windows"),
     after milestones C and D and focus ran without one, on window 1: X's
@@ -1945,6 +2051,8 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         check(status == 0 and 'XSTANDIN delete' in printed(),
               lambda: 'the X client exited %d:\n%s' % (status, printed()))
         check('window 1: WM_DELETE_WINDOW' in settled(log), 'the log does not say WM_DELETE_WINDOW')
+        # With no other X window shown, so a small one belongs to nothing.
+        or_only = x_or_only_part(desk, standin, cenv, lambda: settled(log), work)
         route.close()
         xpid, restart = x_restart_part(desk, standin, cenv, clip_dir, lambda: settled(log), work, xpid)
         print('XWAYLAND_GATE_DROP_OK %s' % x_drop_part(desk, standin, cenv, lambda: settled(log), work))
@@ -1964,10 +2072,10 @@ def x_part(compositor, standin, server, work, wl_standin=None):
         return ('display=%s xpid=%d shell=hidden new+title+appid+decor+INPUT-sock frames=320x200(after %d),'
                 '400x300 configure+focus-in click=1@10,12 key=%d keymap=%s switch=%s measure=min %s us median %s us '
                 '(%d frames) accessx=1s->Xwayland-lived motif=decor-client,server %s %s '
-                '%s %s close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
+                '%s %s %s close=WM_DELETE_WINDOW->exit 0->gone %s quit=Xwayland ended,socket+lock removed '
                 'cursor-lines=%d' % (display, xpid, skipped, KEY_A + 8, '%dB' % len(keymap) if keymap else 'none', switched,
                                      measure.group(1), measure.group(2), frames, milestone_c, milestone_d, focus,
-                                     layout, restart,
+                                     layout, or_only, restart,
                                      len(desk.cursors)))
     finally:
         for p in (client, comp):

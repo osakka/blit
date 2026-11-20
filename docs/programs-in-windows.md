@@ -99,6 +99,14 @@ says so, and Hibr's frame stays off, as for Firefox.
   the program it started). A program that keeps asking is heard once a
   second at most.
 
+*Since Blit 0.3.129:*
+
+- **A game's full-screen X window shows.** Some games draw full screen in
+  an override-redirect window, which no window manager manages. One that
+  covers a display (or the whole X screen) is now a window of its own,
+  drawn by the game, asking the desktop for full screen; it takes keys and
+  clicks as any window does.
+
 *Since Blit 0.3.88, with a Hibr that sends its display layout:*
 
 - **Programs see your displays as they are.** Each display is one output
@@ -136,9 +144,7 @@ says so, and Hibr's frame stays off, as for Firefox.
 
 - **X11 programs**: Big Picture full screen and Proton games --
   [ADR 0228](adr/0228-blit-is-the-compositor-for-programs.md) phase 2's
-  milestone E (Gitea #169). A program whose only window is an
-  override-redirect one (some games' full-screen windows) does not show
-  (#175).
+  milestone E (Gitea #169).
 - **Programs' menus in Hibr's bar** (the global menu): Blit's side is in
   0.3.77, Hibr's to follow. Qt and KDE programs, and GTK 3 ones with the
   appmenu module, get it; Firefox and GTK 4 programs keep their own menus.

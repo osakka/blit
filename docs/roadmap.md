@@ -88,8 +88,6 @@ already be fixed.
 - ADR 0229's remaining rows, each its own change: HiDPI output scale (outputs
   say scale 1; no fractional scale, #170), idle inhibit (#171), portals
   (#172), touch and tablets (#173).
-- Programs whose only window is override-redirect (some games' full-screen
-  windows) do not show yet (#175).
 
 ### 6. Housekeeping
 

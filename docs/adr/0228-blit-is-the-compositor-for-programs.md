@@ -1,6 +1,9 @@
 # ADR 0228: Blit is the compositor for programs
 
 - Status: accepted
+- Note: Since 0.3.129 an override-redirect X window that covers a display
+  (a game's full-screen window) is shown as a window of its own asking for
+  full screen, not as a popup (Gitea #175).
 - Note: Phases 0 and 1 and phase 2's milestones A-D shipped in 0.3.71-0.3.84; the owner ran Steam and a game on 0.3.79.
 - Date: 2026-11-09
 - Scope: a Wayland server and an X window manager inside Blit; programs and

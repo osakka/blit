@@ -7678,6 +7678,7 @@ struct bc_xwin {
     int undecorated;                  /* _MOTIF_WM_HINTS: no decorations (it draws its own frame) */
     uint32_t pid;                     /* its client's process, 0 unknown (X-Resource) */
     int or_logged;                    /* an override-redirect window with no parent, noted once */
+    int or_fullscreen;                /* override-redirect and covering a display or the screen (#175) */
     xcb_window_t transient_for;       /* WM_TRANSIENT_FOR, XCB_WINDOW_NONE none */
     uint32_t stack;                   /* its place in X's stacking: higher is above */
     int32_t min_w, min_h, max_w, max_h;   /* WM_NORMAL_HINTS, pixels, 0 none */
@@ -8450,13 +8451,42 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
         }
         return;
     }
-    if (w->override_redirect && (parent = x_popup_parent(s, w)) == NULL) {
-        if (!w->or_logged)
-            logf_("X: override-redirect window 0x%x at %d,%d belongs to no shown X window: not shown",
-                  (unsigned)w->window, w->x, w->y);
-        w->or_logged = 1;
-        if (held) wl_buffer_send_release(held);
-        return;
+    /* An override-redirect window that covers a display exactly, or the
+       whole X screen, is a game's full-screen window (Gitea #175): shown as
+       a window of its own, drawn by the program (no desktop frame), asking
+       for full screen (the desktop decides, as for any program's request)
+       -- never a menu of whatever is under it. Any other override-redirect
+       window is a popup of the X window it belongs to, and one that belongs
+       to none (a toolkit's hidden 1x1 helper at -1,-1, a notification) is
+       not shown: on the owner's machine those outnumbered the games. */
+    if (w->override_redirect) {
+        struct bc_output *o;
+        int covers = 0, x0 = 0, y0 = 0, x1 = 0, y1 = 0, first = 1;
+        wl_list_for_each(o, &s->outputs, link) {
+            if (w->x == o->x && w->y == o->y && w->width == o->width && w->height == o->height)
+                covers = 1;
+            if (first || o->x < x0) x0 = o->x;
+            if (first || o->y < y0) y0 = o->y;
+            if (first || o->x + o->width > x1) x1 = o->x + o->width;
+            if (first || o->y + o->height > y1) y1 = o->y + o->height;
+            first = 0;
+        }
+        if (!first && w->x == x0 && w->y == y0 && w->width == x1 - x0 && w->height == y1 - y0)
+            covers = 1;
+        w->or_fullscreen = covers;
+        if (!covers && (parent = x_popup_parent(s, w)) == NULL) {
+            if (!w->or_logged)
+                logf_("X: override-redirect window 0x%x %dx%d at %d,%d belongs to no shown X window: not shown",
+                      (unsigned)w->window, w->width, w->height, w->x, w->y);
+            w->or_logged = 1;
+            if (held) wl_buffer_send_release(held);
+            return;
+        }
+        if (covers && !w->or_logged) {
+            logf_("X: override-redirect window 0x%x %dx%d at %d,%d covers a display: a full-screen window",
+                  (unsigned)w->window, w->width, w->height, w->x, w->y);
+            w->or_logged = 1;
+        }
     }
     x = calloc(1, sizeof(*x));
     if (x == NULL) {
@@ -8490,9 +8520,11 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
                   parent->id);
     } else {
         /* X programs leave their frame to the window manager, the desktop,
-           unless _MOTIF_WM_HINTS says no decorations (they draw their own). */
-        x->decor_mode = w->undecorated ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
-                                       : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
+           unless _MOTIF_WM_HINTS says no decorations (they draw their own);
+           an override-redirect window manages itself and has none. */
+        x->decor_mode = w->undecorated || w->override_redirect
+                            ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+                            : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE;
         memcpy(x->title, w->title, sizeof(x->title));
         memcpy(x->appid, w->appid, sizeof(x->appid));
         /* Its hints as an xdg toplevel's before its first commit: said
@@ -8501,6 +8533,8 @@ static void x_match(struct bc_server *s, struct bc_xwin *w, struct bc_surface *s
         x->min_w = w->min_w; x->min_h = w->min_h;
         x->max_w = w->max_w; x->max_h = w->max_h;
         x->fullscreen = (w->state & BC_XS_FULLSCREEN) != 0;
+        if (w->override_redirect && w->or_fullscreen)
+            x->fullscreen = 1;
         x->maximize = (w->state & BC_XS_MAXIMIZED) == BC_XS_MAXIMIZED;
         /* A focus it asked for before it was shown: with its WINDOW new. */
         x->ask_reason = w->ask;
