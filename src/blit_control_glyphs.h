@@ -82,12 +82,51 @@ static int blit_control_pen_index(uint32_t scalar)
    minimise boxes (ADR 0222), and its two full-screen and three sticky boxes
    (ADR 0224). */
 #define BLIT_STATE_PENS (BLIT_STATE_SET + BLIT_MINIMISE_SET + BLIT_FULLSCREEN_SET + BLIT_STICKY_SET)
-#define BLIT_CHROME_PENS (BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS + BLIT_STATE_PENS)
+/* ... and the key ends (ADR 0237): raised left and right, pressed left and
+   right, U+1003D1-1003D4. */
+#define BLIT_KEY_FIRST 0x1003D1U
+#define BLIT_KEY_PENS 4U
+#define BLIT_CHROME_PENS (BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS + BLIT_STATE_PENS + BLIT_KEY_PENS)
+
+static int blit_key_glyph(uint32_t scalar)
+{
+    return scalar >= BLIT_KEY_FIRST && scalar < BLIT_KEY_FIRST + BLIT_KEY_PENS;
+}
+
+/* The bevel's width: 2 px at the owner's cells, 1 px below 16 px tall. It
+   is the same as SGR 51:6 and 51:7's bands, so the ends meet the icon cells
+   between them edge for edge. */
+static int blit_key_bevel(int h)
+{
+    return h >= 16 ? 2 * BLIT_WINDOW_LINE : BLIT_WINDOW_LINE;
+}
+
+/* A key's end (ADR 0237): the face is the cell's background; the light
+   edges are the foreground (WR_FG), the dark edges the underline colour
+   (WR_LINE). Raised: light along the top and the outer side, dark along
+   the bottom (and, on the right end, its side). Pressed: the reverse. The
+   dark edge is drawn last, so it takes the corners where the two meet, as a
+   lit bevel does. */
+static void blit_key_roles(uint32_t scalar, unsigned char *roles, int w, int h)
+{
+    unsigned i = scalar - BLIT_KEY_FIRST;
+    int right = i & 1, pressed = i >= 2, t = blit_key_bevel(h);
+    unsigned char light = pressed ? WR_LINE : WR_FG, dark = pressed ? WR_FG : WR_LINE;
+    int x, y;
+    memset(roles, WR_NONE, (size_t)w * (size_t)h);
+    for (y = 0; y < h; ++y)
+        for (x = 0; x < w; ++x) {
+            unsigned char role = WR_NONE;
+            if (y < t || (!right && x < t)) role = light;
+            if (y >= h - t || (right && x >= w - t)) role = dark;
+            roles[y * w + x] = role;
+        }
+}
 
 static int blit_chrome_glyph(uint32_t scalar)
 {
     return blit_window_glyph(scalar) || blit_control_glyph(scalar) || blit_frame_glyph(scalar) ||
-        blit_state_glyph(scalar) || blit_player_glyph(scalar);
+        blit_state_glyph(scalar) || blit_player_glyph(scalar) || blit_key_glyph(scalar);
 }
 
 static int blit_chrome_pen_index(uint32_t scalar)
@@ -98,6 +137,9 @@ static int blit_chrome_pen_index(uint32_t scalar)
     if (pen >= 0) return (int)(BLIT_WINDOW_SET + BLIT_CONTROL_PENS) + pen;
     pen = blit_state_pen_index(scalar);
     if (pen >= 0) return (int)(BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS) + pen;
+    if (blit_key_glyph(scalar))
+        return (int)(BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS + BLIT_STATE_PENS +
+                     (scalar - BLIT_KEY_FIRST));
     pen = blit_control_pen_index(scalar);
     return pen < 0 ? -1 : (int)BLIT_WINDOW_SET + pen;
 }
@@ -283,9 +325,11 @@ static int blit_chrome_draw(uint32_t scalar, int plane, unsigned char *pixels, i
     /* ADR 0237: the player glyphs are coverage in the foreground, with
        partial coverage (an unlit segment); they have no pens. */
     if (blit_player_glyph(scalar)) return plane ? 1 : blit_player_draw(scalar, pixels, stride, w, h);
-    if (!blit_control_glyph(scalar) && !blit_frame_glyph(scalar) && !blit_state_glyph(scalar)) return 0;
+    if (!blit_control_glyph(scalar) && !blit_frame_glyph(scalar) && !blit_state_glyph(scalar) &&
+        !blit_key_glyph(scalar)) return 0;
     if (w <= 0 || h <= 0 || w > 128 || h > 128) return 0;
-    if (blit_frame_glyph(scalar)) blit_frame_roles(scalar, roles, w, h);
+    if (blit_key_glyph(scalar)) blit_key_roles(scalar, roles, w, h);
+    else if (blit_frame_glyph(scalar)) blit_frame_roles(scalar, roles, w, h);
     else if (blit_state_glyph(scalar)) blit_state_roles(scalar, roles, w, h);
     else blit_control_roles(scalar, roles, w, h);
     for (y = 0; y < h; ++y) for (x = 0; x < w; ++x) {

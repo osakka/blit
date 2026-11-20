@@ -668,6 +668,17 @@ static int blit_window_framed_bands(int kind, int h, uint32_t line,
         band[0].top = h - L; band[0].bottom = h; band[0].colour = line;
         return 1;
     }
+    if (kind == 6 || kind == 7) {
+        /* ADR 0237: a key's icon cells, 51:6 raised and 51:7 pressed: its
+           bevel across them, the light edge the foreground, the dark edge
+           `line` (the underline colour, else the foreground); 2 px from 16 px
+           tall, as the key's end glyphs draw it. */
+        int b = h >= 16 ? 2 * L : L;
+        uint32_t light = kind == 6 ? pens->fg : line, dark = kind == 6 ? line : pens->fg;
+        band[0].top = 0; band[0].bottom = b; band[0].colour = light;
+        band[1].top = h - b; band[1].bottom = h; band[1].colour = dark;
+        return 2;
+    }
     t = kind == 3 ? BLIT_WINDOW_THICK_RING : L;
     if (t > h / 2) t = h / 2;
     band[0].top = 0; band[0].bottom = t; band[0].colour = line;

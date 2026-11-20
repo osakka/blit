@@ -188,7 +188,7 @@ Do not infer capabilities from a screenshot or from a device filename. A
 resource is usable only when its API state and capability fields say it is.
 `GET /v1/server`'s `capabilities` is the list to switch on, not the
 version. Among its flags, the terminal's SGR extensions: `sgr-framed` (SGR
-51 framed, with Blit's 51:3 thick and 51:5 rule, ended by 54),
+51 framed, with Blit's 51:3 thick, 51:5 rule and 51:6/51:7 a key's raised and pressed bevel, ended by 54),
 `sgr-framed-bar` (51:2, a Slate title bar's rows in the cell's pens; 51:4
 is its alias), `sgr-shadow` (66 and 67, a drop shadow under the cell's
 glyph) and `sgr-icon-pen` (68:v and 69, the pen of Blit's colour icons in

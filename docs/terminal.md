@@ -99,12 +99,13 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 39, 49, 59 | Default text, background and underline colour |
 | 51, 51:3, 54 | Framed: a line along the cell's top and bottom edges, 1 px (51) or 3 px (51:3, a Blit extension for a default button's ring), in the underline colour if set, else the foreground; 54 ends it |
 | 51:2 | Blit extension: a Slate title bar's top and bottom rows (frame line and highlight, shade and rule) in the cell's pens: foreground, underline colour (white if unset) and half foreground half background, so a title's text cells match the bar glyphs beside them (ADR 0210, 0211) |
+| 51:6, 51:7 | Blit extension: a key's bevel across its icon cells (ADR 0237): 51:6 raised, 2 px of the foreground on top and 2 px of the underline colour (else the foreground) below; 51:7 pressed, the reverse, with the cell's glyph 1 px lower. The key's ends are the `key-left`/`key-right` glyphs in the same pens; the face is the cell's background |
 | 51:5 | Blit extension: a rule along the cell's bottom edge only, 1 px, in the underline colour if set, else the foreground: the line under a note's strip (ADR 0210) |
 | 66:kind:width:inset, 67 | Blit extension: a drop shadow drawn under the cell's glyph, in the underline colour if set, else the foreground; 67 (or 66:0) ends it. kind 1 right, 2 right from 2 px down (a window's first row), 3 under, 4 under from the 2 px offset (its first cell), 5 the corner; width 1 or 2 px, 2 if left out; inset 1 (default: 1 px in, just outside a Blit frame glyph's line) or 0 (at the cell's edge: the cells beyond a frame that fills its own, a box-drawing border or the outer-edge frame cells of ADR 0214, whose line is on the cell's outermost edge). Colon form only (ADR 0211) |
 | 68:v, 69 | Blit extension: the icon pen, the pen Blit's colour icons (U+100000 and up that carry colour) are drawn in, in this cell. v 1 auto (the icon's monochrome shape in the cell's foreground, the background showing through its knockouts), 2 black, 3 white; 69 (or 68:0, or 68 alone) ends it, and an unknown v leaves it alone. Without it an icon is in its own colours. Every other glyph ignores it, and a change redraws the cell only. Colon form only (ADR 0221) |
 
 **A client detects these extensions** from `GET /v1/server`'s `capabilities`:
-`sgr-framed` (51, 51:3, 51:5, 54), `sgr-framed-bar` (51:2, and 51:4 as its
+`sgr-framed` (51, 51:3, 51:5, 51:6, 51:7, 54), `sgr-framed-bar` (51:2, and 51:4 as its
 alias), `sgr-shadow` (66, 67) and `sgr-icon-pen` (68, 69), not from the
 version.
 

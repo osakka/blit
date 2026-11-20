@@ -74,3 +74,24 @@ icon_clip_gate now reads a text glyph's columns (it assumed one).
   catalogue_fields_gate (the new parts in the schema's and README's
   vocabulary), blit_icons_rebuild_gate (the font is its sources, byte for
   byte), font_reference_gate: the font suite, 51 pass.
+
+## Amended 2026-11-20 (0.3.127): keys
+
+The owner chose one-row keys from a second preview. A key is `key-left`, the
+icon cells, `key-right` on one row. Its three colours are the cell's: the
+face is the background (SGR 48), the light edge and the icon the foreground,
+the dark edge the underline colour (SGR 58).
+
+- The ends, U+1003D1-1003D4 (`key-left`, `key-right`, `key-pressed-left`,
+  `key-pressed-right`), are cell geometry in the cell's pens like the Slate
+  glyphs: light along the top and the outer side, dark along the bottom
+  (and the right end's side), the dark edge taking the corners it meets;
+  pressed is the reverse. Part `key`, set `key`, line `shade`.
+- The icon cells carry SGR 51:6 (raised) or 51:7 (pressed): the same 2 px
+  bevel across them as two framing bands, so the ends meet them edge for
+  edge; a 51:7 cell's glyph is drawn 1 px lower, so a pressed key's icon
+  goes down with it. The framing field's free values took them; 51:4 and
+  51:5 were already Slate's synonym and the note's rule (hibr noticed).
+- window_style_gate draws a raised and a pressed key on the CPU and GLES
+  compositors: the bands' colours and widths, each end's sides and corners,
+  and the pressed `H` exactly 1 px below the raised one.

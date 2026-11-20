@@ -47,7 +47,9 @@
    Slate bar, 3 its old dark twin, 4 the bottom rule) as
    blit_window_framed_bands' kind, which is the SGR 51 sub-parameter: 1, 3,
    2, 2, 5. */
-#define KMS_FRAMED_KIND(attr) ("\1\3\2\2\5\1\1\1"[((attr) >> 12) & 7U])
+#define KMS_FRAMED_KIND(attr) ("\1\3\2\2\5\6\7\1"[((attr) >> 12) & 7U])
+/* ADR 0237: a pressed key's cell (51:7) draws its glyph one pixel lower. */
+#define KMS_FRAMED_PRESSED(attr) (((attr) & KMS_ATTR_FRAMED) && (((attr) >> 12) & 7U) == 6U)
 /* ADR 0211: the server's shadow field, SGR 66's kind (three bits) and its
    width bit. */
 #define KMS_ATTR_SHADOW_SHIFT 16
@@ -1517,7 +1519,8 @@ static void draw_view(KmsOutput *output, const BlitFont *font,
                 draw_cell_glyphs(output, font, (attr & KMS_ATTR_WIDE) ? wide_font : NULL,
                     cp, view->combining ? &view->combining[index * BLIT_MAX_COMBINING] : NULL,
                     view->combining_count ? view->combining_count[index] : 0,
-                    x, y, glyph_width, ch, fg, lean, (attr & 1) != 0, KMS_ICON_PEN(attr));
+                    x, y + (KMS_FRAMED_PRESSED(attr) ? 1 : 0), glyph_width, ch, fg, lean, (attr & 1) != 0,
+                    KMS_ICON_PEN(attr));
             }
             if (!(attr & KMS_ATTR_CONTINUATION) && (attr & 4))
                 if (y + ch - 1 >= clip_y0 && y + ch - 1 < clip_y1) {

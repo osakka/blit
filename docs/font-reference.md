@@ -428,6 +428,11 @@ the catalogue (`GET /v1/fonts/icons`) and [special additions](fonts/special.md).
   faders the same top to bottom with `fader-*`.
 - **Transport**: `transport-<name>` in one cell, `transport-wide-<name>-left`
   and `-right` in two; in the text colour.
+- **Keys** (0.3.127): `key-left`, the icon cells, `key-right`, on one row.
+  Set the key's face as the background (SGR 48) on all its cells, the light
+  edge and icon as the foreground, the dark edge as SGR 58. Give the icon
+  cells SGR 51:6 (raised) or 51:7 (pressed, the icon 1 px lower), ended by
+  SGR 54, and use `key-pressed-left`/`-right` for a pressed key's ends.
 - **Now playing**: `disc-<f>`, `vinyl-<f>`, `cassette-<f>`, each `-left` and
   `-right`, in their own colours; step `f` 0-7 while playing, 0 when stopped.
 

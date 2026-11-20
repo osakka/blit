@@ -2256,11 +2256,11 @@ components:
           description: 'Always false: no glyph carries colours of its own.'
         shape: {type: string}
         pens: {type: string, enum: [foreground, cell]}
-        set: {type: string, enum: [chalk, slate-light, slate, capsule, frame]}
+        set: {type: string, enum: [chalk, slate-light, slate, capsule, frame, key]}
         part:
           type: string
           enum: [bar-corner, title-bar, note-close, frame, dialog-border, button-cap, checkbox, switch, capsule,
-                 lcd-big-top, lcd-big-bottom, lcd-digit, lcd-colon, led, slider, fader]
+                 lcd-big-top, lcd-big-bottom, lcd-digit, lcd-colon, led, slider, fader, key]
           description: What the glyph is a piece of.
         cells:
           type: object
@@ -2287,7 +2287,7 @@ components:
             bar's colour (the corners' fill).
         line:
           type: string
-          enum: [none, highlight, box-face, dialog-face, button-face, knob]
+          enum: [none, highlight, box-face, dialog-face, button-face, knob, shade]
           description: >-
             What SGR 58 (the underline colour, white when unset) is: nothing,
             the bar's highlight (and a window box's face), a box's face, the
@@ -6033,8 +6033,14 @@ components:
         concealed: {type: boolean}
         framed:
           type: string
-          enum: [none, thin, thick, bar, rule, slate-light-bar, slate-dark-bar]
+          enum: [none, thin, thick, bar, rule, raised, pressed, slate-light-bar, slate-dark-bar]
           description: >-
+            Blit's 51:6 (raised) and 51:7 (pressed, from 0.3.127, ADR 0237)
+            draw a key's bevel across its icon cells: 2 px of the foreground
+            along the top and 2 px of the underline colour (else the
+            foreground) along the bottom, or the reverse pressed, where the
+            cell's glyph is also drawn 1 px lower; key-left and key-right
+            draw its ends.
             SGR 51 (thin) or Blit's 51:3 (thick): a line along the cell's top
             and bottom edges, 1 px or the default button's 3 px ring, in the
             underline colour if set, else the foreground. Blit's 51:2 (bar)

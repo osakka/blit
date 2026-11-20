@@ -194,6 +194,12 @@ Dir.mktmpdir('blit-window-style') do |root|
              (0...10).map { |i| bar_pens + u(BOX_FIRST + i) }.join + sgr('0') + colours
     frames_scene = at.call(2, 10, nine) + at.call(16, 10, states) + win_text.call(2, 12, true, false) + win_text.call(2, 20, false, true) +
                    inactive_text.call(16, 12, true) + inactive_text.call(16, 20, false)
+    # ADR 0237: keys on row 28 (index 27): the face BG, the light edge FG,
+    # the dark edge LINE (SGR 58). Raised: key-left, H and a blank framed
+    # 51:6, key-right; then pressed the same with 51:7.
+    key_pens = sgr("0;38;2;#{rgb(FG)};48;2;#{rgb(BG)};58;2;#{rgb(LINE)}")
+    keys = at.call(2, 27, "#{key_pens}#{u(0x1003D1)}#{sgr('51:6')}H #{sgr('54')}#{u(0x1003D2)}#{colours} " \
+                          "#{key_pens}#{u(0x1003D3)}#{sgr('51:7')}H #{sgr('54')}#{u(0x1003D4)}#{sgr('0')}#{colours}")
     shadows = SHADOWS.map { |k, t, i| "#{sgr("66:#{k}:#{t}:#{i}")} #{sgr('67')} " }.join +
               "#{sgr('58;2;255;0;0;66:1:2')} #{sgr('0')}#{colours}#{sgr('66:1:2;0')}#{colours} " \
               "#{sgr('58;2;255;0;0;66:1:2')}#{u(FIRST + 14)}#{sgr('0')}#{colours}"
@@ -208,7 +214,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     script = "printf '\\033[?25l#{colours}\\033[2J" \
              "\\033[2;3H#{rows[0]}\\033[3;3H#{rows[1]}\\033[4;3H#{sgr("58;2;#{rgb(LINE)}")}#{rows[1]}#{sgr('59')}" \
              "\\033[6;3H#{buttons}#{colours}\\033[7;3H#{sgr('51')} #{sgr('0')}#{colours}E#{sgr('51:5')} #{sgr('0')}#{colours}" \
-             "\\033[8;3H#{titles}#{colours}\\033[9;3H#{shadows}\\033[10;3H#{pen_row}#{frames_scene}'; sleep 600"
+             "\\033[8;3H#{titles}#{colours}\\033[9;3H#{shadows}\\033[10;3H#{pen_row}#{frames_scene}#{keys}'; sleep 600"
     # A file, not -c: the 105 glyphs make a script longer than an argument
     # may be.
     path = File.join(root, 'scene.sh')
@@ -442,6 +448,30 @@ Dir.mktmpdir('blit-window-style') do |root|
     check(lines.call(3, 6, FG).empty?, 'framing survives SGR 0')
     check(lines.call(4, 6, FG) == [ch - 1], "SGR 51:5 does not draw the bottom rule only: #{lines.call(4, 6, FG)}")
 
+    # ADR 0237: a key. 51:6 is 2 px of the foreground on top and 2 px of the
+    # underline colour below, 51:7 the reverse; the ends' edges are the same
+    # 2 px, so they meet the icon cells; a pressed glyph is 1 px lower.
+    row = 27
+    check(lines.call(4, row, FG) == [0, 1] && lines.call(4, row, LINE) == [ch - 2, ch - 1],
+          "SGR 51:6 is not light 2 px over, dark 2 px under: #{lines.call(4, row, FG)} #{lines.call(4, row, LINE)}")
+    check(lines.call(9, row, LINE) == [0, 1] && lines.call(9, row, FG) == [ch - 2, ch - 1],
+          "SGR 51:7 is not dark over, light under: #{lines.call(9, row, LINE)} #{lines.call(9, row, FG)}")
+    side = ->(col, dxs, colour) { (2...(ch - 2)).all? { |dy| dxs.all? { |dx| px.call(col, row, dx, dy) == colour } } }
+    check(lines.call(2, row, FG) == [0, 1] && lines.call(2, row, LINE) == [ch - 2, ch - 1] &&
+          side.call(2, [0, 1], FG) && side.call(2, [cw - 1], BG),
+          'key-left is not light on top and left, dark below, open to the right')
+    # The dark edge takes the corner it meets: the top-right 2 x 2 is dark.
+    top_light = (0..1).all? { |dy| (0...(cw - 2)).all? { |dx| px.call(5, row, dx, dy) == FG } } &&
+                (0..1).all? { |dy| [cw - 2, cw - 1].all? { |dx| px.call(5, row, dx, dy) == LINE } }
+    check(top_light && side.call(5, [cw - 2, cw - 1], LINE) && side.call(5, [0], BG),
+          'key-right is not light on top, dark on the right (and its top-right corner)')
+    check(lines.call(7, row, LINE) == [0, 1] && lines.call(7, row, FG) == [ch - 2, ch - 1] &&
+          side.call(7, [0, 1], LINE), 'key-pressed-left is not dark on top and left, light below')
+    check(side.call(10, [cw - 2, cw - 1], FG), 'key-pressed-right is not light on the right')
+    ink_top = ->(col) { (2...(ch - 2)).find { |dy| (0...cw).any? { |dx| px.call(col, row, dx, dy) == FG } } }
+    check(ink_top.call(3) && ink_top.call(8) == ink_top.call(3) + 1,
+          "the pressed glyph is not 1 px lower: raised #{ink_top.call(3)}, pressed #{ink_top.call(8)}")
+
     # A Slate dialog on the wallpaper: from the content out the face (margin,
     # 2 px), the foreground (3 px), the face (gap, 1 px), the foreground (1 px),
     # then the wallpaper itself: no halo, no pixel of any other colour.
@@ -517,7 +547,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     request('DELETE', "/v1/terminal-sessions/#{session['id']}")
     puts "WINDOW_STYLE_PASS backend=#{GATE_BACKEND} cell=#{cw}x#{ch} glyphs=70+13_frame+10_state(pressed_boxes,grow)+4_minimise+10_fullscreen_sticky inactive_windows=plain_title_ends windows=slate+chalk(outer_edge,stripes_run_in,shadow_inset_0) pixels=#{checked} " \
          'chalk=foreground slate=cell_pens(fg,line,mix) transparent=background sgr51=1px sgr51:3=3px ' \
-         'sgr51:5=bottom_rule underline_colour=used sgr54,sgr0=end buttons=continuous ' \
+         'sgr51:5=bottom_rule sgr51:6/51:7=key_bevel,ends_meet,pressed_drops_1px underline_colour=used sgr54,sgr0=end buttons=continuous ' \
          'dialog=no_halo,no_fixed_colour caps=corners_show_dialog_face titles=51:2=51:4=bar_rows shadow=5_kinds*2_widths*2_insets,colour,under_glyph sgr67,sgr0=end'
   ensure
     Process.kill('TERM', pid) rescue nil

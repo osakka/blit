@@ -207,15 +207,16 @@ extern char **environ;
    button's ring, BLIT_WINDOW_THICK_RING wide), 2 a Slate title bar's rows
    (51:2, in the cell's own colours since ADR 0211; 51:4, once Slate dark's,
    is parsed as 51:2), 4 a rule along the bottom only (51:5, under a note's
-   strip). 3 is no longer stored. SGR 54 ends any of them. */
+   strip), 5 a key's raised bevel (51:6) and 6 its pressed bevel (51:7,
+   ADR 0237). 3 is no longer stored. SGR 54 ends any of them. */
 #define BLIT_ATTR_FRAMED 2048
 #define BLIT_ATTR_FRAMED_SHIFT 12
 #define BLIT_ATTR_FRAMED_ALL (BLIT_ATTR_FRAMED | (7U << BLIT_ATTR_FRAMED_SHIFT))
 #define BLIT_FRAMED_KIND(attributes) (((attributes) >> BLIT_ATTR_FRAMED_SHIFT) & 7U)
 /* The field value for each SGR 51 sub-parameter, and back. */
-static const unsigned char blit_framed_kind_for_sgr[6] = { 0, 0, 2, 1, 2, 4 };
-static const char *const blit_framed_names[5] = {
-    "thin", "thick", "bar", "bar", "rule"
+static const unsigned char blit_framed_kind_for_sgr[8] = { 0, 0, 2, 1, 2, 4, 5, 6 };
+static const char *const blit_framed_names[7] = {
+    "thin", "thick", "bar", "bar", "rule", "raised", "pressed"
 };
 /* ADR 0211: a Blit-drawn drop shadow, SGR 66:kind:width:inset, ended by
    SGR 67. The kind is three bits (BLIT_SHADOW_KIND): 1 right, 2 right from
@@ -251,15 +252,15 @@ typedef struct {
 static const char *framed_name(uint32_t attributes)
 {
     unsigned kind = BLIT_FRAMED_KIND(attributes);
-    if (!(attributes & BLIT_ATTR_FRAMED) || kind > 4) return "none";
+    if (!(attributes & BLIT_ATTR_FRAMED) || kind > 6) return "none";
     return blit_framed_names[kind];
 }
 
 static const char *framed_sgr(uint32_t attributes)
 {
-    static const char *const sgr[5] = { ";51", ";51:3", ";51:2", ";51:2", ";51:5" };
+    static const char *const sgr[7] = { ";51", ";51:3", ";51:2", ";51:2", ";51:5", ";51:6", ";51:7" };
     unsigned kind = BLIT_FRAMED_KIND(attributes);
-    return kind <= 4 ? sgr[kind] : ";51";
+    return kind <= 6 ? sgr[kind] : ";51";
 }
 
 /* ADR 0211: a cell's shadow as the cells API names it: "none", or its
@@ -9173,14 +9174,14 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
                 attributes |= BLIT_ATTR_CONCEAL;
             if (json_string(cell_json, "framed", color_text, sizeof(color_text))) {
                 unsigned kind;
-                for (kind = 0; kind < 5 && strcmp(color_text, blit_framed_names[kind]) != 0; ++kind)
+                for (kind = 0; kind < 7 && strcmp(color_text, blit_framed_names[kind]) != 0; ++kind)
                     ;
                 /* Before ADR 0211 the bar was two kinds; both names still
                    mean the one bar. */
                 if (strcmp(color_text, "slate-light-bar") == 0 ||
                     strcmp(color_text, "slate-dark-bar") == 0)
                     kind = 2;
-                if (kind < 5)
+                if (kind < 7)
                     attributes |= (uint32_t)(BLIT_ATTR_FRAMED | (kind << BLIT_ATTR_FRAMED_SHIFT));
                 else if (strcmp(color_text, "none") != 0)
                     style_valid = 0;
@@ -13673,7 +13674,7 @@ static void terminal_apply_sgr(BlitSession *session, const char *sequence)
                ECMA-48 frames all four sides; Blit draws the top and
                bottom only. An unknown sub-parameter is plain 51. */
             int sub = param->subs > 0 ? param->sub[0] : 1;
-            unsigned kind = sub >= 0 && sub <= 5 ? blit_framed_kind_for_sgr[sub] : 0;
+            unsigned kind = sub >= 0 && sub <= 7 ? blit_framed_kind_for_sgr[sub] : 0;
             session->terminal_attributes &= (uint32_t)~BLIT_ATTR_FRAMED_ALL;
             session->terminal_attributes |= (uint32_t)(BLIT_ATTR_FRAMED |
                 (kind << BLIT_ATTR_FRAMED_SHIFT));

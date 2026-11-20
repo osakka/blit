@@ -739,7 +739,8 @@ static void kms_gles_view(BlitKms *kms, KmsGlesResources *r, const KmsOutput *ou
             if (blit_chrome_colour(cp))
                 kms_gles_window_glyph(kms, r, cp, x, y, width, ch, &pens);
             else
-                kms_gles_glyph(kms, r, view, index, x, y, width, ch, fg, lean, (attr & 1) != 0);
+                kms_gles_glyph(kms, r, view, index, x, y + (KMS_FRAMED_PRESSED(attr) ? 1 : 0), width, ch, fg,
+                               lean, (attr & 1) != 0);
             /* Underline and strike are clipped to the region, as fill_rect
                is in draw_view. */
             if (attr & (4 | 512)) {

@@ -37,11 +37,11 @@ ROOT = File.expand_path('../..', __dir__)
 Dir.chdir(ROOT)
 
 PARTS = %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule
-           lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader].freeze
+           lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader key].freeze
 BACKGROUNDS = %w[bar panel wallpaper dialog-face button-face].freeze
 FOREGROUNDS = %w[ink track bar].freeze
-LINES = %w[none highlight box-face dialog-face button-face knob].freeze
-SETS = %w[chalk slate-light slate capsule frame].freeze
+LINES = %w[none highlight box-face dialog-face button-face knob shade].freeze
+SETS = %w[chalk slate-light slate capsule frame key].freeze
 KEYS = %w[id codepoint colour shape pens set part cells background foreground line deprecated replaced_by].freeze
 # ADR 0214: what is deprecated, and the one frame set that replaces it.
 OLD_FRAME = %w[frame-left frame-right-top frame-right frame-bottom-left frame-bottom-first frame-bottom

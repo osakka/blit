@@ -657,5 +657,9 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `fader-track-filled` | `U+10037A` | `"\udbc0\udf7a"` | foreground | Fader: the track below the knob, full |
 | `fader-knob` | `U+10037B` | `"\udbc0\udf7b"` | foreground | Fader: the knob, grooved |
 | `fader-cap-bottom` | `U+10037C` | `"\udbc0\udf7c"` | foreground | Fader: the bottom end: the filled track and an end bar |
+| `key-left` | `U+1003D1` | `"\udbc0\udfd1"` | cell pens | Key, left end, raised: the light edge along the top and left side, the dark edge along the bottom; the face is the cell background |
+| `key-right` | `U+1003D2` | `"\udbc0\udfd2"` | cell pens | Key, right end, raised: the light edge along the top, the dark edge along the bottom and right side |
+| `key-pressed-left` | `U+1003D3` | `"\udbc0\udfd3"` | cell pens | Key, left end, pressed: the dark edge along the top and left side, the light edge along the bottom |
+| `key-pressed-right` | `U+1003D4` | `"\udbc0\udfd4"` | cell pens | Key, right end, pressed: the dark edge along the top, the light edge along the bottom and right side |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

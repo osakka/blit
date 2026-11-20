@@ -76,10 +76,10 @@ raise 'cell_geometry entries are not typed' unless
   glyph.fetch('additionalProperties') == false &&
   glyph.dig('properties','part','enum') ==
     %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule
-       lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader] &&
+       lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader key] &&
   glyph.dig('properties','background','enum') == %w[bar panel wallpaper dialog-face button-face] &&
   glyph.dig('properties','foreground','enum') == %w[ink track bar] &&
-  glyph.dig('properties','line','enum') == %w[none highlight box-face dialog-face button-face knob] &&
+  glyph.dig('properties','line','enum') == %w[none highlight box-face dialog-face button-face knob shade] &&
   glyph.dig('properties','cells','required').sort == %w[position span]
 # ADR 0214: the outer-edge frame's set, and a deprecation a client can read.
 raise 'the frame set or the deprecation of a replaced glyph is not typed' unless
