@@ -252,11 +252,17 @@ staging with the helper above:
 - `blit.hibr_stock=1` uses the stock-session entrypoint rather than the
   dedicated window-control workload.
 
-The host wrapper boots a packed initramfs, asserts every marker, and rejects
-a clean QEMU poweroff when any is missing:
+The host wrapper boots a packed initramfs, asserts every marker (including
+`LAYOUT_MATRIX_PASS`), and rejects a clean QEMU poweroff when any is missing.
+It boots with `blit.hibr_panes=1 blit.hibr_restart=1` fixed; the other modes
+above need a QEMU command of your own. It needs a VKMS kernel in
+`BLIT_QEMU_KERNEL` (default `/tmp/linux-vkms-build/...`); neither that
+kernel nor the Alpine initroot is built in this repository, and the Hibr
+staging does not follow Hibr's current layout (Gitea #166):
 
 ```sh
-tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-input.initramfs.gz
+BLIT_QEMU_KERNEL=/path/to/bzImage \
+  tools/tests/qemu_hibr_lifecycle_gate.sh /tmp/blit-input.initramfs.gz
 ```
 
 ## Build
@@ -266,6 +272,7 @@ From the repository root:
 ```sh
 tools/build-tcc.sh build/blit/blit-server server
 tools/build-tcc.sh build/blit/blit-update-helper helper
+tools/build-tcc.sh build/blit/blit-compositor compositor
 BLIT_HIBR_ROOT=/path/to/hibr \
   tools/build-tcc.sh build/blit/console-blit.so adapter
 ```

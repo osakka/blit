@@ -43,7 +43,10 @@ It is normally not started by hand.
 .I port
 TCP port for the API, 1 to 65535.
 The default is 8080, which the packaged service also uses.
-Any other argument is ignored.
+Arguments after
+.I port
+are ignored; a first argument that is not a number from 1 to 65535 makes
+the server print its usage and exit with status 2.
 .TP
 .BR \-V ", " \-\-version
 Print the version, as
@@ -129,9 +132,9 @@ An address that is not IPv4 makes the server exit with status 2.
 .TP
 .B BLIT_ALLOW_UNAUTHENTICATED_NETWORK
 .I flag.
-Allows a non-loopback
+Allows a
 .B BLIT_BIND_ADDRESS
-without a token, with a warning.
+other than 127.0.0.1 without a token, with a warning.
 Without it the server refuses and exits with status 3.
 For isolated test networks only.
 .TP
@@ -145,7 +148,9 @@ Unset or empty allows any command.
 Token that authorises
 .BR "PUT /v1/control/update" ,
 which installs a new Blit package.
-It is separate from the API token.
+It is separate from the API token: the upload sends it as
+.B X-Blit-Update-Token
+and needs no API token.
 Unset means updates through the API are refused.
 .TP
 .B BLIT_UPDATE_TOKEN_FILE
@@ -164,8 +169,16 @@ Default
 .B BLIT_DISPLAY_BACKEND
 Accepted only as
 .BR kms ,
-the one backend; any other value is reported as invalid in
-.BR /v1/settings .
+the one backend.
+Any other value is invalid: the server opens no display and serves only the
+API, saying why in
+.B /v1/settings
+and
+.BR /v1/diagnostics ,
+unless
+.B server.display_backend
+is saved as
+.BR kms .
 .TP
 .B BLIT_KMS_COMPOSITOR
 .B cpu
@@ -217,12 +230,13 @@ Saved setting:
 The package sets it.
 .TP
 .B BLIT_HUD
-.I flag.
-Shows the performance panel at start: frame rate, timings, errors and a
+On only when exactly
+.BR 1 :
+shows the performance panel at start: frame rate, timings, errors and a
 graph, drawn by Blit in a corner of each display.
 Saved setting:
 .BR hud.enabled ;
-the panel's display, corner, rate and sections are set only there.
+the panel's display, corner, rate, opacity and sections are set only there.
 .SS Fonts
 .TP
 .B BLIT_FONT_SCALE
@@ -230,7 +244,9 @@ Initial font scale, 1.0 to 3.0 in steps of 0.1; default 1.0.
 Fonts are normally chosen by cell height (8 to 64 pixels) through the API.
 .TP
 .B BLIT_PSF_FONT
-Path to a PSF bitmap font used as the startup font.
+Path to a PSF bitmap or outline (TrueType/OpenType) font used as the
+startup font; one that cannot be loaded is skipped for the bundled
+Terminus.
 Default: the bundled Terminus 16 pixel font.
 Saved setting:
 .BR font.font_id .
@@ -255,11 +271,14 @@ so Arabizi's rules and word lists are read from
 installed by the
 .B hibr-ime-arabizi
 package.
+Also read by
+.BR blit-compositor .
 .SS Hibr login manager and joined displays
 .TP
 .B BLIT_LOGIN_AUTOSTART
 .I flag.
-Starts the Hibr login manager on the first display.
+Starts the Hibr login manager on the first display, only when the server
+runs as root.
 Saved setting:
 .BR login.enabled .
 The package sets it.
@@ -282,7 +301,13 @@ Display the login screen uses; default the first.
 .B BLIT_LOGIN_PANE_ID
 Pane the login screen uses.
 Saved setting:
-.BR login.pane_id .
+.BR login.preferred_pane_id ,
+with
+.B login.fallback
+.RB ( first_available
+or
+.BR wait )
+for when that pane is missing.
 .TP
 .B BLIT_AUXILIARY_LAUNCHER
 Script that starts Hibr on the other displays; default
@@ -300,6 +325,15 @@ Script that places the other displays' desktops; default
 .B BLIT_EVDEV_MOUSE
 Path of an extra evdev mouse to register at start.
 Devices are otherwise found automatically, including when plugged in later.
+.TP
+.BR LC_ALL ", " LC_CTYPE ", " LANG
+The locale whose compose table makes dead keys work, read in that order
+.RB ( C
+if none; the table comes from
+.BR libx11-data ).
+The package sets
+.BR C.UTF-8 ,
+and sessions inherit them.
 .SS Settings
 .TP
 .B BLIT_SETTINGS
@@ -310,15 +344,6 @@ document: a recovery mode for a document that stops the server starting.
 .B BLIT_SETTINGS_PATH
 Where the settings document lives; default
 .IR /var/lib/blit/settings.json .
-.SS Updates
-.TP
-.B BLIT_UPDATE_DIRECTORY
-Where uploaded packages are staged; default
-.IR /var/lib/blit/updates .
-.TP
-.B BLIT_UPDATE_SOCKET
-Socket of the update helper; default
-.IR /run/blit/update.sock .
 .SS Diagnostics
 These print to standard error, which is the journal under systemd.
 .TP
@@ -398,7 +423,19 @@ milliseconds, to test that the next start serves the API without displays.
 .TP
 .B BLIT_DISPLAY_MODE_TRIAL_MS
 How long a display mode set through the API is on trial before it reverts
-unless kept, in milliseconds; default 15000.
+unless kept, in milliseconds, 100 to 600000; default 15000.
+.TP
+.B BLIT_UPDATE_DIRECTORY
+Where uploaded packages are staged; default
+.IR /var/lib/blit/updates .
+For a gate's stand-in helper: the packaged
+.B blit-update-helper
+accepts only the default.
+.TP
+.B BLIT_UPDATE_SOCKET
+Socket of the update helper; default
+.IR /run/blit/update.sock .
+For a gate's stand-in helper: the packaged helper listens only there.
 .TP
 .B BLIT_TEST_DISPLAY_GUARD_HOLD
 With
@@ -409,7 +446,7 @@ to test that an orderly stop removes it.
 .B BLIT_TEST_GLES_CPU_CONNECTOR
 With
 .BR BLIT_TEST_MODE=1 ,
-composes the output on this connector with the CPU while the GPU composes
+composes the output on this DRM connector id (a number) with the CPU while the GPU composes
 the others, to test that dmabuf frames are then not offered (ADR 0223).
 .TP
 .B BLIT_TEST_VT_SIGNALS
@@ -491,7 +528,9 @@ The server's version.
 The API port.
 .TP
 .B BLIT_API_TOKEN
-The API token, when there is one; not given to the login screen.
+The API token, when there is one; not given to a desktop joining a
+signed-in user's session from the login screen (ADR 0127), whose
+environment Blit clears.
 .TP
 .BR BLIT_SESSION_ID ", " BLIT_SESSION_TOKEN ", " BLIT_SURFACE_ID
 The session's identity, and a token for its own requests.
@@ -520,8 +559,15 @@ The default sound devices chosen through the API; playback also sets
 and
 .BR ALSA_PCM_DEVICE .
 .TP
-.B BLIT_KMS_ASYNC_PAGEFLIP ", " BLIT_KMS_COMPOSITOR
-The effective presentation settings.
+.BR BLIT_KMS_ASYNC_PAGEFLIP ", " BLIT_KMS_COMPOSITOR
+The configured presentation settings:
+.B BLIT_KMS_COMPOSITOR
+is
+.B gles
+or
+.B cpu
+as requested; what each display actually uses is in
+.BR /v1/diagnostics .
 .TP
 .B DT_LOG
 For Hibr desktops, a log file under
@@ -532,8 +578,11 @@ A session request may also set
 .B BLIT_TERMINAL_FG
 and
 .B BLIT_TERMINAL_BG
-in its environment: the terminal's default foreground and background
-colours.
+in its environment (or
+.B DT_INK
+and
+.BR DT_FACE ):
+the terminal's default foreground and background colours.
 .SH KEYBOARD
 .TP
 .B Ctrl+Alt+Backspace
@@ -550,14 +599,18 @@ To restart the server without a reboot, use
 (Restart Blit in Hibr's Control Panel) or
 .BR "systemctl restart blit" .
 .PP
-The package does not restart Blit. After an
+The package does not start or restart Blit: after the first install,
+nothing runs until a reboot or
+.BR "systemctl start blit-update-helper blit" .
+After an
 .B apt upgrade
 the old Blit keeps running; it notices within 5 seconds that
 .I /usr/lib/blit/VERSION
 differs from its own version and, by default, restarts itself the same
 way once the login screen shows with nobody signed in, no other session
-runs and nothing has been typed for 10 seconds, at most once for each
-installed version.
+runs, no input has come for 10 seconds and no API update is in progress, at
+most once for each installed version (only when it runs the installed
+.IR /usr/lib/blit/bin/blit-server ).
 .B server.restart_after_update
 set to
 .B manual
@@ -576,9 +629,14 @@ Used by the kernel to release and reacquire the console when switching
 virtual terminals.
 .PP
 A separate watchdog process restores the console and kills the server if
-its main loop stops for 10 seconds, so systemd starts it again. It is
-running before the displays are opened: a GPU start that hangs is ended
-the same way, and the next start composes on the CPU so the API comes up.
+its main loop stops for 10 seconds (120 seconds while an API update
+installs), so systemd starts it again. It is running before the displays
+are opened: a GPU start that hangs is ended the same way, and the next
+start composes on the CPU so the API comes up. A start that hung opening
+the display device or setting up the outputs makes the next start serve the
+API with no displays until a deliberate restart. Both guards leave a marker
+beside the settings document and are off under
+.BR BLIT_SETTINGS=ignore .
 .SH EXIT STATUS
 .TP
 .B 0
@@ -597,6 +655,9 @@ or
 .B 3
 Refused to listen on the network without
 .BR BLIT_AUTH_TOKEN .
+.PP
+The packaged unit restarts a failed server after 10 seconds, but systemd
+stops restarting it after three starts within 60 seconds.
 .SH FILES
 .TP
 .I /etc/blit/blit.env
@@ -608,6 +669,11 @@ The update token.
 .TP
 .I /var/lib/blit/settings.json
 The saved settings document.
+.TP
+.IR /var/lib/blit/settings.json.gles-starting ", " /var/lib/blit/settings.json.display-starting
+Markers of a GPU start and a display start in progress; one found at start
+means the last such start hung (see
+.BR SIGNALS ).
 .TP
 .I /usr/lib/blit/VERSION
 The installed version.
@@ -640,12 +706,17 @@ Check the server, then list displays:
 .RS 4
 .EX
 TOKEN=$(sudo sed -n 's/^BLIT_AUTH_TOKEN=//p' /etc/blit/blit.env)
-curl -s http://127.0.0.1:8080/v1/version
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/version
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/displays
 .EE
 .RE
 .PP
-Start a login shell as the user alice in a session (without
+Start a login shell as the user alice in a session on a display (a
+display id from
+.BR "GET /v1/displays" ;
+a free
+.B pane_id
+also works; without
 .B user
 it runs as the server's own account):
 .PP
@@ -653,17 +724,24 @@ it runs as the server's own account):
 .EX
 curl -s -H "Authorization: Bearer $TOKEN" \e
   -H 'Content-Type: application/json' \e
-  -d '{"command":"/bin/bash","arguments":["-l"],"user":"alice"}' \e
+  -d '{"command":"/bin/bash","arguments":["-l"],"user":"alice","display_id":"display-1"}' \e
   http://127.0.0.1:8080/v1/terminal-sessions
 .EE
 .RE
 .PP
-Start once without the saved settings, after a bad change:
+Start once without the saved settings, after a bad change, keeping the
+service's own environment
+.RI ( /etc/blit/blit.env );
+run by hand,
+.B /usr/bin/blit
+reads no
+.IR blit.env :
 .PP
 .RS 4
 .EX
-sudo systemctl stop blit
-sudo BLIT_SETTINGS=ignore /usr/bin/blit 8080
+sudo systemctl set-environment BLIT_SETTINGS=ignore
+sudo systemctl restart blit
+sudo systemctl unset-environment BLIT_SETTINGS
 .EE
 .RE
 .SH SEE ALSO

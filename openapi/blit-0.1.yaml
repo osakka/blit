@@ -5977,12 +5977,24 @@ components:
         placement_width: {type: integer, minimum: 0, maximum: 4096}
         placement_height: {type: integer, minimum: 0, maximum: 4096}
         z: {type: integer}
+        dmabuf:
+          type: boolean
+          description: The picture shown is a dmabuf frame on the GPU (ADR 0223).
+        sequence:
+          type: integer
+          minimum: 0
+          description: The sequence of the newest frame sent by descriptor (ADR 0202); 0 for none.
+        frame_us:
+          type: integer
+          minimum: 0
+          description: When that frame was accepted, monotonic microseconds; 0 for none.
         placements:
           type: array
-          maxItems: 9
+          maxItems: 16385
           description: >-
-            The default placement as id 0, then up to 8 numbered placements
-            (Kitty `p=`), each with its source rectangle.
+            The default placement as id 0, then the numbered placements
+            (Kitty `p=`), each with its source rectangle; bounded per session
+            (16384) and by picture memory, not per image (ADR 0226).
           items: {$ref: '#/components/schemas/GraphicsPlacement'}
         revision: {$ref: '#/components/schemas/Revision'}
       additionalProperties: false

@@ -219,10 +219,11 @@ a gate that is slow because it sleeps for a production period is a candidate for
 a test-mode knob, not for a retry or a bigger timeout.
 
 `all` includes every other suite, `font` among them: do not run `font` as well.
-The release recipe below is `all`, then the renderer suite on GLES. When only
-the compositor-sensitive gates need the GLES pass, `renderer-gles` runs the
-renderer suite on GLES without the gates the compositor cannot change (their
-own C probes, the CPU-path hotplug gates); `all` still runs every one of them:
+The release recipe below records three runs: `all`, the `renderer` suite
+(native), and `renderer-gles`, the renderer suite on GLES without the gates
+the compositor cannot change (their own C probes, the CPU-path hotplug
+gates; `all` still runs every one of them). The full GLES pass of every
+renderer gate is the second line here, for compositor work:
 
 ```sh
 tools/run-gates.sh all
@@ -379,9 +380,9 @@ run. `--check` refuses a recorded result that is not a pass of that
 source. `update-live.sh` ends with a smoke check: the same displays up, a
 surface in as many panes as before (the desktop came back) or, when the
 restart signed the desktop out, the login screen up waiting for the
-password, and frames advancing. The two commit
-variables are needed when the manifest is recorded in a later commit than
-the build. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
+password, and frames advancing. When the manifest is recorded in a later commit than the build,
+`generate-manifest.sh` takes `BLIT_SOURCE_COMMIT=<build-commit>` and
+`BLIT_DOCUMENTATION_COMMIT=<build-commit>`. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
 existing manifest with a package. The artifact gate and `update-live.sh`
 both refuse a package whose SHA-256 differs from the manifest's;
 `update-live.sh` also needs `BLIT_UPDATE_TOKEN` or `BLIT_UPDATE_TOKEN_FILE`.

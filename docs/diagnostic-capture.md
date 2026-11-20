@@ -1,5 +1,10 @@
 # Live diagnostic capture
 
+The probes below talk to the Blit named by `BLIT_LIVE`
+(`BLIT_LIVE=http://HOST:8080`); set it every time, since their built-in
+default is one fixed host (Gitea #168). The pointer probes also read
+`BLIT_POINTER_ASYNC`, and the font probes `BLIT_FONT_ID`.
+
 `BLIT_AUTH_TOKEN=... ruby tools/probes/host_font_size.rb` uses the
 pixel-size font API. It changes global font cell heights through
 17, 19 and 23 px, saves observations/BMP captures, checks unchanged renderer and
