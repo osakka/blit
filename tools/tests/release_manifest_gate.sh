@@ -48,7 +48,7 @@ printf 'run-gates: source=0000000000000000000000000000000000000000 suites=all\nR
 "$recorder" "$work/m.yaml" "$work/pass" >/dev/null
 grep -qx "gates_all: pass=3 skip=1 fail=0 source=$source_commit" "$work/m.yaml" ||
     { echo "release manifest gate: a passing run was not recorded" >&2; exit 1; }
-"$generator" --check "$package" "$work/m.yaml" | grep -q ' gates=1$' ||
+"$generator" --check "$package" "$work/m.yaml" | grep ' gates=1$' >/dev/null ||
     { echo "release manifest gate: a recorded pass did not check" >&2; exit 1; }
 for refused in dirty failed other; do
     if "$recorder" "$work/m.yaml" "$work/$refused" >/dev/null 2>&1; then

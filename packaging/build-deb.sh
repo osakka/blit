@@ -23,6 +23,43 @@ HIBR_FRAME_V5=0.99.482
 # an upgrade removes them rather than leaving a bridge Blit no longer serves.
 RETIRED_PACKAGES='blit-gamescope, steamer'
 
+# Gitea #165: a package's library dependencies, with the floors its binaries
+# actually need. dpkg-shlibdeps reads them from the binaries' versioned
+# symbols and the build system's shlibs (Debian 13 for a release: glibc 2.38,
+# libxkbcommon's V_0.5.0 ...); the floors stated here -- the build minimums of
+# docs/toolchain.md -- are kept where they are higher, and packages with no
+# library of their own (xkb-data) are added as they are. One line out.
+#   package_depends "STATED, LIST" BINARY...
+package_depends() {
+	stated=$1
+	shift
+	work=$(mktemp -d "${TMPDIR:-/tmp}/blit-shlibdeps.XXXXXX")
+	mkdir "$work/debian"
+	printf 'Source: blit\n\nPackage: blit\nArchitecture: any\n' >"$work/debian/control"
+	found=$(cd "$work" && dpkg-shlibdeps -O "$@" 2>/dev/null) || {
+		rm -rf "$work"
+		echo "blit: dpkg-shlibdeps failed for $*" >&2
+		return 1
+	}
+	rm -rf "$work"
+	found=${found#shlibs:Depends=}
+	printf '%s\n%s\n' "$stated" "$found" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' |
+	awk '
+		# A stated constraint other than a floor (blit (= version)) is kept
+		# as written; floors keep the higher of the two.
+		{ name = $1; floor = ""; other = ""
+		  if (match($0, /\(>= [^)]*\)/)) floor = substr($0, RSTART + 4, RLENGTH - 5)
+		  else if (match($0, /\(.*\)/)) other = substr($0, RSTART, RLENGTH)
+		  if (!(name in seen)) { seen[name] = 1; order[++n] = name; best[name] = floor; fixed[name] = other; next }
+		  if (fixed[name] != "" || floor == "") next
+		  if (best[name] == "") { best[name] = floor; next }
+		  cmd = "dpkg --compare-versions \"" floor "\" gt \"" best[name] "\""
+		  if (system(cmd) == 0) best[name] = floor }
+		END { for (i = 1; i <= n; ++i) { d = order[i]
+		                                if (fixed[d] != "") d = d " " fixed[d]; else if (best[d] != "") d = d " (>= " best[d] ")"
+		                                printf "%s%s", (i > 1 ? ", " : ""), d } print "" }'
+}
+
 # The adapter is part of the package's ABI boundary. Reusing a .so from the
 # ignored build directory made its Hibr provenance unknowable: a package
 # could carry an adapter compiled against a different checkout while the
@@ -358,6 +395,9 @@ fi
 exit 0
 EOF
 chmod 0755 "$stage/DEBIAN/postinst"
+blit_depends=$(package_depends "libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0), libxkbcommon0 (>= 1.5.0), xkb-data, libx11-data" \
+	"$stage/usr/lib/blit/bin/blit-server" "$stage/usr/lib/blit/bin/blit-update-helper" \
+	"$stage/usr/lib/blit/hibr/console-blit.so") || exit 1
 cat > "$stage/DEBIAN/control" <<EOF
 Package: blit
 Version: $pkgver
@@ -365,7 +405,7 @@ Section: misc
 Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
-Depends: libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0), libxkbcommon0 (>= 1.5.0), xkb-data, libx11-data
+Depends: $blit_depends
 Recommends: hibr-ime-arabizi (>= 0.1.5)
 Suggests: hibr, blit-font-sources, blit-compositor
 Breaks: hibr (<< $HIBR_FRAME_V5), $RETIRED_PACKAGES
@@ -528,6 +568,8 @@ libxcb-randr.so.0 at run time
 (MIT licences; their own copyright files are under /usr/share/doc/).
 EOF
 chmod 0644 "$cdoc/README" "$cdoc/copyright"
+compositor_depends=$(package_depends "blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0, libxcb-randr0" \
+	"$cstage/pkg/usr/bin/blit-compositor") || exit 1
 cat > "$cstage/pkg/DEBIAN/control" <<EOF
 Package: blit-compositor
 Version: $pkgver
@@ -535,7 +577,7 @@ Section: x11
 Priority: optional
 Architecture: amd64
 Maintainer: ITD Labs <itdlabs@localhost>
-Depends: blit (= $pkgver), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0, libxcb-randr0
+Depends: $compositor_depends
 Recommends: xwayland
 Description: Blit's Wayland compositor for programs in Hibr windows
  blit-compositor is the Wayland compositor for the programs of one Blit

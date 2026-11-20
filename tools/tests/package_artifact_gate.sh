@@ -8,16 +8,37 @@ set -euo pipefail
 # relocations read-only after start (PT_GNU_RELRO).
 elf_hardened() {
     headers=$(readelf -lW "$1")
-    echo "$headers" | grep -Eq 'GNU_STACK( +0x[0-9a-f]+){5} +RW +' || {
+    echo "$headers" | grep -E 'GNU_STACK( +0x[0-9a-f]+){5} +RW +' >/dev/null || {
         echo "PACKAGE_ARTIFACT_FAIL $1 has no read-write PT_GNU_STACK" >&2
         exit 1
     }
     case "$2" in
-        program) echo "$headers" | grep -q GNU_RELRO || {
+        program) echo "$headers" | grep GNU_RELRO >/dev/null || {
             echo "PACKAGE_ARTIFACT_FAIL $1 has no PT_GNU_RELRO" >&2
             exit 1
         } ;;
     esac
+}
+
+# With pipefail, `cmd | grep -q` fails whenever grep stops reading at its
+# first match before cmd has written everything (SIGPIPE, status 141): the
+# release build lost this gate that way, silently. Every pipe into grep
+# here lets grep read to the end (>/dev/null), whatever the timing.
+
+# Gitea #165: a package's libc6 floor covers the newest glibc symbol version
+# its ELF files use, so it does not install on a system it cannot run on.
+#   glibc_covered PACKAGE ELF...
+glibc_covered() {
+    pkg=$1
+    shift
+    need=$(for f in "$@"; do readelf -W --dyn-syms "$f"; done |
+        grep -o '@GLIBC_[0-9][0-9.]*' | sed 's/@GLIBC_//' | sort -uV | tail -1)
+    floor=$(dpkg-deb -f "$pkg" Depends | tr ',' '\n' | sed -n 's/^ *libc6 (>= \([^)]*\)).*/\1/p')
+    [ -n "$need" ] || return 0
+    if [ -z "$floor" ] || ! dpkg --compare-versions "$floor" ge "$need"; then
+        echo "PACKAGE_ARTIFACT_FAIL $(basename "$pkg") needs glibc $need but declares libc6 (>= ${floor:-none})" >&2
+        exit 1
+    fi
 }
 
 package=${1:?usage: package_artifact_gate.sh PATH_TO_DEB}
@@ -80,6 +101,8 @@ test -f "$stage/usr/lib/blit/hibr/console-blit.so"
 elf_hardened "$stage/usr/lib/blit/bin/blit-server" program
 elf_hardened "$stage/usr/lib/blit/bin/blit-update-helper" program
 elf_hardened "$stage/usr/lib/blit/hibr/console-blit.so" shared
+glibc_covered "$package" "$stage/usr/lib/blit/bin/blit-server" \
+    "$stage/usr/lib/blit/bin/blit-update-helper" "$stage/usr/lib/blit/hibr/console-blit.so"
 # ADR 0227: Spleen is one text font of five masters.
 for master in 6x12 8x16 12x24 16x32 32x64; do
     test -f "$stage/usr/lib/blit/fonts/text/spleen/spleen-$master.otf"
@@ -256,11 +279,11 @@ test "$(dpkg-deb -f "$package" Breaks)" = "$breaks" || {
          "not '$breaks'" >&2
     exit 1
 }
-if dpkg-deb -f "$package" Suggests | grep -Fq blit-gamescope; then
+if dpkg-deb -f "$package" Suggests | grep -F blit-gamescope >/dev/null; then
     echo "PACKAGE_ARTIFACT_FAIL blit still suggests blit-gamescope" >&2
     exit 1
 fi
-dpkg-deb -f "$package" Suggests | grep -Fq blit-font-sources || {
+dpkg-deb -f "$package" Suggests | grep -F blit-font-sources >/dev/null || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-font-sources" >&2
     exit 1
 }
@@ -290,7 +313,7 @@ if [ -f "$sources_package" ]; then
         exit 1
     }
 fi
-dpkg-deb -f "$package" Suggests | grep -Fq blit-compositor || {
+dpkg-deb -f "$package" Suggests | grep -F blit-compositor >/dev/null || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-compositor" >&2
     exit 1
 }
@@ -307,10 +330,16 @@ if [ -f "$compositor_package" ]; then
     test "$(dpkg-deb -f "$compositor_package" Package)" = blit-compositor
     test "$(dpkg-deb -f "$compositor_package" Architecture)" = amd64
     test "$(dpkg-deb -f "$compositor_package" Version)" = "$version"
-    test "$(dpkg-deb -f "$compositor_package" Depends)" = \
-        "blit (= $version), libc6, libwayland-server0, libxkbcommon0, libxcb1, libxcb-composite0, libxcb-xfixes0, libxcb-res0, libxcb-randr0" || {
-        echo "PACKAGE_ARTIFACT_FAIL blit-compositor Depends is" \
-             "$(dpkg-deb -f "$compositor_package" Depends)" >&2
+    # blit at exactly this version first, then each library, with the floors
+    # dpkg-shlibdeps found (Gitea #165; glibc_covered checks libc6's).
+    cdeps=$(dpkg-deb -f "$compositor_package" Depends)
+    case "$cdeps" in "blit (= $version), "*) ;; *) cdeps_bad=1 ;; esac
+    for lib in libc6 libwayland-server0 libxkbcommon0 libxcb1 libxcb-composite0 \
+               libxcb-xfixes0 libxcb-res0 libxcb-randr0; do
+        printf '%s\n' "$cdeps" | tr ',' '\n' | grep -E "^ *$lib( |\$)" >/dev/null || cdeps_bad=1
+    done
+    [ -z "${cdeps_bad:-}" ] || {
+        echo "PACKAGE_ARTIFACT_FAIL blit-compositor Depends is $cdeps" >&2
         exit 1
     }
     test "$(dpkg-deb -f "$compositor_package" Recommends)" = xwayland || {
@@ -318,7 +347,7 @@ if [ -f "$compositor_package" ]; then
              "$(dpkg-deb -f "$compositor_package" Recommends)" >&2
         exit 1
     }
-    dpkg-deb -f "$compositor_package" Description | grep -Fq 'ADR 0228'
+    dpkg-deb -f "$compositor_package" Description | grep -F 'ADR 0228' >/dev/null
     cstage=$(mktemp -d "${TMPDIR:-/tmp}/blit-compositor-gate.XXXXXX")
     trap 'rm -rf "$stage" "${sstage:-}" "${gstage:-}" "$cstage"' EXIT HUP INT TERM
     dpkg-deb -x "$compositor_package" "$cstage"
@@ -330,7 +359,8 @@ if [ -f "$compositor_package" ]; then
     test -x "$cstage/usr/bin/blit-compositor"
     test "$(stat -c %a "$cstage/usr/bin/blit-compositor")" = 755
     elf_hardened "$cstage/usr/bin/blit-compositor" program
-    "$cstage/usr/bin/blit-compositor" --help | grep -q '^usage: blit-compositor ' || {
+    glibc_covered "$compositor_package" "$cstage/usr/bin/blit-compositor"
+    "$cstage/usr/bin/blit-compositor" --help | grep '^usage: blit-compositor ' >/dev/null || {
         echo "PACKAGE_ARTIFACT_FAIL /usr/bin/blit-compositor is not the compositor" >&2
         exit 1
     }

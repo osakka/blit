@@ -574,7 +574,8 @@ BLIT_GATE_BINARY=build/blit/blit-server \
   tools/tests/shutdown_gate.sh
 ```
 
-It requires `401` without a token and `200` with the configured bearer token.
+It requires `401` without a token and with a wrong one (the server keeps
+running), and `202` with the configured bearer token (Gitea #176).
 
 TLS termination, token rotation, and per-client authorization remain
 deployment responsibilities.
