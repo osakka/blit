@@ -72,6 +72,13 @@ void blit_raster_close(BlitRaster *raster);
 int blit_raster_set_arabic(BlitRaster *raster, const char *path);
 const char *blit_raster_arabic_path(const BlitRaster *raster);
 const char *blit_raster_arabic_family(const BlitRaster *raster);
+/* ADR 0241: the face Arabic words are shaped in (Noto Naskh Arabic), for
+   any text font, pixel fonts included. Once, before any lookup; 0 leaves
+   the raster unchanged. With it, runs of Arabic cells are drawn as slices
+   of their shaped word; without it, cell by cell with the companion. */
+int blit_raster_set_arabic_words(BlitRaster *raster, const char *path);
+const char *blit_raster_arabic_words_path(const BlitRaster *raster);
+const char *blit_raster_arabic_words_family(const BlitRaster *raster);
 int blit_raster_baseline(const BlitRaster *raster);
 /* ADR 0227: the design cell of the master a font of masters is drawn with,
    and whether the cell height is a whole multiple of it (crisp) or not

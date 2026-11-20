@@ -658,6 +658,12 @@ const char *blit_font_arabic_path(const char *primary)
     return blit_font_is_outline(primary) ? blit_font_root_file("BlitArabicModern.ttf") : NULL;
 }
 
+/* ADR 0241: the face Arabic words are shaped in, for every text font. */
+const char *blit_font_arabic_words_path(void)
+{
+    return blit_font_root_file("NotoNaskhArabic-Regular.ttf");
+}
+
 int blit_font_profile_available(int index)
 {
     static const char *const needed[] = {

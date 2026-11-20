@@ -1,4 +1,5 @@
 #include "blit_raster.h"
+#include "blit_cell_word.h"
 #include "blit_emoji_presentation.h"
 #include "blit_control_glyphs.h"
 #include <ft2build.h>
@@ -49,6 +50,13 @@ struct BlitRaster {
     hb_buffer_t *arabic_buffer;
     int arabic_baseline;
     char arabic_path[1024];
+    /* ADR 0241: the face Arabic words are shaped in, unhinted, and its
+       alef's top in font units (set at the text font's cap height). */
+    FT_Face words;
+    hb_font_t *words_font;
+    hb_buffer_t *words_buffer;
+    double words_alef_top;
+    char words_path[1024];
     /* ADR 0218: how text glyphs are hinted. Zero is full, what text always did. */
     BlitRasterHinting hinting;
     /* ADR 0227: the master drawing a font of masters (its design cell; zero
@@ -92,6 +100,9 @@ void blit_raster_close(BlitRaster *raster)
     if (raster->colour_font) hb_font_destroy(raster->colour_font);
     if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
     if (raster->arabic_buffer) hb_buffer_destroy(raster->arabic_buffer);
+    if (raster->words_font) hb_font_destroy(raster->words_font);
+    if (raster->words_buffer) hb_buffer_destroy(raster->words_buffer);
+    if (raster->words) FT_Done_Face(raster->words);
     if (raster->arabic) FT_Done_Face(raster->arabic);
     if (raster->icons) FT_Done_Face(raster->icons);
     if (raster->nerd) FT_Done_Face(raster->nerd);
@@ -415,6 +426,47 @@ BlitRaster *blit_raster_open_pixel(const BlitFont *font, const char *colour_path
     open_stack(raster, colour_path);
     return raster;
 }
+
+/* ADR 0241: attach the face Arabic words are shaped in. Like the
+   companion, once, before any lookup; a failure leaves the raster as it
+   was. A proportional face: no fixed-width check. */
+int blit_raster_set_arabic_words(BlitRaster *raster, const char *path)
+{
+    FT_Face face = NULL;
+    hb_font_t *font = NULL;
+    hb_buffer_t *buffer = NULL;
+    FT_UInt alef;
+    if (!raster || !path || strlen(path) >= sizeof(raster->words_path) ||
+        !raster->library || raster->renders || raster->words)
+        return 0;
+    if (FT_New_Face(raster->library, path, 0, &face) || !FT_IS_SCALABLE(face) ||
+        FT_Select_Charmap(face, FT_ENCODING_UNICODE)) goto fail;
+    alef = FT_Get_Char_Index(face, 0x0627);
+    if (!alef || FT_Load_Glyph(face, alef, FT_LOAD_NO_SCALE) ||
+        face->glyph->metrics.horiBearingY <= 0) goto fail;
+    raster->words_alef_top = (double)face->glyph->metrics.horiBearingY;
+    font = hb_ft_font_create_referenced(face);
+    buffer = hb_buffer_create();
+    if (font == hb_font_get_empty() ||
+        !hb_buffer_pre_allocate(buffer, BLIT_WORD_MAX_TEXT)) goto fail;
+    hb_ft_font_set_load_flags(font, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
+    raster->words = face;
+    raster->words_font = font;
+    raster->words_buffer = buffer;
+    strcpy(raster->words_path, path);
+    return 1;
+fail:
+    if (buffer) hb_buffer_destroy(buffer);
+    if (font) hb_font_destroy(font);
+    if (face) FT_Done_Face(face);
+    raster->words_alef_top = 0;
+    return 0;
+}
+
+const char *blit_raster_arabic_words_path(const BlitRaster *raster)
+{ return raster && raster->words ? raster->words_path : NULL; }
+const char *blit_raster_arabic_words_family(const BlitRaster *raster)
+{ return raster && raster->words ? raster->words->family_name : NULL; }
 
 int blit_raster_set_arabic(BlitRaster *raster, const char *path)
 {
