@@ -5,7 +5,7 @@ require 'json'
 require 'net/http'
 require 'timeout'
 require 'base64'
-base=URI(ENV.fetch('BLIT_BASE_URL','http://192.168.10.54:8080'))
+base=URI(ENV.fetch('BLIT_BASE_URL') { abort "#{File.basename($0)}: set BLIT_BASE_URL, e.g. BLIT_BASE_URL=http://HOST:8080" })
 token=ENV.fetch('BLIT_AUTH_TOKEN')
 command=ARGV.fetch(0){abort 'usage: api_command_report.rb BASH_DIAGNOSTIC'}
 request=lambda do |method,path,body=nil|

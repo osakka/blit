@@ -16,7 +16,7 @@ require 'net/http'
 require 'securerandom'
 require 'uri'
 
-host = ARGV.fetch(0, '192.168.10.54:8080')
+host = ARGV.fetch(0) { abort "usage: #{File.basename($0)} HOST:PORT ..." }
 token = ENV.fetch('BLIT_AUTH_TOKEN') { ARGV.fetch(1, 'hellomonkeyboy') }
 base = URI("http://#{host}")
 image_id = Integer(ENV.fetch('BLIT_KITTY_IMAGE_ID', '9001'), 10)

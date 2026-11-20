@@ -14,7 +14,7 @@ require 'net/http'
 require 'securerandom'
 require 'uri'
 
-host = ARGV.fetch(0, '192.168.10.54:8080')
+host = ARGV.fetch(0) { abort "usage: #{File.basename($0)} HOST:PORT ..." }
 token = ENV.fetch('BLIT_AUTH_TOKEN') { ARGV.fetch(1, 'hellomonkeyboy') }
 steps = Integer(ARGV.fetch(2, '12'), 10)
 attempts = Integer(ENV.fetch('BLIT_LIVE_MOTION_ATTEMPTS', '8'), 10)

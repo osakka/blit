@@ -10,7 +10,7 @@
 # pointer, which needs real evdev ioctls, and the gate environment has no
 # /dev/input and no /dev/uinput. The fabricated nodes are regular files, on
 # which every ioctl fails, so they are devices of no kind. Those two effects
-# are measured on 192.168.10.54, which has three real pointers, and the
+# are measured on the owner's machine, which has three real pointers, and the
 # release manifest records the measurement.
 #
 # What this does assert, all of it local:

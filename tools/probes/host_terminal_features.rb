@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 require 'json'; require 'net/http'; require 'uri'
-BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+BASE = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 TOKEN = ENV.fetch('BLIT_AUTH_TOKEN')
 def call(m, p, b = nil)
   u = BASE + p

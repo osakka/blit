@@ -6,7 +6,7 @@ require 'net/http'
 require 'uri'
 require 'fileutils'
 
-BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+BASE = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 TOKEN = ENV.fetch('BLIT_AUTH_TOKEN')
 OUT = ENV.fetch('BLIT_EVIDENCE_DIR', 'diagnostics/rendering-20261017/pty-pointer')
 FRAMES = Integer(ENV.fetch('BLIT_STRESS_FRAMES', '600'), 10)

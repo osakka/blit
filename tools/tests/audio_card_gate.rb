@@ -24,7 +24,7 @@
 # What this gate cannot do: serve an ioctl. A fabricated control node is a
 # regular file, so `controlC<N>.elements` stands in for the card, in the same
 # shape and for the same reason as an input device's `.identity`. The real
-# SNDRV_CTL_IOCTL_* round-trip is measured on 192.168.10.54 by
+# SNDRV_CTL_IOCTL_* round-trip is measured on the owner's machine by
 # tools/probes/host_audio_controls.rb, where six cards between them exercise
 # every branch of the resolution rule. The arithmetic itself is
 # tools/tests/audio_control_gate.c.

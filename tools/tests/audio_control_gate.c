@@ -3,7 +3,7 @@
  * A C gate because a fabricated control node cannot serve an ioctl, so the
  * parts worth pinning exactly are the pure ones -- the same division
  * blit_input_pointer.h and pointer_curve_gate.c already use. The ioctls
- * themselves are measured on 192.168.10.54 by
+ * themselves are measured on the owner's machine by
  * tools/probes/host_audio_controls.rb.
  */
 #include <stdio.h>

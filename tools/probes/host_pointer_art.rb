@@ -7,7 +7,7 @@ require 'tmpdir'
 require 'fileutils'
 
 ROOT=File.expand_path('../..',__dir__)
-BASE=URI(ENV.fetch('BLIT_LIVE','http://192.168.10.54:8080'))
+BASE=URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 TOKEN=ENV.fetch('BLIT_AUTH_TOKEN')
 def get(path, raw:false)
   q=Net::HTTP::Get.new(BASE+path);q['Authorization']="Bearer #{TOKEN}"

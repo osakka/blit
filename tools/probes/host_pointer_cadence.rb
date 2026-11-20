@@ -12,7 +12,7 @@ async = ENV['BLIT_POINTER_ASYNC'] == '1'
 seconds = Float(ENV.fetch('BLIT_POINTER_SECONDS', (360.0 / rate).to_s))
 abort 'BLIT_POINTER_SECONDS must be 0.25..120' unless seconds.between?(0.25,120)
 steps = (seconds * rate).ceil
-base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+base = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 token = ENV.fetch('BLIT_AUTH_TOKEN')
 connection_ms = []; exchange_ms = []
 request = lambda do |path, payload = nil, measure = false|

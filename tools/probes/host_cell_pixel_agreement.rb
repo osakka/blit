@@ -32,7 +32,7 @@ require 'net/http'
 require 'set'
 require 'uri'
 
-BASE = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+BASE = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 TOKEN = ENV.fetch('BLIT_AUTH_TOKEN')
 SAMPLES = Integer(ENV.fetch('BLIT_SAMPLES', '6'), 10)
 INTERVAL = Float(ENV.fetch('BLIT_INTERVAL', '8'))

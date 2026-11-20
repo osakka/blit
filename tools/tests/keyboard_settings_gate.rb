@@ -18,7 +18,7 @@
 #  * It cannot exercise EVIOCGREP/EVIOCSREP. A fabricated node is a regular
 #    file and fails every ioctl, so the sidecar's `repeat=` line stands in for
 #    the kernel and this gate is testing that stand-in. The real ioctl
-#    round-trip is measured on 192.168.10.54 by tools/probes/host_keyboard.rb,
+#    round-trip is measured on the owner's machine by tools/probes/host_keyboard.rb,
 #    which is where it belongs: the kernel is the thing under test there.
 #  * The LED write is skipped for a fabricated node -- it would append event
 #    structs to a regular file -- so the lamp is only ever measured on the

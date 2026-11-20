@@ -66,5 +66,16 @@ IO.popen(%w[git ls-files -z *.md], &:read).split("\0").each do |file|
 end
 raise "broken links:\n#{broken.join("\n")}" unless broken.empty?
 
-puts "DOCUMENTATION_PASS names=#{names.size} internal=#{INTERNAL.size} pages=#{pages.size} links=checked " \
+# Gitea #168: no tool or living document names a private network host -- a
+# probe takes its host as an argument or BLIT_LIVE and refuses without one.
+# The dated records (the ledger, history, ADR bodies, release manifests)
+# keep what they recorded.
+# QEMU's own user network (10.0.2.0/24) is the same in every guest.
+private_host = /\b(?:192\.168\.\d{1,3}|10\.(?!0\.2\.)\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3})\.\d{1,3}\b/
+named = (Dir['tools/**/*'] + Dir['*.md'] + Dir['docs/*.md'] + Dir['docs/spec/*.md'] + Dir['man/*'] + Dir['hibr/*'])
+        .select { |f| File.file?(f) && !f.start_with?('tools/fonts/') && f != 'docs/verification-status.md' }
+        .select { |f| File.read(f, mode: 'rb').force_encoding('UTF-8').scrub.match?(private_host) }
+raise "a private network address in: #{named.join(' ')}" unless named.empty?
+
+puts "DOCUMENTATION_PASS names=#{names.size} internal=#{INTERNAL.size} pages=#{pages.size} links=checked private_hosts=none " \
      "version_flag=#{File.executable?(binary) ? 'checked' : 'no_binary'}"

@@ -6,7 +6,7 @@ require 'net/http'
 require 'securerandom'
 require 'timeout'
 
-base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+base = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 token = ENV.fetch('BLIT_AUTH_TOKEN')
 request = lambda do |method, path, body = nil|
   req = {'GET'=>Net::HTTP::Get, 'POST'=>Net::HTTP::Post,

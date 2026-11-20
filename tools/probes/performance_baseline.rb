@@ -5,7 +5,7 @@ require 'net/http'
 require 'uri'
 seconds = Float(ARGV.fetch(0, '10'))
 abort 'duration must be finite and 2..30 seconds' unless seconds.finite? && seconds.between?(2, 30)
-base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+base = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 abort 'expected HTTP(S) base URL' unless %w[http https].include?(base.scheme)
 token = ENV.fetch('BLIT_AUTH_TOKEN')
 get = lambda do |path|

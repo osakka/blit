@@ -10,7 +10,7 @@ require 'net/http'
 require 'uri'
 seconds = Float(ARGV.fetch(0, '30'))
 abort 'duration must be 5..120 seconds' unless seconds.between?(5, 120)
-base = URI(ENV.fetch('BLIT_LIVE', 'http://192.168.10.54:8080'))
+base = URI(ENV.fetch('BLIT_LIVE') { abort "#{File.basename($0)}: set BLIT_LIVE, e.g. BLIT_LIVE=http://HOST:8080" })
 token = ENV.fetch('BLIT_AUTH_TOKEN')
 get = lambda do |path|
   request = Net::HTTP::Get.new(base + path)

@@ -20,7 +20,7 @@
 # the state describe the same frame, which is what the capture headers are for:
 # a sample whose presented revision moved under it is discarded, not failed.
 require 'json'; require 'net/http'; require 'uri'
-HOST = ARGV[0] || '192.168.10.54:8080'; TOKEN = ARGV[1] || ENV.fetch('BLIT_AUTH_TOKEN')
+HOST = ARGV[0] || abort("usage: #{File.basename($0)} HOST:PORT [TOKEN] [SURFACE] [ATTEMPTS]"); TOKEN = ARGV[1] || ENV.fetch('BLIT_AUTH_TOKEN')
 SURFACE_ARG = ARGV[2]
 ATTEMPTS = Integer(ARGV[3] || '12')
 BASE = URI("http://#{HOST}")
