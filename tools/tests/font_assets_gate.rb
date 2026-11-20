@@ -47,5 +47,9 @@ check(root, entry.fetch('file'), entry.fetch('sha256'), 'Arabic companion')
 check(root, entry.fetch('license_file'), entry.fetch('license_sha256'), 'Arabic licence')
 check(root, entry.fetch('source_file'), entry.fetch('source_sha256'), 'Arabic source')
 check(root, arabic.fetch('specimens_file'), arabic.fetch('specimens_sha256'), 'Arabic specimens')
+# ADR 0241: the face Arabic words are shaped in, shipped unmodified.
+naskh = arabic.fetch('naskh')
+check(root, naskh.fetch('file'), naskh.fetch('sha256'), 'Arabic word face')
+check(root, naskh.fetch('license_file'), naskh.fetch('license_sha256'), 'Arabic word face licence')
 puts "FONT_ASSETS_PASS text=#{text.size} stack=icons+nerd+#{stack.fetch('symbols').size}_symbols+unifont " \
      "nerd_codepoints=#{scalars.size} colour=Noto#{manifest.fetch('colour').fetch('version')} source_hashes=exact licences=included"

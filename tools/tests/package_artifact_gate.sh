@@ -176,7 +176,7 @@ for icon_asset in $(git -C "$root" ls-tree --name-only "$source_commit" assets/f
         exit 1
     }
 done
-for font_asset in BlitArabicModern.ttf arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt; do
+for font_asset in BlitArabicModern.ttf NotoNaskhArabic-Regular.ttf licenses/NotoNaskhArabic-OFL.txt arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL Arabic asset differs from recorded source: $font_asset" >&2
