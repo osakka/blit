@@ -1238,8 +1238,9 @@ paths:
         ADR 0228 phase 1: the keyboard as an xkb keymap in libxkbcommon's
         text format (`XKB_KEYMAP_FORMAT_TEXT_V1`), for blit-compositor to hand
         to its Wayland clients. It is the system's xkb keymap that Blit
-        itself types with (ADR 0231: xkeyboard-config's `us`, compiled by
-        libxkbcommon), the same for every keyboard -- a device's `modifiers`
+        itself types with (ADR 0231: the current keyboard's layout from
+        xkeyboard-config, `us` until the keyboard list comes, compiled by
+        libxkbcommon), the same for every device -- a device's `modifiers`
         roles are applied to its keys before the keymap, not written into
         it -- so it has no second source. Keycodes are evdev codes plus 8.
         The keyboard whose repeat the headers give is `device` when given,
@@ -2116,6 +2117,8 @@ paths:
           - $ref: '#/components/schemas/StreamPixelFrameEnd'
           - $ref: '#/components/schemas/StreamPixelFrameHide'
           - $ref: '#/components/schemas/StreamDiagnosticEvent'
+          - $ref: '#/components/schemas/StreamKeyboardEvent'
+          - $ref: '#/components/schemas/StreamDeviceChanged'
 
 components:
   securitySchemes:
@@ -2257,7 +2260,8 @@ components:
         an application sets for it, so a client maps it from this data.
         `pens` says how it is drawn: `foreground` in the one colour (Chalk),
         `cell` in the foreground, SGR 58 and a mix of foreground and
-        background (Slate, the capsule); the corners have neither field.
+        background (Slate, the capsule); the bar corners and the player
+        glyphs (LCD, LED, slider, fader) have neither field.
       required: [id, codepoint, colour, shape, part, cells, background, foreground, line]
       properties:
         id: {type: string}
@@ -3223,6 +3227,39 @@ components:
                 start a Hibr standby, move an attached client, or persist a
                 current-session Hibr Displays arrangement.
               items: {$ref: '#/components/schemas/AuxiliaryDisplayBinding'}
+            displays:
+              type: object
+              description: >-
+                Per connector name (ADR 0204, ADR 0236): a display's zoom
+                above 100 and its kept mode (never one on trial). Entries
+                for displays not attached now are kept for when they return.
+              additionalProperties:
+                type: object
+                properties:
+                  zoom: {type: integer, minimum: 100, maximum: 400}
+                  mode: {type: string}
+                additionalProperties: false
+            keyboards:
+              type: object
+              description: >-
+                The keyboard list and the current one (ADR 0231), written
+                when it is other than `us` alone. Set it through
+                `PUT /v1/input/keyboards`.
+              required: [list, current]
+              properties:
+                list:
+                  type: array
+                  minItems: 1
+                  maxItems: 16
+                  items:
+                    type: object
+                    required: [layout]
+                    properties:
+                      layout: {type: string, pattern: '^[a-z0-9_-]{1,47}$'}
+                      variant: {type: string, pattern: '^[a-z0-9_-]{0,47}$'}
+                    additionalProperties: false
+                current: {type: integer, minimum: 0}
+              additionalProperties: false
             server:
               type: object
               description: >-
@@ -3801,12 +3838,41 @@ components:
                 socket name (`@blit-frames-<port>`, empty when it could not
                 be opened) and server-wide counts, with the reason for the
                 last refusal (empty before any).
-              required: [socket, accepted, refused, last_error]
+              required: [socket, accepted, refused, last_error, dmabuf]
               properties:
                 socket: {type: string}
                 accepted: {type: integer, minimum: 0}
                 refused: {type: integer, minimum: 0}
                 last_error: {type: string}
+                dmabuf:
+                  type: object
+                  description: >-
+                    Frames by dmabuf (ADR 0223): whether they are advertised
+                    (or why not), fences, the formats, server-wide counts,
+                    and each session that has had any.
+                  required: [advertised, unavailable, fences, formats, accepted,
+                             refused, released, fences_waited, sessions]
+                  properties:
+                    advertised: {type: boolean}
+                    unavailable: {type: string}
+                    fences: {type: boolean}
+                    formats: {type: string}
+                    accepted: {type: integer, minimum: 0}
+                    refused: {type: integer, minimum: 0}
+                    released: {type: integer, minimum: 0}
+                    fences_waited: {type: integer, minimum: 0}
+                    sessions:
+                      type: array
+                      items:
+                        type: object
+                        required: [session_id, accepted, released, refused]
+                        properties:
+                          session_id: {type: string}
+                          accepted: {type: integer, minimum: 0}
+                          released: {type: integer, minimum: 0}
+                          refused: {$ref: '#/components/schemas/DmabufRefusals'}
+                        additionalProperties: false
+                  additionalProperties: false
               additionalProperties: false
           additionalProperties: false
         hud:
@@ -5687,13 +5753,37 @@ components:
           description: >-
             Picture frames sent by descriptor into this session's images
             (ADR 0202).
-          required: [accepted, refused, stale, superseded, last_error]
+          required: [accepted, refused, stale, superseded, last_error, dmabuf]
           properties:
             accepted: {type: integer, minimum: 0}
             refused: {type: integer, minimum: 0}
             stale: {type: integer, minimum: 0}
             superseded: {type: integer, minimum: 0}
             last_error: {type: string}
+            dmabuf:
+              type: object
+              description: Those that came as dmabufs (ADR 0223).
+              required: [accepted, released, refused]
+              properties:
+                accepted: {type: integer, minimum: 0}
+                released: {type: integer, minimum: 0}
+                refused: {$ref: '#/components/schemas/DmabufRefusals'}
+              additionalProperties: false
+            input:
+              type: object
+              description: >-
+                Present when the session has input routes to a producer
+                (ADR 0228): events sent and dropped, the last error, and each
+                route with its picture, state, hold mode, members and where
+                the pointer is (docs/api.md, "Program windows").
+              required: [events, dropped, last_error, routes]
+              properties:
+                events: {type: integer, minimum: 0}
+                dropped: {type: integer, minimum: 0}
+                last_error: {type: string}
+                routes:
+                  type: array
+                  items: {type: object}
           additionalProperties: false
         status:
           type: [object, 'null']
@@ -6283,7 +6373,9 @@ components:
       description: >-
         `pixel_frame_ready` (state `ready`) after an accepted begin;
         `pixel_frame_present` (state `accepted`) for a completed frame when
-        `ack` was set; `pixel_frame_error` with a `code` and no state.
+        `ack` was set; `pixel_frame_error` with a `code` and no state. A
+        refusal for picture memory (`image_store_full`, `image_budget`)
+        also carries `status` 409.
       required: [type]
       properties:
         type:
@@ -6292,7 +6384,49 @@ components:
         state: {type: string, enum: [ready, accepted]}
         code:
           type: string
-          enum: [invalid_begin, invalid_end, frame_size, frame_incomplete]
+          enum: [invalid_begin, invalid_end, frame_size, frame_incomplete,
+                 image_store_full, image_budget]
+        status: {type: integer, enum: [409]}
+      additionalProperties: false
+    DmabufRefusals:
+      type: object
+      required: [unavailable, format, import, invalid]
+      properties:
+        unavailable: {type: integer, minimum: 0}
+        format: {type: integer, minimum: 0}
+        import: {type: integer, minimum: 0}
+        invalid: {type: integer, minimum: 0}
+      additionalProperties: false
+    StreamKeyboardEvent:
+      type: object
+      description: >-
+        On the input stream when the current keyboard changes (ADR 0231):
+        its index in the keyboard list, its xkb layout and variant, and its
+        name.
+      required: [type, current, layout, variant, name]
+      properties:
+        type: {type: string, enum: [keyboard]}
+        current: {type: integer, minimum: 0}
+        layout: {type: string}
+        variant: {type: string}
+        name: {type: string}
+      additionalProperties: false
+    StreamDeviceChanged:
+      type: object
+      description: >-
+        A device appeared, changed or went: an input, audio or display
+        device, with its id, name and device node, its revision and its
+        collection's revision.
+      required: [type, class, change, id, name, node, revision, collection_revision]
+      properties:
+        type: {type: string, enum: [device_changed]}
+        class: {type: string}
+        change: {type: string}
+        id: {type: string}
+        name: {type: string}
+        node: {type: string}
+        revision: {type: integer, minimum: 0}
+        collection_revision: {type: integer, minimum: 0}
       additionalProperties: false
     StreamInputEvent:
       type: object

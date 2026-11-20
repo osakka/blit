@@ -1,8 +1,7 @@
 # ADR 0206: hand the display to gamescope for full-speed games
 
-- Status: superseded by [ADR 0228](0228-blit-is-the-compositor-for-programs.md)
-  (its phase 3 scans a full-screen window out directly); never built;
-  withdrawn with gamescope, 2026-11-10
+- Status: superseded by ADR 0228
+- Note: Never built; withdrawn with gamescope on 2026-11-10. ADR 0228's phase 3 scans a full-screen window out directly.
 - Date: 2026-11-03
 - Scope: lifecycle, KMS ownership, physical input, sessions, API
 - Depends on: [ADR 0083](0083-blit-root-owned-hibr-login-manager.md)

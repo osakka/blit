@@ -35,12 +35,12 @@ promise: if what you see differs from it, that is a bug.
 
 *Since Blit 0.3.78 with Hibr 0.99.486 (ADR 0228 phase 2, milestone A).*
 Programs that speak only X11 (xterm,
-older applications; Steam is milestone B) run under Xwayland, which
+Steam, older applications) run under Xwayland, which
 `blit-compositor` starts with itself and manages: install `xwayland`
 (`blit-compositor` recommends it; 23.1 or later, as Debian 13 has).
 Without it, or with an older one, X11 programs fail with "cannot open
 display" and the compositor's log says why. **Control Panel > Windows >
-X11 Programs (Xwayland)** turns them off and on (on by default; applied at
+X11 Programs** turns them off and on (on by default; applied at
 Restart Desktop): off, X-only programs fail the same way, while GTK, Qt
 and Firefox keep running as Wayland programs.
 
@@ -110,12 +110,9 @@ says so, and Hibr's frame stays off, as for Firefox.
   that asks for full screen fills the display Hibr puts it on -- for X
   programs, at that display's corner and size -- not always the same one.
   Which display full-screen programs open on is Hibr's setting (**Control
-  Panel > Displays > Full-screen programs open on**). An X program's
+  Panel > Displays > Full Screen On**). An X program's
   window stays inside the display it is shown on, and moves with it to
   another.
-- Two displays of exactly the same size and refresh cannot yet be told
-  apart when a window moves between them: the program keeps the one it
-  was on.
 
 ## Using the window
 
@@ -125,6 +122,11 @@ says so, and Hibr's frame stays off, as for Firefox.
 | Mouse | Clicks, scrolling, menus and popups land where they are drawn; a press on a background window focuses it first. A game can lock the pointer after a click; Hibr's release key gives it back. |
 | Pointer shape | The program names it (text, hand, resize, ...) and Blit draws its own pointer for that name: the same cursors as everywhere else. A program's own cursor pictures are never drawn. Shapes show over the focused window; the text cursor shows everywhere. |
 | Copy and paste | One clipboard with Hibr's terminals and applications, as text. Vault passwords paste in and are cleared again when the Vault's timer ends, and never enter the clipboard history. Middle-click paste (the primary selection) works between programs. |
+| Drag and drop | Files dragged from Hibr drop into Wayland and X programs, and a program's own drag drops into Hibr, a terminal or another program, with the program's drag icon under the pointer (0.3.114-0.3.123). |
+| Typing other scripts | The keyboard's input method, Arabizi included, types into programs' text fields (text-input-v3, 0.3.101; Arabizi's cycle and teach keys from 0.3.109). |
+| Extra mouse buttons | Back, forward and further buttons reach the program, unless the desktop keeps that chord for itself as a shortcut (0.3.107; `INPUT keep`, 0.3.95). |
+| A program that stops answering | After 2 s without an answer (Blit's pointer setting `busy_after_ms`, 0.5-10 s) the pointer over its window turns busy, and goes back when the program answers ([ADR 0235](adr/0235-the-busy-pointer.md)). |
+| Video and scaled windows | Programs that crop or scale their output (mpv and other `wp_viewporter` users, and a window's buffer scale) show at the window's size (0.3.115, 0.3.124). |
 | Moving and resizing | From Hibr's frame, or from the program's own title bar and edges if it draws them (Firefox, GTK applications); right click on such a title bar for the window menu. Maximize, full screen and minimize as for any Hibr window. |
 | Closing | Hibr's close asks the program to close, so it can still ask to save. |
 | Restart Desktop | Programs keep running; their windows come back as they were. |
@@ -132,16 +134,19 @@ says so, and Hibr's frame stays off, as for Firefox.
 
 ## Not yet
 
-- **X11 programs**: Big Picture full screen and Proton games -- ADR 0228
-  phase 2's milestone E (above); drag and drop with X programs. A menu its
-  program moves while it is open stays where it first showed; a program
-  whose only window is an override-redirect one (some games' full-screen
-  windows) does not show.
+- **X11 programs**: Big Picture full screen and Proton games --
+  [ADR 0228](adr/0228-blit-is-the-compositor-for-programs.md) phase 2's
+  milestone E (Gitea #169). A program whose only window is an
+  override-redirect one (some games' full-screen windows) does not show
+  (#175).
 - **Programs' menus in Hibr's bar** (the global menu): Blit's side is in
   0.3.77, Hibr's to follow. Qt and KDE programs, and GTK 3 ones with the
   appmenu module, get it; Firefox and GTK 4 programs keep their own menus.
-- **Drag and drop, HiDPI scaling, input methods, touch and tablets** are
-  ADR 0229's later rows.
+- **HiDPI output scale** (outputs tell programs scale 1; no fractional
+  scale, #170), **idle inhibit** (#171), **portals** (#172), and **touch
+  and tablets** (#173) are
+  [ADR 0229](adr/0229-programs-and-the-desktop-one-owner-per-concern.md)'s
+  later rows.
 
 ## When something is wrong
 

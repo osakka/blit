@@ -1,6 +1,7 @@
 # ADR 0232: An update installs blit and its compositor together
 
-- Status: accepted (0.3.97; the evidence below, recorded 2026-11-13)
+- Status: accepted
+- Note: Shipped in 0.3.97; the evidence below was recorded on 2026-11-13.
 - Date: 2026-11-12
 - Scope: `PUT /v1/control/update`, the root update helper
   (`blit-update-helper`), `tools/deploy/update-live.sh`, the release

@@ -63,7 +63,7 @@ Blit exposes three kinds of operations:
 | Kind | Examples | Client rule |
 | --- | --- | --- |
 | Discovery | `/version`, `/server`, `/displays`, `/topology` | Read before mutation; treat capabilities as runtime facts. |
-| Resource lifecycle | sessions, surfaces, routes, overlays, fonts, effects | Keep returned IDs/revisions; use preconditions and idempotency keys. |
+| Resource lifecycle | sessions, surfaces, routes, overlays, fonts, settings (effects are read-only, set through settings) | Keep returned IDs/revisions; use preconditions and idempotency keys. |
 | Observation/control | stream, diagnostics, screenshots, shutdown/restart/update | Observe asynchronous work; use typed problem codes on failure. |
 
 The API is intentionally not a remote shell. Terminal bytes go through the
@@ -149,7 +149,7 @@ Every client begins with `GET /v1/version`. The response identifies both the
 running server and the API contract:
 
 ```json
-{"server_version":"0.3.20","api_version":"0.1"}
+{"server_version":"0.3.127","api_version":"0.1"}
 ```
 
 `server_version` answers “which binary is serving this request?”;
@@ -411,18 +411,18 @@ status codes.
 | Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, place panes |
 | Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
-| Auxiliary displays | `GET/PUT /v1/auxiliary-displays`, `POST /v1/auxiliary-displays/apply` | Start and place Hibr on the other monitors |
+| Auxiliary displays | `GET /v1/auxiliary-displays`, `POST /v1/auxiliary-displays/apply` | Start and place Hibr on the other monitors |
 | Terminals | `GET/POST /v1/terminal-sessions`, `GET/PATCH/DELETE /v1/terminal-sessions/{id}`, `POST /v1/terminal-sessions/{id}/input`, `DELETE .../graphics`, `POST/GET/DELETE .../output-capture` | Inventory, create, place, inspect, drive, and stop PTY sessions; reset their images; capture their output |
 | Hibr | `POST /v1/terminal-sessions/{id}/hibr-owner` | Internal: the Blit-launched Hibr adapter registers its PID for resize reassertion |
 | Surfaces | `GET/PUT /v1/surfaces/{id}/cells`, `GET /v1/surfaces/{id}/summary`, `GET/PATCH /v1/surfaces/{id}/scrollback` | Read and revision-update authoritative terminal state; scroll the view |
-| Input | `GET /v1/input/devices`, `GET/PATCH /v1/input/devices/{id}`, `POST /v1/input/inject`, `GET /v1/input/routes`, `PUT/DELETE /v1/input/routes/{id}` | Discover, configure, and route physical or synthetic input |
+| Input | `GET /v1/input/devices`, `GET/PATCH /v1/input/devices/{id}`, `POST /v1/input/inject`, `GET /v1/input/routes`, `PUT/DELETE /v1/input/routes/{id}`, `GET /v1/input/keymap`, `GET/PUT /v1/input/keyboards`, `GET /v1/input/keyboards/available`, `POST /v1/input/arabizi/convert` | Discover, configure, and route physical or synthetic input; the keyboards and their keymap; Arabizi |
 | Presentation | `POST /v1/frames`, `GET /v1/stream` | Commit coherent frames and consume event/pixel streams |
 | Graphics | `GET /v1/effects`, `GET/POST /v1/overlays`, `DELETE /v1/overlays/{id}` | Report pane effects; manage bounded overlays |
 | Diagnostics | `GET /v1/diagnostics`, `/runtime`, `/console`, `/processes`, `/observation`, `/trace`, `/graphics-ledger`, `/screenshots/{display_id}` | Inspect aggregate state, timing, the console, busy processes, events, picture events and blinks, and evidence captures |
 | Control | `POST /v1/control/shutdown`, `/restart`, `GET/PUT /v1/control/shutdown-key` | Stop or restart the server; program the keyboard chord that stops it |
 | Updates | `PUT /v1/control/update`, `GET .../status`, `POST .../cancel`, `POST .../reset` | Upload and supervise a verified package update |
 
-The schema contains 50 path templates (`api_schema_gate.rb` checks the
+The schema contains 54 path templates (`api_schema_gate.rb` checks the
 count). Keep this table synchronized when a path is added, removed, or
 renamed; the schema remains the authoritative count.
 
@@ -436,17 +436,22 @@ GET    /v1/version                         compatibility handshake
 GET    /v1/server                          capabilities and links
 GET    /v1/graphics /displays /audio       hardware inventory
 GET/PUT /v1/control/shutdown-key           the keyboard stop chord
-GET/PATCH /v1/displays/{id}                rotation 0 only, brightness
+GET/PATCH /v1/displays/{id}                mode, zoom, brightness; rotation 0 only
 GET/PATCH /v1/audio/{id}                   a PCM's default flag
-GET/PATCH /v1/audio/cards[/{id}]           a card's mixer
+GET    /v1/audio/cards, GET/PATCH /{id}    a card's mixer
 GET/PUT /v1/fonts /topology                revisioned configuration
 GET    /v1/effects                         pane effects (set in settings)
 GET/PUT/DELETE /v1/settings                persisted server and font settings
+GET/POST/DELETE /v1/login                  the login screen and its signed-in session
+GET    /v1/auxiliary-displays              Hibr on the other monitors
+POST   /v1/auxiliary-displays/apply        start and place it
+GET    /v1/fonts/icons                     Blit's icon and glyph catalogue
 GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
 POST   /v1/terminal-sessions/{id}/input    terminal input bytes
 DELETE /v1/terminal-sessions/{id}/graphics explicit retained-graphics reset
+POST/GET/DELETE /v1/terminal-sessions/{id}/output-capture  capture output
 POST   /v1/terminal-sessions/{id}/hibr-owner internal Hibr owner registration
 GET/PUT /v1/surfaces/{id}/cells            authoritative cell snapshot/update
 GET    /v1/surfaces/{id}/summary           cheap health check
@@ -454,12 +459,17 @@ GET/PATCH /v1/surfaces/{id}/scrollback     history and scrolled view
 GET/PATCH /v1/input/devices[/{id}]         discover and configure devices
 POST   /v1/input/inject                    synthetic input
 GET    /v1/input/routes, PUT/DELETE /{id}  input routing
+GET    /v1/input/keymap                    the current keyboard's xkb keymap
+GET/PUT /v1/input/keyboards                the keyboard list and current one
+GET    /v1/input/keyboards/available       layouts and variants to choose from
+POST   /v1/input/arabizi/convert           Arabizi text to Arabic
 POST   /v1/frames                          explicit coherent frame boundary
 GET    /v1/stream                          events and bounded pixel frames
 GET    /v1/diagnostics*                    state, timing, traces, screenshots
 GET    /v1/diagnostics/observation         one canonical operational state dump
 POST   /v1/control/{shutdown,restart}      orderly service control
 PUT    /v1/control/update, GET .../status  verified package supervision
+POST   /v1/control/update/{cancel,reset}   stop or clear an update
 GET/POST /v1/overlays, DELETE /{id}        bounded graphic overlays
 ```
 
@@ -957,6 +967,7 @@ is worse than its absence.
 
 ```text
 mode-report   always
+mode          every display with a KMS connector (ADR 0236, 0.3.125).
 brightness    only where a backlight is attributed to the display.
 zoom          every KMS display (ADR 0204).
 ```
@@ -1232,7 +1243,9 @@ holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` v
 "Picture memory"), `restart_after_update`, `expect_desktop` and
 `shutdown_key`. The other
 sections are `display_layouts`, `effects`, `pointer`, `login`,
-`auxiliary_displays`, `input_devices`, `audio_devices` and `displays`.
+`auxiliary_displays`, `input_devices`, `audio_devices`, `displays` (each
+connector's zoom and kept mode), `hud` (the performance panel) and
+`keyboards` (the keyboard list, ADR 0231).
 Environment variables such as `BLIT_RENDER_INTERVAL_MS`, `BLIT_PANE_LAYOUT`,
 `BLIT_KMS_COMPOSITOR`, `BLIT_KMS_FRAME_TIMING`, `BLIT_KMS_ASYNC_PAGEFLIP`,
 `BLIT_EXPECT_DESKTOP`, `BLIT_PSF_FONT` and `BLIT_FONT_SCALE` are boot
@@ -1393,7 +1406,8 @@ as base64, with each read's byte offset and time since arming. `DELETE`
 frees the capture, as does closing the session. The cell snapshot shows the
 result; the capture shows the sequence that produced it, such as a clear
 arriving while a background colour was set. It can contain anything the
-program printed, so it requires the API token like every endpoint, and is
+program printed, so it requires the API token (when one is configured), as every API
+endpoint does, and is
 only recorded while armed.
 
 ## Terminal surfaces and atomic updates
@@ -1635,7 +1649,9 @@ not shown) and `spin_frames`.
 
 ```json
 {"busy_pointer":true,"busy_after_ms":2000,"busy_spin_ms":1000,"busy_style":"wheel"}
-``` `effective.pointer_shown` adds `size_px`
+```
+
+`effective.pointer_shown` adds `size_px`
 (the size drawn now), `shake_scale` and `shake_sizes` (how many times the
 drawn size has changed).
 
@@ -1813,6 +1829,8 @@ GET /v1/input/keyboards/available?layout=ara   that layout's variants
 `keyboards` replaces the list: 1 to 16, each compiled before any is used,
 so one the system does not have is a `422 keyboard_not_available` and the
 list in use stays as it was; a malformed body is `400 invalid_keyboards`.
+`GET /v1/input/keyboards/available?layout=<x>` with a name that is not an
+xkb layout is `400 invalid_keyboard`.
 `current` alone switches. `name` is the system's description
 (xkeyboard-config's `rules/evdev.lst`) and is ignored when sent back; the
 available lists come from the same file, so a new language is the
@@ -1907,8 +1925,9 @@ are evdev codes plus 8; Shift, Lock, Control, Mod1 (Alt), Mod2 (Num Lock),
 Mod4 (Super) and Mod5 (AltGr) are the modifiers, and the indicators
 include "Caps Lock" and "Num Lock" (X programs read them; Xwayland 24.1
 crashes under a keymap with none). Without the xkb data (Debian:
-`xkb-data`) Blit has no keymap, says so at start, and no key types
-anything.
+`xkb-data`) Blit has no keymap, says so at start, no key types
+anything, and `GET /v1/input/keymap` answers 500
+`input_keymap_unserialisable`.
 
 The keyboard is `?device=<id>` when given (404 `input_device_not_found` for
 none such), else the keyboard whose key came last -- the one whose keys
@@ -1952,15 +1971,19 @@ GET /v1/input/keymap
 
 `GET /v1/fonts/icons` returns the packaged, versioned catalogue of Blit's own
 colour icons (status icons, the hui badge, telephones, file-manager icons):
-each icon's id, codepoint, how many columns it spans, and the codepoints
+each icon's id, codepoint, how many columns it spans and, for an icon over
+several rows (the big now-playing discs, 0.3.127), `rows` and `row`, and the codepoints
 retired and never reused. Its `cell_geometry` section lists the glyphs
 Blit draws as cell geometry: the bar corners, the 70 window-chrome glyphs
 (ADR 0210), the 20 controls (ADR 0212), the 13 outer-edge frame glyphs
 (ADR 0214), the 10 pressed-box and grow glyphs (ADR 0219), the 4
 minimise boxes (ADR 0222) and the 10 full-screen and sticky boxes
-(ADR 0224), each with `colour`, `set` (`chalk`, `slate-light`, `slate`,
-`capsule` or `frame`) and `pens` (`foreground`, or `cell` for Slate and the
-capsule, ADR 0211). Slate dark's codepoints are under `retired`. An entry a
+(ADR 0224), the 105 player glyphs (LCD digits, LED meters, sliders and
+faders) and the 4 key ends (ADR 0237). Each has `colour`; the window and
+control glyphs and the keys also carry `set` (`chalk`, `slate-light`,
+`slate`, `capsule`, `frame` or `key`) and `pens` (`foreground`, or `cell`
+for Slate, the capsule and the keys, ADR 0211); the bar corners and the
+player glyphs have neither. Slate dark's codepoints are under `retired`. An entry a
 later glyph replaces carries `deprecated: true` and `replaced_by` (the ids
 that replace it): Blit still draws it, unchanged, until a release retires
 it, so a client moves at its own pace (ADR 0214). An `icons` entry can carry
@@ -1975,7 +1998,7 @@ one's place in it), `background` (the cell's background should be the
 title bar's, a panel, the wallpaper, a dialog's face or a button's),
 `foreground` (ink, a capsule's track, or the bar's colour) and `line`
 (what SGR 58 is: nothing, a highlight, a box's, dialog's or button's
-face, or a knob). The words are in
+face, a knob, or `shade`, a key's dark edge). The words are in
 [the icon contract](../assets/fonts/icons/README.md) and typed in OpenAPI.
 
 **The catalogue has a revision.** The body's first member, `revision`, is
@@ -1984,7 +2007,7 @@ pins), and the response's `ETag` is the same value, quoted. A client that
 keeps the catalogue compares it, or sends it back as `If-None-Match` and is
 answered 304 with no body while it is current; the response is
 `Cache-Control: no-cache`, so it may be kept and must be asked about. The
-catalogue is about 61 KB; the endpoint's limit is 256 KiB. Authentication
+catalogue is about 140 KB; the endpoint's limit is 256 KiB. Authentication
 is the same as other read endpoints. A missing, unreadable or oversized catalogue returns 503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)
@@ -2224,7 +2247,7 @@ trailing newline is optional.
   `members`, the route's member pictures (`INPUT member`, "Program
   windows"), each `{"image","x","y"}`.
 
-## Program windows (draft, ADR 0228 phase 1)
+## Program windows (ADR 0228)
 
 `blit-compositor` implements the compositor's
 side from 0.3.71 (ADR 0228 phase 1: milestone A, `wl_shm` windows as FRM1;
@@ -2290,10 +2313,11 @@ It speaks the frame channel above as a producer, with these additions.
     <code>`, `INPUT ok <id>`, `INPUT error <id> <code>`;
   - a producer to Blit: `INPUT sock <id> <path>`,
     `INPUT on|off <id>`, `INPUT hold <id> relative|confine`, `INPUT member
-    <id> <toplevel-id> <x> <y>`, `INPUT keep <chord>...` (no id: the
-    session's whole set, below);
-  - on an input route's socket: `INPUT key|ptr|rel|btn|wheel|frame|keymap
-    <id> ...`;
+    <id> <toplevel-id> <x> <y>`, `INPUT view <id> <sx> <sy> <sw> <sh> <dw>
+    <dh>|-` (0.3.125), `INPUT imekeys ...`, `INPUT keep <chord>...` (no
+    id: the session's whole set, below);
+  - on an input route's socket: `INPUT key|ptr|rel|btn|wheel|frame|keymap|
+    modifiers|method|busy|ime <id> ...`;
   - between the compositor and the desktop: every `WINDOW <verb> <id> ...`
     line above and below, and `WINDOW ok <id>`, `WINDOW error <id> <code>`;
   - the keyboards (ADR 0231, from Blit 0.3.94), concerning no picture: a
@@ -2313,8 +2337,8 @@ It speaks the frame channel above as a producer, with these additions.
   - **`INPUT keep <chord> <chord> ...`** (0.3.95): the desktop's own
     shortcuts, kept from programs. It replaces the sending session's whole
     set (an empty `INPUT keep` clears it) and is not answered; one chord
-    not in the grammar refuses the line, `INPUT error 0 EINVAL`, and keeps
-    the set. A chord is `[ctrl-][alt-][shift-][super-]<key>`, the
+    not in the grammar, or more than 256 chords, refuses the line,
+    `INPUT error 0 EINVAL`, and keeps the set. A chord is `[ctrl-][alt-][shift-][super-]<key>`, the
     modifiers in that order, the key named by the US key at its position
     (a-z, 0-9, `` ` - = [ ] \ ; ' , . / ``, so `alt-w` is the W key in any
     layout and `shift-1` is Shift+1) or by name (f1-f24, up, down, left,
@@ -2835,8 +2859,9 @@ It speaks the frame channel above as a producer, with these additions.
     one under way ends short with what came; the reader's pipe closes.
     When the desktop clears a selection (`CLIP clear`), X's owner goes at
     once (a paste already under way is the desktop's pipe to finish).
-  Not yet: `_NET_WM_WINDOW_TYPE` (noted once in the compositor's log), and
-  X drag and drop. When Xwayland dies,
+  Not yet: `_NET_WM_WINDOW_TYPE`, except `_NET_WM_WINDOW_TYPE_DND`, which
+  marks a drag's icon (the rest is noted once in the compositor's log).
+  When Xwayland dies,
   its windows are `WINDOW gone`, an X program's selection is `CLIP clear`,
   and it is started again on the same display; its X programs end with
   it.
@@ -2872,7 +2897,7 @@ It speaks the frame channel above as a producer, with these additions.
                                        the keymap (a memfd passed with it)
   INPUT modifiers <id> <depressed> <latched> <locked> <group>
                                        the keyboard's xkb modifiers
-  INPUT method <id> <name|-> [<options>]
+  INPUT method <id> <name|-> [<options>]   (Blit sends no options yet)
                                        the current keyboard's input method
   INPUT busy <id> <ms|off>             when a program counts as busy
   INPUT ime <id> cycle|back|teach <code>   the input method's key, pressed
@@ -3021,8 +3046,10 @@ It speaks the frame channel above as a producer, with these additions.
     announced, if later); a oneshot constraint deactivated by `off` is
     spent, so destroying it afterwards sends nothing, and a program that
     wants the lock again makes a new constraint, which asks again.
-- **The keyboard map** is generated from Blit's own keyboard tables (its
-  evdev-to-character maps and modifier roles) -- one source -- and comes on
+- **The keyboard map** is the system's xkb keymap for the current
+  keyboard, compiled by libxkbcommon from xkeyboard-config (ADR 0231) --
+  one source; modifier roles are applied to keys on the way in, not written
+  into the keymap -- and comes on
   the input route itself: `INPUT keymap` with a sealed memfd of the xkb
   text (`xkb_v1`, the bytes `GET /v1/input/keymap` serves) and the repeat,
   which the compositor compiles with libxkbcommon and hands to clients. A
@@ -3154,9 +3181,9 @@ It speaks the frame channel above as a producer, with these additions.
   under a new `<seq>`, after the re-announcement. A pipe either way may
   close short: an X program that stops sending, or stops taking, for 3 s
   is let go, and the pipe carries no error, so the desktop reads a short
-  text as it would a whole one (or its write to an X paste fails). Drag
-  and drop is not here yet: a drag is cancelled at once (ADR 0229's later
-  row).
+  text as it would a whole one (or its write to an X paste fails). A
+  program's drag is cancelled at once only when the desktop's hello answer
+  lacks `drag=1` (above).
 
 ## Diagnostics and screenshots
 
@@ -3220,11 +3247,13 @@ ring, not the trace's, so a burst of pointer events cannot evict it. Read it
 incrementally with `since`:
 
 ```sh
-before=$(curl -s "$base/v1/diagnostics/runtime" | jq '.performance | {graphics_blink_events,graphics_blink_frames,graphics_barrier_timeouts}')
-cursor=$(curl -s "$base/v1/diagnostics/graphics-ledger?limit=1" | jq .sequence)
+base=${BLIT_URL:-http://127.0.0.1:8080}
+auth=(--header "Authorization: Bearer $BLIT_AUTH_TOKEN")
+before=$(curl -s "${auth[@]}" "$base/v1/diagnostics/runtime" | jq '.performance | {graphics_blink_events,graphics_blink_frames,graphics_barrier_timeouts}')
+cursor=$(curl -s "${auth[@]}" "$base/v1/diagnostics/graphics-ledger?limit=1" | jq .sequence)
 # ... do the thing that blinks ...
-curl -s "$base/v1/diagnostics/runtime" | jq '.performance | {graphics_blink_events,graphics_blink_frames,graphics_barrier_timeouts}'
-curl -s "$base/v1/diagnostics/graphics-ledger?since=$cursor" | jq '.events[] | {sequence,kind,frame,image_id,reason,frames,cells}'
+curl -s "${auth[@]}" "$base/v1/diagnostics/runtime" | jq '.performance | {graphics_blink_events,graphics_blink_frames,graphics_barrier_timeouts}'
+curl -s "${auth[@]}" "$base/v1/diagnostics/graphics-ledger?since=$cursor" | jq '.events[] | {sequence,kind,frame,image_id,reason,frames,cells}'
 ```
 
 The response's `next` is the cursor for the following read and `lost`
@@ -3234,8 +3263,8 @@ what last deleted the image, then `;returned` or `;successor=<id>`.
 Capture one display with:
 
 ```sh
-curl --fail --output display.bmp \
-  http://HOST:8080/v1/diagnostics/screenshots/display-1
+curl --fail --header "Authorization: Bearer $BLIT_AUTH_TOKEN" \
+  --output display.bmp http://HOST:8080/v1/diagnostics/screenshots/display-1
 ```
 
 The capture is a BMP of the next presented frame; taking it never forces a
@@ -3326,7 +3355,9 @@ video   9/s  by descriptor  (kitty 0  sixel 0)
 - **graph** (section `graph`): the last 60 s, one bar a second, newest at
   the right: that second's worst frame time on the output, against a line at
   the refresh interval. Bars over it are red.
-- **blit**, once, on the first panel shown: the worst loop gap in 10 s,
+- **blit** (section `blit`): each display's own lines above (display,
+  draws, why, draw, flip, gpu, video) -- without this section a panel shows
+  none of them -- and, once, on the first panel shown: the worst loop gap in 10 s,
   input (`idle`, or the last and worst dispatch time), the glyph cache's hit
   rate, and errors in 10 s (`none`, or the nonzero counts). While an
   installed update waits for a restart, one more line:
@@ -3355,7 +3386,8 @@ panel with its place and lines.
 
 Pane effects are set in the settings document's `effects` (see "Pane effects"
 under settings). `GET /v1/effects` reports what each live pane draws, and is
-read-only. `POST/DELETE /v1/overlays` manages explicit graphic overlays.
+read-only. `POST /v1/overlays` and `DELETE /v1/overlays/{id}` manage
+explicit graphic overlays.
 Effects and overlays are downstream of terminal state and cannot silently
 replace it.
 

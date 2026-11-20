@@ -99,7 +99,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | 39, 49, 59 | Default text, background and underline colour |
 | 51, 51:3, 54 | Framed: a line along the cell's top and bottom edges, 1 px (51) or 3 px (51:3, a Blit extension for a default button's ring), in the underline colour if set, else the foreground; 54 ends it |
 | 51:2 | Blit extension: a Slate title bar's top and bottom rows (frame line and highlight, shade and rule) in the cell's pens: foreground, underline colour (white if unset) and half foreground half background, so a title's text cells match the bar glyphs beside them (ADR 0210, 0211) |
-| 51:6, 51:7 | Blit extension: a key's bevel across its icon cells (ADR 0237): 51:6 raised, 2 px of the foreground on top and 2 px of the underline colour (else the foreground) below; 51:7 pressed, the reverse, with the cell's glyph 1 px lower. The key's ends are the `key-left`/`key-right` glyphs in the same pens; the face is the cell's background |
+| 51:6, 51:7 | Blit extension: a key's bevel across its icon cells (ADR 0237): 51:6 raised, 2 px (1 px in cells under 16 px tall) of the foreground on top and as much of the underline colour (else the foreground) below; 51:7 pressed, the reverse, with the cell's glyph 1 px lower. The key's ends are the `key-left`/`key-right` glyphs in the same pens; the face is the cell's background |
 | 51:5 | Blit extension: a rule along the cell's bottom edge only, 1 px, in the underline colour if set, else the foreground: the line under a note's strip (ADR 0210) |
 | 66:kind:width:inset, 67 | Blit extension: a drop shadow drawn under the cell's glyph, in the underline colour if set, else the foreground; 67 (or 66:0) ends it. kind 1 right, 2 right from 2 px down (a window's first row), 3 under, 4 under from the 2 px offset (its first cell), 5 the corner; width 1 or 2 px, 2 if left out; inset 1 (default: 1 px in, just outside a Blit frame glyph's line) or 0 (at the cell's edge: the cells beyond a frame that fills its own, a box-drawing border or the outer-edge frame cells of ADR 0214, whose line is on the cell's outermost edge). Colon form only (ADR 0211) |
 | 68:v, 69 | Blit extension: the icon pen, the pen Blit's colour icons (U+100000 and up that carry colour) are drawn in, in this cell. v 1 auto (the icon's monochrome shape in the cell's foreground, the background showing through its knockouts), 2 black, 3 white; 69 (or 68:0, or 68 alone) ends it, and an unknown v leaves it alone. Without it an icon is in its own colours. Every other glyph ignores it, and a change redraws the cell only. Colon form only (ADR 0221) |
@@ -212,7 +212,7 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 | Frames by descriptor | A program in a session can send an image's pixels as a sealed memfd over `BLIT_FRAME_SOCKET` instead of base64, and place and delete it with Kitty escapes ([ADR 0202](adr/0202-local-frames-by-descriptor.md)). Local only: over ssh, pictures stay Kitty escapes |
 | Held by synchronized output | An image deleted by capital letter (`d=I`, `d=A`, ...) inside a `CSI ? 2026 h` update stays drawn, though the program can no longer find it, until the update ends ([ADR 0213](adr/0213-graphics-ledger-blink-counters-and-held-pictures.md)); a whole-output redraw mid-update then shows the held picture, not a hole |
 | Observing | Every transmit, place, delete and free goes in the graphics ledger (`GET /v1/diagnostics/graphics-ledger`), and a picture that vanishes from presented frames and returns is counted as a blink in `graphics_blink_events` and `graphics_blink_frames` |
-| Limits | 16 images per session (shared with Sixel), 8 placements per image, 4096×4096 pixels, 64 MiB per image |
+| Limits | 4096 pictures and 16384 placements per session (shared with Sixel), bounded by picture memory -- 256 MiB per session and a quarter of RAM, at most 2 GiB, across sessions (ADR 0226); 4096×4096 pixels, 64 MiB per image |
 
 Images scroll with their text and are clipped at the edge of the pane.
 
@@ -235,9 +235,10 @@ background (`P2=1`), display mode (80) and cursor placement (8452).
   companion fonts, with Arabic-Indic digits. Bidirectional ordering is the
   application's job; Blit sets `DT_BIDI=on` so Hibr does it.
 - Invalid UTF-8 becomes U+FFFD.
-- Glyphs come from the selected font, then the glyph stack: Nerd Fonts
-  symbols, Unifont for scripts the font lacks, colour emoji, and Blit's own
-  icons. See the [font reference](font-reference.md).
+- Glyphs come from the selected font and the glyph stack around it --
+  Blit's own icons and colour emoji ahead of it, Nerd Font symbols, Arabic
+  and Unifont after -- in the order the
+  [font reference](font-reference.md#families-and-sizing) gives.
 
 ## Limits
 

@@ -42,7 +42,7 @@ process may already own DRM master.
    ```sh
    cd /path/to/hw-manager
    ./build/blit/drm-kms-probe
-   ./build/blit/blit-server 8080
+   BLIT_FONT_ROOT=$PWD/assets/fonts ./build/blit/blit-server 8080
    ```
 
 The probe enumerates cards, connectors, and modes without changing display

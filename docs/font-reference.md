@@ -167,8 +167,8 @@ or portable assignments in an unrelated font. In particular:
 
 - U+270E `✎` is the themed pen silhouette; it is not the multicolour pen.
 - U+16D2 `ᛒ` is Berkanan, not the new Bluetooth drawing.
-- Four Wi-Fi entries represent signal levels 1 to 4. No disconnected/unknown
-  fifth state is defined; choose an explicit textual/themed fallback.
+- Wi-Fi is `wifi-signal-1`..`wifi-signal-4` and `wifi-off` (0.3.55); the
+  older `wifi-1`..`wifi-4` are deprecated, replaced by `cellular-1`..`-4`.
 - Intrinsic-colour artwork keeps its palette; ordinary Nerd icons follow
   foreground colours. A truecolour terminal alone does not imply colour-font
   glyph support or these private mappings.
@@ -268,7 +268,7 @@ window's face and the face runs out to the line.
   into it**, starting (left) or stopping (right) 2 px from the cell's outer
   edge: the line and one clear pixel. They join the next cell's stripes at
   every cell size. Chalk's are coverage; Slate's use the cell's pens as the
-  Slate bar glyphs do. The **plain** title ends (0.3.45) are the same cells
+  Slate bar glyphs do. The **plain** title ends (0.3.44) are the same cells
   without stripes, for the inactive bar: they sit beside the plain `title`
   cells and join them at every size. `stripe-first` and `stripe-last` are redundant.
 - **The shadow is unchanged** (SGR 66, ADR 0211), but goes in the cells
@@ -372,14 +372,18 @@ title bar beside close, minimise, shade and zoom.
 
 ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+100314 (the outer-edge frame, below,
+section. The next free codepoint is U+100495 (the outer-edge frame, below,
 is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
 hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
 off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
 minimise box U+1002CD–1002D0, then the Wi-Fi signal and cellular icons
 U+1002D1–1002D9, the two-column Wi-Fi and volume icons U+1002DA–1002EB,
 the two-column classic phones U+1002EC–1002F3, the two-column batteries
-U+1002F4–100309, and the full-screen and sticky boxes U+10030A–100313).
+U+1002F4–100309, the full-screen and sticky boxes U+10030A–100313, and the
+player glyphs of ADR 0237: LCD digits U+100314–10035E, LED meters
+U+10035F–100372, sliders U+100373–100377, faders U+100378–10037C,
+transport U+10037D–1003A0, discs, records and cassettes U+1003A1–1003D0,
+keys U+1003D1–1003D4, and the big discs U+1003D5–100494).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,
@@ -523,7 +527,7 @@ emoji presentation for supported sequences. ZWJ, modifiers, regional-indicator
 flags, keycaps and tags are multi-scalar clusters, not individual Nerd glyphs.
 
 Scalar layout remains the compatibility default. An application deliberately
-using cluster layout must follow the [explicit emoji layout API](api.md#explicit-emoji-cell-layout-since-01578),
+using cluster layout must follow the [explicit emoji layout API](api.md#explicit-emoji-cell-layout),
 including owner/continuation cells and width. Do not switch the existing Hibr
 desktop's layout policy globally to make an icon work. Font/corpus coverage,
 browser appearance and passing local raster tests are not universal terminal
@@ -551,9 +555,9 @@ or physical conformance guarantees; internal issue #110 tracks the rest.
 The tables are generated, not another editable glyph registry:
 
 ```sh
-# The pinned fontTools 4.60.1 the font builders use: PYTHONPATH=$(tools/fonts/fonttools.sh)
-python3 tools/fonts/build-reference.py
-python3 tools/fonts/build-reference.py --check
+# The pinned fontTools 4.60.1 the font builders use (tools/fonts/fonttools.sh)
+PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-reference.py
+PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-reference.py --check
 ruby tools/tests/font_reference_gate.rb
 ```
 

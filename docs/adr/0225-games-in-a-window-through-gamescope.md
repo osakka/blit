@@ -1,8 +1,7 @@
 # ADR 0225: Steam and games in a window, through a headless gamescope
 
-- Status: superseded by [ADR 0228](0228-blit-is-the-compositor-for-programs.md);
-  deprecated 2026-11-10 by the owner, removed in 0.3.75 (blit-gamescope,
-  the libei input path and their gates)
+- Status: retired in 0.3.75 (ADR 0228)
+- Note: Deprecated by the owner on 2026-11-10; blit-gamescope, the libei input path and their gates were removed in 0.3.75. Programs in windows go through blit-compositor (ADR 0228).
 - Removed: in 0.3.75 -- the bridge (`src/blit_gamescope*.{c,h}`) and its
   package, the libei backend of the input route (`INPUT eis`), the EIS and
   stand-in libei gates; the route model and its hold modes stay, for

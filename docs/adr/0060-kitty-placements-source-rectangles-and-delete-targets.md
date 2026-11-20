@@ -1,6 +1,7 @@
 # ADR 0060: Kitty placements, source rectangles and delete targets
 
 - Status: accepted
+- Note: The per-image limit of 8 numbered placements was superseded by ADR 0226 (0.3.65): placements are bounded by memory.
 - Date: 2026-10-10
 - Scope: Kitty graphics parsing, the graphics model, both renderers, the
   graphics diagnostics contract

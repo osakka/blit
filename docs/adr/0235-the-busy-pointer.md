@@ -1,7 +1,7 @@
 # ADR 0235: The busy pointer
 
-- Status: proposed (0.3.106; accepted once the owner has seen a hung
-  program spin on the mini PC)
+- Status: accepted
+- Note: Shipped in 0.3.106; amended in 0.3.112 and 0.3.113.
 - Date: 2026-11-13
 - Scope: blit-compositor (pings, `WINDOW busy`, `INPUT busy`), the pointer
   art (`src/blit_pointer_art.h`), `src/blit_server.c` (the spin),

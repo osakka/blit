@@ -1,6 +1,7 @@
 # ADR 0194: Blit's own fonts only, renamed; JetBrains Mono as Blit JetBrainless
 
 - Status: accepted; in use since 0.2.35
+- Note: Its baked-profile parts were superseded by ADR 0195 (0.2.36); blit-spleen16 was retired in 0.3.68 (ADR 0227).
 - Date: 2026-10-27
 - Scope: `assets/fonts`, the font profile table, packaging, the font gates
 

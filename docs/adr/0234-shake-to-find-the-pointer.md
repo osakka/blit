@@ -1,7 +1,7 @@
 # ADR 0234: Shake to find the pointer
 
-- Status: proposed (0.3.102; accepted once the owner has shaken it on the
-  mini PC)
+- Status: accepted
+- Note: Shipped in 0.3.102.
 - Date: 2026-11-13
 - Scope: the pointer (`src/blit_pointer_shake.h`, `src/blit_pointer_art.h`,
   `src/blit_kms.c`, `src/blit_server.c`), `document.pointer` in

@@ -26,7 +26,8 @@ implementation, or accepted ADR.
 The following are disposable or machine-specific and belong in `/tmp` or an
 explicit external artifact store:
 
-- `build/`, `vendor/` dependency trees, QEMU disk/initramfs images;
+- `build/`, `vendor/deps/` (anything under `vendor/` except the pinned
+  `vendor/harfbuzz` headers, ADR 0159), QEMU disk/initramfs images;
 - Debian packages, extracted package trees, screenshots, logs, and captures;
 - bearer/update credentials, private host paths, and physical-host dumps;
 - generated bindings and copied Hibr installations.

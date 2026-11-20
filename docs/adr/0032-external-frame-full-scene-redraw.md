@@ -1,6 +1,7 @@
 # ADR 0032: Redraw the complete SDL scene for external Hibr commits
 
-- Status: superseded by ADR 0036
+- Status: retired in 0.2.22 (ADR 0184)
+- Note: First superseded by ADR 0036 (external cell damage), itself retired with the SDL scene in 0.2.22.
 
 ## Context
 

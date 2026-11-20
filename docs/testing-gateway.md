@@ -24,7 +24,8 @@ verify readiness.
 For a clean API-driven shutdown while the server is alive, call:
 
 ```sh
-curl --fail --request POST http://127.0.0.1:8080/v1/control/shutdown
+curl --fail --header "Authorization: Bearer $TOKEN" \
+  --request POST http://127.0.0.1:8080/v1/control/shutdown   # 202 Accepted
 ```
 
 The endpoint acknowledges first, then the event loop terminates child process
@@ -45,8 +46,10 @@ profile (ADR 0065) ships as an example drop-in,
 `/usr/share/doc/blit/examples/blit-unprivileged.conf`. Installation generates
 `/etc/blit/update.token` and an API `BLIT_AUTH_TOKEN` in `/etc/blit/blit.env`,
 both readable by root and the `blit` group. The default configuration binds
-`0.0.0.0:8080` for the trusted LAN and sets `LANG=C.UTF-8` and
-`LC_ALL=C.UTF-8`, so Hibr's Unicode desktop glyphs reach its PTY as UTF-8.
+`0.0.0.0:8080` for the trusted LAN; sets `LANG=C.UTF-8` and
+`LC_ALL=C.UTF-8`, so Hibr's Unicode desktop glyphs reach its PTY as UTF-8;
+and sets `BLIT_LOGIN_AUTOSTART=1` (start Hibr's root login screen),
+`BLIT_EXPECT_DESKTOP=1` and `BLIT_DISPLAY_BACKEND=kms`.
 Existing values in `/etc/blit/blit.env` and `/etc/blit/update.token` are
 preserved on upgrades.
 
@@ -148,7 +151,7 @@ Run the hardware gate against a Blit instance that owns the physical DRM
 device:
 
 ```sh
-BLIT_GATE_SERVER=http://192.168.10.54:8080 \
+BLIT_GATE_SERVER=http://HOST:8080 \
   tools/tests/physical_multi_display_gate.rb
 ```
 
@@ -428,9 +431,9 @@ The frame-rate gate creates a bounded PTY producer and samples the versioned
 runtime diagnostics endpoint. It requires a completed, fresh measurement
 window, a configurable minimum measured rate, and zero missed refresh
 deadlines; cumulative frame counters alone are not treated as a refresh-rate
-measurement. The windowed render maximum is reported for diagnosis and can be
-made a hard failure criterion because KMS presentation time can include the
-wait for the next physical vblank; missed deadlines are the
+measurement. The windowed render maximum is a hard failure above
+`BLIT_GATE_MAX_RENDER_MS` (default 20 ms); KMS presentation time can include
+the wait for the next physical vblank, so missed deadlines remain the
 authoritative cadence failure:
 
 ```sh
@@ -440,15 +443,16 @@ BLIT_GATE_PORT=19248 ruby tools/tests/frame_rate_gate.rb
 For a 60 Hz physical output, use a release-level minimum explicitly:
 
 ```sh
-BLIT_GATE_SERVER=http://192.168.10.54:8080 BLIT_GATE_MIN_HZ=55 \
-  ruby tools/tests/frame_rate_gate.rb
+BLIT_GATE_SERVER=http://HOST:8080 BLIT_GATE_AUTH_TOKEN=YOUR_API_TOKEN \
+BLIT_GATE_MIN_HZ=55 ruby tools/tests/frame_rate_gate.rb
 ```
 
 The same gate can run against an already-running physical host without
 silently starting a local DRM-mock server:
 
 ```sh
-BLIT_GATE_SERVER=http://192.168.10.54:8080 ruby tools/tests/frame_rate_gate.rb
+BLIT_GATE_SERVER=http://HOST:8080 BLIT_GATE_AUTH_TOKEN=YOUR_API_TOKEN \
+  ruby tools/tests/frame_rate_gate.rb
 ```
 
 For a full-surface physical composition workload, provide the API token and
@@ -456,7 +460,7 @@ the surface dimensions. The 60 Hz release acceptance uses a 17 ms render
 budget; the default 20 ms value is only a local DRM-mock smoke budget:
 
 ```sh
-BLIT_GATE_SERVER=http://192.168.10.54:8080 \
+BLIT_GATE_SERVER=http://HOST:8080 \
 BLIT_GATE_AUTH_TOKEN=YOUR_API_TOKEN \
 BLIT_GATE_MIN_HZ=55 \
 BLIT_GATE_SURFACE_WIDTH=240 BLIT_GATE_SURFACE_HEIGHT=135 \
@@ -632,9 +636,10 @@ curl --fail --request POST \
 An omitted `display_id` targets the first output for compatibility. Unknown
 display IDs are rejected with `display_not_found`; arguments and environment
 are passed only after the executable path passes the configured policy. The
-nested `surface` object and its `width`/`height` members are required by the
-OpenAPI contract; omitting them returns the typed `session_create_failed`
-problem.
+nested `surface` object and its `width`/`height` members are required for an
+unplaced session and optional with `pane_id` or `display_id` (the pane gives
+the size); omitting them for an unplaced session returns the typed
+`session_create_failed` problem.
 
 ## Discover and attach to Blit panes
 
@@ -647,7 +652,7 @@ curl --fail http://127.0.0.1:8080/v1/topology
 
 curl --fail --request POST \
   --header 'Content-Type: application/json' \
-  --data '{"command":"/opt/bin/hibr-desktop","pane_id":"pane-display-1-1","surface":{"width":80,"height":24}}' \
+  --data '{"command":"/usr/bin/desktop","pane_id":"pane-display-1-1","surface":{"width":80,"height":24}}' \
   http://127.0.0.1:8080/v1/terminal-sessions
 ```
 
@@ -730,7 +735,9 @@ curl --fail --request POST \
 Stale cell revisions are rejected with `409 Conflict`. Cell mutations update
 authoritative state; frame receipts record acceptance and trigger the KMS
 output from an immutable surface/revision plan. Cell styles accept six-digit
-foreground and background colors plus bold, dim, underline, and inverse flags;
+foreground and background colors plus the flags and fields of OpenAPI's
+`CellStyle` (bold, dim, italic, underline, blink, inverse, strike, concealed,
+`framed` and `shadow`);
 invalid colors are rejected. Text is validated as UTF-8 and decoded into
 logical cells; malformed UTF-8 and zero-width sequences without a preceding
 base glyph are rejected. Wide glyphs occupy two physical columns, and
@@ -828,7 +835,7 @@ Clients may send a text WebSocket message to receive a subscription diagnostic
 acknowledgement, for example a `frames`-only subscription. Event fan-out is
 filtered by subscription, and client text frames are unmasked. Ping frames
 receive pong responses. The event types are `surface_delta`, `frame`,
-`terminal_output`, `input`, `device_changed`, `diagnostic`, and the
+`terminal_output`, `input`, `keyboard`, `device_changed`, `diagnostic`, and the
 `pixel_frame_*` events of the pixel canvas. A `surface_delta` includes the
 current surface revision, cursor, and bounded damage rectangle. Input messages
 identify `session_id` and carry terminal data inside the event object.

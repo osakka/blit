@@ -5,24 +5,37 @@ internal issue tracker's, not GitHub's. What already works is in
 [features](features.md); the plans and restart notes from the 0.1 and 0.2
 lines are kept in [history](history/roadmap-0.1-0.2.md).
 
-## Where we are (0.3.74, 2026-11-10)
+## Where we are (0.3.127, 2026-11-20)
 
 Blit is the display server under Hibr on the owner's machine, released
-continuously through Hibr's apt repository. Since 0.3.20:
+continuously through Hibr's apt repository. SDL is gone (ADR 0184): native
+KMS is the only way Blit presents, composed on the GPU by default, or on the
+CPU.
 
-- Pictures by dmabuf (0.3.60, ADR 0223), bounded by memory rather than
-  count (0.3.65, ADR 0226); Spleen as one font of five masters (ADR 0227).
-- Programs in Hibr windows through Blit's own Wayland compositor (ADR 0228
-  phase 1, 0.3.71-0.3.74): windows, popups and subsurfaces as pictures,
-  dmabuf frames, Blit's keyboard and pointer with pointer lock, programs
-  surviving a desktop restart, client-side frames moved and resized by
-  their own title bars, and the clipboard and Vault shared with Hibr --
-  the interop drawn as one owner per concern in ADR 0229. vkcube and
-  Firefox are the live checks.
-- The frame channel's version 5 grammar, a flag day with Hibr 0.99.482.
+Since 0.3.74:
 
-SDL is gone (ADR 0184): native KMS is the only way Blit presents, composed
-on the GPU by default (0.3.11), or on the CPU.
+- **Programs in windows** (ADR 0228, ADR 0229): gamescope, libei and steamer
+  removed (0.3.75); cursor shapes (0.3.76); X programs through Xwayland with
+  Blit's X window manager -- milestone A (0.3.78), Steam and a game on the
+  owner's machine (0.3.79, milestone B), menus, dialogs and the X11 switch
+  (0.3.81, C), X selections (0.3.84, D); focus requests and activation
+  (0.3.86); displays as programs see them (0.3.88); text input through
+  hibr-ime (0.3.101); drag and drop both ways, Wayland and X, with drag
+  icons (0.3.114-0.3.123); `wp_viewporter` (0.3.115) and crops and scales
+  shown (0.3.124-0.3.125); Kitty placements at a pixel size (0.3.127).
+- **Keyboards** from the system's xkb, listed and switched live, with dead
+  keys and compose (ADR 0231, 0.3.91-0.3.94); Arabizi typing in terminals
+  and programs (ADR 0233, 0.3.100-0.3.109).
+- **The pointer**: shake to find it (ADR 0234, 0.3.102); a busy pointer
+  over a program that stops answering (ADR 0235, 0.3.106-0.3.113).
+- **Updates** install `blit` and `blit-compositor` together (ADR 0232,
+  0.3.97); a release is gated by one runner and recorded in a manifest
+  (0.3.125).
+- **Displays**: the start guard for a GPU or display start that hangs
+  (0.3.124-0.3.125); display mode selection, tried and kept (ADR 0236,
+  0.3.125).
+- **Glyphs**: player glyphs (ADR 0237, 0.3.126) and keys and big discs
+  (0.3.127).
 
 ## Next, in order
 
@@ -31,28 +44,14 @@ on the GPU by default (0.3.11), or on the CPU.
 Measured, not guessed: the same workloads (dragging windows, wallpaper,
 video, the browser, games) on the owner's machine, timed per output.
 
-- Done: the Hibr frame barrier no longer holds every frame, and animation
-  frames start just after a vblank (0.3.13–0.3.15): late flips 14.7% → 6.0%
-  on the game's monitor, 10.5% → 0% on the other. The font-size stall (#146)
-  was the settings fsync, off the loop since 0.2.30; the owner confirms it
-  no longer happens (close the ticket).
-- Done: video through Hibr. A YouTube window cost Hibr's desktop 69%, its
-  hold 23% and Blit 21% of a core as Kitty images through the terminal; by
-  descriptor (ADR 0202, Hibr 0.99.398) hold is 3% and Blit 10%. What remains
-  is Hibr's desktop producing the frames (about 35%), Hibr's to reduce.
-- Done: dragging windows, measured with the owner: 58 fps on one monitor,
-  41–50 fps across both, at most 3% of flips late; the owner finds it smooth.
-  The cost while dragging is Hibr's, not Blit's.
-- Done: the 106 ms loop stall of #95 (measured on the 0.1.535 loop) does not
-  recur on 0.3.15: in 4 h on the owner's machine the worst loop gap was
-  30 ms and the worst frame gap 42 ms, and in a 60 s sample no 500 ms window
-  had a gap over 11.8 ms (close the ticket).
-- High refresh rates, 120/240 Hz (#21). (Pointer latency, #101, was fixed in
-  0.1.565 and accepted by the owner; dragging is measured under #125/#135.)
+- High refresh rates, 120/240 Hz (#21).
 - The 0.2 architecture tickets: retained GPU composition and movement
   acceptance (#125, #122), fair scheduling of input, PTYs, API and rendering
   (#134), per-frame latency tracing (#126), deterministic replay (#127),
   benchmarks against Kitty (#135).
+- Solid window moves through Hibr using rectangle copy (#120): the counters
+  shipped in 0.3.124 (`rectangle_copies`); a live solid drag is still to be
+  measured.
 
 ### 2. Browser image sizing (#111)
 
@@ -62,57 +61,54 @@ already be fixed.
 
 ### 3. Display robustness
 
-- A black band across the primary after Hibr's Restart Desktop (#142).
 - Odd cell heights (17, 19 px) lose the wallpaper (#114): reproduced live on
   0.3.15 with three Hibr views; Hibr deletes the picture after an OK probe.
   Passed to Hibr.
-- Shrinking the font leaves joined Hibr views in their old layout: a second
-  menu bar, another display's window (#147). Blit's grids and PTYs are
-  right; Hibr's to fix. Blit adds a gate for its side and re-runs the sweep.
-- Startup must not block before the API is listening (#109): since 0.3.16
-  a GPU start that hangs is killed after 10 s and the next start runs on the
-  CPU with the API up; close the ticket once the owner agrees.
-- A stable display name so per-display settings survive a restart (#103).
+- Shrinking the font leaves joined Hibr views in their old layout (#147).
+  Blit's gate for its side shipped in 0.3.15; the layout is Hibr's to fix.
+- A display mode tried live on the owner's display (#60): built and gated
+  on the mock in 0.3.125; Hibr's containment fix is in Hibr 0.99.553.
+- Monitor hot-plug on real hardware (#100, #20): see "Waiting for hardware".
 
 ### 4. Text
 
-- Emoji sequences end to end in the terminal, not only in the raster (#110).
+- Emoji sequences end to end in the terminal, not only in the raster
+  (#110). `text_layout: "emoji"` already shapes them, opt-in, since 0.1.578.
 - Arabic typography reviewed on screen (#119).
-- Solid window moves through Hibr using rectangle copy (#120).
-- Super as a modifier through Hibr: Blit already reports it under the kitty
-  keyboard protocol (ADR 0169); Hibr must ask for it (Hibr #415, #326).
+- A refined selectable font with explicit coverage (#107).
 
-### 5. Housekeeping
+### 5. Programs in windows (ADR 0228, ADR 0229)
 
-- The gate runner must stop cleanly on Ctrl+C (#106); one entry point and CI
-  for the gates (#27); a GPU in the gate suite (#79).
-- Intermittent loss of fake input devices in a gate (#124).
-- The QEMU visuals probe expects scanlines its staging no longer turns on
-  (`tools/probes/ppm_assert.c --visuals`); give it an `effects` document.
+- **Phase 2's milestone E:** Steam Big Picture full screen, and a Proton
+  game at the display's refresh (#169).
+- **Viewports from Hibr's side** (#159): Blit draws crops and scales and
+  takes pixel-sized placements (0.3.127); Hibr's sub-window views follow.
+- **A dropped file Firefox takes but doesn't open** (#161).
+- **Phase 3: full screen** scanned out directly (#174).
+- ADR 0229's remaining rows, each its own change: HiDPI output scale (outputs
+  say scale 1; no fractional scale, #170), idle inhibit (#171), portals
+  (#172), touch and tablets (#173).
+- Programs whose only window is override-redirect (some games' full-screen
+  windows) do not show yet (#175).
 
-### 6. Release acceptance (#112)
+### 6. Housekeeping
 
-Security review, a reproducible package, and a rehearsed install, rollback
-and recovery.
+- One entry point exists (`tools/run-gates.sh`, ADR 0216); CI for it is
+  still to come (#27). A GPU in the gate suite (#79): the GLES suites run on
+  Mesa's software GL, a real GPU only through the opt-in
+  `BLIT_GATE_LIVE_DMABUF`.
+- The QEMU fixtures cannot run as documented: Hibr staging, the kitty
+  limits expectation, the visuals probe's scanlines, and no in-repo recipe
+  for the kernel and initramfs (#166).
+- The documentation review of 2026-11-20 filed what the docs promise and
+  the code does not do under the `docs-gap` label (#163-#179).
 
-### 7. Programs in windows (ADR 0228, ADR 0229)
+### 7. Release acceptance (#112)
 
-- **Done: gamescope removed in 0.3.75.** By the owner's choice
-  `blit-gamescope` and everything that served it -- the bridge, the libei
-  input path (`INPUT eis`), their gates and package, ADR 0206's hand-over --
-  went in one change with Hibr's side; steamer, the Steam launcher, is
-  retired with it, and `blit` Breaks `blit-gamescope` and `steamer`.
-  Until phase 2, Steam and other X11 programs do not run in Blit windows.
-- **Phase 0:** the latency baseline, deferred by the owner; measured before
-  phase 2 is judged.
-- **Phase 2: Xwayland.** Rootless Xwayland per session with the compositor
-  as its X window manager; ADR 0229's rows already name the X equivalents
-  (decorations, move and resize, selections), so it adds no wire. Steam Big
-  Picture, then a Proton game, in a window.
-- **Phase 3: full screen** scanned out directly; **phase 4** is now only
-  the retirement of ADR 0206, done with 0.3.75.
-- ADR 0229's later rows, each its own change: cursor shapes, drag and
-  drop, activation, idle inhibit, text input, HiDPI, portals, touch.
+Done: reproducible packages, releases built in the Debian 13 environment
+(0.3.80), and an install-and-update rehearsal with real dpkg
+(`update_pair_gate`, 0.3.97). Still to do: a security review, and a
+rehearsed rollback and recovery.
 
 ## Waiting for hardware
 
@@ -120,7 +116,7 @@ These are built and tested; they need a device to confirm.
 
 | What | Needs | Tracking |
 | --- | --- | --- |
-| Monitor plugged in or out while running | a third monitor | #100, #20 |
+| Monitor plugged in or out while running | unplugging and replugging on the owner's machine (two displays since 0.3.126) | #100, #20 |
 | 120/240 Hz output | a high-refresh monitor | #21 |
 | Touchpad tap, tap-and-drag, typing guard | the HP Chromebook | — |
 | Backlight brightness | a laptop panel | — |
@@ -129,5 +125,6 @@ These are built and tested; they need a device to confirm.
 ## Tickets to check and close
 
 These look done or overtaken; each needs its evidence written down before
-it is closed: font completion (#107, #118), the sixel object leak (#85),
-Hibr's login manager (#83), and the image's application list (#82).
+it is closed: Hibr's login manager (#83, the login manager has shipped since
+0.1, with `BLIT_LOGIN_AUTOSTART`), and the freeze after a display layout
+change (#156, the ENOTSUP retry shipped in 0.3.110).

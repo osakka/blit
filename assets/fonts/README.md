@@ -25,23 +25,30 @@ same applies to an operator's own fonts in `/usr/local/lib/blit/fonts/text`.
 | `text/IBMPlexMono-Regular.ttf` | IBM Plex Mono 1.1.0 | `licenses/IBMPlexMono-OFL.txt` |
 | `text/spleen/spleen-{6x12,8x16,12x24,16x32,32x64}.otf` | Spleen 2.2.0, one font of five masters (ADR 0227) | `licenses/Spleen-LICENSE.txt` |
 
-**Every glyph a text font lacks comes from one stack,** in this directory,
-fitted to the chosen font when drawn:
+**Every outline font draws through one glyph stack,** in this directory,
+fitted to the chosen font when drawn. Arabic letters go to
+`BlitArabicModern.ttf`, one Arabic companion for every font. Every other
+character takes the first of these that has it (the same order as the
+[font reference](../../docs/font-reference.md)):
 1. **Cell geometry,** drawn by the raster: box drawing, block elements,
-   Braille, core Powerline and Blit's bar corners.
-2. **`BlitIcons-Regular.ttf`:** Blit's original colour icons (Wi-Fi,
-   battery, volume, telephones, file-manager icons and the rest), the pen
-   alias and the themed text glyphs. Built by `tools/fonts/build-blit-icons.py`
-   from `icons/catalogue.json`.
-3. **The text font itself.** A glyph that would overhang the cell is
+   Braille, core Powerline, Blit's bar corners, the window-chrome and
+   control glyphs, and the player glyphs.
+2. **`BlitIcons-Regular.ttf`, the colour icons:** Blit's originals (Wi-Fi,
+   battery, volume, telephones, file-manager icons, discs and the rest).
+   Built by `tools/fonts/build-blit-icons.py` from `icons/catalogue.json`.
+3. **`NotoColorEmoji.ttf`,** for emoji presentation.
+4. **`SymbolsNerdFontMono-Regular.ttf`,** for a private-use codepoint,
+   whatever the text font puts there: all 10,386 Nerd icons, Nerd Fonts
+   v3.4.0.
+5. **The text font itself.** A glyph that would overhang the cell is
    shrunk to fit, not dropped.
-4. **`SymbolsNerdFontMono-Regular.ttf`:** all 10,386 Nerd icons, Nerd
-   Fonts v3.4.0. Its private-use icons win over a text font's own.
-5. **Noto Sans Symbols 2, Noto Sans Symbols and Noto Sans Math.**
-6. **`NotoEmojiText.ttf` and `NotoColorEmoji.ttf`.**
-7. **`BlitArabicModern.ttf`:** one Arabic companion for every font.
-8. **`Unifont-Regular.otf` and `UnifontUpper-Regular.otf`:** GNU Unifont 16,
-   so `?` is left only for codepoints no font has.
+6. **`BlitIcons-Regular.ttf`, the monochrome text glyphs:** the themed
+   pen, runic text, the wired indicator.
+7. **`SymbolsNerdFontMono-Regular.ttf`,** for anything else.
+8. **`NotoEmojiText.ttf`,** for text-presentation emoji, where asked for.
+9. **Noto Sans Symbols 2, Noto Sans Symbols and Noto Sans Math.**
+10. **`Unifont-Regular.otf` and `UnifontUpper-Regular.otf`:** GNU Unifont
+    16, so `?` is left only for codepoints no font has.
 
 Two fitting rules apply, both carried over from the retired outline
 generator:
@@ -118,8 +125,8 @@ list. Upstream Spleen is BSD-2-Clause; its licence is
 ## Shared outline and colour rendering policy
 
 Each outline text font (above) is rasterized at native size with grayscale
-antialiasing. `NotoColorEmoji.ttf` 2.057 draws supported colour scalars that
-the stack's earlier faces don't. Font size8–64px means exact cell height;
+antialiasing. `NotoColorEmoji.ttf` 2.057 draws emoji-presentation characters ahead
+of the text font (step 3 above). Font size 8–64 px means exact cell height;
 the font's em size is fitted inside that cell, not stretched after rendering.
 The default font is not changed by installation. Select a font through the
 same API or Control Panel as the others. Outline fonts scale smoothly.
@@ -253,8 +260,9 @@ supplies visual forms. The companion shares the primary Latin baseline.
 and each profile's `arabic_companion_path`; pixel fonts have none.
 
 Canonical source/output hashes and licences: `arabic-fonts.source.json`.
-`tools/fonts/build-arabic-profile.py --profile modern SOURCE OUTPUT`
-uses pinned fontTools 4.60.1, Unicode 14.0.0 decompositions and HarfBuzz 6.0.0.
+`PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-arabic-profile.py --profile modern SOURCE OUTPUT`
+needs a Python whose Unicode data is 14.0.0 (Python 3.11; the script refuses
+another) and uses pinned fontTools 4.60.1, Unicode 14.0.0 decompositions and HarfBuzz 6.0.0.
 It adds only missing presentation aliases that the source shaper resolves to
 one glyph; it does not promise all Arabic forms exist. The face retains the
 source notices. FreeMono is GPLv3-or-later with its font

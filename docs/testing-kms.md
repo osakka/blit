@@ -14,7 +14,8 @@ On a DRM-capable guest VT, run it. A network bind needs a token; without
 
 ```sh
 BLIT_AUTH_TOKEN=change-me BLIT_BIND_ADDRESS=0.0.0.0 \
-  ./build/blit/blit-server 8080
+  BLIT_FONT_ROOT=$PWD/assets/fonts ./build/blit/blit-server 8080
+# BLIT_FONT_ROOT: from a checkout; installed, the fonts are in /usr/lib/blit/fonts
 ```
 
 It must report connected outputs or say why it has none. If KMS cannot be
@@ -306,13 +307,18 @@ Kitty images with different z values and a two-pixel image positioned partly
 outside the pane. `PPM_DISPLAY_47_WIDE_STACK_CLIP_PASS` requires the higher-z
 pixel and the clipped image's visible second pixel at their exact coordinates.
 
+The fixture also accepts `blit.visuals=1`, which creates an overlay and
+checks the overlay and visuals pixels (`PPM_DISPLAY_47_VISUALS_PASS`), and
+`blit.pixel_stream_120=1`, a 120 Hz pixel-stream run.
+
 The fixture accepts `blit.kitty_limits=1` for the resource-lifecycle gate.
 `pty_input_echo.c --kitty-limits` sends one incomplete upload more than the
-store holds (`BLIT_GRAPHICS_MAX_IMAGES` + 1, so 17 since the store grew to 16
-in 0.3.17), then an upload one pixel wider than `BLIT_GRAPHICS_MAX_WIDTH`.
+store holds (`BLIT_GRAPHICS_MAX_IMAGES` + 1, so 4097 since ADR 0226 in
+0.3.65), then an upload one pixel wider than `BLIT_GRAPHICS_MAX_WIDTH`.
 Both sizes come from `src/blit_graphics.h`, so the probe follows the store.
 `KITTY_LIMITS_PASS` requires the session's `graphics_diagnostics` to report
-one eviction and one rejection.
+one eviction and one rejection; since ADR 0226 a picture past the count is
+refused, not evicted, so that expectation is out of date (Gitea #166).
 This mode is diagnostic-only and intentionally does not run the pixel oracle.
 
 The fixture accepts `blit.kitty_query=1` for the PTY acknowledgement gate. A

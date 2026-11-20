@@ -1,6 +1,7 @@
 # ADR 0180: retained GPU workstream and renderer ownership decision
 
-- Status: proposed
+- Status: superseded by ADR 0181
+- Note: ADR 0181 decided the mechanism question this record left open.
 - Date: 2026-10-22
 - Tracking: programme 122, architecture 125, parity 104; implementation 126–135
 

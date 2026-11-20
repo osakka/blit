@@ -1,6 +1,7 @@
 # ADR 0107: The direct-KMS test profile survives package restart
 
 - Status: accepted
+- Note: SDL no longer exists (ADR 0184, 0.2.22); BLIT_DISPLAY_BACKEND=kms is still written by the package.
 - Date: 2026-10-17
 - Scope: packaged service boot configuration and renderer verification
 - Related: [ADR 0004](0004-terminal-state-and-direct-kms.md)

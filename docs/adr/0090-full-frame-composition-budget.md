@@ -1,6 +1,7 @@
 # ADR 0090: full-frame composition has an explicit workload budget
 
 - Status: accepted
+- Note: The OpenGL ES 2 cache policy it names (ADR 0099) was retired in 0.2.22; the workload budget gate remains (tools/tests/frame_rate_gate.rb).
 - Date: 2026-10-16
 - Scope: SDL composition timing, performance evidence, and scene-cache policy
 

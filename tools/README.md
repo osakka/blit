@@ -3,6 +3,19 @@
 The files in this directory are not the Blit runtime and are not required to
 run an installed server. They are reproducible developer tooling:
 
+- `tools/build-tcc.sh` builds every target (server, update helper, Hibr
+  adapter, compositor); `tools/build-flags.sh` finds the system's libraries
+  through `pkg-config` (ADR 0230); `tools/tcc-link.sh` is the one link step
+  (ADR 0238).
+- `tools/run-gates.sh` runs the gate suites ([development
+  workflow](../docs/development-workflow.md)).
+- `tools/build-env/` is the Debian 13 podman environment releases are built
+  in; `tools/release/` builds a release (`build-release.sh`), writes its
+  manifest (`generate-manifest.sh`) and records the gate runs
+  (`record-gates.sh`); `tools/deploy/update-live.sh` updates a running Blit
+  through its API and checks the box after.
+- `tools/fonts/` builds the icon font and the font reference;
+  `tools/build-hibr-font.py` builds Hibr's glyph font.
 - `tools/probes/` contains QEMU init scripts, staging helpers, input emitters,
   and small protocol probes used by the acceptance gates.
 - `tools/tests/` contains repeatable contract and network tests.
@@ -16,9 +29,9 @@ run an installed server. They are reproducible developer tooling:
   capture headers.
 
 The installed runtime is the TCC-built `blit-server` binary, exposed as
-`/usr/bin/blit`. Hibr owns desktop lifecycle and is started with its own
-installed `desktop` command. Blit does not install, require, or invoke a shell
-launcher for Hibr.
+`/usr/bin/blit`. Hibr owns desktop lifecycle. Blit installs and runs only
+small Hibr-script launchers (`/usr/share/blit/hibr`, see
+[`hibr/README.md`](../hibr/README.md)); Hibr's own commands do the rest.
 
 The optional `hibr/console-blit.so` provider is a C module for Hibr programs
 that explicitly load the provider. It is separate from desktop orchestration.
@@ -56,15 +69,16 @@ bit depth.
 the generated font bitmap, including a bold diamond in the last column. It
 requires a free pane and the canonical 8x16 font; it never overwrites the
 desktop. Set `BLIT_AUTH_TOKEN`, optionally `BLIT_LIVE`/`BLIT_EVIDENCE_DIR`.
-Its local dummy-renderer run checks 21 cells / 2688 pixels; physical-host
+Its run on the DRM mock checks 21 cells / 2688 pixels; physical-host
 acceptance must run independently after deployment.
 
 `host_render_agreement.rb` now compares revision-matched blank and solid/half
 block cell colours against scanout pixels. It refuses retained-graphics
 surfaces and excludes unsupported styles, visible terminal cursor and a
 bounded software-pointer neighbourhood. Those exclusions are not acceptance
-claims. Set `BLIT_AUTH_TOKEN`; pass host:port and optional surface/attempts.
-The legacy positional token remains supported. A moving revision or changing
+claims. Run it as `host_render_agreement.rb HOST:PORT [TOKEN] [SURFACE] [ATTEMPTS]`:
+the token is the second argument, and `BLIT_AUTH_TOKEN` is used only when it
+is omitted, so a surface needs the token before it. A moving revision or changing
 pointer state across capture discards the sample; it is not reported as a
 renderer failure. Pointer exclusions are refreshed for every attempt.
 
@@ -85,7 +99,7 @@ It restores focus/pointer and deletes only its temporary shell session. A free
 pane is required; it does not start Hibr or change backend/topology.
 
 ```sh
-export BLIT_LIVE=http://192.168.10.54:8080
+export BLIT_LIVE=http://HOST:8080
 export BLIT_AUTH_TOKEN='<API token>'
 ruby tools/probes/host_damage_union.rb
 BLIT_REQUIRE_REFRESH=1 BLIT_STRESS_FRAMES=6000 \

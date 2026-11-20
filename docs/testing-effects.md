@@ -229,7 +229,8 @@ The lifecycle is revisioned through the normal resource response and is
 covered by the terminal conformance runner.
 
 The QEMU direct KMS capture probe (`tools/probes/qemu_kms_capture_init.sh`,
-see [KMS testing](testing-kms.md)) creates an overlay on `display-47` and
+see [KMS testing](testing-kms.md)), booted with `blit.visuals=1`, creates an
+overlay on `display-47` and
 verifies its blue pixel in the captured PPM. This checks that the API state
 reaches KMS pixels rather than only being accepted by the API.
 

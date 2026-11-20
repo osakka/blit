@@ -1,7 +1,7 @@
 # ADR 0236: display mode selection, tried and kept
 
-- Status: accepted (mock-gated; a live mode change on the owner's display is
-  the owner's to try)
+- Status: accepted
+- Note: Gated on the DRM mock; a live mode change on the owner's display is tracked in Gitea #60.
 - Date: 2026-11-19
 - Scope: `PATCH /v1/displays/{id}` `configuration.mode`, blit_kms output
   rebuild, the settings document's `displays` section (Gitea #60)

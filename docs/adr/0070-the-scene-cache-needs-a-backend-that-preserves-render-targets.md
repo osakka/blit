@@ -1,6 +1,7 @@
 # ADR 0070: the scene cache is used only where render targets are known to persist
 
-- Status: superseded by ADR 0099
+- Status: retired in 0.2.22 (ADR 0184)
+- Note: First superseded by ADR 0099, itself retired with the SDL presentation path in 0.2.22.
 - Date: 2026-10-13
 - Scope: the SDL presentation path — incremental damage, the cached scene
   texture, and what the gate suite can prove about either

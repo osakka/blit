@@ -88,7 +88,7 @@ intermittent redraws, run this from a reachable Bash host:
 # This must be the API bearer token, not the separate package-update token.
 export BLIT_AUTH_TOKEN_FILE=/secure/path/to/api-token
 tools/diagnostics/troubleshoot-experience.sh \
-  http://192.168.10.54:8080 15 \
+  http://HOST:8080 15 \
   diagnostics/troubleshoot-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
@@ -100,8 +100,9 @@ both token forms and records only the authentication mode in metadata.
 While it prints `recording`, reproduce the symptom with the real mouse and
 keyboard. The command writes `verdict.json`, `verdict.txt`, raw 250 ms runtime
 samples, filtered traces, and one cached screenshot per display. Its verdict is
-ordered at the first missing boundary: physical input, routing/render, surface
-production, presentation stall, or presentation cadence. Do not interpret a
+ordered at the first missing boundary: `physical-input-not-observed`,
+`input-routing-or-render-boundary`, `presentation-stalled`,
+`presentation-cadence`, or `no-first-boundary-failure`. Do not interpret a
 zero physical-input verdict as a renderer result; it means the reproduction
 did not cross evdev during that window. Do not use the screenshots to infer
 frame rate.
@@ -113,7 +114,7 @@ machine:
 
 ```sh
 tools/diagnostics/experience-capture.sh \
-  http://192.168.10.54:8080 10 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) yes
+  http://HOST:8080 10 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) yes
 ```
 
 It first records ten seconds of runtime counters, surface summaries, input
@@ -138,9 +139,10 @@ inventory from `GET /v1/terminal-sessions`; captures no longer probe a guessed
 numeric session range. Each
 `screenshots/*.bmp` has a matching `.headers` file retaining the API capture
 frame and surface-revision identity. These files let a screenshot be compared
-with the exact runtime and surface state that produced it. The command writes
-`validation.txt` only after the required JSON and screenshot/header invariants
-pass; a missing or malformed artifact makes the capture fail.
+with the exact runtime and surface state that produced it. The command
+records the check of the required JSON and screenshot/header invariants in
+`validation.txt`; a missing or malformed artifact makes the capture exit
+non-zero.
 
 Interpret the first missing boundary in this order:
 
@@ -163,14 +165,14 @@ the real pointer:
 
 ```sh
 tools/diagnostics/pointer-artifact-capture.sh \
-  http://192.168.10.54:8080 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) no physical
+  http://HOST:8080 diagnostics/experience-$(date -u +%Y%m%dT%H%M%SZ) no physical
 ```
 
 Use `api` mode as the independent control path:
 
 ```sh
 tools/diagnostics/pointer-artifact-capture.sh \
-  http://192.168.10.54:8080 diagnostics/experience-api-$(date -u +%Y%m%dT%H%M%SZ) yes api
+  http://HOST:8080 diagnostics/experience-api-$(date -u +%Y%m%dT%H%M%SZ) yes api
 ```
 
 The capture separates the failure classes: `runtime-physical.json` reports
@@ -235,7 +237,7 @@ bottom pane and one `--join` in the top pane—use the read-only split capture:
 
 ```sh
 tools/diagnostics/hibr-split-capture.sh \
-  http://192.168.10.54:8080 10 \
+  http://HOST:8080 10 \
   diagnostics/hibr-split-$(date -u +%Y%m%dT%H%M%SZ)
 ```
 
@@ -263,8 +265,9 @@ known surfaces; the capture remains bounded and does not download their full
 cell grids.
 The capture harness requests eight newest trace events by default; set
 `BLIT_TRACE_LIMIT=1..128` to choose another bounded window.
-During the timed interval it polls only runtime counters and the compact
-surface summary. The filtered trace views are taken at the start and end so
+During the timed interval it polls runtime counters and the compact surface
+summary and, unless the fourth argument is `no`, takes one screenshot per
+display per second. The filtered trace views are taken at the start and end so
 the capture itself does not repeatedly serialize diagnostic history on the
 single-threaded gateway.
 
@@ -276,22 +279,22 @@ This never creates, focuses, resizes, or deletes a session.
 Run it from a machine that can reach Blit:
 
 ```sh
-tools/diagnostics/capture-live.sh http://192.168.10.54:8080 20
+tools/diagnostics/capture-live.sh http://HOST:8080 20
 ```
 
 For a timing-only run that does not issue the large framebuffer screenshot
 request, pass `no` as the fourth argument:
 
 ```sh
-tools/diagnostics/capture-live.sh http://192.168.10.54:8080 20 diagnostics/live-timing no
+tools/diagnostics/capture-live.sh http://HOST:8080 20 diagnostics/live-timing no
 ```
 
 Use the timing-only form when measuring frame cadence, loop gaps, or input
 latency. Use the default screenshot form when visual evidence is required;
 the screenshot endpoint is intentionally kept separate because its transfer
-can block a single-threaded server for hundreds of milliseconds. Diagnostic
-captures send `?cached=1`, which is still accepted and has no effect: every
-capture reads a frame that was presented (see the last section).
+can block a single-threaded server for hundreds of milliseconds. `?cached=1` is still
+accepted and has no effect: every capture reads a frame that was presented
+(see the last section).
 
 The output directory contains:
 
@@ -308,10 +311,9 @@ The output directory contains:
   graphics objects, including whether an image is being replaced, hidden, or
   repeatedly recreated;
 - `screenshots/*.bmp` and `screenshot-sha256.txt`: authoritative lossless
-  framebuffer evidence. When `ffmpeg` is installed, matching
-  `screenshots/*.png` and `screenshot-png-sha256.txt` are also emitted for
-  direct inspection. Each BMP has a `.headers` companion with its capture
-  frame and surface-revision identity;
+  framebuffer evidence (PNG copies come from `troubleshoot-experience.sh`
+  and `hibr-split-capture.sh`, not from this capture). Each BMP has a
+  `.headers` companion with its capture frame and surface-revision identity;
 - the start/end hardware and topology snapshots.
 
 Interpretation is causal: a physical click must appear as `pointer_button`,
@@ -319,8 +321,10 @@ the associated Hibr surface activity must follow a `commit`, and the renderer
 must report the resulting presentation. Missing events or a hash change
 without a corresponding commit are distinct, actionable failures.
 
-The general trace is intentionally bounded, and a busy Hibr surface can fill
-it with surface updates. The harness therefore also requests filtered views:
+The trace is three bounded rings: `surface_update` events, `graphics_payload`
+events, and every other kind (the critical ring), so a busy Hibr surface
+cannot evict a click. An unfiltered read returns the `surface_update` ring
+only. The harness therefore also requests filtered views:
 
 ```text
 /v1/diagnostics/trace?kind=pointer_button
@@ -442,7 +446,8 @@ than oversights.
 
 The device sections are `input_devices`, `audio_devices` and `displays`;
 the document also holds `font`, `server`, `login`, `display_layouts`,
-`auxiliary_displays` and pane `effects`
+`auxiliary_displays`, pane `effects`, `hud` (the performance panel) and
+`keyboards` (the keyboard list, ADR 0231)
 ([blit(8)](../man/blit.8) names the saved setting behind each environment
 variable). A display is keyed by its **connector name** (`state.connector`,
 `DP-1` on the live host), not by `display-<n>`, for the same stability
@@ -457,7 +462,8 @@ What is in each section is the setting Blit owns and nothing else:
 
 ```text
 displays   an attached display's pixel zoom, {"zoom": 150}, when it is not
-           100 (ADR 0204), and nothing else: rotation went with SDL (ADR
+           100 (ADR 0204), and its kept mode, {"mode": "1280x720@60"}
+           (ADR 0236), and nothing else: rotation went with SDL (ADR
            0184), and an attached display's old entry is replaced by that, or
            dropped at 100, on the next save. An entry for a display not
            attached now is kept for when it returns. Power is not persisted -- the
@@ -594,11 +600,11 @@ For deterministic pointer diagnostics, inject events through the same Blit
 path used by evdev:
 
 ```sh
-curl -X POST http://192.168.10.54:8080/v1/input/inject \
-  -H 'Content-Type: application/json' \
+curl -X POST http://HOST:8080/v1/input/inject \
+  -H "Authorization: Bearer $BLIT_AUTH_TOKEN" -H 'Content-Type: application/json' \
   -d '{"kind":"pointer_motion","x":960,"y":1080}'
-curl -X POST http://192.168.10.54:8080/v1/input/inject \
-  -H 'Content-Type: application/json' \
+curl -X POST http://HOST:8080/v1/input/inject \
+  -H "Authorization: Bearer $BLIT_AUTH_TOKEN" -H 'Content-Type: application/json' \
   -d '{"kind":"pointer_button","button":0,"pressed":true}'
 ```
 
@@ -611,7 +617,7 @@ button edges, dispatch accounting, pointer position, or a render path event is
 missing:
 
 ```sh
-tools/diagnostics/verify-live-input.sh http://192.168.10.54:8080
+tools/diagnostics/verify-live-input.sh http://HOST:8080
 ```
 
 The deterministic pane-target regression is separate from physical acceptance:
@@ -632,7 +638,7 @@ observed:
 
 ```sh
 tools/diagnostics/verify-live-physical.sh \
-  http://192.168.10.54:8080 10 diagnostics/physical-test
+  http://HOST:8080 10 diagnostics/physical-test
 ```
 
 Exit status `2` means the capture was valid but no physical motion occurred;
@@ -665,7 +671,7 @@ reachable client:
 
 ```sh
 tools/diagnostics/pointer-artifact-capture.sh \
-  http://192.168.10.54:8080 diagnostics/pointer-live no
+  http://HOST:8080 diagnostics/pointer-live no api
 ```
 
 The transaction records the deployed version and topology, the active session,
@@ -767,7 +773,7 @@ This boundary has been observed on the live host: Blit reported a healthy
 rendered cleanly, while the unchanged Hibr capture presented coherently with
 no missed deadlines but filled only the upper desktop region, leaving the
 lower framebuffer black. The Hibr-side lifecycle defect is tracked in
-[Hibr issue #145](https://git.home.arpa/itdlabs/hibr/issues/145); Blit
+Hibr issue #145 (the internal tracker); Blit
 preserves the evidence and must not paper over the missing Hibr rows by
 inventing terminal cells or changing the output geometry.
 

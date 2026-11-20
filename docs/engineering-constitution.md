@@ -31,7 +31,7 @@ delegate to the same core behavior.
 
 Examples:
 
-- one protocol model, with generated bindings for clients;
+- one protocol model, the OpenAPI document, checked by a gate (`api_schema_gate`);
 - one terminal-state engine, not separate state machines per transport;
 - one effect definition and evaluation contract, not hand-maintained copies
   in multiple renderers;

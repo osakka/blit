@@ -58,7 +58,9 @@ maintainer meets most:
   used only by the optional adapter (below).
 
 Kitty placement follows the Kitty model: `x y w h` crop, `X Y` offset in
-the cell, up to 8 placements per image with `p`, and `a=d` with the
+the cell, numbered placements with `p` (bounded per session by picture
+memory, not by a count per image,
+[ADR 0226](adr/0226-pictures-bounded-by-memory-not-count.md)), and `a=d` with the
 `a i c p q x y z` targets
 ([ADR 0060](adr/0060-kitty-placements-source-rectangles-and-delete-targets.md)).
 Keys Blit does not implement are refused and reported in
@@ -182,13 +184,15 @@ display disappears.
 Hibr's pictures -- video, browser pages, games, the wallpaper -- reach Blit
 by one of two paths, and Hibr picks between them on its own:
 
-- **On this machine** (Hibr 0.99.398 or later, Blit 0.3.19 or later): Hibr's
+- **On this machine** (first shipped in Blit 0.3.19 with Hibr 0.99.398;
+  today's frame channel is version 5, which needs Hibr 0.99.482 or later,
+  the version the package's `Breaks:` names): Hibr's
   console writes each frame to a sealed memfd and passes it over
   `BLIT_FRAME_SOCKET`, through hold where the desktop is held. Placement,
   layering and deletion stay Kitty escapes on the terminal, under the same
   image id ([ADR 0202](adr/0202-local-frames-by-descriptor.md)). The login
-  screen passes the two frame variables, and only those, into the session
-  it starts. The wallpaper stays a Kitty image, since it is placed rarely.
+  screen passes `BLIT_VERSION` and the two frame variables into the session
+  it starts, and no other Blit variable (none of its tokens). The wallpaper stays a Kitty image, since it is placed rarely.
 - **From anywhere else** -- Hibr reached over ssh, run on another machine,
   or on macOS: the variables are absent or the socket unreachable, so Hibr
   sends Kitty images through the terminal (one image id per picture,
@@ -201,6 +205,13 @@ Nothing needs configuring. To see which path is in use, read a session's
 arrive by descriptor and stays still otherwise. With a video playing on the
 owner's machine, the descriptor path cut Hibr's hold from 23% to 3% of a
 core and Blit from 21% to 10% (the ADR's "Result").
+
+Programs' windows use the same socket. Hibr starts `blit-compositor` with
+`BLIT_FRAME_SOCKET` and `BLIT_FRAME_TOKEN`; the compositor hands each
+program's frames over it and speaks the `WINDOW`, `CLIP` and `KEYBOARD`
+lines with the desktop through Blit
+([programs in windows](programs-in-windows.md), and the API reference's
+[Program windows](api.md#program-windows-adr-0228)).
 
 ## Pointer lock
 

@@ -1,7 +1,7 @@
 # ADR 0231: Keyboards from xkb: one list, one current keyboard
 
-- Status: accepted (the owner's OK, 2026-11-12); implementing in three
-  releases (below)
+- Status: accepted
+- Note: Built in three releases: 0.3.91, 0.3.93 and 0.3.94.
 - Date: 2026-11-12
 - Scope: what a key types, everywhere Blit delivers it (terminals through
   the kitty and legacy encoders, Wayland programs through blit-compositor's

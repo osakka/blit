@@ -1,6 +1,7 @@
 # ADR 0210: Window chrome glyph sets (Chalk and Slate) are cell geometry, and SGR 51 frames button labels and titles
 
-- Status: accepted; Slate's colours and the shadow revised by ADR 0211
+- Status: accepted
+- Note: Slate's colours and the shadow revised by ADR 0211.
 - Date: 2026-11-03
 - Scope: `src/blit_window_glyphs.h` (new), `blit_raster.c`, both
   compositors (`blit_kms.c`, `blit_kms_gles.c`), the SGR parser, DECRQSS,

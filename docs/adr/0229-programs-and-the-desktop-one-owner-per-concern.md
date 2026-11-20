@@ -1,7 +1,7 @@
 # ADR 0229: Programs and the desktop -- one owner per concern
 
-- Status: proposed (the owner asked for it, 2026-11-10; the 0.3.74 rows
-  are built and gated, with Hibr 0.99.482 to ship them)
+- Status: accepted
+- Note: The 0.3.74 rows shipped with Hibr 0.99.482; later rows (drag and drop, input methods, viewports) shipped through 0.3.125.
 - Date: 2026-11-10
 - Scope: everything a program in a Hibr window (Wayland now, X through
   Xwayland in ADR 0228's phase 2) shares with the desktop: what each side

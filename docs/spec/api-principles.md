@@ -11,7 +11,8 @@ To change the public contract:
 
 1. Define or change resources, commands, events, and errors in the schema.
 2. Review compatibility, examples, and behavior in documentation.
-3. Generate protocol types, validators, and reference material.
+3. Validate the schema (`api_schema_gate`) and update the API guide
+   (`docs/api.md`) in the same change.
 4. Implement server behavior and conformance tests.
 5. Version the schema and record a decision for breaking changes.
 
@@ -58,8 +59,11 @@ The initial schema should eventually cover:
 The schema defines messages and semantics, not sockets, ports, framing, or
 serialization libraries. A new transport is an implementation decision until
 its security and operational requirements are documented. The one local
-transport so far, picture frames passed by descriptor over a Unix socket, is
-documented in ADR 0202.
+transport so far is the frame channel, a Unix socket: pictures passed by
+descriptor (memfd, ADR 0202; dmabuf, ADR 0223), each producer's input
+route, and the `WINDOW`, `CLIP` and `KEYBOARD` lines of programs in windows
+(ADR 0228, ADR 0229), in one version 5 grammar. The API guide's frame
+channel and "Program windows" sections document it.
 
 ## Error model
 

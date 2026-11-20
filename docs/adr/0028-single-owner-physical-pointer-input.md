@@ -1,6 +1,7 @@
 # ADR-0028: Use one owner for physical pointer input
 
 - Status: accepted
+- Note: The SDL mouse fallback was removed in 0.2.22 (ADR 0184).
 
 ## Decision
 

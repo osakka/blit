@@ -42,28 +42,32 @@ is insufficient.
 
 ## Non-goals
 
-- A full X11 or Wayland compatibility layer.
-- A general-purpose desktop window manager or compositor.
-- Arbitrary pixel-oriented application windows with unrestricted stacking,
-  focus, and lifecycle semantics.
+- Window semantics in the server. `blit-server` stays text-first and owns
+  no windows: programs in windows go through the separate `blit-compositor`
+  (a Wayland compositor and the X window manager of its Xwayland, ADR 0228),
+  and the desktop places, stacks and focuses their windows (ADR 0229).
 - A promise that blit provides a complete remote desktop protocol.
 - Unbounded graphic overlays that displace the text model as canonical state.
 - Unbounded visual effects that can make frame timing or output behavior
   nondeterministic.
 - A claim that Kitty or sixel alone is a high-rate emulator frame transport;
-  graphical emulation requires the bounded API-owned graphic canvas path.
+  high-rate pictures arrive by descriptor on the frame channel (ADR 0202,
+  ADR 0223) or as a program's window (ADR 0228).
 
 ## Vocabulary
+
+Design vocabulary; where a term is an API resource today, it says which.
 
 - **Server**: the long-lived blit process and its public API.
 - **Terminal session**: a managed PTY-backed process/session with input,
   output, lifecycle, identity, and policy state.
 - **Surface**: a logical text plane with a grid, style state, and content.
 - **Canvas**: the logical coordinate space containing one or more surfaces and
-  outputs.
+  outputs (in the API: displays and their panes, `/v1/topology`).
 - **Output**: a physical display target, including its mode and placement.
 - **Overlay canvas**: a bounded optional graphic plane composed with text
-  surfaces under an explicit lifecycle and capability policy.
+  surfaces under an explicit lifecycle and capability policy (in the API:
+  `/v1/overlays`).
 - **Input route**: the policy binding an input device, seat, or event source
   to a terminal session, surface, overlay, or API stream.
 - **Effect**: a named, parameterized transformation applied during rendering.

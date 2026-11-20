@@ -1,14 +1,13 @@
 # Nerd icon notices
 
-Blit Modern Nerd and Blit Retro Nerd are renamed derivatives of Nerd Fonts
-v3.4.0 Hack Mono and 3270 Mono. Blit's changes fit complete icon outlines to
-the terminal cap height/advance. From588, U+270E uses Blit's original themed
-pen silhouette; earlier derivatives used the Font Awesome pencil alias.
-They are not original typeface designs or endorsed upstream products.
+Blit ships Nerd Fonts v3.4.0 Symbols Only Mono
+(`SymbolsNerdFontMono-Regular.ttf`) unmodified; the glyph stack fits its
+icons to the text font when it draws them (ADR 0195). The earlier renamed
+derivatives, Blit Modern Nerd and Blit Retro Nerd, were retired in 0.2.36.
 
 The parent `NerdFonts-LICENSE.txt` and base-font licences remain applicable.
 The following upstream notices accompany the complete icon repertoire. The
-canonical SHA256 inventory is `../../modern-fonts.source.json`; the upstream
+canonical SHA256 inventory is [`../../fonts.source.json`](../../fonts.source.json) (`stack.nerd`); the upstream
 catalogue is the pinned Nerd Fonts v3.4.0 `glyphnames.json`.
 
 | Family / attribution | Notice / upstream source |

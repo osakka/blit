@@ -1,6 +1,7 @@
 # ADR 0191: Braille is cell geometry; missing symbol blocks come from reviewed Noto sources
 
 - Status: accepted
+- Note: Its baked-profile parts were superseded by ADR 0195 (0.2.36).
 - Date: 2026-10-26
 - Scope: raster cell geometry, the outline font generator and its manifest,
   both outline profiles (modern, retro)

@@ -106,8 +106,8 @@ disables the performance assertions and must never be reported as a passing
 performance gate (ADR 0178).
 
 Graphics damage changes require
-`ruby tools/tests/graphics_placement_damage_gate.rb`, on both
-`BLIT_GATE_BACKEND=native` and `gles`. It compares production incremental
+`ruby tools/tests/graphics_placement_damage_gate.rb`, a standalone C probe
+(the backend does not apply; `renderer-gles` leaves it out). It compares production incremental
 composition against full-redraw pixels; counts or screenshots alone are
 insufficient. Preserve held/deferred snapshot acknowledgement and
 unknown-caller fallback (ADR 0177).
@@ -119,24 +119,44 @@ backend-change rejection. Report cache work separately from live frame
 latency. Keep source/font identities and workload conditions with the result;
 never promote an idle API sample into a Kitty comparison.
 
-Use the narrowest gate that proves the change, then run the broader gate before
-handoff:
+Use the narrowest suite that proves the change, then `all` before handoff.
+What each suite holds (`tools/run-gates.sh` is the authority; each suite is
+a function there, `suite_<name>`, listing its gates):
 
-- schema/API changes: schema validation, API conformance, and version identity;
-- documentation changes: `ruby tools/tests/documentation_gate.rb` (in the
-  schema suite) for environment variables in `blit(8)`, manual-page
-  formatting and links;
-- terminal changes: TCC build and `tools/tests/terminal_conformance.rb`;
-- font/Unicode changes: glyph coverage, UTF-8 snapshots, and a Hibr capture;
-- renderer/input changes: the renderer suite on `BLIT_GATE_BACKEND=native` and
-  `gles`, plus KMS/VKMS pixel and input;
-- multi-display/Hibr changes: two-output topology, pane matrix, primary plus
-  `--join`, routing, and cleanup;
-- packaging changes: allowlist, embedded version identity, install/service
-  checks, and checksum;
-- presentation startup/recovery changes: the lifecycle suite;
-- performance/timing changes: diagnostics, measured intervals, CPU/RSS, and a
-  bounded workload rather than a subjective “feels faster” claim.
+- **schema** -- the API schema and its conformance, the observation and
+  stream replay contracts, authentication of every route and the
+  diagnostics, the runner's own and the gate environment's tests, the
+  package's entrypoint policy, and `documentation_gate.rb` (environment
+  variables in `blit(8)`, manual-page formatting, relative links);
+- **terminal** -- `terminal_conformance.rb` (with the running server's
+  version, XTVERSION), rectangle copy, the Kitty keyboard protocol, session
+  lifecycle, write and resize, layout reassertion, ingestion and the child
+  environment;
+- **font** -- glyph coverage, the glyph stack, icons and their catalogue,
+  Arabic, emoji, Nerd and Powerline, Spleen, hinting, the font reference and
+  the cache workload;
+- **renderer** -- native KMS pixels on the DRM mock: damage, the pointer,
+  pictures, effects, displays and their settings, keyboards and pointers,
+  audio, the login policy, Arabizi, the session limit, the performance panel;
+- **renderer-gles** -- the renderer gates the compositor can change, on
+  GLES (Mesa's software GL);
+- **hibr** -- singleton ownership and fail-closed resume, joins and
+  auxiliary displays, the console adapter, and programs in windows: the
+  compositor and Xwayland gates, the frame channel (descriptors, dmabuf,
+  input routes, the keymap) and picture memory;
+- **lifecycle** -- restart, shutdown and its key, supervised updates and
+  restart after an update, the login manager and identity, the service
+  boundary, fault traces, and the deploy script's smoke reading;
+- **packaging** -- the `.deb` artifact (allowlist, embedded version,
+  install and service checks, checksums, ELF hardening) and the split
+  update upload; `update_pair_gate.sh` runs in the release build instead
+  (`tools/release/build-release.sh`), as root in the build environment;
+- **timing** -- measured cadence, frame rate, the bounded PTY soak, the
+  baseline sampler, and, with `BLIT_GATE_LIVE`, the live-host gates.
+
+A TCC build is not a gate: the runner never builds, and stops if the binary
+is missing. A performance claim needs diagnostics, measured intervals,
+CPU/RSS and a bounded workload, not a subjective "feels faster".
 
 For font/catalogue asset changes, regenerate `docs/fonts` with
 `tools/fonts/build-reference.py` in the existing pinned fontTools 4.60.1
@@ -147,9 +167,8 @@ derived from canonical assets; never repair a glyph mapping by editing the
 generated reference. A documentation-only change needs these focused checks,
 asset identity and link checks, not a live renderer restart.
 
-`tools/run-gates.sh` is that list, executable. Its suite names match the
-categories above, so the narrowest run is one suite and the pre-handoff run is
-`all`:
+`tools/run-gates.sh` is that list, executable: the narrowest run is one suite
+and the pre-handoff run is `all`:
 
 ```sh
 tools/run-gates.sh terminal          # the narrowest gate for a terminal change
@@ -169,6 +188,8 @@ The runner is measured, bounded and parallel (ADR 0216):
 | `BLIT_GATE_JOBS` | Gates run at once; default `min(4, nproc/2)`. `1` is the plain serial run. |
 | `BLIT_GATE_TIMEOUT` | Seconds one gate may take; default 300, with more for the few gates that wait on purpose. A gate over it is killed with its server and reported `FAIL ... TIMEOUT`; it is never retried. |
 | `BLIT_GATE_PORT_OFFSET` | Added to every fixed gate port. Parallel workers add a stride of 1000 each. Give each checkout or agent running gates at the same time its own offset: 0, 4000, 8000 (the runner refuses offsets that reach the ephemeral port range). |
+| `BLIT_HIBR_ROOT` | The pinned Hibr checkout the adapter gates build against; default `/tmp/hibr-<packaging/HIBR_VERSION>` when that exists, else those gates skip. |
+| `BLIT_GATE_LIVE_DMABUF` | A live host whose GPU imports dmabufs (with `BLIT_AUTH_TOKEN`); enables `frame_dmabuf_live_gate.sh` in the hibr suite (ADR 0223). |
 | `BLIT_GATE_SERVER_ENV` | `NAME=value` words given to every gate server, e.g. `BLIT_GATE_SERVER_ENV='BLIT_FOO=1'`. The one way to give gate servers a variable on purpose; a gate's own settings still win. |
 
 Gate servers are sealed from the host they run on. Every gate starts
@@ -185,12 +206,12 @@ it with a polluted environment. A new gate that starts a server uses the
 helper; it never spawns one with the inherited environment.
 
 Gates that depend on a quiet machine (cadence, frame rate, "saved within N
-ms", the soak, update/restart timing) are marked `run_serial_gate`: they run
-alone, after every parallel gate, in the order they are listed, whatever
-`BLIT_GATE_JOBS` is. A gate that fails only under parallel load is a bug in the
+ms", the soak, update/restart timing) are marked `run_serial_gate`: with
+`BLIT_GATE_JOBS` above 1 they run alone, after every parallel gate, in the
+order they are listed; with 1 every gate runs in suite order anyway. A gate that fails only under parallel load is a bug in the
 gate or the server, or belongs in that lane; it is not retried.
 
-Every report line ends with the gate's wall time. The run ends with the 20
+Every PASS and FAIL line ends with the gate's wall time (a SKIP line has none). The run ends with the 20
 slowest gates and the time per suite, then the unchanged `RUN_GATES_PASS` or
 `RUN_GATES_FAIL` line. "Time per suite" and "gate time" are sums over gates, so
 with several jobs they exceed the `wall` time. Look at the slowest gates first:
@@ -227,7 +248,9 @@ A gate that needs QEMU, physical hardware, a package, or a live host is
 skipped with that reason rather than counted as a pass or a failure.
 
 QEMU is the repeatable multi-display oracle, and the runner never implies it:
-run `tools/tests/qemu_hibr_lifecycle_gate.sh` explicitly. A physical host is
+run `BLIT_QEMU_KERNEL=<a VKMS bzImage> tools/tests/qemu_hibr_lifecycle_gate.sh
+INITRAMFS` explicitly (without them it exits 77; neither the kernel nor the
+initramfs is built in this repository, see [KMS testing](testing-kms.md)). A physical host is
 evidence for that host and its current hardware only; it cannot prove untested
 monitor counts, refresh modes, GPUs, or input devices.
 
@@ -242,7 +265,8 @@ blind spots, so that a green run is read for what it is:
 against a software renderer in a container without a GPU, while the physical
 path used GLES. An optimisation that assumed render-target persistence
 produced a visible screensaver trail that survived two "fixed" claims; five
-reproductions passed because all five ran in software. See ADRs 0070/0099 and
+reproductions passed because all five ran in software. See ADRs
+[0070](adr/0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md)/0099 and
 issue 79. Run compositor changes on both `native` and `gles`; physical GPU
 timing still requires host acceptance.
 
@@ -302,38 +326,50 @@ means source and focused tests pass; “validated” means the matching runtime
 artifact passed the relevant end-to-end gate. Screenshots supplement API/state
 assertions; neither substitutes for the other.
 
-A release runs these steps in order. Building the package requires the
-exact pinned Hibr checkout as an explicit input; omitting it fails closed:
+A release runs these steps in order. The gates run on this host, on a quiet
+machine; the packages are built in the Debian 13 build environment
+(`tools/build-env/`), which needs the exact pinned Hibr checkout inside this
+checkout; omitting it fails closed:
 
 ```sh
-hibr=/path/to/hibr-$(sed -n '1p' packaging/HIBR_VERSION)
-deb=/tmp/blit-package/blit_X.Y.Z-1_amd64.deb
+hibr=build/hibr-$(sed -n '1p' packaging/HIBR_VERSION)   # inside the checkout
+out=build/release
 git commit packaging/VERSION   # the version first: the gates test the commit that ships
 tools/build-tcc.sh
-tools/build-tcc.sh build/blit/blit-helper helper
+tools/build-tcc.sh build/blit/blit-update-helper helper
+tools/build-tcc.sh build/blit/blit-compositor compositor
 BLIT_HIBR_ROOT=$hibr tools/run-gates.sh all >build/gates-all.txt
 tools/run-gates.sh renderer >build/gates-renderer.txt
 tools/run-gates.sh renderer-gles >build/gates-renderer-gles.txt
-BLIT_HIBR_ROOT=$hibr packaging/build-deb.sh /tmp/blit-package
-BLIT_SOURCE_COMMIT=<build-commit> BLIT_DOCUMENTATION_COMMIT=<build-commit> \
-  tools/release/generate-manifest.sh "$deb" releases/X.Y.Z.yaml
+BLIT_HIBR_ROOT=$hibr tools/release/build-release.sh $out
 tools/release/record-gates.sh releases/X.Y.Z.yaml build/gates-*.txt
-tools/tests/package_artifact_gate.sh "$deb"
-tools/deploy/update-live.sh HOST "$deb"
+tools/release/generate-manifest.sh --check $out/blit_X.Y.Z-1_amd64.deb releases/X.Y.Z.yaml
+tools/deploy/update-live.sh HOST $out/blit_X.Y.Z-1_amd64.deb
 ```
 
-`packaging/build-deb.sh` writes two packages to the output directory:
-`blit_X.Y.Z-1_amd64.deb` and `blit-font-sources_20120503-1_all.deb` (the
+`build-release.sh` builds the binaries, runs `compositor_gate` and
+`xwayland_gate`, writes the packages, generates `releases/X.Y.Z.yaml`, runs
+the packaging suite on the package and `update_pair_gate.sh` (a real
+`dpkg --install` of the pair, as root in the environment), and stops at the
+first failure. The packages are then published to Hibr's apt repository
+with the hibr-apt repository's `publish.sh`, given each `.deb`.
+
+`packaging/build-deb.sh` writes three packages to the output directory:
+`blit_X.Y.Z-1_amd64.deb`, `blit-compositor_X.Y.Z-1_amd64.deb`
+([ADR 0228](adr/0228-blit-is-the-compositor-for-programs.md),
+[ADR 0232](adr/0232-an-update-installs-blit-and-its-compositor-together.md))
+and `blit-font-sources_20120503-1_all.deb` (the
 FreeMono source archive behind the Arabic font, versioned by upstream;
 [ADR 0217](adr/0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)).
 The manifest generator, the artifact gate and `update-live.sh` take the main
-package; the gate also checks the sources package when it sits beside it.
-The documentation is installed once, under `/usr/share/doc/blit/docs`. The
-sources package only needs publishing (`publish.sh` given each `.deb`) when
+package, with `blit-compositor` of the same version beside it; both are
+recorded and checked. The gate also checks the sources package when it sits
+beside it. The documentation is installed once, under
+`/usr/share/doc/blit/docs`. The sources package only needs publishing when
 its content changes, not every release.
 
 `releases/<version>.yaml` is generated from the package, not written by
-hand, apart from the `status:` and `notes:` lines the operator adds. The
+hand, apart from a `notes:` line the operator may add. The
 gate results are recorded from the runs' outputs (Gitea #27):
 `record-gates.sh` writes `gates_<suite>: pass=N skip=N fail=0
 source=<commit>` for each, and refuses a failed run or one whose
@@ -341,8 +377,9 @@ source=<commit>` for each, and refuses a failed run or one whose
 `source_commit`, clean -- so the version is committed before the gates
 run. `--check` refuses a recorded result that is not a pass of that
 source. `update-live.sh` ends with a smoke check: the same displays up, a
-surface in as many panes as before (the desktop came back), frames
-advancing. The two commit
+surface in as many panes as before (the desktop came back) or, when the
+restart signed the desktop out, the login screen up waiting for the
+password, and frames advancing. The two commit
 variables are needed when the manifest is recorded in a later commit than
 the build. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
 existing manifest with a package. The artifact gate and `update-live.sh`

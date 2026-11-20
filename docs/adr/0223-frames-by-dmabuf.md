@@ -1,6 +1,7 @@
 # ADR 0223: frames by dmabuf, imported by the GPU compositor without a copy
 
-- Status: proposed
+- Status: accepted
+- Note: Shipped in 0.3.60; blit-compositor uses it (zwp_linux_dmabuf_v1); amended in 0.3.110.
 - Date: 2026-11-07
 - Scope: the local frame channel (ADR 0202) and the GPU compositor
   (ADR 0181): letting a program hand Blit a picture that is already in GPU

@@ -1,7 +1,7 @@
 # ADR 0233: Arabizi, a keyboard of our own
 
-- Status: proposed (the owner's "go", 2026-11-13; this draft for the owner's
-  and Hibr's review before any build)
+- Status: accepted; in use since 0.3.105
+- Note: Built in 0.3.100-0.3.101; the owner types with it (verification ledger, 0.3.105).
 - Date: 2026-11-13
 - Scope: a new keyboard kind in Blit's keyboard list (ADR 0231): an input
   method that turns Latin Arabizi typing into Arabic, with or without

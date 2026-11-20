@@ -33,6 +33,7 @@ itself.
 | phone-ring | U+10001E | Filled handset with gold ring waves: a call |
 | phone-classic-off … phone-classic-ring | U+10001F–U+100022 | A classic rotary desk phone in the same four states: outline, dashed, filled, filled with ring waves |
 | — | U+100023–U+100032 | **Retired** (0.3.5): the large two-column phones, which the owner dropped. Listed under `retired` in the catalogue; never reused, so an old client can't show something else there |
+
 **Since 0.3.8 only folders have colourways** (ADR 0201). Every other file
 kind has one look in its own natural colours, in its classic slot. **Since
 0.3.9** the blue, green and amber slots of those kinds are retired (listed
@@ -40,7 +41,9 @@ under `retired` in the catalogue, never reused); folders (folder, share,
 folder-*) keep all four. The ranges below give each kind's eight
 codepoints, of which a non-folder kind now uses only the classic two.
 
-| file-<kind>-<colour>-left, -right | U+100033–U+100092 | File-manager icons, two columns wide, in a System 7 spirit: folder, document, text, pdf, image, audio, video, archive, code, application, disk, trash, in classic, blue, green and amber; drawn by `tools/fonts/draw-file-icons.py` (ADR 0201) |
+| ID | Codepoint | Appearance |
+| --- | --- | --- |
+| file-<kind>-<colour>-left, -right | U+100033–U+100092 | File-manager icons, two columns wide, in a classic desktop spirit: folder, document, text, pdf, image, audio, video, archive, code, application, disk, trash, in classic, blue, green and amber; drawn by `tools/fonts/draw-file-icons.py` (ADR 0201) |
 | file-home-<colour>-left, -right | U+100093–U+10009A | Home, the first kind added after the twelve: a house with a roof in the primary colour; classic, blue, green, amber |
 | file-<kind>-<colour>-left, -right | U+10009B–U+1000F2 | Eleven more kinds, eight codepoints each in this order: boxer (a Boxer game without its cover: two boxing gloves), markdown, spreadsheet, diagram, presentation, font, web, terminal, settings, bundle (a Hibr bundle), link |
 | file-image-jpg/png/gif-left, -right | U+10022B–U+100230 | The picture with its format on a label (JPG orange, PNG blue, GIF violet); one look each (0.3.8) |
@@ -109,7 +112,7 @@ and the title bar's end cells, `chalk-title-end-left`, `-right` and
 `slate-light-title-end-left`, `-right` (U+1002B3–1002B6), then the same
 four without stripes for an inactive bar, `chalk-title-end-plain-left`,
 `-right` and `slate-light-title-end-plain-left`, `-right` (U+1002B7–1002BA,
-0.3.45). A window has one
+0.3.44). A window has one
 frame, and its line sits on the outermost edge of each frame cell: the left
 cell's left edge, the right cell's right edge, the bottom row's bottom edge
 (the bottom corners have two lines). Nothing else in the cell is drawn, so
@@ -148,7 +151,17 @@ icons, U+1002DA–U+1002EB the two-column Wi-Fi and volume icons,
 U+1002EC–U+1002F3 the two-column classic phones, U+1002F4–U+100309 the
 two-column batteries, U+10030A–U+100313 the full-screen box (normal,
 pressed) and the sticky box (normal, pressed, on; ADR 0224), cell geometry
-as the minimise box, and U+100314 is the next free codepoint.
+as the minimise box. The player glyphs of ADR 0237 follow: cell geometry
+U+100314–10037C (LCD digits, LED meters, sliders, faders), the transport
+text glyphs U+10037D–1003A0, the disc, record and cassette icons
+U+1003A1–1003D0 (two columns, frames 0-7), the key ends U+1003D1–1003D4
+(cell geometry, set `key`) and the big discs U+1003D5–100494, four columns
+by two rows (`<kind>-big-<f>-r<row>c<col>`). U+100495 is the next free
+codepoint.
+
+An icon wider than a cell carries `columns` and its `column`; one taller
+than a row (the big discs) also carries `rows` and its `row`, which the
+icon font's private `BLrw` table repeats for the raster (ADR 0237).
 
 ### What an application sets for a cell-geometry glyph
 
@@ -161,7 +174,7 @@ schema (`CellGeometryGlyph`):
 
 | Field | Values and meaning |
 | --- | --- |
-| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners have neither this nor `set`. |
+| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners and the player's LCD, LED, slider and fader glyphs have neither this nor `set`. |
 | `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`, `frame` (the one frame set, drawn in the foreground alone like Chalk, ADR 0214)., `key` (a key's ends, ADR 0237). |
 | `part` | What the glyph is a piece of: `bar-corner`, `title-bar` (stripes, title, close, shade, zoom), `note-close`, `frame`, `dialog-border`, `button-cap`, `checkbox`, `switch`, `capsule`; the player glyphs (ADR 0237): `lcd-big-top` and `lcd-big-bottom` (a big LCD digit's two rows, two cells each), `lcd-digit` (a small LCD digit, two cells), `lcd-colon`, `led` (a level meter's LEDs), `slider`, `fader`, `key` (a key's ends). |
 | `cells` | `{span, position}`: how many cells the whole piece spans (1 to 3), written side by side, and this glyph's place in it from 0. |
@@ -215,9 +228,9 @@ Source files and the original-art MIT licence are hash-pinned in
 `../fonts.source.json`. Bluetooth trademark rights are not
 granted by the drawing's licence.
 
-Tests: `ruby tools/tests/custom_icon_gate.rb` covers all57 supported heights
+Tests: `ruby tools/tests/custom_icon_gate.rb` covers all 57 supported heights
 in every shipped text font, premultiplied colour, partial-alpha edges,
-distinct rasters for every Wi-Fi, battery and volume level, themed pen, bounded cache, and the101-scalar versioned Hibr GL
+distinct rasters for every Wi-Fi, battery and volume level, themed pen, bounded cache, and the 150-scalar versioned Hibr GL
 snapshot in both one/two-cell allocations. Snapshot coverage is not coverage
 of every Hibr application. `custom_icon_api_gate.rb` checks real local PTY
 UTF-8 writes (whole and bytewise), one-cell private advances, the canonical
@@ -225,7 +238,5 @@ catalogue/missing/oversized errors, and PTY/API presented-pixel parity.
 The KMS raster gate includes every original at every supported size.
 These are executable local checks, not physical visual acceptance.
 
-Internal Hibr tracking330 covers opt-in menu,
-Wi-Fi and Bluetooth selection. No Hibr source was changed here. Until Hibr
-selects the private glyphs, an existing Unicode/Nerd indicator is not evidence
-that these colour originals are missing from the font.
+Hibr selects these glyphs by catalogue id (its `wm/glyphs.hibr`). No Hibr
+source was changed here.

@@ -21,3 +21,7 @@ server
 build-tcc-ignore
 __pycache__/
 *.pyc
+
+# Dependency trees fetched or built locally (ADR 0230 builds against the
+# system; only the pinned HarfBuzz headers in vendor/harfbuzz are tracked).
+/vendor/deps/

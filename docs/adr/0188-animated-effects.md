@@ -1,7 +1,7 @@
 # ADR 0188: Animated effects re-present a held scene on a frame clock that exists only while one is on
 
-- Status: accepted; in use since 0.2.31; amended in 0.2.33 (ticks only
-  fill gaps) and 0.3.67 (the rate follows the display refresh)
+- Status: accepted; in use since 0.2.31
+- Note: Amended in 0.2.33 (ticks only fill gaps) and 0.3.67 (the rate follows the display refresh).
 - Date: 2026-10-26
 - Scope: effects registry, main loop render scheduling, KMS present path,
   GLES presentation pass, diagnostics

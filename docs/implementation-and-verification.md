@@ -22,8 +22,9 @@ criteria pass.
    rejected with a typed problem response.
 6. The compositors consume read-only frame plans. They never parse PTY
    output or mutate canonical terminal state.
-7. TCC builds all first-party production C code. A successful host-compiler
-   build is never release evidence.
+7. TCC compiles all first-party production C code, and the system linker
+   links it (ADR 0238). A build by another compiler is never release
+   evidence.
 8. No stage may introduce a parallel implementation of an already accepted
    subsystem.
 
@@ -118,6 +119,18 @@ criteria pass.
 - `BLIT-EFFECT-002`: keep effects downstream of canonical text and topology
   state.
 
+### Programs in windows
+
+- `BLIT-PROG-001`: show each program's toplevel, popup and subsurface as a
+  picture on the frame channel, in a window the desktop places, sizes,
+  stacks and focuses (ADR 0228, ADR 0229).
+- `BLIT-PROG-002`: give each window Blit's keyboard (the system's xkb
+  keymap), pointer, input methods and pointer lock on its own input route.
+- `BLIT-PROG-003`: share one clipboard, and drag and drop, between programs,
+  Hibr and terminals (`CLIP`).
+- `BLIT-PROG-004`: run X11 programs under the compositor's rootless
+  Xwayland, with Blit's X window manager giving them the same promises.
+
 ## Acceptance
 
 `tools/run-gates.sh` is the executable list of gates; its suites and the
@@ -128,9 +141,10 @@ change classes they prove are in the
 |---|---|---|
 | `BLIT-API-*` | `schema` suite | — |
 | `BLIT-TERM-*` | `terminal` and `font` suites | Hibr capture |
-| `BLIT-RENDER-*`, `BLIT-EFFECT-*`, `BLIT-INPUT-*` | `renderer` suite, on `BLIT_GATE_BACKEND=native` and `gles` | VKMS pixel and input fixtures ([KMS testing](testing-kms.md)) |
+| `BLIT-RENDER-*`, `BLIT-EFFECT-*`, `BLIT-INPUT-*` | `renderer` and `renderer-gles` suites | VKMS pixel and input fixtures ([KMS testing](testing-kms.md)) |
 | `BLIT-DISPLAY-*` | `renderer` and `timing` suites | VKMS two- and four-output fixtures; a physical multi-monitor host |
-| `BLIT-HIBR-*` | `hibr` suite | `tools/tests/qemu_hibr_lifecycle_gate.sh` |
+| `BLIT-HIBR-*` | `hibr` suite | `tools/tests/qemu_hibr_lifecycle_gate.sh`, run by hand (its fixture needs a VKMS kernel and an initramfs not built in this repository) |
+| `BLIT-PROG-*` | `hibr` suite (`compositor_gate`, `xwayland_gate`, `frame_input_gate`), and both again in the release environment | the owner's machine: Firefox, a GTK and a Qt program, vkcube, Steam |
 | `BLIT-PLAT-*`, lifecycle and faults | `lifecycle` and `timing` suites | `physical_multi_display_gate.rb` with `BLIT_GATE_LIVE` |
 
 Effects never change terminal cells, focus, routes or topology. The bounded
@@ -144,9 +158,12 @@ soak is evidence only after it passes.
 
 Every acceptance result must record:
 
-- commit ID;
-- TCC version;
-- kernel, QEMU, Alpine, libdrm, Mesa, and Hibr versions;
+- commit ID (a release's manifest, `releases/<version>.yaml`, records the
+  source commit, the packages' checksums, the Hibr version and ABI, and
+  each suite's counts and source commit);
+- the build environment (the Debian 13 environment, `tools/build-env/`, for
+  a release; for a QEMU or hardware result, the kernel, QEMU and Mesa
+  versions);
 - exact command and environment;
 - input fixture and expected result;
 - machine-readable result;

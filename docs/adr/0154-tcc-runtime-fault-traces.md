@@ -1,6 +1,8 @@
 # ADR 0154: retain TCC runtime fault traces
 
-- Status: accepted
+- Status: superseded by ADR 0238
+- Note: TCC's `-bt8` runtime was replaced by Blit's own crash backtrace
+  (`src/blit_crash.h`) in 0.3.87, when the system linker took over linking.
 - Date: 2026-10-20
 - Tracking: Blit 104/109
 

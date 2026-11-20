@@ -1,6 +1,7 @@
 # ADR 0148: explicit presentation source and safe invalid-environment handling
 
-- Status: accepted
+- Status: superseded by ADR 0184
+- Note: ADR 0184 (0.2.22) made `kms` the only presentation value; anything else is refused.
 - Date: 2026-10-19
 - Tracking: Blit 108; related ADR 0138
 

@@ -8,11 +8,12 @@ through an HTTP and WebSocket API.
 
 Blit is the display under the [Hibr](https://github.com/osakka/hibr) text
 desktop, but it does not need Hibr: any program can run in a Blit session.
-Graphical programs -- Wayland ones today (Firefox, GTK, Vulkan), X ones
-through Xwayland next -- open in Hibr windows through `blit-compositor`,
-Blit's own Wayland compositor, which turns each window into a picture
-Blit shows and gives it Blit's keyboard, pointer and Hibr's clipboard
-(ADR 0228, ADR 0229).
+Graphical programs -- Wayland ones (Firefox, GTK, Qt, Vulkan) and X11 ones
+through Xwayland (Steam, xterm) -- open in Hibr windows through
+`blit-compositor`, Blit's own Wayland compositor and X window manager,
+which turns each window into a picture Blit shows and gives it Blit's
+keyboard, pointer, input methods, Hibr's clipboard and drag and drop
+(ADR 0228, ADR 0229; [programs in windows](docs/programs-in-windows.md)).
 
 Current release: see [`packaging/VERSION`](packaging/VERSION).
 Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
@@ -36,7 +37,13 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
   Fonts, colour emoji, Arabic, Unifont, and Blit's own colour icons.
 - **Input:** keyboards, mice, touchpads and gamepads, found as they are
   plugged in, each configurable: repeat rate, remapping, pointer speed,
-  natural scrolling, a choice of pointer looks.
+  natural scrolling, a choice of pointer looks, shake to find the pointer,
+  and a busy pointer over a program that stops answering.
+- **Keyboards and typing:** layouts from the system's xkb, listed and
+  switched live, with dead keys and compose; Arabizi, typing Arabic in Latin
+  letters, in terminals and programs alike.
+- **Display modes:** pick a monitor's resolution and refresh; a new mode
+  is tried and goes back by itself unless you keep it.
 - **Effects:** rounded corners, scanlines, screen curvature, glow, RGB
   shift, an old CRT's hum bar, flicker, jitter, static noise, a phosphor
   tint, brightness and contrast, burn-in and a CRT mask, per pane, also
@@ -53,8 +60,9 @@ The full list, with when each arrived and how it has been proved, is in
 
 ## Install
 
-Blit is published in Hibr's apt repository (amd64; it needs HarfBuzz 6.0 or
-later, so Debian 12, Ubuntu 24.04 or newer):
+Blit is published in Hibr's apt repository (amd64; built on Debian 13, it
+needs glibc 2.38 and HarfBuzz 6.0 or later, so Debian 13, Ubuntu 24.04 or
+newer):
 
 ```sh
 curl -fsSL https://osakka.github.io/hibr-apt/hibr.gpg \
@@ -65,9 +73,12 @@ sudo apt update
 sudo apt install blit hibr
 ```
 
-The package installs and starts `blit.service`, generates an API token in
-`/etc/blit/blit.env`, and shows Hibr's login screen on the first monitor.
-`apt upgrade` keeps it current. For programs in windows,
+The package installs and enables `blit.service` and generates an API token
+in `/etc/blit/blit.env`; start it with `sudo systemctl start blit` (or
+reboot), and it shows Hibr's login screen on the first monitor. `apt
+upgrade` keeps it current: the new version takes over the next time the
+login screen is showing with nobody signed in, or at `sudo systemctl
+restart blit` (ADR 0205). For programs in windows,
 `sudo apt install blit-compositor`; Hibr starts it with the desktop (Control
 Panel > Windows > Programs in Windows), and a terminal opened after that
 has `WAYLAND_DISPLAY`.
@@ -78,7 +89,7 @@ has `WAYLAND_DISPLAY`.
 man blit                                   # the server, its settings and files
 blit --version                             # the installed Blit
 TOKEN=$(sudo sed -n 's/^BLIT_AUTH_TOKEN=//p' /etc/blit/blit.env)
-curl -s http://127.0.0.1:8080/v1/version    # the running Blit
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/version  # the running Blit
 curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8080/v1/displays
 ```
 
@@ -127,20 +138,29 @@ All of it: [docs/README.md](docs/README.md).
 
 ## Build from source
 
-Blit is C, built with TCC on any current Linux distribution from the
-system's own development packages, found through `pkg-config`: libdrm,
+Blit is C, compiled by TCC and linked by the system linker
+(`tools/tcc-link.sh`, ADR 0238), on any current Linux distribution, from
+the system's own development packages found through `pkg-config`: libdrm,
 FreeType, HarfBuzz (≥ 6.0.0; its headers pinned in `vendor/harfbuzz`),
-zlib, the EGL/GLES/GBM headers (the libraries are loaded at run time) and,
-for `blit-compositor`, wayland and xkbcommon. The minimum versions and each
-distribution's package names are in [the toolchain](docs/toolchain.md);
-`tools/build-flags.sh --check` checks them.
+zlib, xkbcommon, the EGL/GLES/GBM headers (the libraries are loaded at run
+time) and, for `blit-compositor`, wayland (server, scanner, protocols) and
+xcb. Two pinned checkouts sit under `build/`: hibr-ime (the input methods,
+built in; `packaging/IME_VERSION`) and, for a package, Hibr itself (the
+adapter, `packaging/HIBR_VERSION`). The minimum versions, each
+distribution's package names and the checkouts are in
+[the toolchain](docs/toolchain.md); `tools/build-flags.sh --check` checks
+them.
 
 ```sh
 tools/build-tcc.sh                                      # build/blit/blit-server
-tools/build-tcc.sh build/blit/blit-helper helper
+tools/build-tcc.sh build/blit/blit-update-helper helper
 tools/run-gates.sh all                                  # the test suites
-packaging/build-deb.sh build/pkg                        # the .debs
+BLIT_HIBR_ROOT=build/hibr-$(cat packaging/HIBR_VERSION) \
+  packaging/build-deb.sh build/pkg                      # the .debs
 ```
+
+Releases are built by `tools/release/build-release.sh OUTDIR` in the
+Debian 13 build environment (`tools/build-env/`).
 
 The package build makes three packages: `blit`, `blit-font-sources` (the
 source archive of the Arabic font, ADR 0217) and `blit-compositor` (programs
@@ -166,12 +186,14 @@ release procedure.
 
 Blit owns the screens, input, terminals and the API. Hibr, or any other
 program, runs inside sessions and owns its own desktop. Blit never edits
-Hibr; it starts Hibr's installed commands and talks to them through the
-API.
+Hibr; it runs Hibr (`/usr/bin/hibr`) with its own small launchers in
+`/usr/share/blit/hibr` and talks to it through the API and the frame
+socket.
 
 ## License
 
 Blit is free software under the GNU General Public License, version 3 or
 later (`LICENSE`, `COPYING`). Bundled fonts and icon artwork keep their own
 licences, recorded beside them under `assets/fonts/`; the Hibr adapter is
-under Hibr's licence, the LGPL version 3 or later.
+under Hibr's licence, the LGPL version 3 or later, and so are hibr-ime's
+input methods, built into `blit-server` and `blit-compositor`.

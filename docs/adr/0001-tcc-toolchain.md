@@ -1,6 +1,8 @@
 # ADR 0001: TCC is the project compiler
 
 - Status: accepted
+- Note: Since 0.3.87 the system linker links the objects TCC compiles
+  (ADR 0238).
 - Date: 2026-10-01
 - Workspace baseline: `/usr/bin/tcc`, TCC `0.9.27`, x86-64 Linux
 

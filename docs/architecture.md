@@ -8,7 +8,7 @@ are in the [decision records](adr/README.md); what it can do is in
 
 ```text
  API clients            frame socket:              evdev: keyboards, mice,
- (HTTP + WebSocket)      pictures by memfd          touchpads, gamepads
+ (HTTP + WebSocket)      pictures by memfd/dmabuf   touchpads, gamepads
          │                       │                           │
          ▼                       ▼                           ▼
  ┌─────────────────────────── main loop (select) ───────────────────────────┐
@@ -46,9 +46,9 @@ Beside the main loop:
 | Sessions | `src/blit_server.c` | PTYs, child processes started with `execve` (no shell in between), their user, environment and lifecycle |
 | Terminal emulator | `src/blit_server.c`, `src/blit_graphics.h` | the byte parser, cells and attributes, scrollback, alternate screen, Kitty and Sixel images; see the [terminal reference](terminal.md) |
 | Frame socket | `src/blit_frames.h`, `src/blit_frames_input.h` | pictures by descriptor from programs on this machine: a sealed memfd (FRM1) or dmabuf (FRM3) per frame into a session's Kitty image, checked by session token and sender uid; the frame channel's version 5 grammar; input routes into a producer's own socket, with the keymap passed by memfd (ADR 0202, 0223, 0228) |
-| Wayland compositor | `src/blit_compositor.c`, `src/blit_compositor_wire.h` (its own program and package, `blit-compositor`) | programs in Hibr windows: each toplevel, popup and subsurface a picture on the frame channel, `WINDOW` lines to the desktop (geometry, states, move and resize), Blit's input on a socket per window, the clipboard bridged to Hibr's (`CLIP`); it composites nothing and owns nothing either side owns (ADR 0228, ADR 0229) |
+| Wayland compositor | `src/blit_compositor.c`, `src/blit_compositor_wire.h` (its own program and package, `blit-compositor`) | programs in Hibr windows: each toplevel, popup and subsurface a picture on the frame channel, `WINDOW` lines to the desktop (geometry, states, move and resize), Blit's input on a socket per window, the clipboard and drag and drop bridged to Hibr's (`CLIP`), text input through hibr-ime; and the X window manager of its rootless Xwayland (X windows as pictures, X selections and XDND onto `CLIP`); it composites nothing and owns nothing either side owns (ADR 0228, ADR 0229) |
 | Topology | `src/blit_display_layout.h` | monitors, panes per monitor (up to 8×8), which session is in which pane |
-| Input | `src/blit_server.c`, `src/blit_touchpad.h`, `src/blit_input_*.h` | evdev discovery and identity, keyboard and pointer settings, routing to sessions, pointer lock |
+| Input | `src/blit_server.c`, `src/blit_touchpad.h`, `src/blit_input_*.h`, `src/blit_keyboard_xkb.h`, `src/blit_ime_root.h`, `src/blit_pointer_*.h` | evdev discovery and identity, keyboards from the system's xkb (ADR 0231), input methods from hibr-ime (Arabizi, ADR 0233), keyboard and pointer settings, the pointer's art, shake and busy states, routing to sessions, pointer lock |
 | Glyphs | `src/blit_font.c`, `src/blit_raster.c`, `src/blit_cell_geometry.h`, `src/blit_window_glyphs.h`, `src/blit_control_glyphs.h` | text fonts, the glyph stack, HarfBuzz shaping, colour glyphs, cell-exact line drawing, the glyph cache |
 | KMS | `src/blit_kms.c`, `src/blit_kms_hotplug.h` | connectors, modes, buffers, page flips, refresh scheduling, hotplug |
 | GPU compositor | `src/blit_gles.c`, `src/blit_kms_gles.c` | composing panes, glyphs, images and effects with OpenGL ES; Mesa is loaded at run time |
@@ -91,8 +91,9 @@ blink counters in `/v1/diagnostics`.
 - **Blit does not own the desktop**: Hibr owns its desktop and runs inside
   Blit sessions; Blit starts Hibr's installed commands and never edits
   Hibr ([Hibr integration](integration-hibr.md)).
-- **Built with TCC** (ADR 0001): a small, fast compiler, pinned, with
-  FreeType and HarfBuzz from the distribution.
+- **Compiled by TCC, linked by the system linker** (ADR 0001, ADR 0238):
+  every dependency comes from the system through `pkg-config` (ADR 0230,
+  `tools/build-flags.sh`), plus the pinned hibr-ime checkout.
 
 ## Security
 
@@ -104,5 +105,6 @@ that session's token; it never opens a name it is given (ADR 0066, 0202).
 Sessions can be
 limited to an allow-list of commands. An unprivileged profile runs it as
 user `blit` with the device groups it needs. Package installation is a
-separate root helper that only accepts a package named `blit` with the
-checksum the server sends it. See `man blit` and ADR 0065.
+separate root helper that only accepts `blit` and, when it is installed,
+`blit-compositor` at the same version, each with the checksum the server
+sends it (ADR 0008, ADR 0232). See `man blit` and ADR 0065.

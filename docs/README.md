@@ -28,8 +28,8 @@ GitHub's.
 
 - [Features](features.md) — everything Blit does, when it arrived, how far
   it has been proved.
-- [Programs in windows](programs-in-windows.md) — running Firefox, GTK, Qt
-  and Vulkan programs as Hibr windows: what to expect, and what is not there
+- [Programs in windows](programs-in-windows.md) — running Firefox, GTK, Qt,
+  Vulkan and X11 (Xwayland) programs as Hibr windows: what to expect, and what is not there
   yet.
 - [Terminal reference](terminal.md) — escape sequences, mouse and keyboard
   protocols, Kitty graphics, Sixel, Unicode, limits and known gaps.
@@ -49,6 +49,8 @@ GitHub's.
 - [API principles](spec/api-principles.md) — how the API is designed.
 - [Hibr integration](integration-hibr.md) — login, desktop ownership,
   joined displays, the optional console adapter.
+- [Blit's Hibr launchers and the adapter](../hibr/README.md) — what Blit
+  runs in Hibr, and how to build the adapter.
 
 **Design**
 
@@ -65,7 +67,9 @@ GitHub's.
   change follows.
 - [Repository hygiene](repository-hygiene.md) — what belongs in the
   repository, staging and handoff.
-- [Toolchain](toolchain.md) — TCC and the dependencies.
+- [Toolchain](toolchain.md) — TCC, the system linker and the dependencies.
+- [Developer tools](../tools/README.md) — the build, release, gate and
+  live-probe tooling.
 - [Implementation and verification contract](implementation-and-verification.md)
   — requirements, test matrix and release gates.
 - Testing guides: [KMS](testing-kms.md), [bare metal](testing-baremetal.md),
@@ -94,7 +98,8 @@ When two disagree:
 A guide that disagrees with the code is a bug in the guide. The
 documentation gate (`tools/tests/documentation_gate.rb`) checks that every
 environment variable the server reads is in `blit(8)`, that the manual
-pages format cleanly, and that no link in the repository is broken.
+pages format cleanly, and that no relative link points at a missing file
+(it does not check `#anchors`).
 
 ## How far something is proved
 
@@ -115,4 +120,6 @@ A change to the API updates the OpenAPI document, the API guide, the
 relevant ADR and a gate in the same commit. A new feature gets a row in
 [features](features.md); a new environment variable gets an entry in
 [`blit(8)`](../man/blit.8) (the gate enforces it). Every release adds a
-ledger entry naming its package checksum and suite results.
+ledger entry with what it proved, and a `releases/<version>.yaml` manifest
+with the package checksums and the suites' results
+(`tools/release/generate-manifest.sh`, `tools/release/record-gates.sh`).
