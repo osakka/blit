@@ -141,6 +141,7 @@ typedef struct {
     int fd;                 /* the frame socket, -1 when not connected */
     int window;             /* the peer answered window=1 */
     int drag;               /* the peer answered drag=1: it runs a program's drag out (CLIP dragout) */
+    int inhibit;            /* the peer answered inhibit=1: it takes WINDOW inhibit (#171) */
     int dmabuf;             /* the peer answered dmabuf=1 with a formats= list */
     int refused;            /* an FRM3 was refused ENOTSUP: dmabuf copied or kept until the next try */
     uint32_t retry_ms;      /* the wait before that try: 250 ms, doubling to 4 s while refused */
@@ -255,6 +256,7 @@ static int bc_wire_parse_hello(BcWire *w, const char *answer)
     /* From the whole answer, not the logged copy: a formats= list is long. */
     w->window = bc_answer_has(answer, "window=1");
     w->drag = bc_answer_has(answer, "drag=1");
+    w->inhibit = bc_answer_has(answer, "inhibit=1");
     w->dmabuf = bc_answer_has(answer, "dmabuf=1");
     if (w->dmabuf) w->format_count = bc_formats_parse(answer, w->formats, BC_FORMATS_MAX);
     if (w->format_count == 0) w->dmabuf = 0;

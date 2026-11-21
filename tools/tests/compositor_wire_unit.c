@@ -22,6 +22,11 @@ static void hello(void)
     EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=1 fence=0 formats=XR24/0 window=1") == 0 &&
            w.window && w.dmabuf, "dmabuf=1 window=1 at the end");
     EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=0 window=10\n") == 0 && !w.window, "window=10 is not 1");
+    /* #171: inhibit=1, a word of its own; absent or another value is 0. */
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=0 window=1 drag=1 inhibit=1\n") == 0 && w.inhibit && w.drag,
+           "inhibit=1");
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=0 window=1\n") == 0 && !w.inhibit, "no inhibit=1");
+    EXPECT(bc_wire_parse_hello(&w, "OK dmabuf=0 window=1 inhibit=10\n") == 0 && !w.inhibit, "inhibit=10 is not 1");
     EXPECT(bc_wire_parse_hello(&w, "ERROR 0 EACCES\n") != 0, "refused");
     EXPECT(bc_wire_parse_hello(&w, "OKAY\n") != 0, "OKAY is not OK");
     EXPECT(bc_wire_new_id(&w) == 1 && bc_wire_new_id(&w) == 2, "ids count from 1");
@@ -411,6 +416,6 @@ int main(void)
     convert();
     channel();
     if (failures) return 1;
-    printf("COMPOSITOR_WIRE_UNIT_OK hello text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first)\n");
+    printf("COMPOSITOR_WIRE_UNIT_OK hello(inhibit=1) text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first)\n");
     return 0;
 }

@@ -98,6 +98,7 @@
 #include "xdg-output-unstable-v1-server-protocol.h"
 #include "text-input-unstable-v3-server-protocol.h"
 #include "viewporter-server-protocol.h"
+#include "idle-inhibit-unstable-v1-server-protocol.h"
 #include "ime.h"
 #include "blit_ime_root.h"
 #include "blit_compositor_wire.h"
@@ -275,6 +276,7 @@ struct bc_xdg {
     char cursor[24];                  /* the pointer shape its program asked for, "" none yet */
     char cursor_sent[24];             /* the shape last sent (WINDOW cursor): `wait` while busy */
     int busy_sent;                    /* `WINDOW busy <id> on` said (ADR 0235) */
+    int inhibit_sent;                 /* `WINDOW inhibit <id> on` said (#171) */
     struct bc_wm *wm;                 /* the xdg_wm_base it was made from: the one pinged, NULL once gone */
     int32_t min_w, min_h, max_w, max_h;           /* committed */
     int32_t pmin_w, pmin_h, pmax_w, pmax_h;       /* pending */
@@ -555,6 +557,7 @@ struct bc_server {
     char dial_error[96];              /* the last attempt's failure, logged once a kind */
     struct wl_list windows;           /* bc_xdg */
     struct wl_list outputs;           /* bc_output: the displays, in the desktop's order */
+    struct wl_list inhibitors;        /* bc_inhibitor: idle inhibitors (#171) */
     struct wl_list outputs_gone;      /* bc_output removed, its global not yet destroyed */
     /* The desktop's layout (the outputs section): whether one has been
        applied, the set being sent, its extent (X's root), and X's primary
@@ -986,6 +989,7 @@ static void window_set_appid(struct bc_xdg *x, const char *text)
 
 static int window_input_listen(struct bc_xdg *x);
 static void window_input_close(struct bc_xdg *x);
+static void window_inhibit_update(struct bc_xdg *x);
 
 /* `WINDOW new` and every hint the toplevel has, then its input route: at
    its first appearance, and again on a new channel (the restart section). */
@@ -1005,6 +1009,9 @@ static void announce_hints(struct bc_xdg *x, int parent)
     x->cursor_sent[0] = '\0';
     window_busy_announce(x);
     window_cursor_send(x);
+    /* Idle inhibit, as it is now (#171). */
+    x->inhibit_sent = 0;
+    window_inhibit_update(x);
     if (x->surface && x->surface->appmenu_service[0]) send_appmenu(x);
     /* Its input, straight from Blit to its own input socket (one route per
        toplevel); the desktop relays the request under its own id. */
@@ -1077,6 +1084,7 @@ static void window_gone(struct bc_xdg *x)
     window_set_output(x, NULL);
     /* Its pointer lock let go first: the desktop's hold ends with it. */
     constraints_window_gone(x);
+    x->inhibit_sent = 0;   /* gone implies off (#171) */
     if (x->id) {
         holds_end_id(x->server, x->id);
         bc_wire_line(&x->server->wire, "WINDOW gone %u", x->id);
@@ -2637,6 +2645,86 @@ static void bind_viewporter(struct wl_client *client, void *data, uint32_t versi
     wl_resource_set_implementation(r, &viewporter_impl, data, NULL);
 }
 
+/* ---- zwp_idle_inhibit_manager_v1 (#171) ----
+   A program asks that the screen not blank while one of its surfaces is
+   shown (a video). Blit judges nothing: it tells a desktop that answered
+   inhibit=1 which windows hold an inhibitor, `WINDOW inhibit <id> on|off`
+   (gone implies off; said again on a new channel), and the desktop's saver
+   decides with what it shows. */
+struct bc_inhibitor {
+    struct wl_resource *resource;
+    struct bc_surface *surface;        /* NULL once its surface is gone */
+    struct wl_list link;               /* bc_server.inhibitors */
+};
+
+/* Say the window's state if a desktop that runs the rule is connected and
+   it differs from what was said. */
+static void window_inhibit_update(struct bc_xdg *x)
+{
+    struct bc_server *s;
+    struct bc_inhibitor *in;
+    int on = 0;
+    if (x == NULL) return;
+    s = x->server;
+    wl_list_for_each(in, &s->inhibitors, link)
+        if (in->surface && surface_window(in->surface) == x) { on = 1; break; }
+    if (!x->id || !s->wire.inhibit || on == x->inhibit_sent) return;
+    x->inhibit_sent = on;
+    bc_wire_line(&s->wire, "WINDOW inhibit %u %s", x->id, on ? "on" : "off");
+    logf_("window %u: idle inhibit %s", x->id, on ? "on" : "off");
+}
+
+static void inhibitor_destroyed(struct wl_resource *resource)
+{
+    struct bc_inhibitor *in = wl_resource_get_user_data(resource);
+    struct bc_xdg *x = in->surface ? surface_window(in->surface) : NULL;
+    wl_list_remove(&in->link);
+    free(in);
+    window_inhibit_update(x);
+}
+
+static const struct zwp_idle_inhibitor_v1_interface inhibitor_impl = {
+    .destroy = bc_destroy_request,
+};
+
+static void inhibit_manager_create(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                                   struct wl_resource *surface_resource)
+{
+    struct bc_server *s = wl_resource_get_user_data(resource);
+    struct bc_inhibitor *in = calloc(1, sizeof(*in));
+    if (in == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    in->resource = wl_resource_create(client, &zwp_idle_inhibitor_v1_interface,
+                                      wl_resource_get_version(resource), id);
+    if (in->resource == NULL) {
+        free(in);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    in->surface = wl_resource_get_user_data(surface_resource);
+    wl_list_insert(&s->inhibitors, &in->link);
+    wl_resource_set_implementation(in->resource, &inhibitor_impl, in, inhibitor_destroyed);
+    window_inhibit_update(surface_window(in->surface));
+}
+
+static const struct zwp_idle_inhibit_manager_v1_interface inhibit_manager_impl = {
+    .destroy = bc_destroy_request,
+    .create_inhibitor = inhibit_manager_create,
+};
+
+static void bind_inhibit_manager(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &zwp_idle_inhibit_manager_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &inhibit_manager_impl, data, NULL);
+}
+
 static void surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
@@ -2712,6 +2800,15 @@ static const struct wl_surface_interface surface_impl = {
 static void surface_destroyed(struct wl_resource *resource)
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
+    {
+        /* Its inhibitors outlive it, inert (#171): its window says off. */
+        struct bc_inhibitor *in;
+        struct bc_xdg *x = surface_window(surface);
+        int had = 0;
+        wl_list_for_each(in, &surface->server->inhibitors, link)
+            if (in->surface == surface) { in->surface = NULL; had = 1; }
+        if (had) window_inhibit_update(x);
+    }
     if (surface->dragicon && surface->server->dragout.icon == surface) dragicon_end(surface->server);
     /* Its viewport outlives it, inert (no_surface on use). */
     if (surface->viewport) wl_resource_set_user_data(surface->viewport, NULL);
@@ -12203,6 +12300,7 @@ int main(int argc, char **argv)
     bc_wire_init(&server.wire);
     wl_list_init(&server.windows);
     wl_list_init(&server.outputs);
+    wl_list_init(&server.inhibitors);
     wl_list_init(&server.outputs_gone);
     wl_list_init(&server.holds);
     server.format_table_fd = -1;
@@ -12351,7 +12449,9 @@ int main(int argc, char **argv)
         !wl_global_create(server.display, &xdg_activation_v1_interface,
                           BC_VERSION(1, xdg_activation_v1_interface), &server, bind_activation) ||
         !wl_global_create(server.display, &wp_viewporter_interface,
-                          BC_VERSION(1, wp_viewporter_interface), &server, bind_viewporter)) {
+                          BC_VERSION(1, wp_viewporter_interface), &server, bind_viewporter) ||
+        !wl_global_create(server.display, &zwp_idle_inhibit_manager_v1_interface,
+                          BC_VERSION(1, zwp_idle_inhibit_manager_v1_interface), &server, bind_inhibit_manager)) {
         logf_("could not create the globals");
         wl_display_destroy(server.display);
         return 1;

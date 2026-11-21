@@ -2570,6 +2570,16 @@ It speaks the frame channel above as a producer, with these additions.
     when off, its own shape again (`default` when it named none). Hibr
     shows "(not responding)" and offers Force Quit. X programs answer no
     xdg ping and are never busy here.
+  - `WINDOW inhibit <id> on|off` (Gitea #171): the window's program holds
+    an idle inhibitor (`zwp_idle_inhibit_manager_v1`, on any of its
+    surfaces) -- a video asking that the screen not blank -- or has let
+    the last one go. Sent only to a desktop whose hello answer says
+    `inhibit=1`, on each change and again when a window is announced again
+    (a new channel); `WINDOW gone` implies off. Blit judges nothing: the
+    desktop's saver decides with what it shows (the protocol counts an
+    inhibitor only while its surface is visible). X programs have no such
+    request here; Hibr also honours `org.freedesktop.ScreenSaver.Inhibit`
+    on the session bus.
   - `WINDOW activate <id> <reason>` (0.3.86): the program asks for its
     top-level `<id>` to have the focus. `<reason>` is one word: `x-focus`
     (an X program took X's input focus itself onto one of its windows;

@@ -2316,6 +2316,117 @@ def dragout_unsaid_part(compositor, standin, work):
         listener.close()
 
 
+def inhibit_part(compositor, standin, work):
+    """#171: a program's idle inhibitor reaches a desktop that answered
+    inhibit=1 as `WINDOW inhibit <id> on`, its destruction as `off`, and is
+    said again on a new channel; its window gone says nothing more (gone
+    implies off). A desktop without inhibit=1 is never sent the line."""
+    def run(answer, label):
+        runtime = os.path.join(work, 'run-inhibit-' + label)
+        os.mkdir(runtime, 0o700)
+        name = 'blit-compositor-gate-inhibit-%s-%d' % (label, os.getpid())
+        listener = listen(name)
+        env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+        env.pop('WAYLAND_DISPLAY', None)
+        log = os.path.join(work, 'compositor-inhibit-%s.log' % label)
+        comp = start([compositor, '--x11', 'off', '--log', log], env,
+                     open(os.path.join(work, 'compositor-inhibit-%s.out' % label), 'w'))
+        client = route = None
+        try:
+            desk = Desktop(listener, answer)
+            desk.line('WINDOW display blit-0 -')
+            path = os.path.join(work, 'standin-inhibit-%s.out' % label)
+            client = start([standin, '--inhibit', 'Video'], dict(env, WAYLAND_DISPLAY='blit-0'), open(path, 'w'))
+            printed = lambda: open(path).read()
+            for want in ('WINDOW new 1 0', 'WINDOW title 1 Video'):
+                desk.line(want)
+            wait_for(lambda: 'STANDIN inhibit on' in printed(), lambda: 'no inhibitor made:\n' + printed())
+            return desk, comp, client, listener, log, printed
+        except BaseException:
+            for p in (client, comp):
+                if p and p.poll() is None:
+                    p.kill()
+                    p.wait()
+            listener.close()
+            raise
+
+    def until(desk, want, wait=10):
+        """Lines up to `want`, frames set aside; the lines seen."""
+        seen = []
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            g = desk.next(0.3)
+            if g is None:
+                continue
+            if g[0] == 'frame':
+                os.close(g[2])
+                continue
+            seen.append(g[1])
+            if g[1] == want:
+                return seen
+        fail('no %r; got:\n%s' % (want, seen))
+
+    # A desktop that runs the rule.
+    desk, comp, client, listener, log, printed = run(b'OK dmabuf=0 window=1 inhibit=1\n', 'said')
+    route = None
+    try:
+        until(desk, 'WINDOW inhibit 1 on')
+        # A new channel (the desktop restarted): said again with the window.
+        name = 'blit-compositor-gate-inhibit-said-%d' % os.getpid()
+        desk.sock.close()
+        listener.close()
+        listener = listen(name)
+        desk = Desktop(listener, b'OK dmabuf=0 window=1 inhibit=1\n')
+        desk.line('WINDOW display blit-0 -')
+        until(desk, 'WINDOW inhibit 1 on')
+        deadline = time.time() + 10
+        while 1 not in desk.input_socks and time.time() < deadline:
+            g = desk.next(0.3)
+            if g is not None and g[0] == 'frame':
+                os.close(g[2])
+        check(1 in desk.input_socks, 'no INPUT sock for window 1 on the new channel')
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        route.sendall(b'INPUT ptr %d 20.00 20.00\nINPUT frame %d 1\nINPUT btn %d 272 press\nINPUT frame %d 2\n'
+                      % (BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE))
+        wait_for(lambda: 'STANDIN inhibit off' in printed(), lambda: 'the inhibitor was not destroyed:\n' + printed())
+        until(desk, 'WINDOW inhibit 1 off')
+        check('window 1: idle inhibit on' in settled(log) and 'window 1: idle inhibit off' in settled(log),
+              lambda: 'the log does not say on and off:\n' + settled(log))
+        quit_compositor(desk, comp)
+    finally:
+        if route:
+            route.close()
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+    # A desktop without inhibit=1 (every Hibr before #171) gets no line.
+    desk, comp, client, listener, log, printed = run(b'OK dmabuf=0 window=1\n', 'unsaid')
+    try:
+        got = []
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            g = desk.next(0.3)
+            if g is None:
+                continue
+            if g[0] == 'frame':
+                os.close(g[2])
+                continue
+            got.append(g[1])
+        check(not any(l.startswith('WINDOW inhibit') for l in got),
+              lambda: 'a desktop without inhibit=1 was sent WINDOW inhibit:\n%s' % got)
+        quit_compositor(desk, comp)
+    finally:
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+    return 'inhibit=on,again-on-a-new-channel,off,unsaid-desktop-silent'
+
+
 def dragout_part(compositor, standin, work):
     """ADR 0229 row 3 (0.3.119): a program drags out. Its start_drag, with
     the press the compositor delivered, is `CLIP dragout o<n> <window>
@@ -3273,6 +3384,7 @@ def main():
         print('COMPOSITOR_DROP_OK %s' % drop_part(compositor, standin, work))
         print('COMPOSITOR_DRAGOUT_OK %s' % dragout_part(compositor, standin, work))
         print('COMPOSITOR_VIEWPORT_OK %s' % viewport_part(compositor, standin, work))
+        print('COMPOSITOR_INHIBIT_OK %s' % inhibit_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))

@@ -152,6 +152,7 @@
 #include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "linux-dmabuf-unstable-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
+#include "idle-inhibit-unstable-v1-client-protocol.h"
 #include "presentation-time-client-protocol.h"
 #include "relative-pointer-unstable-v1-client-protocol.h"
 #include "pointer-constraints-unstable-v1-client-protocol.h"
@@ -249,6 +250,11 @@ struct standin {
     int view_script, view_step;       /* --view-script: a step at each sized configure (Gitea #159) */
     struct wp_viewport *sub_viewport;
     struct wp_viewporter *viewporter;
+    /* --inhibit (#171): an idle inhibitor on the window after its first
+       configure, destroyed at the first button press. */
+    int inhibit_mode;
+    struct zwp_idle_inhibit_manager_v1 *inhibit_manager;
+    struct zwp_idle_inhibitor_v1 *inhibitor;
     struct wp_viewport *viewport;
     uint32_t wm_name;                 /* the xdg_wm_base global, for binding it again */
     struct wp_cursor_shape_manager_v1 *shape_manager;
@@ -1432,6 +1438,11 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
     struct standin *s = data;
     (void)p; (void)time;
     printf("STANDIN button %u %u\n", button, state);
+    if (s->inhibitor && state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        zwp_idle_inhibitor_v1_destroy(s->inhibitor);
+        s->inhibitor = NULL;
+        printf("STANDIN inhibit off\n");
+    }
     if (s->dragout && state == WL_POINTER_BUTTON_STATE_PRESSED && button == 0x110 && s->data_device) {
         struct wl_data_source *src = wl_data_device_manager_create_data_source(s->ddm);
         wl_data_source_add_listener(src, &drag_source_listener, s);
@@ -1747,6 +1758,8 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
         s->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
     else if (strcmp(interface, wp_viewporter_interface.name) == 0)
         s->viewporter = wl_registry_bind(registry, name, &wp_viewporter_interface, 1);
+    else if (strcmp(interface, zwp_idle_inhibit_manager_v1_interface.name) == 0)
+        s->inhibit_manager = wl_registry_bind(registry, name, &zwp_idle_inhibit_manager_v1_interface, 1);
     else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
         s->wm_name = name;
         s->wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface,
@@ -1893,6 +1906,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--appmenu") == 0) s.appmenu_mode = 1;
         else if (strcmp(argv[i], "--activate") == 0) s.activate_mode = 1;
         else if (strcmp(argv[i], "--states") == 0) s.states = 1;
+        else if (strcmp(argv[i], "--inhibit") == 0) s.inhibit_mode = 1;
         else if (strcmp(argv[i], "--xdg-output") == 0) s.xdg_mode = 1;
         else if (strcmp(argv[i], "--dmabuf") == 0) s.use_dmabuf = 1;
         else if (strcmp(argv[i], "--second-wm") == 0) s.second_wm = 1;
@@ -2016,6 +2030,14 @@ int main(int argc, char **argv)
         return 1;
     }
     printf("STANDIN initial commit answered in one roundtrip\n");
+    if (s.inhibit_mode) {
+        if (!s.inhibit_manager) {
+            fprintf(stderr, "STANDIN no zwp_idle_inhibit_manager_v1\n");
+            return 1;
+        }
+        s.inhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(s.inhibit_manager, s.surface);
+        printf("STANDIN inhibit on\n");
+    }
     fflush(stdout);
     while (!s.closed && wl_display_dispatch(s.display) >= 0)
         fflush(stdout);
@@ -2078,6 +2100,8 @@ int main(int argc, char **argv)
     if (s.sub_viewport) wp_viewport_destroy(s.sub_viewport);
     if (s.viewport) wp_viewport_destroy(s.viewport);
     if (s.viewporter) wp_viewporter_destroy(s.viewporter);
+    if (s.inhibitor) zwp_idle_inhibitor_v1_destroy(s.inhibitor);
+    if (s.inhibit_manager) zwp_idle_inhibit_manager_v1_destroy(s.inhibit_manager);
     if (s.psm) zwp_primary_selection_device_manager_v1_destroy(s.psm);
     if (s.subcompositor) wl_subcompositor_destroy(s.subcompositor);
     wl_compositor_destroy(s.compositor);
