@@ -2381,13 +2381,12 @@ components:
         title: {type: string, description: The font's family name.}
         source: {type: string, enum: [shipped, local]}
         path: {type: string}
-        available: {type: boolean}
-        arabic_companion_path:
-          type: [string, 'null']
+        available:
+          type: boolean
           description: >-
-            The Arabic companion face. Every outline font has one; a PSF
-            profile has null. An outline profile is available only when the
-            companion file is readable.
+            Its file is readable, and for an outline font the shared faces
+            it needs too: the colour and text emoji, the PSF fallback and
+            the Arabic face.
         rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
         masters:
           type: array
@@ -2398,29 +2397,22 @@ components:
           items: {type: string, pattern: '^[1-9][0-9]*x[1-9][0-9]*$'}
           minItems: 1
       additionalProperties: false
-    ArabicCompanion:
+    ArabicFace:
       type: [object, 'null']
       description: >-
-        The Arabic faces actually loaded, or null when neither is. Its
-        baseline is the active font's. path and family are the companion
-        (Blit Arabic Modern), null for a pixel font, which has none;
-        words_path and words_family are the word face (Noto Naskh Arabic),
-        present only when it is attached (arabic naskh, ADR 0241).
-      required: [path, family, baseline_px, shaping]
+        Blit's one Arabic face (ADR 0241, 0243), Noto Naskh Arabic, for every
+        text font, pixel fonts included: runs of Arabic cells are shaped as
+        words in it and drawn as slices, on the text baseline. Hibr supplies
+        display-order forms; Blit does not apply paragraph bidi again. A run
+        it cannot shape (a scalar it lacks) is drawn cell by cell from the
+        glyph stack. null when the face is not attached (a fonts root
+        without its file at boot): every Arabic cell is then drawn from the
+        glyph stack until a font change attaches it.
+      required: [family, path, shaping]
       properties:
-        path: {type: [string, 'null']}
-        family: {type: [string, 'null']}
-        baseline_px: {type: integer, minimum: 0}
-        shaping:
-          type: string
-          enum: [words, visual-cell-marks]
-          description: >-
-            words when the word face is attached: runs of Arabic are shaped
-            as words (ADR 0241). visual-cell-marks otherwise: Hibr supplies
-            display-order forms; OpenType positions cell-local marks. Blit
-            does not apply paragraph bidi again.
-        words_path: {type: string}
-        words_family: {type: string}
+        family: {type: string}
+        path: {type: string}
+        shaping: {const: words}
       additionalProperties: false
     FontConfiguration:
       type: object
@@ -2443,14 +2435,6 @@ components:
             FT_LOAD_TARGET_NORMAL), light (FT_LOAD_TARGET_LIGHT) or none
             (FT_LOAD_NO_HINTING). Fitted icons and symbols ignore it. A change
             rebuilds the glyph cache and redraws, as a size change does.
-        arabic:
-          type: string
-          enum: [naskh, modern]
-          description: >-
-            The face Arabic is drawn in (ADR 0241): naskh (the default) shapes
-            runs as words in Noto Naskh Arabic, for every text font; modern
-            draws cell by cell in Blit Arabic Modern. A word face that cannot
-            be attached fails the change and keeps the active font.
       additionalProperties: false
     FontProfiles:
       type: object
@@ -2470,11 +2454,9 @@ components:
             size_px: {type: integer, minimum: 1}
             sizing: {type: string, enum: [scale, pixels]}
             hinting: {type: string, enum: [full, light, none]}
-            arabic: {type: string, enum: [naskh, modern]}
+            arabic: {$ref: '#/components/schemas/ArabicFace'}
             rasterization: {type: string, enum: [bitmap-nearest, native-antialiased]}
             colour_glyphs: {type: boolean}
-            arabic_companion:
-              $ref: '#/components/schemas/ArabicCompanion'
             master:
               type: [string, 'null']
               pattern: '^[1-9][0-9]*x[1-9][0-9]*$'
@@ -2549,14 +2531,14 @@ components:
               role:
                 type: string
                 enum: [text, icons, nerd, symbols, unifont, colour, text_emoji,
-                       arabic_cells, arabic_words, pixel_fallback, pixel_wide]
+                       arabic_words, pixel_fallback, pixel_wide]
                 description: >-
                   What the face is for. text is a selectable text font (a
                   font of masters has one entry per master); icons, nerd,
                   symbols and unifont are the glyph stack, symbols and
                   unifont several faces in the order they are tried;
-                  arabic_cells is Blit Arabic Modern, arabic_words Noto
-                  Naskh Arabic; pixel_fallback is the boot PSF and every
+                  arabic_words is Noto Naskh Arabic, the one Arabic face
+                  (ADR 0243); pixel_fallback is the boot PSF and every
                   outline font's PSF fallback, pixel_wide the 16x16 PSF for
                   wide cells.
               draw:
@@ -3231,7 +3213,12 @@ components:
                 scale: {type: number, minimum: 1.0, maximum: 3.0}
                 size_px: {type: integer, minimum: 8, maximum: 64}
                 hinting: {type: string, enum: [full, light, none]}
-                arabic: {type: string, enum: [naskh, modern]}
+                arabic:
+                  deprecated: true
+                  description: >-
+                    Written by 0.3.129 and 0.3.130 only, when Arabic had a
+                    choice of face (naskh or modern). Read past on load and on
+                    a settings write, and never written back (ADR 0243).
             pointer: {$ref: '#/components/schemas/PointerAppearance'}
             effects:
               type: object

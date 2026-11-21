@@ -365,19 +365,19 @@ see the [security review](security-review-2026-11.md)), and stops at the
 first failure. The packages are then published to Hibr's apt repository
 with the hibr-apt repository's `publish.sh`, given each `.deb`.
 
-`packaging/build-deb.sh` writes three packages to the output directory:
-`blit_X.Y.Z-1_amd64.deb`, `blit-compositor_X.Y.Z-1_amd64.deb`
+`packaging/build-deb.sh` writes two packages to the output directory:
+`blit_X.Y.Z-1_amd64.deb` and `blit-compositor_X.Y.Z-1_amd64.deb`
 ([ADR 0228](adr/0228-blit-is-the-compositor-for-programs.md),
-[ADR 0232](adr/0232-an-update-installs-blit-and-its-compositor-together.md))
-and `blit-font-sources_20120503-1_all.deb` (the
-FreeMono source archive behind the Arabic font, versioned by upstream;
-[ADR 0217](adr/0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)).
+[ADR 0232](adr/0232-an-update-installs-blit-and-its-compositor-together.md)).
+`blit-font-sources`, the FreeMono source archive behind the retired Blit
+Arabic Modern, is no longer built
+([ADR 0243](adr/0243-glyph-multiplexing.md)).
 The manifest generator, the artifact gate and `update-live.sh` take the main
 package, with `blit-compositor` of the same version beside it; both are
-recorded and checked. The gate also checks the sources package when it sits
-beside it. The documentation is installed once, under
-`/usr/share/doc/blit/docs`. The sources package only needs publishing when
-its content changes, not every release.
+recorded and checked. The documentation is installed once, under
+`/usr/share/doc/blit/docs`. The hibr-apt repository should keep the old
+`blit-font-sources_20120503-1_all.deb` for as long as it serves a `blit`
+of 0.3.130 or earlier, the GPL source of that release's Arabic font.
 
 `releases/<version>.yaml` is generated from the package, not written by
 hand, apart from a `notes:` line the operator may add. The

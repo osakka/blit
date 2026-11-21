@@ -23,7 +23,8 @@ typedef struct BlitRasterGlyph {
     int baseline;
     /* Ink may extend beyond its allocated terminal cell. Consumers must add
        these offsets, and invalidate/repaint neighbouring ink on damage.
-       Currently nonzero only for the opt-in Arabic module experiment. */
+       Today only an Arabic word's slice has one: ink_offset_y, a row above
+       and below at most (ADR 0241). */
     int ink_offset_x, ink_offset_y;
     BlitRasterFormat format;
     int fallback;
@@ -66,16 +67,12 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
 BlitRaster *blit_raster_open_pixel(const BlitFont *font, const char *colour_path,
                                    int cell_width, int cell_height);
 void blit_raster_close(BlitRaster *raster);
-/* Experimental Arabic companion. Attach once before any raster lookup;
-   failures leave the context unchanged. No bidi, paragraph shaping or profile
-   auto-selection. All letters share one face transform and baseline. */
-int blit_raster_set_arabic(BlitRaster *raster, const char *path);
-const char *blit_raster_arabic_path(const BlitRaster *raster);
-const char *blit_raster_arabic_family(const BlitRaster *raster);
 /* ADR 0241: the face Arabic words are shaped in (Noto Naskh Arabic), for
-   any text font, pixel fonts included. Once, before any lookup; 0 leaves
-   the raster unchanged. With it, runs of Arabic cells are drawn as slices
-   of their shaped word; without it, cell by cell with the companion. */
+   any text font, pixel fonts included: Blit's one Arabic face (ADR 0243).
+   Once, before any lookup; 0 leaves the raster unchanged. With it, runs of
+   Arabic cells are drawn as slices of their shaped word; a run it refuses,
+   and every Arabic cell without it, is drawn cell by cell from the glyph
+   stack like any other scalar. */
 int blit_raster_set_arabic_words(BlitRaster *raster, const char *path);
 const char *blit_raster_arabic_words_path(const BlitRaster *raster);
 const char *blit_raster_arabic_words_family(const BlitRaster *raster);
@@ -93,7 +90,6 @@ int blit_raster_get_word(BlitRaster *raster, const struct BlitCellWord *word, in
 void blit_raster_word_counts(const BlitRaster *raster, unsigned long long *hits,
                              unsigned long long *misses, size_t *bytes,
                              unsigned long long *dropped);
-int blit_raster_baseline(const BlitRaster *raster);
 /* ADR 0227: the design cell of the master a font of masters is drawn with,
    and whether the cell height is a whole multiple of it (crisp) or not
    (scaled); NULL for any other font. */
@@ -112,7 +108,7 @@ int blit_raster_get_styled(BlitRaster *raster, uint32_t scalar, int columns,
    glyph, or a Slate or capsule control. */
 int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
                                  BlitRasterGlyph *glyph);
-/* Internal bounded colour/opt-in Arabic cluster path. Unsupported forms fail
+/* Internal bounded colour cluster path. Unsupported forms fail
    without replacing cache entries or the caller's output. Does not segment
    terminal input or choose a cluster's column allocation. */
 int blit_raster_get_cluster(BlitRaster *raster, const BlitCellCluster *cluster,

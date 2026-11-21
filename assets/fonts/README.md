@@ -26,9 +26,10 @@ same applies to an operator's own fonts in `/usr/local/lib/blit/fonts/text`.
 | `text/spleen/spleen-{6x12,8x16,12x24,16x32,32x64}.otf` | Spleen 2.2.0, one font of five masters (ADR 0227) | `licenses/Spleen-LICENSE.txt` |
 
 **Every outline font draws through one glyph stack,** in this directory,
-fitted to the chosen font when drawn. Arabic letters go to
-`BlitArabicModern.ttf`, one Arabic companion for every font. Every other
-character takes the first of these that has it (the same order as the
+fitted to the chosen font when drawn. Runs of Arabic cells are shaped as
+words in `NotoNaskhArabic-Regular.ttf`, the one Arabic face, for every font
+([below](#the-arabic-face)). Every other character, and an Arabic cell the
+word face cannot shape, takes the first of these that has it (the same order as the
 [font reference](../../docs/font-reference.md)):
 1. **Cell geometry,** drawn by the raster: box drawing, block elements,
    Braille, core Powerline, Blit's bar corners, the window-chrome and
@@ -68,7 +69,7 @@ holds nothing unpinned.
 
 **The one registry (ADR 0243):** `fonts.source.json` is also the one place a
 face is named. Every face Blit ships -- the text fonts, the glyph stack, the
-emoji faces, the Arabic faces (its `arabic` section) and the two pixel fonts
+emoji faces, the Arabic face (its `arabic` section) and the two pixel fonts
 (its `pixel` section) -- has an `id` (its family name in kebab form, a PSF's
 its file name), a `role` and a `draw`, both from the vocabulary in its
 `registry` section, and its `family` where it has one.
@@ -97,6 +98,11 @@ Retired in 0.2.36:
 - the baked Blit Modern, Retro and JetBrainless Nerd fonts;
 - their generator, `build-outline-nerd.py`;
 - Blit Arabic Retro.
+
+Retired with ADR 0243: Blit Arabic Modern (`BlitArabicModern.ttf`, derived
+from GNU FreeMono), its FreeMono notices and source archive, its generator
+`build-arabic-profile.py`, and the `blit-font-sources` package that carried
+the source (ADR 0217).
 
 Scope matters: this is **not all Unicode or all emoji sequences**. Font files
 alone do not shape flags, skin tones, ZWJ families or VS16 presentation. The
@@ -271,49 +277,35 @@ primary font. Codepoints outside the BMP are **not** covered, because
 the wide cells, plane 1 and beyond come from the glyph stack's
 `UnifontUpper-Regular.otf`.
 
-## The Arabic companion
+## The Arabic face
 
-`BlitArabicModern.ttf` (GNU FreeMono 20120503 derivative) is the one Arabic
-companion attached to every outline text font (ADR 0195). It preserves source outlines and positioning; native
-antialiased glyphs and cell-local mark clusters replace PSF substitution for
-the tested Arabic repertoire. There is no second bidi pass: Hibr already
-supplies visual forms. The companion shares the primary Latin baseline.
-`GET /v1/fonts` identifies the loaded companion (`active.arabic_companion`)
-and each profile's `arabic_companion_path`; pixel fonts have none.
-
-Canonical source/output hashes and licences: the `arabic` section of
-`fonts.source.json`.
-`PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-arabic-profile.py --profile modern SOURCE OUTPUT`
-needs a Python whose Unicode data is 14.0.0 (Python 3.11; the script refuses
-another) and uses pinned fontTools 4.60.1, Unicode 14.0.0 decompositions and HarfBuzz 6.0.0.
-It adds only missing presentation aliases that the source shaper resolves to
-one glyph; it does not promise all Arabic forms exist. The face retains the
-source notices. FreeMono is GPLv3-or-later with its font
-embedding exception retained in the font and `FreeMono-README.txt`;
-`FreeMono-LICENSE.txt` is the GPL and `FreeMono-AUTHORS.txt` credits contributors.
-The complete upstream preferred-source/build archive is kept in the
-repository at `sources/freefont-src-20120503.tar.gz`, pinned by the manifest.
-It is not in the runtime package: the separate `blit-font-sources` package
-installs it at `/usr/share/doc/blit-font-sources/`, and
-`/usr/lib/blit/fonts/FreeMono-SOURCE.txt` in the `blit` package points to it
-(ADR 0217); its
-`sfd/FreeMono.sfd`, FontForge generation scripts and build instructions are
-the source of the upstream outlines. Blit's offline derivative generator is
-the source of the naming/cmap modifications, not a new font-outline design.
+`NotoNaskhArabic-Regular.ttf`, Noto Naskh Arabic 2.021, the upstream
+release's unhinted face, unmodified (OFL 1.1,
+`licenses/NotoNaskhArabic-OFL.txt`), is Blit's one Arabic face (ADR 0241,
+0243), attached to every text font, pixel fonts included. Each run of
+Arabic cells Hibr sends is one word: its letters are recovered from Hibr's
+presentation forms (by the Unicode 14.0.0 decomposition pinned in the
+`arabic` section of `fonts.source.json`, `src/blit_arabic_forms.h`), shaped
+with HarfBuzz and fitted into exactly its cells, and each cell draws its
+slice. There is no second bidi pass: Hibr already supplies visual forms.
+Words share the primary Latin baseline; their ink may take a row above and
+below, never a column sideways. A run the face cannot shape (a scalar it
+lacks) is drawn cell by cell from the glyph stack. `GET /v1/fonts` reports
+the attached face as `active.arabic`.
 
 `arabic-specimens.json` records actual read-only Hibr0.99.277/ABI16 visual
 output, including `حِبْر`, vocalized Bismillah, lam-alef variants and
 Arabic-Indic/Hindi digits `٠١٢٣٤٥٦٧٨٩` (U+0660..0669), alongside ASCII digits.
 It is a finite corpus, not exhaustive Quranic/Unicode coverage.
 
-Run `ruby tools/tests/arabic_raster_gate.rb` or the normal font gate suite.
-Generate a real raster preview with
-`ruby tools/fonts/preview.rb --arabic build/font-preview/blit-arabic.png`.
-The backend fixture consumes ink offsets and verifies neighbouring-ink damage,
-pane clipping, cursor repaint and mixed Latin/Arabic/colour cache collisions
-through the KMS compositor's cell path, under two text fonts. Run
-`ruby tools/tests/arabic_backend_gate.rb`. These are finite composition
-tests, not physical scanout or typographic acceptance. Physical typography
-review remains separate from automated gates.
-
-[Inspect the raster specimen](../../docs/images/blit-arabic-candidates.png).
+Run the font gate suite, or the Arabic gates alone:
+`ruby tools/tests/arabic_word_text_gate.rb` (the letters recovered from the
+cells), `arabic_word_slice_gate.rb` (every text font, heights 8-64: slices
+compose their words exactly), `arabic_word_view_gate.rb` and
+`arabic_backend_gate.rb` (through the KMS compositor's cell path: words
+placed exactly, neighbouring-ink damage, pane clipping, cursor repaint,
+mixed Latin/Arabic/colour cache collisions and a refused run drawn from the
+glyph stack), and `sh tools/tests/arabic_screen_gate.sh` (the GPU's word
+sprites). These are finite composition tests, not physical scanout or
+typographic acceptance. Physical typography review remains separate from
+automated gates.

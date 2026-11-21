@@ -468,8 +468,6 @@ suite_font() {
     run_gate icon_clip_gate.rb ruby tools/tests/icon_clip_gate.rb
     run_gate pixel_font_stack_gate.rb ruby tools/tests/pixel_font_stack_gate.rb
     run_gate custom_icon_api_gate.rb ruby tools/tests/custom_icon_api_gate.rb
-    run_gate arabic_raster_gate.rb ruby tools/tests/arabic_raster_gate.rb
-    run_gate arabic_word_gate.py python3 tools/tests/arabic_word_gate.py
     run_gate arabic_word_text ruby tools/tests/arabic_word_text_gate.rb
     run_gate arabic_word_slice ruby tools/tests/arabic_word_slice_gate.rb
     run_gate arabic_word_view ruby tools/tests/arabic_word_view_gate.rb

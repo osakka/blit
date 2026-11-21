@@ -241,7 +241,7 @@ static int font_load_file(BlitFont *font, const char *path)
 /* ADR 0195: the font list is discovered, not written by hand.
  *
  * One fonts root (BLIT_FONT_ROOT, else /usr/lib/blit/fonts) holds the glyph
- * stack, the emoji and Arabic faces, the pixel fonts, and text/, the shipped
+ * stack, the emoji faces, the Arabic face, the pixel fonts, and text/, the shipped
  * text fonts. BLIT_FONT_LOCAL_ROOT (else /usr/local/lib/blit/fonts) may hold
  * an operator's own text/. A text font is any regular, scalable, fixed-width
  * TTF or OTF with a Unicode charmap; its id is its family name in lower-case
@@ -653,13 +653,8 @@ const char *blit_font_profile_for_path(const char *path)
     return "custom";
 }
 
-/* ADR 0195: one Arabic companion serves every outline font. */
-const char *blit_font_arabic_path(const char *primary)
-{
-    return blit_font_is_outline(primary) ? blit_font_root_file(BLIT_FACE_ARABIC_CELLS) : NULL;
-}
-
-/* ADR 0241: the face Arabic words are shaped in, for every text font. */
+/* ADR 0241, 0243: the face Arabic words are shaped in, Blit's one Arabic
+   face, for every text font. */
 const char *blit_font_arabic_words_path(void)
 {
     return blit_font_root_file(BLIT_FACE_ARABIC_WORDS);
@@ -668,7 +663,7 @@ const char *blit_font_arabic_words_path(void)
 int blit_font_profile_available(int index)
 {
     static const char *const needed[] = {
-        BLIT_FACE_COLOUR, BLIT_FACE_TEXT_EMOJI, BLIT_FACE_PIXEL_FALLBACK, BLIT_FACE_ARABIC_CELLS
+        BLIT_FACE_COLOUR, BLIT_FACE_TEXT_EMOJI, BLIT_FACE_PIXEL_FALLBACK, BLIT_FACE_ARABIC_WORDS
     };
     const char *path = blit_font_profile_path(index);
     size_t i;

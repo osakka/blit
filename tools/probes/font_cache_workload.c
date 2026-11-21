@@ -29,14 +29,14 @@ int main(int argc, char **argv)
     unsigned long before, renders;
     struct timespec start, stop;
     double ms;
-    if (argc != 5) return 2;
+    if (argc != 4) return 2;
     while (scanf("%x", &scalar) == 1) {
         if (n == 512) return 2;
         keys[n++] = scalar;
     }
     if (!n || blit_font_load_path(&font, argv[1]) != 0) return 2;
     r = blit_raster_open(&font, argv[2], argv[3], 11, 22);
-    if (!r || !blit_raster_set_arabic(r, argv[4])) return 2;
+    if (!r) return 2;
     for (i = 0; i < n; ++i) {
         if (!blit_raster_get(r, keys[i], 1, 0, &g)) return 3;
         expected[i] = signature(&g);

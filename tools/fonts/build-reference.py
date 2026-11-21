@@ -69,7 +69,7 @@ def generate():
     entries = [('text-' + Path(t['file']).stem, t) for t in modern['text']]
     entries += [('stack-icons', stack['icons']), ('stack-nerd', stack['nerd'])]
     entries += [('stack-' + Path(e['file']).stem, e) for e in stack['symbols'] + stack['unifont']]
-    entries += [('arabic', arabic['modern']), ('colour-emoji', modern['colour']),
+    entries += [('arabic', arabic['naskh']), ('colour-emoji', modern['colour']),
                 ('text-emoji', modern['text_emoji'])]
     coverage = {'format_version': 1, 'scope': 'Exact native asset cmap, not runtime routing, ink, width or shaping conformance. Ranges are inclusive hexadecimal scalars.', 'faces': {}}
     cmaps = {}
@@ -96,7 +96,7 @@ def generate():
         for name, cp in sorted(items):
             page += f'| `{name}` | `U+{cp:04X}` | `{chr(cp)}` | `{json.dumps(chr(cp), ensure_ascii=True)}` |\n'
         outputs[f'{family}.md'] = page
-    intro += '\n## Native face inventory\n\nThese are asset cmap counts, not glyph counts, application coverage or effective runtime fallback inventories. Arabic companions contain other characters that are not automatically routed through them.\n\n'
+    intro += '\n## Native face inventory\n\nThese are asset cmap counts, not glyph counts, application coverage or effective runtime fallback inventories. The Arabic face also maps characters that are not routed through it: it shapes runs of Arabic cells only (ADR 0241).\n\n'
     intro += '| Face role | Asset | Mapped scalars |\n| --- | --- | ---: |\n'
     for role, entry in coverage['faces'].items():
         intro += f'| {role} | `{entry["file"]}` | {entry["scalar_count"]} |\n'

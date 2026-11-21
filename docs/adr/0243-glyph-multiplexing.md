@@ -1,7 +1,8 @@
 # ADR 0243: Glyph multiplexing -- one registry, adopted protocols, published
 
-- Status: accepted as direction (the owner, 2026-11-21); two decisions open
-  (below). Step 1, the registry, built in 0.3.130: one manifest
+- Status: accepted as direction (the owner, 2026-11-21); both open
+  decisions made (below): the icons moved to U+101000 and Blit Arabic
+  Modern retired, in 0.3.131. Step 1, the registry, built in 0.3.130: one manifest
   (`assets/fonts/fonts.source.json`, the Arabic manifest folded in), a
   generated header (`src/blit_font_registry.h`), no face file named in
   `src/`, `/v1/fonts` reporting it; every font gate's output byte for byte
@@ -101,7 +102,7 @@ The handshake, in one write: the Glyph Protocol's support check, an
 XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
 66, then DA1; anything unanswered when DA1's answer arrives is unsupported.
 
-## Open (the owner's)
+## Decided (the owner's, 2026-11-21)
 
 - **Blit's icon codepoints: decided (the owner, 2026-11-21), built in
   0.3.131.** Blit's icons and cell geometry were at U+100000-U+100495. The
@@ -127,11 +128,28 @@ XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
   map first (to be gated on Blit 0.3.131); a later release, named in its notes,
   drops the old range (`BLIT_ICON_OLD_RANGE_DROPPED`) and the gate's old
   half. Step 3's name lookup makes the move invisible to new programs.
-- **One Arabic face.** Noto Naskh Arabic covers every assigned codepoint of
-  the six Arabic blocks; Blit Arabic Modern covers part of the base block
-  and none of the Supplement or Extended blocks. Proposed: retire Modern
-  (as Retro was), so Arabic is one path with no switch, removing the
-  `arabic` setting and its Control Panel row.
+- **One Arabic face** (2026-11-21). Noto Naskh Arabic covers every
+  assigned codepoint of the six Arabic blocks; Blit Arabic Modern covered
+  part of the base block and none of the Supplement or Extended blocks.
+  Modern is retired, as Retro was (ADR 0195), so Arabic is one path with no
+  switch:
+  - the face (`BlitArabicModern.ttf`), its registry entry and role
+    (`arabic_cells`), its FreeMono notices and source archive, its
+    generator (`build-arabic-profile.py`) and the `blit-font-sources`
+    package (ADR 0217) are removed; the registry has one Arabic face,
+    `noto-naskh-arabic` (`arabic_words`);
+  - the raster's per-cell companion path is removed: a run the word face
+    refuses is drawn cell by cell from the glyph stack, and ink margins are
+    a row above and below, none sideways (ADR 0241, amended);
+  - the `arabic` font setting is removed (the Control Panel's Blit pane
+    drops its row, in hibr-apps); `active.arabic` reports the face (`{family, path, shaping: "words"}`,
+    null when it is not attached) and a stored `font.arabic` is ignored;
+  - `blit` declares no relation to `blit-font-sources`: an installed copy
+    is an inert source archive and stays until removed, because a Breaks
+    makes the updater's `dpkg --install` refuse the update (checked with
+    dpkg 1.22 on scratch packages) and a Conflicts would hold `blit` back
+    under `apt upgrade`. hibr-apt should keep the package while it serves a
+    `blit` of 0.3.130 or earlier, the GPL source of that release's face.
 
 ## Not chosen
 

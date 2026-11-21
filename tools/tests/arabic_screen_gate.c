@@ -29,8 +29,7 @@ int main(void)
     memset(&kms, 0, sizeof(kms));
     if (blit_font_load_path(&font, "assets/fonts/Blit-Terminus16.psf") < 0 || blit_font_load_wide(&wide) < 0) return 2;
     r = blit_raster_open(&font, "assets/fonts/text/Hack-Regular.ttf", "assets/fonts/NotoColorEmoji.ttf", 11, 22);
-    if (!r || !blit_raster_set_arabic(r, "assets/fonts/BlitArabicModern.ttf") ||
-        !blit_raster_set_arabic_words(r, "assets/fonts/NotoNaskhArabic-Regular.ttf")) return 3;
+    if (!r || !blit_raster_set_arabic_words(r, "assets/fonts/NotoNaskhArabic-Regular.ttf")) return 3;
     blit_raster_attach(&font, r);
     kms.font = &font; kms.wide_font = &wide;
     kms.gles = blit_gles_open_surfaceless(error, sizeof(error));

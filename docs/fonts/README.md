@@ -28,7 +28,7 @@ Generated from pinned Nerd Fonts3.4.0 and packaged font cmaps. Do not edit these
 
 ## Native face inventory
 
-These are asset cmap counts, not glyph counts, application coverage or effective runtime fallback inventories. Arabic companions contain other characters that are not automatically routed through them.
+These are asset cmap counts, not glyph counts, application coverage or effective runtime fallback inventories. The Arabic face also maps characters that are not routed through it: it shapes runs of Arabic cells only (ADR 0241).
 
 | Face role | Asset | Mapped scalars |
 | --- | --- | ---: |
@@ -49,7 +49,7 @@ These are asset cmap counts, not glyph counts, application coverage or effective
 | stack-NotoSansMath-Regular | `NotoSansMath-Regular.ttf` | 3033 |
 | stack-Unifont-Regular | `Unifont-Regular.otf` | 58909 |
 | stack-UnifontUpper-Regular | `UnifontUpper-Regular.otf` | 57072 |
-| arabic | `BlitArabicModern.ttf` | 4160 |
+| arabic | `NotoNaskhArabic-Regular.ttf` | 1249 |
 | colour-emoji | `NotoColorEmoji.ttf` | 1510 |
 | text-emoji | `NotoEmojiText.ttf` | 1489 |
 

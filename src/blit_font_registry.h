@@ -10,7 +10,6 @@
 #define BLIT_FACE_NERD "SymbolsNerdFontMono-Regular.ttf"
 #define BLIT_FACE_COLOUR "NotoColorEmoji.ttf"
 #define BLIT_FACE_TEXT_EMOJI "NotoEmojiText.ttf"
-#define BLIT_FACE_ARABIC_CELLS "BlitArabicModern.ttf"
 #define BLIT_FACE_ARABIC_WORDS "NotoNaskhArabic-Regular.ttf"
 #define BLIT_FACE_PIXEL_FALLBACK "Blit-Terminus16.psf"
 #define BLIT_FACE_PIXEL_WIDE "Blit-Unifont16.psf"
@@ -26,7 +25,7 @@
 
 /* The whole registry, one X(id, role, draw, file, family) per face in the
    registry's order; family is NULL where the face has none (a PSF). */
-#define BLIT_FONT_REGISTRY_COUNT 23
+#define BLIT_FONT_REGISTRY_COUNT 22
 #define BLIT_FONT_REGISTRY(X) \
     X("hack", "text", "cell", "text/Hack-Regular.ttf", "Hack") \
     X("ibm-3270", "text", "cell", "text/3270-Regular.ttf", "IBM 3270") \
@@ -47,7 +46,6 @@
     X("unifont-upper", "unifont", "fitted", "UnifontUpper-Regular.otf", "Unifont Upper") \
     X("noto-color-emoji", "colour", "colour", "NotoColorEmoji.ttf", "Noto Color Emoji") \
     X("noto-emoji", "text_emoji", "cell", "NotoEmojiText.ttf", "Noto Emoji") \
-    X("blit-arabic-modern", "arabic_cells", "cell", "BlitArabicModern.ttf", "Blit Arabic Modern") \
     X("noto-naskh-arabic", "arabic_words", "words", "NotoNaskhArabic-Regular.ttf", "Noto Naskh Arabic") \
     X("blit-terminus16", "pixel_fallback", "cell", "Blit-Terminus16.psf", NULL) \
     X("blit-unifont16", "pixel_wide", "cell", "Blit-Unifont16.psf", NULL)

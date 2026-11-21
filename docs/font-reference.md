@@ -41,9 +41,10 @@ The shipped text fonts are unmodified upstream releases:
 | `spleen` | Spleen 2.2.0, five masters (6x12 to 32x64), pixel-exact at their multiples (ADR 0227) | BSD-2-Clause |
 | `blit-terminus16` | Bitmap pixel font | OFL |
 
-**Every outline font draws through one glyph stack.** Arabic letters go
-to Blit Arabic Modern. Every other character takes the first of these that
-has it:
+**Every outline font draws through one glyph stack.** Runs of Arabic
+cells are shaped as words in Noto Naskh Arabic ([below](#arabic-and-arabic-indic-numerals)).
+Every other character, and an Arabic cell the word face cannot shape,
+takes the first of these that has it:
 1. Blit's cell geometry: box drawing, blocks, Braille, Powerline, bar
    corners and the window-chrome glyph sets.
 2. Blit's own colour icons.
@@ -82,11 +83,8 @@ hinted: it changes how crisp text is at small sizes, and nothing about the
 cell grid. Fitted icons and symbols, emoji and cell-geometry glyphs ignore it
 (ADR 0218). Set it with `PUT /v1/fonts`; it is stored with the font.
 
-`arabic` (`naskh`, `modern`; default `naskh`) chooses how Arabic is drawn
-(ADR 0241): `naskh` shapes it as words in Noto Naskh Arabic, for every text
-font including the pixel fonts; `modern` draws it cell by cell in Blit
-Arabic Modern. Set it with `PUT /v1/fonts`; it is stored with the font, and
-`active.arabic` reports it.
+Arabic has one face and no setting (ADR 0243): the `arabic` choice of
+0.3.129 and 0.3.130 went with Blit Arabic Modern.
 
 **The icon pen** is the pen of Blit's colour icons (U+101000 and up that
 carry colour), and it is per cell: SGR 68:v (`1` auto, `2` black, `3`
@@ -111,7 +109,7 @@ while the desktop beside it keeps them in colour.
 | Themed Hibr pen, runic text, wired indicator | [Themed text additions](fonts/special.md#themed-text-additions) | U+270E, U+16D2, U+21CC retain documented text meanings |
 | Window chrome: title bars, frames, dialogs, buttons (Chalk, Slate light, Slate dark) | [Cell geometry](fonts/special.md#cell-geometry), [below](#window-chrome-glyph-sets-chalk-and-slate) | Pixel-exact cell geometry; Chalk in the foreground, Slate in its own colours; label buttons with SGR 51 |
 | Powerline separators and box/block UI geometry | [Powerline](fonts/pl.md), [Extras](fonts/ple.md) | Core U+E0B0..E0B3 use cell-fitted geometry; do not extend that guarantee to every Extra; box/half-block geometry is protected |
-| Arabic and Arabic-Indic digits | [Arabic section below](#arabic-and-arabic-indic-numerals) | Native companions, shared baseline, existing Hibr visual ordering |
+| Arabic and Arabic-Indic digits | [Arabic section below](#arabic-and-arabic-indic-numerals) | Shaped as words in Noto Naskh Arabic, shared baseline, existing Hibr visual ordering |
 | Faces, people, nature, food, objects, symbols, flags | [Emoji categories](fonts/emoji.md) | Colour/text presentation and multi-scalar layout are distinct from Nerd icons |
 
 Nerd `custom-*` names belong to the pinned upstream Nerd catalogue; they are
@@ -510,15 +508,11 @@ application already chooses.
 
 ## Arabic and Arabic-Indic numerals
 
-Every outline text font attaches the one Arabic companion, Blit Arabic
-Modern, automatically, and under the default `arabic: "naskh"` every text
-font, pixel fonts included, also attaches the word face, Noto Naskh Arabic.
-Inspect `active.arabic_companion` for the loaded family/path, shared
-`baseline_px` and `shaping`: `"words"` with `words_family`/`words_path` when
-the word face is attached, else `"visual-cell-marks"`. Each profile reports
-`arabic_companion_path`, null for the pixel fonts; a pixel font's
-`active.arabic_companion` has a null `path` and `family` under `naskh` and
-is null under `modern`.
+Every text font, pixel fonts included, attaches Blit's one Arabic face,
+Noto Naskh Arabic (ADR 0241, 0243). `active.arabic` reports its `family`,
+`path` and `shaping` (`"words"`), and is null only when the face could not
+be attached at boot (its file missing), when every Arabic cell is drawn
+from the glyph stack.
 Primary `glyphs`/`mappings` counts describe the PSF fallback, not total
 coverage.
 
@@ -528,17 +522,20 @@ are not the same set. Core specimens include `حِبْر`, vocalized Bismillah,
 lam-alef variants, greetings and mixed numeral sets.
 
 Hibr already emits visual-order presentation forms. Blit preserves their
-cell allocation and uses OpenType cell-local mark positioning; **do not apply
-a second bidi pass or reverse the text again**. Blit is not an implicit
-paragraph bidi/shaping engine for arbitrary clients. Diacritics and joining
-ink may extend beyond a cell while the advance remains unchanged.
+cell allocation: each run of Arabic cells is one word, its letters recovered
+from Hibr's forms, shaped with HarfBuzz and fitted into exactly the cells it
+was given; each cell draws its slice. **Do not apply a second bidi pass or
+reverse the text again**. Blit is not an implicit paragraph bidi/shaping
+engine for arbitrary clients. A word's ink may take a row above and below,
+never a column sideways. A run the face cannot shape (a scalar it lacks,
+such as a Latin accent on an Arabic letter) is drawn cell by cell from the
+glyph stack.
 
-[View the actual shared-raster Arabic specimen](images/blit-arabic-candidates.png).
 The [captured logical/visual corpus](../assets/fonts/arabic-specimens.json)
-is finite; neither the corpus nor raw companion cmap coverage guarantees all
+is finite; neither the corpus nor the face's cmap coverage guarantees all
 Arabic, Quranic annotations or religious ligatures. The corpus's original
 acceptance annotations are historical; current implementation evidence is in
-the [verification ledger](verification-status.md) and [ADR 0174](adr/0174-arabic-companion-rasterization.md).
+the [verification ledger](verification-status.md) and [ADR 0241](adr/0241-arabic-shaped-as-words-and-drawn-as-slices.md).
 
 ## Emoji: characters, presentation and sequences
 
@@ -604,8 +601,7 @@ site should consume the same files rather than introduce a parallel catalogue.
 Keep [font notices](../assets/fonts/README.md), [Nerd family attribution](../assets/fonts/licenses/nerd-v3.4.0/README.md),
 [original-art MIT licence](../assets/fonts/icons/LICENSE.txt), and
 [Unicode data licence](../assets/unicode/emoji-18.0/LICENSE.txt) when redistributing
-the respective material. Each text font's licence is in `licenses/`. Arabic
-Modern is GPLv3+ with the documented font-embedding exception and preferred
-source included; Unifont is used under the OFL 1.1.
+the respective material. Each text font's licence is in `licenses/`. Noto
+Naskh Arabic is used under the OFL 1.1, as is Unifont.
 Typeface, source-art and trademark rights are distinct. Inclusion of a brand
 glyph does not grant permission to use its trademark.

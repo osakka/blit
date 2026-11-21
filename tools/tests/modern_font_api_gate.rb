@@ -22,7 +22,7 @@ end
 Dir.mktmpdir('blit-modern-api') do |work|
   fonts = File.join(work, 'fonts'); Dir.mkdir(fonts); Dir.mkdir(File.join(fonts, 'text'))
   # ADR 0195: a fonts root holds the stack; text/ holds the text fonts.
-  %w[Blit-Terminus16.psf text/Hack-Regular.ttf text/3270-Regular.ttf BlitArabicModern.ttf NotoNaskhArabic-Regular.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
+  %w[Blit-Terminus16.psf text/Hack-Regular.ttf text/3270-Regular.ttf NotoNaskhArabic-Regular.ttf NotoColorEmoji.ttf NotoEmojiText.ttf].each do |asset|
     FileUtils.copy_file(File.join(root, 'assets/fonts', asset), File.join(fonts, asset))
   end
   env = TestProfile.environment.merge('BLIT_SETTINGS'=>'load',
@@ -54,78 +54,70 @@ Dir.mktmpdir('blit-modern-api') do |work|
       end
     end
   end
-  # ADR 0241: naskh attaches the word face beside the companion; modern is the
-  # companion alone, cell by cell, as before the setting existed.
+  # ADR 0241, 0243: one Arabic face, Noto Naskh Arabic's words, for every
+  # text font, pixel fonts included; no companion, no choice.
   words = lambda do |active, label|
-    arabic = active['arabic_companion']
-    raise "#{label}: arabic is #{active['arabic'].inspect}, not naskh" unless active['arabic'] == 'naskh'
-    raise "#{label}: word face not reported: #{arabic.inspect}" unless arabic.is_a?(Hash) &&
-      arabic['shaping'] == 'words' && arabic['words_family'] == 'Noto Naskh Arabic' &&
-      File.basename(arabic['words_path'].to_s) == 'NotoNaskhArabic-Regular.ttf'
+    arabic = active['arabic']
+    raise "#{label}: the Arabic face is not reported: #{arabic.inspect}" unless arabic.is_a?(Hash) &&
+      arabic.keys.sort == %w[family path shaping] && arabic['shaping'] == 'words' &&
+      arabic['family'] == 'Noto Naskh Arabic' && File.basename(arabic['path'].to_s) == 'NotoNaskhArabic-Regular.ttf'
+    raise "#{label}: a retired companion is reported" if active.key?('arabic_companion')
   end
   cells = lambda do |active, label|
-    arabic = active['arabic_companion']
-    raise "#{label}: arabic is #{active['arabic'].inspect}, not modern" unless active['arabic'] == 'modern'
-    raise "#{label}: modern still reports the word face: #{arabic.inspect}" unless arabic.is_a?(Hash) &&
-      arabic['shaping'] == 'visual-cell-marks' && !arabic.key?('words_path') && !arabic.key?('words_family')
+    raise "#{label}: no word face, yet arabic is #{active['arabic'].inspect}" unless active.key?('arabic') && active['arabic'].nil?
+  end
+  retired = lambda do |inventory|
+    raise 'a profile still names an Arabic companion' if inventory['profiles'].any? { |p| p.key?('arabic_companion_path') }
+    raise 'the registry still holds an arabic_cells face' if inventory['registry'].any? { |f| f['role'] == 'arabic_cells' }
   end
   begin
     launch.call
-    active = request.call('GET', '/v1/fonts').fetch('active')
-    words.call(active, 'the default')
-    raise 'a pixel font with the word face misreports the companion' unless active.dig('arabic_companion','path').nil? && active.dig('arabic_companion','family').nil?
+    inventory = request.call('GET', '/v1/fonts')
+    retired.call(inventory)
+    words.call(inventory.fetch('active'), 'the default (a pixel font)')
     result = request.call('PUT', '/v1/fonts', {font_id:'hack', size_px:23})
     raise 'native face not selected' unless result.dig('active', 'rasterization') == 'native-antialiased'
     raise 'colour support absent' unless result.dig('active', 'colour_glyphs') == true
-    raise 'Arabic companion absent' unless result.dig('active','arabic_companion','family') == 'Blit Arabic Modern'
     words.call(result['active'], 'hack')
-    # arabic alone, either word, and back; the font and size stay.
-    active = request.call('PUT', '/v1/fonts', {arabic:'modern'}).fetch('active')
-    cells.call(active, 'arabic modern')
-    raise 'arabic modern changed the font' unless active['id'] == 'hack' && active['size_px'] == 23
-    raise 'modern lost the companion' unless active.dig('arabic_companion','family') == 'Blit Arabic Modern'
-    renders = request.call('GET', '/v1/fonts').dig('active','raster_cache','renders')
-    request.call('PUT', '/v1/fonts', {arabic:'modern'})
-    raise 'an unchanged arabic rebuilt the raster' unless request.call('GET', '/v1/fonts').dig('active','raster_cache','renders') == renders
-    words.call(request.call('PUT', '/v1/fonts', {arabic:'naskh', size_px:23}).fetch('active'), 'arabic naskh with a size')
-    ['Naskh', 'MODERN', 'arabic', 'noto', '', 1, nil, true, ['naskh']].each do |bad|
-      problem = request.call('PUT', '/v1/fonts', {arabic:bad}, 400)
-      raise "arabic #{bad.inspect} -> #{problem.inspect}" unless problem['code'] == 'invalid_font_arabic' && problem['detail'].start_with?('arabic must be naskh or modern')
+    # arabic is no longer a font setting: alone it is an empty change, and
+    # beside a real one it is read past like any unknown key.
+    ['naskh', 'modern', 'kufi', 1, nil].each do |old|
+      problem = request.call('PUT', '/v1/fonts', {arabic:old}, 400)
+      raise "arabic #{old.inspect} alone -> #{problem.inspect}" unless problem['code'] == 'font_configuration_empty' && !problem['detail'].include?('arabic')
     end
-    words.call(request.call('GET', '/v1/fonts').fetch('active'), 'after refusals')
-    problem = request.call('PUT', '/v1/fonts', {}, 400)
-    raise "empty font change -> #{problem.inspect}" unless problem['code'] == 'font_configuration_empty' && problem['detail'].include?('arabic')
-    # The settings door stores and validates it.
+    renders = request.call('GET', '/v1/fonts').dig('active','raster_cache','renders')
+    active = request.call('PUT', '/v1/fonts', {arabic:'modern', size_px:23}).fetch('active')
+    words.call(active, 'arabic modern beside an unchanged size')
+    raise 'an unchanged font rebuilt the raster' unless active['id'] == 'hack' && active['size_px'] == 23 && active.dig('raster_cache','renders') == renders
+    # The settings door: the stored font has no arabic, and one sent back
+    # by a client (from a 0.3.129 or 0.3.130 document) is read past.
     settings = settled.call
-    raise "arabic not stored: #{settings.dig('document','font').inspect}" unless settings.dig('document','font','arabic') == 'naskh'
+    raise "arabic stored: #{settings.dig('document','font').inspect}" if settings.dig('document','font').key?('arabic')
     document = settings.fetch('document')
     document['font']['arabic'] = 'kufi'
-    problem = request.call('PUT', '/v1/settings', {document:document}, 400, {'If-Match'=>settings.fetch('revision').to_s})
-    raise "settings arabic kufi -> #{problem.inspect}" unless problem['code'] == 'invalid_settings_font'
-    document['font']['arabic'] = 'modern'
     request.call('PUT', '/v1/settings', {document:document}, 200, {'If-Match'=>settings.fetch('revision').to_s})
-    cells.call(request.call('GET', '/v1/fonts').fetch('active'), 'settings arabic modern')
-    # Survives a restart.
-    settled.call
-    stop.call; launch.call
-    cells.call(request.call('GET', '/v1/fonts').fetch('active'), 'modern after a restart')
-    request.call('PUT', '/v1/fonts', {arabic:'naskh'})
-    # A document saved before the setting existed has no arabic: naskh.
+    words.call(request.call('GET', '/v1/fonts').fetch('active'), 'settings with an old arabic')
+    # A document saved by 0.3.129 or 0.3.130, arabic modern, still loads:
+    # its font, and Arabic as words.
     settled.call
     stop.call
     saved = JSON.parse(File.read(File.join(work, 'settings.json')))
-    saved['font'].delete('arabic')
+    saved['font']['arabic'] = 'modern'
     File.write(File.join(work, 'settings.json'), JSON.generate(saved))
     launch.call
     active = request.call('GET', '/v1/fonts').fetch('active')
-    words.call(active, 'a document without arabic')
-    raise 'a document without arabic lost the font' unless active['id'] == 'hack' && active['size_px'] == 23
+    words.call(active, 'a document with arabic modern')
+    raise 'a document with arabic lost the font' unless active['id'] == 'hack' && active['size_px'] == 23
+    # ... and the key is gone once the font is saved again.
+    request.call('PUT', '/v1/fonts', {size_px:24})
+    request.call('PUT', '/v1/fonts', {size_px:23})
+    raise 'an old arabic was written back' if settled.call.dig('document','font').key?('arabic')
     %w[ibm-3270 hack].each do |profile|
       request.call('PUT', '/v1/fonts', {font_id:profile})
       (8..64).each do |size|
         active = request.call('PUT', '/v1/fonts', {size_px:size}).fetch('active')
         raise "incorrect #{profile} #{size}px metrics" unless active['size_px'] == size && active.dig('cell_pixels','height') == size && active['id'] == profile && active['rasterization'] == 'native-antialiased'
-        raise 'wrong companion identity' unless File.basename(active.dig('arabic_companion','path')) == 'BlitArabicModern.ttf'
+        words.call(active, "#{profile} #{size}px")
       end
     end
     request.call('PUT', '/v1/fonts', {size_px:23})
@@ -137,43 +129,25 @@ Dir.mktmpdir('blit-modern-api') do |work|
     active = request.call('PUT', '/v1/fonts', {font_id:'blit-terminus16'}).fetch('active')
     raise 'retro policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'bitmap-nearest'
     words.call(active, 'blit-terminus16')
-    raise 'bitmap misreports Arabic' unless active.dig('arabic_companion','path').nil? && active.dig('arabic_companion','family').nil?
-    active = request.call('PUT', '/v1/fonts', {arabic:'modern'}).fetch('active')
-    raise 'bitmap misreports Arabic' unless active['arabic'] == 'modern' && active['arabic_companion'].nil?
-    words.call(request.call('PUT', '/v1/fonts', {arabic:'naskh'}).fetch('active'), 'blit-terminus16 back to naskh')
     active = request.call('PUT', '/v1/fonts', {font_id:'hack'}).fetch('active')
     raise 'modern policy changed' unless active['size_px'] == 23 && active['rasterization'] == 'native-antialiased'
     %w[hack ibm-3270].each do |profile|
       request.call('PUT', '/v1/fonts', {font_id:profile})
-      ['NotoColorEmoji.ttf','NotoEmojiText.ttf','BlitArabicModern.ttf','NotoNaskhArabic-Regular.ttf'].each do |asset|
+      ['NotoColorEmoji.ttf','NotoEmojiText.ttf','NotoNaskhArabic-Regular.ttf'].each do |asset|
         path = File.join(fonts, asset)
         File.rename(path, path + '.missing')
         begin
+          # A change never loses a face the running raster has.
           request.call('PUT', '/v1/fonts', {size_px:24}, 422)
           active = request.call('GET', '/v1/fonts').fetch('active')
           raise 'failed change destroyed active font' unless active['size_px'] == 23 && active['id'] == profile
-          raise 'failed change lost loaded Arabic face' unless active['arabic_companion'].is_a?(Hash)
           words.call(active, "a failed change without #{asset}")
-          if asset.start_with?('BlitArabic')
-            inventory=request.call('GET','/v1/fonts')
-            raise 'absent companion still available' if inventory['profiles'].find { |p| p['id']==profile }.fetch('available')
-          end
-          if asset.start_with?('NotoNaskh')
-            # modern does not need the word face; naskh cannot come back
-            # without it, and the refused change keeps modern as it was.
-            cells.call(request.call('PUT', '/v1/fonts', {arabic:'modern'}).fetch('active'), "modern without #{asset}")
-            request.call('PUT', '/v1/fonts', {size_px:24})
-            request.call('PUT', '/v1/fonts', {size_px:23})
-            request.call('PUT', '/v1/fonts', {arabic:'naskh'}, 422)
-            active = request.call('GET', '/v1/fonts').fetch('active')
-            cells.call(active, "a refused naskh without #{asset}")
-            raise 'a refused naskh changed the font' unless active['size_px'] == 23 && active['id'] == profile
-          end
+          inventory=request.call('GET','/v1/fonts')
+          raise "#{profile} still available without #{asset}" if inventory['profiles'].find { |p| p['id']==profile }.fetch('available')
         ensure
           File.rename(path + '.missing', path)
         end
       end
-      words.call(request.call('PUT', '/v1/fonts', {arabic:'naskh'}).fetch('active'), "#{profile} naskh again")
       Timeout.timeout(5) do
         loop do
           settings = request.call('GET', '/v1/settings')
@@ -188,13 +162,12 @@ Dir.mktmpdir('blit-modern-api') do |work|
       raise 'restart lost native font' unless active['id'] == profile && active['size_px'] == 23 && active['rasterization'] == 'native-antialiased'
       words.call(active, "#{profile} after a restart")
     end
-    # A fonts root without the word face still starts (the default falls to
-    # modern), but an explicit naskh is refused and changes nothing.
+    # A fonts root without the Arabic face still starts, with its stored
+    # font: Arabic is drawn cell by cell from the glyph stack and
+    # active.arabic is null. A change then goes ahead without the face, and
+    # the first change after it is back attaches it.
     settled.call
     stop.call
-    saved = JSON.parse(File.read(File.join(work, 'settings.json')))
-    saved['font'].delete('arabic')
-    File.write(File.join(work, 'settings.json'), JSON.generate(saved))
     naskh = File.join(fonts, 'NotoNaskhArabic-Regular.ttf')
     File.rename(naskh, naskh + '.missing')
     begin
@@ -202,14 +175,14 @@ Dir.mktmpdir('blit-modern-api') do |work|
       active = request.call('GET', '/v1/fonts').fetch('active')
       cells.call(active, 'a boot without the word face')
       raise 'a boot without the word face lost the stored font' unless active['id'] == 'ibm-3270' && active['size_px'] == 23
-      request.call('PUT', '/v1/fonts', {arabic:'naskh'}, 422)
-      cells.call(request.call('GET', '/v1/fonts').fetch('active'), 'naskh refused without the word face')
-      raise 'a refused naskh was stored' if request.call('GET', '/v1/settings').dig('document','font','arabic') == 'naskh'
+      active = request.call('PUT', '/v1/fonts', {size_px:24}).fetch('active')
+      cells.call(active, 'a change without the word face')
+      raise 'a change without the word face was refused' unless active['size_px'] == 24
     ensure
       File.rename(naskh + '.missing', naskh)
     end
-    words.call(request.call('PUT', '/v1/fonts', {arabic:'naskh'}).fetch('active'), 'naskh once the face is back')
-    puts 'MODERN_FONT_API_PASS sizes=57_each profiles=bitmap+modern+smooth_retro sizing=preserved save_restore=canonical missing_colour_or_text=rollback arabic=naskh+modern+stored+refused'
+    words.call(request.call('PUT', '/v1/fonts', {size_px:23}).fetch('active'), 'a change once the face is back')
+    puts 'MODERN_FONT_API_PASS sizes=57_each profiles=bitmap+modern+smooth_retro sizing=preserved save_restore=canonical missing_colour_or_text=rollback arabic=one_face+old_setting_read_past+boot_without_face'
   rescue Exception
     warn File.read(File.join(work,'server.log'))
     raise

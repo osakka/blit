@@ -1,4 +1,10 @@
-/* Real composition and incremental-vs-clean frames. No physical scanout. */
+/* ADR 0241, 0243: Arabic words through the KMS compositor's own cell path
+   (draw_view, CPU): real composition against a raster oracle, incremental
+   frames equal to clean ones (wallpaper restored, pane edges clipped), the
+   block cursor over a word's overhanging ink, and a run the word face
+   refuses drawn cell by cell from the glyph stack. No physical scanout.
+   With -DBLIT_TEST_NO_INK_DAMAGE (no ink margins) it must fail: a word's
+   ink leaves its row. */
 #include "../../src/blit_kms.c"
 #include "../../src/blit_raster.h"
 
@@ -11,6 +17,7 @@ static unsigned pixels[W*H], saved[W*H], oracle[W*H];
 static unsigned cps[ROWS][COLS], marks[ROWS][COLS][BLIT_MAX_COMBINING];
 static unsigned char counts[ROWS][COLS];
 static int ox,oy,cw,ch;
+static long overhangs;   /* words whose ink leaves their row */
 static int cursor_visible,cursor_column,cursor_row;
 static int wallpaper_active;
 static unsigned char wallpaper_rgb[12]={0x31,0x52,0x73,0x31,0x52,0x73,0x31,0x52,0x73,0x31,0x52,0x73};
@@ -30,21 +37,56 @@ static void frame(int full,int x,int y,int width,int height)
     draw_view(&output,font,NULL,&view);
 }
 
+static void paint_glyph(const BlitRasterGlyph *g,int row,int col,int cursor)
+{
+    int x,y;
+    for(y=0;y<g->height;++y) for(x=0;x<g->width;++x) {
+        int dx=ox+col*cw+g->ink_offset_x+x;
+        int dy=oy+row*ch+g->ink_offset_y+y;
+        int inside_cursor=dx>=ox+cursor_column*cw&&dx<ox+(cursor_column+1)*cw&&
+            dy>=oy+cursor_row*ch&&dy<oy+(cursor_row+1)*ch;
+        if(dx>=ox&&dx<ox+COLS*cw&&dy>=oy&&dy<oy+ROWS*ch&&(!cursor||inside_cursor))
+            oracle[dy*W+dx]=blit_raster_blend(g,x,y,cursor?0x123456:0xabcdef,oracle[dy*W+dx]);
+    }
+}
+
+/* The oracle: each run of Arabic cells is its whole shaped word, placed at
+   the run's first cell (a word never leaves its cells sideways, so this is
+   the slices' order too); any other cell is its own cluster. */
 static void paint_reference(int cursor)
 {
-    int row,col,x,y;
-    for(row=0;row<ROWS;++row) for(col=0;col<COLS;++col) if(cps[row][col]) {
-        BlitCellCluster key;
-        BlitRasterGlyph g;
-        CHECK(blit_cell_cluster_init(&key,cps[row][col],marks[row][col],counts[row][col],1));
-        CHECK(font->raster_cluster_get(font->raster_state,&key,0,&g));
-        for(y=0;y<g.height;++y) for(x=0;x<g.width;++x) {
-            int dx=ox+col*cw+g.ink_offset_x+x;
-            int dy=oy+row*ch+g.ink_offset_y+y;
-            int inside_cursor=dx>=ox+cursor_column*cw&&dx<ox+(cursor_column+1)*cw&&
-                dy>=oy+cursor_row*ch&&dy<oy+(cursor_row+1)*ch;
-            if(dx>=ox&&dx<ox+COLS*cw&&dy>=oy&&dy<oy+ROWS*ch&&(!cursor||inside_cursor))
-                oracle[dy*W+dx]=blit_raster_blend(&g,x,y,cursor?0x123456:0xabcdef,oracle[dy*W+dx]);
+    int row,col,k,n;
+    for(row=0;row<ROWS;++row) {
+        BlitCellCluster cl[COLS];
+        const BlitCellCluster *cells[COLS];
+        BlitWordRun runs[COLS];
+        int worded[COLS];
+        for(col=0;col<COLS;++col) {
+            worded[col]=0;
+            cells[col]=cps[row][col]&&
+                blit_cell_cluster_init(&cl[col],cps[row][col],marks[row][col],counts[row][col],1)&&
+                blit_cell_word_kind(&cl[col])!=BLIT_WORD_NONE?&cl[col]:NULL;
+        }
+        n=blit_cell_word_runs(cells,COLS,runs,COLS);
+        for(k=0;k<n;++k) {
+            BlitCellWord word;
+            BlitRasterGlyph whole;
+            memset(&word,0,sizeof(word));
+            word.kind=runs[k].kind; word.count=runs[k].count;
+            memcpy(word.cells,&cl[runs[k].start],(size_t)word.count*sizeof(BlitCellCluster));
+            /* Every run here is one the face shapes. */
+            CHECK(blit_raster_get_word(font->raster_state,&word,-1,0,&whole,NULL));
+            CHECK(whole.ink_offset_x==0&&whole.width==word.count*cw);
+            overhangs+=whole.ink_offset_y<0||whole.ink_offset_y+whole.height>ch;
+            paint_glyph(&whole,row,runs[k].start,cursor);
+            for(col=runs[k].start;col<runs[k].start+runs[k].count;++col) worded[col]=1;
+        }
+        for(col=0;col<COLS;++col) if(cps[row][col]&&!worded[col]) {
+            BlitCellCluster key;
+            BlitRasterGlyph g;
+            CHECK(blit_cell_cluster_init(&key,cps[row][col],marks[row][col],counts[row][col],1));
+            CHECK(font->raster_cluster_get(font->raster_state,&key,0,&g));
+            paint_glyph(&g,row,col,cursor);
         }
     }
 }
@@ -84,7 +126,7 @@ static void compare(const unsigned *expected,int tolerance,int size,int step,con
 int main(int argc,char **argv)
 {
     int sizes[]={8,9,16,17,22,23,32,48,64};
-    int si,step,cases=0;
+    int si,step,cases=0,refused=0;
     BlitFont native_font;
     unsigned colours[ROWS*COLS]={0};
     uint32_t attributes[ROWS*COLS]={0};
@@ -97,7 +139,11 @@ int main(int argc,char **argv)
         BlitRaster *raster;
         ch=sizes[si]; cw=(ch+1)/2;
         raster=blit_raster_open(font,argv[1],argv[2],cw,ch);
-        CHECK(raster&&blit_raster_set_arabic(raster,argv[3])); blit_raster_attach(font,raster);
+        CHECK(raster&&blit_raster_set_arabic_words(raster,argv[3])); blit_raster_attach(font,raster);
+        /* The word face's ink may take a row above and below, never a
+           column sideways. */
+        CHECK(font->raster_ink_left==0&&font->raster_ink_right==0&&
+              font->raster_ink_top==1&&font->raster_ink_bottom==1);
 #ifdef BLIT_TEST_NO_INK_DAMAGE
         font->raster_ink_left=font->raster_ink_right=font->raster_ink_top=font->raster_ink_bottom=0;
 #endif
@@ -107,8 +153,6 @@ int main(int argc,char **argv)
         view.codepoints=&cps[0][0]; view.combining=&marks[0][0][0]; view.combining_count=&counts[0][0];
         view.foreground=view.background=colours; view.attributes=attributes;
         view.default_foreground=0xabcdef; view.default_background=0x123456;
-        /* Expanded Arabic canvases must keep italic shear anchored to the
-           original cell, rather than re-centring it around their own ink. */
         memset(cps,0,sizeof(cps)); memset(counts,0,sizeof(counts)); memset(marks,0,sizeof(marks));
         cursor_visible=wallpaper_active=0;
         memset(&wallpaper,0,sizeof(wallpaper));
@@ -124,7 +168,7 @@ int main(int argc,char **argv)
         /* All three scalar keys collide modulo128: mask/Arabic/colour
            replacement must flush queued users before reusing atlas texels. */
         cps[5][0]='A'; cps[5][1]=0xfec1; cps[5][2]=0x1f341;
-        cps[5][3]=0x08ff; /* uncovered Arabic scalar: explicit shared fallback */
+        cps[5][3]=0x08ff; /* a marks-only cell: a run of its own */
         frame(1,0,0,COLS,ROWS);
         for(step=0;step<8;++step) {
             int oldx=7+(step? (step-1)%3:0),newx=7+step%3;
@@ -162,8 +206,37 @@ int main(int argc,char **argv)
         reference(); compare(oracle,
             0,
             ch,9,"wallpaper-oracle"); ++cases;
+        /* ADR 0243: a run the word face refuses (a Latin acute in it) is
+           drawn cell by cell from the glyph stack, exactly as with no word
+           face at all, and with ink; a word beside it is not. */
+        {
+            BlitRaster *plain;
+            int x,y,ink=0,same=1,word_differs=0;
+            wallpaper_active=0; view.graphics_count=0; cursor_visible=0;
+            memset(cps,0,sizeof(cps)); memset(counts,0,sizeof(counts)); memset(marks,0,sizeof(marks));
+            cps[6][6]=0xfe91; cps[6][7]=0xfe92; cps[6][8]=0xfe90;
+            marks[6][7][0]=0x0301; counts[6][7]=1;
+            cps[6][11]=0xfe91; cps[6][12]=0xfe92; cps[6][13]=0xfe90;
+            frame(1,0,0,COLS,ROWS); memcpy(saved,pixels,sizeof(saved));
+            plain=blit_raster_open(font,argv[1],argv[2],cw,ch);
+            CHECK(plain); blit_raster_attach(font,plain);
+            frame(1,0,0,COLS,ROWS);
+            for(y=oy+6*ch;y<oy+7*ch;++y) {
+                for(x=ox+6*cw;x<ox+9*cw;++x) {
+                    same&=pixels[y*W+x]==saved[y*W+x];
+                    ink|=pixels[y*W+x]!=0x123456;
+                }
+                for(x=ox+11*cw;x<ox+14*cw;++x) word_differs|=pixels[y*W+x]!=saved[y*W+x];
+            }
+            if(!same||!ink||!word_differs) {
+                fprintf(stderr,"ARABIC_REFUSED_FAIL size=%d same=%d ink=%d word_differs=%d\n",ch,same,ink,word_differs);
+                exit(1);
+            }
+            ++refused; ++cases;
+        }
     }
     blit_font_free(font);
-    printf("ARABIC_BACKEND_PASS cases=%d sizes=9 clipping=exact incremental=exact native_scanout=not_tested\n",cases);
+    CHECK(overhangs);
+    printf("ARABIC_BACKEND_PASS cases=%d sizes=9 refused_runs=%d overhanging_words=%ld clipping=exact incremental=exact native_scanout=not_tested\n",cases,refused,overhangs);
     return 0;
 }

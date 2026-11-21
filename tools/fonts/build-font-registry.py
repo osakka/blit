@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / 'assets/fonts/fonts.source.json'
 HEADER = ROOT / 'src/blit_font_registry.h'
 # The roles the code draws with: one file each, or an ordered list.
-SINGLE = ['icons', 'nerd', 'colour', 'text_emoji', 'arabic_cells', 'arabic_words',
+SINGLE = ['icons', 'nerd', 'colour', 'text_emoji', 'arabic_words',
           'pixel_fallback', 'pixel_wide']
 LISTED = ['symbols', 'unifont']
 

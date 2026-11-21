@@ -50,7 +50,7 @@ struct BlitRaster {
     BlitFont fallback;
     int pixel;  /* a pixel font's raster: blit_raster_open_pixel (ADR 0199) */
     FT_Library library;
-    FT_Face outline, colour, text_emoji, arabic;
+    FT_Face outline, colour, text_emoji;
     /* ADR 0195: the glyph stack beside the text font. Each may be absent;
        a missing face is skipped, never fatal. */
     FT_Face icons, nerd, symbols[BLIT_FACE_SYMBOLS_COUNT], unifont[BLIT_FACE_UNIFONT_COUNT];
@@ -64,10 +64,6 @@ struct BlitRaster {
        and rows by this. */
     struct { unsigned short glyph; unsigned char rows, row; } icon_rows[512];
     int icon_row_count;
-    hb_font_t *arabic_font;
-    hb_buffer_t *arabic_buffer;
-    int arabic_baseline;
-    char arabic_path[1024];
     /* ADR 0241: the face Arabic words are shaped in, unhinted, and its
        alef's top in font units (set at the text font's cap height). */
     FT_Face words;
@@ -120,8 +116,6 @@ void blit_raster_close(BlitRaster *raster)
     for (i = 0; i < (int)BLIT_CHROME_PENS * 3; ++i) free(raster->window_planes[i / 3][i % 3]);
     if (raster->shape_buffer) hb_buffer_destroy(raster->shape_buffer);
     if (raster->colour_font) hb_font_destroy(raster->colour_font);
-    if (raster->arabic_font) hb_font_destroy(raster->arabic_font);
-    if (raster->arabic_buffer) hb_buffer_destroy(raster->arabic_buffer);
     if (raster->word_cache) {
         unsigned w;
         for (w = 0; w < WORD_SETS * WORD_WAYS; ++w) {
@@ -134,7 +128,6 @@ void blit_raster_close(BlitRaster *raster)
     if (raster->words_font) hb_font_destroy(raster->words_font);
     if (raster->words_buffer) hb_buffer_destroy(raster->words_buffer);
     if (raster->words) FT_Done_Face(raster->words);
-    if (raster->arabic) FT_Done_Face(raster->arabic);
     if (raster->icons) FT_Done_Face(raster->icons);
     if (raster->nerd) FT_Done_Face(raster->nerd);
     for (i = 0; i < BLIT_FACE_SYMBOLS_COUNT; ++i) if (raster->symbols[i]) FT_Done_Face(raster->symbols[i]);
@@ -458,9 +451,9 @@ BlitRaster *blit_raster_open_pixel(const BlitFont *font, const char *colour_path
     return raster;
 }
 
-/* ADR 0241: attach the face Arabic words are shaped in. Like the
-   companion, once, before any lookup; a failure leaves the raster as it
-   was. A proportional face: no fixed-width check. */
+/* ADR 0241: attach the face Arabic words are shaped in: once, before any
+   lookup; a failure leaves the raster as it was. A proportional face: no
+   fixed-width check. */
 int blit_raster_set_arabic_words(BlitRaster *raster, const char *path)
 {
     FT_Face face = NULL;
@@ -731,162 +724,6 @@ void blit_raster_word_counts(const BlitRaster *raster, unsigned long long *hits,
     if (misses) *misses = raster ? raster->word_misses : 0;
     if (bytes) *bytes = raster ? raster->word_bytes : 0;
     if (dropped) *dropped = raster ? raster->word_dropped : 0;
-}
-
-int blit_raster_set_arabic(BlitRaster *raster, const char *path)
-{
-    FT_Face face = NULL;
-    hb_font_t *font = NULL;
-    hb_buffer_t *buffer = NULL;
-    FT_UInt nominal;
-    FT_Pos advance;
-    FT_F26Dot6 x_em, y_em;
-    if (!raster || !path || strlen(path) >= sizeof(raster->arabic_path) ||
-        !raster->library || raster->renders || raster->arabic)
-        return 0;
-    if (FT_New_Face(raster->library, path, 0, &face) || !FT_IS_SCALABLE(face) ||
-        !FT_IS_FIXED_WIDTH(face) || FT_Select_Charmap(face, FT_ENCODING_UNICODE)) goto fail;
-    nominal = FT_Get_Char_Index(face, 0x0628);
-    if (!nominal || FT_Load_Glyph(face, nominal, FT_LOAD_NO_SCALE)) goto fail;
-    advance = face->glyph->advance.x;
-    if (advance <= 0 || face->ascender <= 0 || face->descender > 0) goto fail;
-    /* One common transform, not per-letter fitting. Arabic advance rather
-       than max_advance: the latter includes multi-cell religious ligatures.
-       Fractional sizes and unhinted outlines preserve connecting strokes. */
-    x_em = (FT_F26Dot6)((long)raster->width * 64 * face->units_per_EM / advance);
-    y_em = (FT_F26Dot6)((long)raster->height * 64 * face->units_per_EM /
-                       (face->ascender - face->descender));
-    if (FT_Set_Char_Size(face, x_em, y_em, 72, 72)) goto fail;
-    font = hb_ft_font_create_referenced(face);
-    buffer = hb_buffer_create();
-    if (font == hb_font_get_empty() ||
-        !hb_buffer_pre_allocate(buffer, BLIT_CLUSTER_MAX_SCALARS)) goto fail;
-    hb_ft_font_set_load_flags(font, FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP);
-    raster->arabic = face;
-    raster->arabic_font = font;
-    raster->arabic_buffer = buffer;
-    /* Mixed scripts share a baseline; overhang is handled by ink bounds,
-       not by separately centring each face inside the same terminal row. */
-    raster->arabic_baseline = raster->baseline;
-    strcpy(raster->arabic_path, path);
-    return 1;
-fail:
-    if (buffer) hb_buffer_destroy(buffer);
-    if (font) hb_font_destroy(font);
-    if (face) FT_Done_Face(face);
-    return 0;
-}
-
-static int arabic_scalar(uint32_t cp)
-{
-    return (cp >= 0x0600 && cp <= 0x06ff) || (cp >= 0x0750 && cp <= 0x077f) ||
-        (cp >= 0x08a0 && cp <= 0x08ff) || (cp >= 0xfb50 && cp <= 0xfdff) ||
-        (cp >= 0xfe70 && cp <= 0xfefc);
-}
-
-static int draw_arabic(BlitRaster *raster, RasterEntry *entry)
-{
-    static const hb_feature_t features[] = {
-        {HB_TAG('i','s','o','l'),0,0,(unsigned)-1},
-        {HB_TAG('i','n','i','t'),0,0,(unsigned)-1},
-        {HB_TAG('m','e','d','i'),0,0,(unsigned)-1},
-        {HB_TAG('f','i','n','a'),0,0,(unsigned)-1},
-        {HB_TAG('r','l','i','g'),0,0,(unsigned)-1},
-        {HB_TAG('l','i','g','a'),0,0,(unsigned)-1},
-        {HB_TAG('c','a','l','t'),0,0,(unsigned)-1}
-    };
-    hb_glyph_info_t *info;
-    hb_glyph_position_t *positions;
-    unsigned count, n;
-    int advance = 0, origin, pass;
-    int min_x = 0, min_y = 0, max_x = entry->glyph.width, max_y = entry->glyph.height;
-    FT_Face face = raster->arabic;
-    if (!face) return 0;
-    for (n = 0; n < entry->key.length; ++n)
-        if (!arabic_scalar(entry->key.scalars[n]) ||
-            !FT_Get_Char_Index(face, entry->key.scalars[n])) return 0;
-    hb_buffer_clear_contents(raster->arabic_buffer);
-    hb_buffer_add_utf32(raster->arabic_buffer, entry->key.scalars,
-        (int)entry->key.length, 0, (int)entry->key.length);
-    /* This is ONE visual cell, not a logical text run. Never reverse cells. */
-    hb_buffer_set_direction(raster->arabic_buffer, HB_DIRECTION_LTR);
-    hb_buffer_set_script(raster->arabic_buffer, HB_SCRIPT_ARABIC);
-    hb_buffer_set_language(raster->arabic_buffer, hb_language_from_string("ar", -1));
-    hb_shape(raster->arabic_font, raster->arabic_buffer, features,
-              sizeof(features) / sizeof(features[0]));
-    if (!hb_buffer_allocation_successful(raster->arabic_buffer)) return -1;
-    info = hb_buffer_get_glyph_infos(raster->arabic_buffer, &count);
-    positions = hb_buffer_get_glyph_positions(raster->arabic_buffer, NULL);
-    if (!count || count > BLIT_CLUSTER_MAX_SCALARS || !info || !positions) return 0;
-    for (n = 0; n < count; ++n) {
-        if (!info[n].codepoint) return 0;
-        advance += positions[n].x_advance;
-    }
-    origin = (entry->glyph.width * 64 - advance) / 2;
-    /* Measure actual ink first, then paint the exact bounding canvas. A cell
-       advance is not an ink clipping rectangle (Arabic cursive overhangs and
-       vowel marks are legitimate). Allocation remains bounded per context. */
-    for (pass = 0; pass < 2; ++pass) {
-      int pen_x = 0, pen_y = 0;
-      for (n = 0; n < count; ++n) {
-        FT_Bitmap *bitmap;
-        int left, top, x, y;
-        FT_Vector delta;
-        int px = origin + pen_x + positions[n].x_offset;
-        int py = pen_y + positions[n].y_offset;
-        /* Fractional placement is consumed by FreeType, not discarded before
-           scan conversion. Integer placement uses mathematical floor. */
-        left = px >= 0 ? px / 64 : -((-px + 63) / 64);
-        top = py >= 0 ? py / 64 : -((-py + 63) / 64);
-        delta.x = px - left * 64; delta.y = py - top * 64;
-        FT_Set_Transform(face, NULL, &delta);
-        if (FT_Load_Glyph(face, info[n].codepoint,
-                         FT_LOAD_RENDER | FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP)) {
-            FT_Set_Transform(face, NULL, NULL); return -1;
-        }
-        FT_Set_Transform(face, NULL, NULL);
-        bitmap = &face->glyph->bitmap;
-        left += face->glyph->bitmap_left;
-        top = raster->arabic_baseline - top - face->glyph->bitmap_top;
-        if (bitmap->pitch < 0 || bitmap->pixel_mode != FT_PIXEL_MODE_GRAY ||
-            bitmap->num_grays != 256) return -1;
-        if (!pass) {
-            if (left < min_x) min_x = left;
-            if (top < min_y) min_y = top;
-            if (left + (int)bitmap->width > max_x) max_x = left + (int)bitmap->width;
-            if (top + (int)bitmap->rows > max_y) max_y = top + (int)bitmap->rows;
-        } else {
-            left -= min_x; top -= min_y;
-            if (left < 0 || top < 0 || left + (int)bitmap->width > entry->glyph.width ||
-                top + (int)bitmap->rows > entry->glyph.height) return -1;
-            for (y = 0; y < (int)bitmap->rows; ++y) for (x = 0; x < (int)bitmap->width; ++x) {
-                unsigned char *out = entry->pixels + (top + y) * entry->glyph.stride + left + x;
-                unsigned in = bitmap->buffer[y * bitmap->pitch + x];
-                *out = (unsigned char)(in + (*out * (255 - in) + 127) / 255);
-            }
-        }
-        pen_x += positions[n].x_advance;
-        pen_y += positions[n].y_advance;
-      }
-      if (!pass) {
-        unsigned char *pixels;
-        size_t bytes;
-        if (min_x < -2 * raster->width || max_x > 4 * raster->width ||
-            min_y < -raster->height || max_y > 2 * raster->height) return 0;
-        bytes = (size_t)(max_x - min_x) * (max_y - min_y);
-        pixels = calloc(1, bytes);
-        if (!pixels) return -1;
-        free(entry->pixels);
-        entry->pixels = pixels;
-        entry->glyph.pixels = pixels;
-        entry->glyph.width = entry->glyph.stride = max_x - min_x;
-        entry->glyph.height = max_y - min_y;
-        entry->glyph.ink_offset_x = min_x;
-        entry->glyph.ink_offset_y = min_y;
-      }
-    }
-    entry->glyph.baseline = raster->arabic_baseline - min_y;
-    return 1;
 }
 
 static int protected_geometry(uint32_t scalar)
@@ -1962,15 +1799,14 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
     unsigned colour_index = 0;
     uint32_t scalar = key->scalars[0];
     int columns = key->columns;
-    int arabic = raster->arabic && arabic_scalar(scalar);
     int text_selector = key->length == 2 && key->scalars[1] == 0xfe0e && blit_emoji_variation(scalar);
     /* ADR 0195: Blit's own icons come first: its colour icons in plane 16
        and the pen at U+270E, whatever the text font has there. */
-    int blit_icon = !arabic && key->length == 1 && raster->icons &&
+    int blit_icon = key->length == 1 && raster->icons &&
         (blit_icon_codepoint(scalar) || scalar == 0x270e) && !bar_corner(scalar) &&
         !blit_chrome_glyph(scalar) &&
         FT_Get_Char_Index(raster->icons, scalar);
-    int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
+    int outline_colour = !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     BlitRasterIconPen icon_pen = blit_icon && pen != BLIT_RASTER_ICON_COLOUR &&
         outline_has_colour(raster->icons, scalar) ? pen : BLIT_RASTER_ICON_COLOUR;
@@ -2002,14 +1838,13 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
     if (blit_icon) next.glyph.format = outline_has_colour(raster->icons, scalar) &&
         icon_pen != BLIT_RASTER_ICON_AUTO ?
         BLIT_RASTER_RGBA_PREMULTIPLIED : BLIT_RASTER_COVERAGE;
-    if (arabic) next.glyph.format = BLIT_RASTER_COVERAGE;
     /* ADR 0210, 0211: the window glyphs are coverage. Chalk is drawn in the
        foreground; looked up whole, a Slate glyph is the same one-colour
        fallback, and its pens come from blit_raster_get_window_plane. */
     if (key->length == 1 && blit_chrome_glyph(scalar))
         next.glyph.format = BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
-    else if (key->length > 1 && !arabic) {
+    else if (key->length > 1) {
         colour_index = colour_cluster_glyph(raster, key);
         if (!colour_index) return 0;
         next.glyph.format = BLIT_RASTER_RGBA_PREMULTIPLIED;
@@ -2021,8 +1856,7 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
     next.pixels = calloc(1, bytes);
     if (!next.pixels) return 0;
     next.glyph.pixels = next.pixels;
-    if (arabic) result = draw_arabic(raster, &next);
-    else if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
+    if (key->length == 1 && scalar >= 0xe0b0 && scalar <= 0xe0b3) {
         draw_powerline(scalar,&next); result=1;
     } else if (key->length == 1 && bar_corner(scalar)) {
         draw_bar_corner(scalar, &next); result = 1;
@@ -2161,8 +1995,8 @@ int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
    text keeps the plain overstrike, whose stems stay whole pixels where a
    narrowed letter's would not (FreeType does not hint x). Cell geometry (box drawing, blocks, braille, Powerline, window
    chrome, bar corners) is meant to meet its neighbours, and Blit's icons
-   span cells; they, colour glyphs, Arabic (its ink may leave the cell) and
-   any glyph with room keep their regular form, so every other bold cell
+   span cells; they, colour glyphs and any glyph with room keep their
+   regular form, so every other bold cell
    is exactly as before. */
 #define RASTER_BOLD_BIT (1U << 23)
 #define RASTER_BOLD_EDGE 64
@@ -2177,7 +2011,6 @@ static int bold_needs_room(const BlitRaster *raster, const BlitCellCluster *key,
     if (g->format != BLIT_RASTER_COVERAGE || g->width < 4 || g->ink_offset_x ||
         g->ink_offset_y || protected_geometry(scalar) || invisible_format(scalar) ||
         bar_corner(scalar) || blit_chrome_glyph(scalar) ||
-        (raster->arabic && arabic_scalar(scalar)) ||
         blit_icon_codepoint(scalar) || scalar == 0x270e) return 0;
     for (y = 0; y < g->height; ++y)
         if (g->pixels[y * g->stride + g->width - 1] >= RASTER_BOLD_EDGE) return 1;
@@ -2244,10 +2077,6 @@ void blit_raster_cache_counts(const BlitRaster *raster, unsigned long long *hits
     *hits = raster ? raster->hits : 0;
     *misses = raster ? raster->misses : 0;
 }
-const char *blit_raster_arabic_path(const BlitRaster *raster)
-{ return raster && raster->arabic ? raster->arabic_path : NULL; }
-const char *blit_raster_arabic_family(const BlitRaster *raster)
-{ return raster && raster->arabic ? raster->arabic->family_name : NULL; }
 const BlitFontGrid *blit_raster_master(const BlitRaster *raster, int *crisp)
 {
     if (!raster || !raster->master.height) return NULL;
@@ -2255,8 +2084,6 @@ const BlitFontGrid *blit_raster_master(const BlitRaster *raster, int *crisp)
     return &raster->master;
 }
 
-int blit_raster_baseline(const BlitRaster *raster)
-{ return raster ? raster->baseline : 0; }
 unsigned long blit_raster_render_count(const BlitRaster *raster)
 { return raster ? raster->renders : 0; }
 
@@ -2286,15 +2113,14 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster)
     font->raster_blend = raster ? blit_raster_blend : NULL;
     font->raster_cell_width = raster ? raster->width : 0;
     font->raster_cell_height = raster ? raster->height : 0;
-    font->raster_max_width = raster ? raster->width * (raster->arabic ? 6 : 2) : 0;
-    font->raster_max_height = raster ? raster->height * (raster->arabic ? 3 : 1) : 0;
-    font->raster_ink_left = raster && raster->arabic ? 2 : 0;
-    font->raster_ink_right = raster && raster->arabic ? 3 : 0;
-    /* ADR 0241: a word's canvas may take a row above and below. */
-    font->raster_ink_top = font->raster_ink_bottom =
-        raster && (raster->arabic || raster->words) ? 1 : 0;
-    if (raster && raster->words && font->raster_max_height < raster->height * 3)
-        font->raster_max_height = raster->height * 3;
+    font->raster_max_width = raster ? raster->width * 2 : 0;
+    /* ADR 0241: a word's canvas may take a row above and below, never a
+       column sideways: its ink is fitted inside its cells. No glyph leaves
+       its cell sideways since the per-cell Arabic companion was retired
+       (ADR 0243). */
+    font->raster_max_height = raster ? raster->height * (raster->words ? 3 : 1) : 0;
+    font->raster_ink_left = font->raster_ink_right = 0;
+    font->raster_ink_top = font->raster_ink_bottom = raster && raster->words ? 1 : 0;
     font->raster_word_get = raster && raster->words ? attached_word_get : NULL;
 }
 

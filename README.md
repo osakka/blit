@@ -162,9 +162,8 @@ BLIT_HIBR_ROOT=build/hibr-$(cat packaging/HIBR_VERSION) \
 Releases are built by `tools/release/build-release.sh OUTDIR` in the
 Debian 13 build environment (`tools/build-env/`).
 
-The package build makes three packages: `blit`, `blit-font-sources` (the
-source archive of the Arabic font, ADR 0217) and `blit-compositor` (programs
-in windows, ADR 0228). `blit` suggests the other two. Suites and their
+The package build makes two packages: `blit` and `blit-compositor` (programs
+in windows, ADR 0228), which `blit` suggests. Suites and their
 requirements are listed by `tools/run-gates.sh --help`; the [development workflow](docs/development-workflow.md) has the
 release procedure.
 

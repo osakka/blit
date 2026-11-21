@@ -1458,8 +1458,6 @@ typedef struct {
     int font_configured;
     char boot_font_path[512];
     int boot_font_scale_tenths;
-    /* ADR 0241: naskh when boot could attach the word face, else modern. */
-    int boot_font_arabic;
     uint64_t render_next_us[BLIT_MAX_DISPLAYS];
     /* Late compose (0.2.20): how long before an output's next vblank its
        frame is composed, adapted from flips that missed their vblank. */
@@ -1545,9 +1543,6 @@ typedef struct {
     int font_size_px;
     /* ADR 0218: BlitRasterHinting of text glyphs; zero is full, the default. */
     int font_hinting;
-    /* ADR 0241: the Arabic face, an index of font_arabic_names; zero is
-       naskh (words shaped in Noto Naskh Arabic), the default. */
-    int font_arabic;
     int pointer_valid;
     /* The appearance the settings API chose. What is drawn is
        pointer_shown_art: the same palette, size and shadow, with the shape a
@@ -18998,10 +18993,6 @@ static int resize_session_surface(BlitSession *session, BlitSurface *surface,
 }
 
 static const char *const font_hinting_names[] = {"full", "light", "none"};
-/* ADR 0241: naskh shapes Arabic words in Noto Naskh Arabic; modern draws them
-   cell by cell in Blit Arabic Modern, as before the setting existed. */
-enum { FONT_ARABIC_NASKH, FONT_ARABIC_MODERN };
-static const char *const font_arabic_names[] = {"naskh", "modern"};
 
 /* ADR 0243: every face Blit ships, from the registry's generated table, not
    from the disk: the faces this build draws with, whatever the root holds. */
@@ -19029,7 +19020,7 @@ static void font_registry_json(char *body, size_t capacity, size_t *used)
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_path[512];
-    char arabic_json[9216] = "null";
+    char arabic_json[2700] = "null";
     char master_json[64] = "null", master_fit_json[16] = "null";
     const char *active_id;
     const BlitFontGrid *master;
@@ -19043,44 +19034,28 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         snprintf(master_json, sizeof(master_json), "\"%dx%d\"", master->width, master->height);
         snprintf(master_fit_json, sizeof(master_fit_json), "\"%s\"", crisp ? "crisp" : "scaled");
     }
-    /* ADR 0241: the object is there when either Arabic face is attached. A
-       pixel font has no companion (path and family null) but takes the word
-       face, which is what words names; shaping says which one draws. */
-    if (blit_raster_arabic_path(runtime->font.raster_state) ||
-        blit_raster_arabic_words_path(runtime->font.raster_state)) {
+    /* ADR 0241, 0243: the one Arabic face, for every text font, pixel
+       fonts included; null when it is not attached (a boot without the
+       file), when Arabic is drawn cell by cell from the glyph stack. */
+    if (blit_raster_arabic_words_path(runtime->font.raster_state)) {
         const BlitRaster *raster = runtime->font.raster_state;
-        char path[2048] = "null", family[512] = "null";
-        char words_path[2048], words_family[512], words_json[4700] = "";
-        if (blit_raster_arabic_path(raster)) {
-            char escaped[2040], escaped_family[500];
-            json_escape(blit_raster_arabic_path(raster), escaped, sizeof(escaped));
-            json_escape(blit_raster_arabic_family(raster), escaped_family, sizeof(escaped_family));
-            snprintf(path, sizeof(path), "\"%s\"", escaped);
-            snprintf(family, sizeof(family), "\"%s\"", escaped_family);
-        }
-        if (blit_raster_arabic_words_path(raster)) {
-            json_escape(blit_raster_arabic_words_path(raster), words_path, sizeof(words_path));
-            json_escape(blit_raster_arabic_words_family(raster), words_family, sizeof(words_family));
-            snprintf(words_json, sizeof(words_json),
-                     ",\"words_path\":\"%s\",\"words_family\":\"%s\"", words_path, words_family);
-        }
-        snprintf(arabic_json,sizeof(arabic_json),
-            "{\"path\":%s,\"family\":%s,\"baseline_px\":%d,\"shaping\":\"%s\"%s}",
-            path,family,blit_raster_baseline(raster),
-            blit_raster_arabic_words_path(raster) ? "words" : "visual-cell-marks",
-            words_json);
+        char path[2048], family[512];
+        json_escape(blit_raster_arabic_words_path(raster), path, sizeof(path));
+        json_escape(blit_raster_arabic_words_family(raster), family, sizeof(family));
+        snprintf(arabic_json, sizeof(arabic_json),
+                 "{\"family\":\"%s\",\"path\":\"%s\",\"shaping\":\"words\"}", family, path);
     }
     json_escape(runtime->font.path, escaped_path, sizeof(escaped_path));
     used += (size_t)snprintf(body + used, capacity - used,
         "{\"revision\":1,\"active\":{\"id\":\"%s\",\"path\":\"%s\","
         "\"scale\":%.4f,\"size_px\":%d,\"sizing\":\"%s\",\"hinting\":\"%s\","
-        "\"arabic\":\"%s\",\"cell_pixels\":{\"width\":%d,\"height\":%d},"
+        "\"arabic\":%s,\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         /* The loaded font's own identity.  Without it nothing can tell that a
            run picked up a different artifact under the same name, which is
            exactly how a stale 540-glyph copy in the build tree rendered
            characters as '?' while the released package drew them. */
         "\"glyphs\":%lu,\"mappings\":%lu,"
-        "\"rasterization\":\"%s\",\"colour_glyphs\":%s,\"arabic_companion\":%s,"
+        "\"rasterization\":\"%s\",\"colour_glyphs\":%s,"
         "\"master\":%s,\"master_fit\":%s,"
         "\"raster_cache\":{\"bytes\":%lu,\"renders\":%lu}},"
         "\"profiles\":[",
@@ -19088,14 +19063,14 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         runtime_terminal_cell_height(runtime),
         runtime->font_size_px > 0 ? "pixels" : "scale",
         font_hinting_names[runtime->font_hinting],
-        font_arabic_names[runtime->font_arabic],
+        arabic_json,
         runtime_terminal_cell_width(runtime),
         runtime_terminal_cell_height(runtime),
         (unsigned long)runtime->font.glyph_count,
         (unsigned long)runtime->font.unicode_count,
         blit_font_is_outline(runtime->font.path) ? "native-antialiased" : "bitmap-nearest",
         runtime->font.raster_get ? "true" : "false",
-        arabic_json, master_json, master_fit_json,
+        master_json, master_fit_json,
         (unsigned long)blit_raster_cached_bytes(runtime->font.raster_state),
         blit_raster_render_count(runtime->font.raster_state));
     /* ADR 0195: the list is what the font directories hold right now. */
@@ -19104,18 +19079,12 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
         const char *id = blit_font_profile_id(i);
         const char *path = blit_font_profile_path(i);
         char profile_path[1024], title[256];
-        char companion_json[2200]="null";
         char masters_json[160] = "";
         BlitFontMaster masters[BLIT_FONT_MAX_MASTERS];
         int master_count, m;
         size_t masters_used;
         json_escape(blit_font_profile_title(i), title, sizeof(title));
         json_escape(path, profile_path, sizeof(profile_path));
-        if (blit_font_arabic_path(path)) {
-            char escaped[2048];
-            json_escape(blit_font_arabic_path(path),escaped,sizeof(escaped));
-            snprintf(companion_json,sizeof(companion_json),"\"%s\"",escaped);
-        }
         /* ADR 0227: a font of masters lists their design cells. */
         master_count = blit_font_masters(path, masters, BLIT_FONT_MAX_MASTERS);
         for (m = 0, masters_used = 0; m < master_count; ++m)
@@ -19125,11 +19094,11 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
                 m + 1 == master_count ? "]" : "");
         used += (size_t)snprintf(body + used, capacity - used,
             "%s{\"id\":\"%s\",\"title\":\"%s\",\"path\":\"%s\",\"source\":\"%s\","
-            "\"available\":%s,\"rasterization\":\"%s\",\"arabic_companion_path\":%s%s}",
+            "\"available\":%s,\"rasterization\":\"%s\"%s}",
             first ? "" : ",", id, title, profile_path,
             blit_font_profile_local(i) ? "local" : "shipped",
             blit_font_profile_available(i) ? "true" : "false",
-            blit_font_is_outline(path) ? "native-antialiased" : "bitmap-nearest",companion_json,
+            blit_font_is_outline(path) ? "native-antialiased" : "bitmap-nearest",
             masters_json);
         first = 0;
     }
@@ -19290,18 +19259,14 @@ static int font_hinting_parse(const char *configuration, int *hinting)
                            sizeof(font_hinting_names) / sizeof(font_hinting_names[0]), hinting);
 }
 
-static int font_arabic_parse(const char *configuration, int *arabic)
-{
-    return font_word_parse(configuration, "arabic", font_arabic_names,
-                           sizeof(font_arabic_names) / sizeof(font_arabic_names[0]), arabic);
-}
-
+/* words_required: a word face that cannot be attached fails the change
+   (it is never lost by one); otherwise Arabic is drawn cell by cell from
+   the glyph stack until a later change attaches it. */
 static int prepare_font_raster(BlitFont *font, const char *path,
-                                int scale, int pixels, int hinting, int arabic,
+                                int scale, int pixels, int hinting, int words_required,
                                 BlitRaster **result)
 {
     char colour[1024];
-    const char *companion;
 
     /* ADR 0195: the emoji faces and the glyph stack are the root's. A pixel
        font (ADR 0199) has no outline: it keeps its own glyphs and borrows
@@ -19322,28 +19287,24 @@ static int prepare_font_raster(BlitFont *font, const char *path,
         *result = NULL;
         return 0;
     }
-    /* The companion stays on every outline font: it draws, cell by cell,
-       whatever the word face does not shape. */
-    companion = blit_font_is_outline(path) ? blit_font_arabic_path(path) : NULL;
-    if (companion && !blit_raster_set_arabic(*result, companion)) {
-        blit_raster_close(*result);
-        *result = NULL;
-        return 0;
-    }
-    /* ADR 0241: naskh shapes Arabic words, for pixel fonts too. A face that
-       cannot be attached fails the change, as a missing companion does. */
-    if (arabic == FONT_ARABIC_NASKH &&
-        !blit_raster_set_arabic_words(*result, blit_font_arabic_words_path())) {
-        blit_raster_close(*result);
-        *result = NULL;
-        return 0;
+    /* ADR 0241, 0243: Arabic is shaped as words in the one Arabic face,
+       for pixel fonts too; a run it refuses is drawn cell by cell from the
+       glyph stack. */
+    if (!blit_raster_set_arabic_words(*result, blit_font_arabic_words_path())) {
+        if (words_required) {
+            blit_raster_close(*result);
+            *result = NULL;
+            return 0;
+        }
+        fprintf(stderr, "blit: Arabic word face %s could not be attached; "
+                "Arabic is drawn cell by cell from the glyph stack\n",
+                blit_font_arabic_words_path());
     }
     return 1;
 }
 
 static int apply_font_configuration(BlitRuntime *runtime, const char *path,
-                                    int scale_tenths, int size_px, int hinting,
-                                    int arabic)
+                                    int scale_tenths, int size_px, int hinting)
 {
     BlitFont candidate;
     BlitRaster *raster = NULL;
@@ -19380,10 +19341,13 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     /* Already the active font: nothing to rasterise, reflow or redraw. */
     if (candidate.data == NULL && runtime->font.data != NULL &&
         scale_tenths == runtime->font_scale_tenths && size_px == runtime->font_size_px &&
-        hinting == runtime->font_hinting && arabic == runtime->font_arabic)
+        hinting == runtime->font_hinting)
         return 1;
+    /* A change keeps the Arabic face the running raster has (ADR 0243). */
     if (!prepare_font_raster(candidate.data ? &candidate : &runtime->font,
-                             path, scale_tenths, size_px, hinting, arabic, &raster)) {
+                             path, scale_tenths, size_px, hinting,
+                             blit_raster_arabic_words_path(runtime->font.raster_state) != NULL,
+                             &raster)) {
         blit_font_free(&candidate); return 0;
     }
     if (candidate.data != NULL) {
@@ -19394,7 +19358,6 @@ static int apply_font_configuration(BlitRuntime *runtime, const char *path,
     runtime->font_scale_tenths = scale_tenths;
     runtime->font_size_px = size_px;
     runtime->font_hinting = hinting;
-    runtime->font_arabic = arabic;
     discover_panes(runtime);
     /* A font change alters every cell's physical rectangle. Rebuilding the
        atlas and reflowing surfaces is not enough: the next presentation must
@@ -23512,8 +23475,6 @@ static size_t settings_build(BlitRuntime *runtime, char *out, size_t capacity,
             json_appendf(out, capacity, &used, "\"scale\":%.1f", font_scale_value(runtime));
         json_appendf(out, capacity, &used, ",\"hinting\":\"%s\"",
                      font_hinting_names[runtime->font_hinting]);
-        json_appendf(out, capacity, &used, ",\"arabic\":\"%s\"",
-                     font_arabic_names[runtime->font_arabic]);
         first = 0;
     }
     json_appendf(out, capacity, &used, "},\"server\":{");
@@ -24106,7 +24067,6 @@ static void settings_apply_font(BlitRuntime *runtime)
     int scale_tenths;
     int size_px;
     int hinting;
-    int arabic;
 
     runtime->font_configured = 0;
     if (runtime->settings_enabled && runtime->settings_document[0] != '\0' &&
@@ -24119,17 +24079,16 @@ static void settings_apply_font(BlitRuntime *runtime)
             scale_tenths = runtime->font_scale_tenths;
             size_px = runtime->font_size_px;
             hinting = 0;
-            /* A document saved before ADR 0241 has no arabic: the default,
-               naskh, wherever boot could attach its face. */
-            arabic = runtime->boot_font_arabic;
+            /* A document saved by 0.3.129 or 0.3.130 holds font.arabic
+               (naskh or modern), a setting that is gone (ADR 0243): it is
+               old data, read past like any unknown key and not written
+               back, and Arabic is shaped as words whatever it says. */
             if (font_sizing_parse(configuration, &scale_tenths, &size_px) < 0)
                 fprintf(stderr, "blit: stored font size policy is invalid\n");
             else if (font_hinting_parse(configuration, &hinting) < 0)
                 fprintf(stderr, "blit: stored font hinting is invalid\n");
-            else if (font_arabic_parse(configuration, &arabic) < 0)
-                fprintf(stderr, "blit: stored font arabic is invalid\n");
             else if (!apply_font_configuration(runtime, path, scale_tenths, size_px,
-                                               hinting, arabic))
+                                               hinting))
                 fprintf(stderr, "blit: stored font selection could not be applied\n");
             else {
                 runtime->font_configured = 1;
@@ -24138,7 +24097,7 @@ static void settings_apply_font(BlitRuntime *runtime)
         }
     }
     apply_font_configuration(runtime, runtime->boot_font_path,
-                             runtime->boot_font_scale_tenths, 0, 0, runtime->boot_font_arabic);
+                             runtime->boot_font_scale_tenths, 0, 0);
 }
 
 static void settings_apply_audio_device(BlitRuntime *runtime,
@@ -25146,16 +25105,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int requested_size_px;
         int sizing_result;
         int requested_hinting;
-        int requested_arabic;
         int has_hinting = json_key_cursor(payload, "hinting") != NULL;
-        int has_arabic = json_key_cursor(payload, "arabic") != NULL;
         int has_scale = json_key_cursor(payload, "scale") != NULL;
         int has_pixels = json_key_cursor(payload, "size_px") != NULL;
         int has_font_id = json_string(payload, "font_id", font_id,
                                       sizeof(font_id));
-        if (!has_scale && !has_pixels && !has_font_id && !has_hinting && !has_arabic) {
+        if (!has_scale && !has_pixels && !has_font_id && !has_hinting) {
             send_problem(fd, 400, "Bad Request", "font_configuration_empty",
-                         "font_id, scale, size_px, hinting or arabic is required.");
+                         "font_id, scale, size_px or hinting is required.");
             return;
         }
         requested_scale_tenths = runtime->font_scale_tenths;
@@ -25175,12 +25132,6 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "hinting must be one of full, light or none.");
             return;
         }
-        requested_arabic = runtime->font_arabic;
-        if (font_arabic_parse(payload, &requested_arabic) < 0) {
-            send_problem(fd, 400, "Bad Request", "invalid_font_arabic",
-                         "arabic must be naskh or modern.");
-            return;
-        }
         if (has_font_id) {
             if (!font_path_for_id(font_id, font_path, sizeof(font_path))) {
                 send_problem(fd, 404, "Not Found", "invalid_font_profile",
@@ -25197,7 +25148,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         if (!apply_font_configuration(runtime, font_path,
                                       requested_scale_tenths, requested_size_px,
-                                      requested_hinting, requested_arabic)) {
+                                      requested_hinting)) {
             send_problem(fd, 422, "Unprocessable Entity", "font_apply_failed",
                          "The font could not be loaded or applied to all sessions.");
             return;
@@ -26149,14 +26100,14 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 int proposed_scale = runtime->font_scale_tenths;
                 int proposed_pixels = runtime->font_size_px;
                 int proposed_hinting = 0;
-                int proposed_arabic = FONT_ARABIC_NASKH;
+                /* font.arabic, from a 0.3.129 or 0.3.130 document, is read
+                   past here as on load (ADR 0243). */
                 if (font_cursor != NULL &&
                     (!json_object_slice(font_cursor, font_configuration, sizeof(font_configuration)) ||
                      font_sizing_parse(font_configuration, &proposed_scale, &proposed_pixels) < 0 ||
-                     font_hinting_parse(font_configuration, &proposed_hinting) < 0 ||
-                     font_arabic_parse(font_configuration, &proposed_arabic) < 0)) {
+                     font_hinting_parse(font_configuration, &proposed_hinting) < 0)) {
                     send_problem(fd, 400, "Bad Request", "invalid_settings_font",
-                                 "Font sizing must select scale or integer size_px, never both, hinting must be full, light or none, and arabic must be naskh or modern.");
+                                 "Font sizing must select scale or integer size_px, never both, and hinting must be full, light or none.");
                     return;
                 }
             }
@@ -32963,23 +32914,15 @@ int main(int argc, char **argv)
     runtime.boot_font_scale_tenths = runtime.font_scale_tenths;
     {
         BlitRaster *raster;
+        /* ADR 0243: a fonts root without the Arabic face still starts;
+           Arabic is then drawn cell by cell from the glyph stack and
+           active.arabic is null until a font change can attach it. */
         if (!prepare_font_raster(&runtime.font, runtime.font.path,
-                                 runtime.font_scale_tenths, 0, 0, FONT_ARABIC_MODERN,
-                                 &raster)) {
+                                 runtime.font_scale_tenths, 0, 0, 0, &raster)) {
             fprintf(stderr, "blit: requested native font could not be initialized\n");
             blit_font_free(&runtime.font); blit_font_free(&runtime.wide_font);
             return 1;
         }
-        /* ADR 0241: the default is naskh, but a fonts root without its face
-           still starts: Arabic is then drawn cell by cell, as modern, and the
-           setting says so. An explicit naskh is never softened like this. */
-        runtime.font_arabic = FONT_ARABIC_MODERN;
-        if (raster && blit_raster_set_arabic_words(raster, blit_font_arabic_words_path()))
-            runtime.font_arabic = FONT_ARABIC_NASKH;
-        else if (raster)
-            fprintf(stderr, "blit: Arabic word face %s could not be attached; "
-                    "Arabic is drawn as modern\n", blit_font_arabic_words_path());
-        runtime.boot_font_arabic = runtime.font_arabic;
         blit_raster_attach(&runtime.font, raster);
     }
     {

@@ -1,6 +1,12 @@
 # ADR 0195: Text fonts are discovered; every glyph comes from one shipped stack
 
 - Status: accepted; in use since 0.2.36
+- Note: Item 7's Arabic companion, Blit Arabic Modern, was superseded for
+  drawing by ADR 0241 and retired by
+  [ADR 0243](0243-glyph-multiplexing.md) (2026-11-21), with its GPL
+  FreeMono sources: Arabic is shaped as words in Noto Naskh Arabic, the one
+  Arabic face, for every text font; a run it cannot shape takes the stack
+  like any other scalar.
 - Note: Blit Spleen 16 (`blit-spleen16`) was retired in 0.3.68; Spleen is
   now the text font `spleen`, five masters in `text/spleen/` (ADR 0227).
 - Date: 2026-10-27

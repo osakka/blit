@@ -1,6 +1,16 @@
 # ADR 0217: Slimming the package: one copy of the documentation, font sources in their own package
 
-- Status: accepted
+- Status: accepted; its font-source half retired by
+  [ADR 0243](0243-glyph-multiplexing.md) (2026-11-21). With Blit Arabic
+  Modern gone, `blit-font-sources`, `FreeMono-SOURCE.txt`, the FreeMono
+  notices and `assets/fonts/sources/` are no longer built or shipped, and
+  `blit` no longer suggests the package. `blit` declares no relation to
+  it: an installed copy is inert (a source archive under `/usr/share/doc`)
+  and stays until removed, because a Breaks would make the updater's
+  `dpkg --install` (ADR 0232) refuse the update and a Conflicts would hold
+  `blit` back under `apt upgrade`. The hibr-apt repository should keep the
+  package while it serves a `blit` of 0.3.130 or earlier. The one copy of
+  the documentation stands.
 - Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-11-05
 - Scope: `packaging/build-deb.sh`, `tools/tests/package_artifact_gate.sh`,

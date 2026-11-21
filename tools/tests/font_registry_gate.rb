@@ -24,7 +24,7 @@ ROOT = File.expand_path('../..', __dir__)
 FONTS = File.join(ROOT, 'assets/fonts')
 HEADER = File.join(ROOT, 'src/blit_font_registry.h')
 BINARY = ENV.fetch('BLIT_GATE_BINARY', File.join(ROOT, 'build/blit/blit-server'))
-ROLES = %w[text icons nerd symbols unifont colour text_emoji arabic_cells arabic_words
+ROLES = %w[text icons nerd symbols unifont colour text_emoji arabic_words
            pixel_fallback pixel_wide].freeze
 DRAWS = %w[cell fitted words colour].freeze
 

@@ -1,6 +1,8 @@
 # ADR 0241: Arabic is shaped as words and drawn as slices
 
-- Status: accepted, released in 0.3.129
+- Status: accepted, released in 0.3.129; the only Arabic path since
+  [ADR 0243](0243-glyph-multiplexing.md) retired Blit Arabic Modern
+  (2026-11-21): see "Amended by ADR 0243" below.
 - Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-11-20
 - Scope: `src/blit_raster.c` (a word cache beside the glyph cache, the
@@ -272,3 +274,39 @@ Landed (2026-11-20), each failing on a broken build:
 
 The owner reviewed it on the mini PC (2026-11-21): "arabic looks perfect"
 (Gitea #119 closed).
+
+## Amended by ADR 0243 (2026-11-21)
+
+The owner retired Blit Arabic Modern, so Noto Naskh Arabic's words are
+Blit's one Arabic path, with no switch:
+
+- **No `arabic` setting.** `naskh`/`modern` is gone from `PUT /v1/fonts`,
+  `document.font` and the Control Panel's Blit pane (hibr-apps). A stored `font.arabic` from
+  0.3.129 or 0.3.130 is old data: read past on load and on a settings
+  write, never written back. `active.arabic` is the word face's report,
+  `{family, path, shaping: "words"}`, or null when it is not attached;
+  `active.arabic_companion` and `profiles[].arabic_companion_path` are
+  gone.
+- **No companion.** A run the word face refuses (a scalar it lacks, such
+  as a Latin acute on a beh) is still drawn cell by cell on
+  `draw_cell_glyphs`, now from the glyph stack like any other scalar (the
+  text font where it has the letter, Unifont at the end). The raster has no
+  per-cell Arabic face, `blit_raster_set_arabic` and its cache path are
+  removed.
+- **Ink margins.** With the companion gone, every font's margins are what
+  this record gave a font with a word face and no companion: a row above
+  and below, none sideways. Nothing a raster draws leaves its cell
+  sideways.
+- **A missing face.** The word face is a required face, as the companion
+  was: an outline profile is `available` only with it, and a font change
+  never loses the face the active raster has (422 `font_apply_failed`). A
+  boot without the file still starts, with Arabic drawn from the glyph
+  stack and `active.arabic` null, and the first font change once the file
+  is back attaches it.
+- **Gates.** `arabic_raster_gate` and `arabic_word_gate.py` tested the
+  companion alone and are removed; `arabic_backend_gate` (`arabic_kms_ink`)
+  now tests words through `draw_view` against an oracle of whole words,
+  with incremental frames, wallpaper restore, pane edges, the cursor over
+  overhanging ink, a refused run drawn exactly as with no word face, and
+  its ink-damage negative still failing; `gles_compose_gate` draws Hack
+  with the word face and a refused run beside a word on the GPU.

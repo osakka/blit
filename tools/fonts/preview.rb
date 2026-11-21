@@ -6,24 +6,16 @@ require 'fileutils'
 require 'json'
 require_relative '../tests/build_flags'
 root = File.expand_path('../..', __dir__)
-arabic = ARGV.delete('--arabic')
-output = File.expand_path(ARGV.fetch(0, arabic ? 'build/font-preview/blit-arabic.png' : 'build/font-preview/blit-fonts.png'))
+output = File.expand_path(ARGV.fetch(0, 'build/font-preview/blit-fonts.png'))
 Dir.chdir(root) do
   Dir.mktmpdir('blit-font-preview') do |work|
     binary = File.join(work, 'preview')
     headers = BuildFlags.cflags('font')
     libraries = BuildFlags.libs('font')
     raise 'compile failed' unless system('tcc', '-O2', '-std=c99', '-Wall', *headers,
-      arabic ? 'tools/probes/arabic_preview.c' : 'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', *libraries, '-o', binary)
+      'tools/probes/font_preview.c', 'src/blit_font.c', 'src/blit_raster.c', *libraries, '-o', binary)
     ppm = File.join(work, 'specimen.ppm')
-    if arabic
-      arguments = ['assets/fonts/Blit-Terminus16.psf',
-        'assets/fonts/text/3270-Regular.ttf', 'assets/fonts/text/Hack-Regular.ttf']
-      samples = JSON.parse(File.read('assets/fonts/arabic-specimens.json')).fetch('samples')
-      input = File.join(work, 'samples.txt')
-      File.write(input, samples.map { |s| cp=s.fetch('visual').codepoints; [cp.size,*cp.map { |c| c.to_s(16) }].join(' ') }.join("\n"))
-      arguments.concat(['assets/fonts/BlitArabicModern.ttf', input, ppm])
-    else
+    begin
       # Icon rows from the catalogue, so a renamed or retired icon fails here
       # instead of drawing nothing. Two-column icons are "left,right".
       by_id = JSON.parse(File.read('assets/fonts/icons/catalogue.json')).fetch('icons')

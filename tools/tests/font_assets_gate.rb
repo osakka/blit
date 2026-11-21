@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # ADR 0195: every font file Blit ships is the one fonts.source.json pins,
 # with its licence: the text fonts in text/ (and nothing else there), the
-# glyph stack, the emoji faces, the Arabic faces, the pixel fonts, the Nerd
+# glyph stack, the emoji faces, the Arabic face, the pixel fonts, the Nerd
 # catalogue and Blit's icon sources. fonts.source.json is the one registry
 # (ADR 0243); font_registry_gate checks the code names its faces from it. The text fonts are shipped unmodified, so their
 # hashes are the upstream release's files.
@@ -43,15 +43,18 @@ scalars = JSON.parse(File.read(File.join(root, catalogue.fetch('file')))).values
 raise 'catalogue count mismatch' unless scalars.size == catalogue.fetch('unique_codepoints')
 manifest.fetch('icon_licenses').each { |entry| check(root, entry.fetch('file'), entry.fetch('sha256'), 'icon licence') }
 arabic = manifest.fetch('arabic')
-entry = arabic.fetch('modern')
-check(root, entry.fetch('file'), entry.fetch('sha256'), 'Arabic companion')
-check(root, entry.fetch('license_file'), entry.fetch('license_sha256'), 'Arabic licence')
-check(root, entry.fetch('source_file'), entry.fetch('source_sha256'), 'Arabic source')
 check(root, arabic.fetch('specimens_file'), arabic.fetch('specimens_sha256'), 'Arabic specimens')
-# ADR 0241: the face Arabic words are shaped in, shipped unmodified.
+# ADR 0241: the face Arabic words are shaped in, shipped unmodified: the
+# one Arabic face (ADR 0243).
 naskh = arabic.fetch('naskh')
 check(root, naskh.fetch('file'), naskh.fetch('sha256'), 'Arabic word face')
 check(root, naskh.fetch('license_file'), naskh.fetch('license_sha256'), 'Arabic word face licence')
+raise 'a second Arabic face is pinned' unless arabic.keys.sort == %w[build naskh policy specimens_file specimens_sha256 status]
+# ADR 0243: Blit Arabic Modern is retired, with its FreeMono notices and
+# source archive.
+retired = %w[BlitArabicModern.ttf FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt
+             FreeMono-SOURCE.txt sources/freefont-src-20120503.tar.gz].select { |f| File.exist?(File.join(root, f)) }
+raise "the retired Arabic companion is back: #{retired.join(', ')}" unless retired.empty?
 # ADR 0243: the pixel fonts, generated here and pinned like the rest.
 manifest.fetch('pixel').each_value do |entry|
   check(root, entry.fetch('file'), entry.fetch('sha256'), 'pixel font')

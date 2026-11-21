@@ -260,13 +260,14 @@ int main(void)
     view.surface_revision = 4; ++view.graphics_signature;
     compare("image bands", &kms, out, &view);
 
-    /* The host's font: Modern at 11x22 with colour emoji and the Arabic
-       companion, whose ink overhangs its cells. */
+    /* The host's font: Hack at 11x22 with colour emoji and the Arabic word
+       face, whose words' ink overhangs their row (ADR 0241). */
     {
         BlitRaster *raster = blit_raster_open(&font, "assets/fonts/text/Hack-Regular.ttf",
                                               "assets/fonts/NotoColorEmoji.ttf", 11, 22);
-        if (raster == NULL || !blit_raster_set_arabic(raster, "assets/fonts/BlitArabicModern.ttf")) {
-            fprintf(stderr, "GLES_COMPOSE_FAIL the Modern/Arabic raster does not open\n");
+        if (raster == NULL ||
+            !blit_raster_set_arabic_words(raster, "assets/fonts/NotoNaskhArabic-Regular.ttf")) {
+            fprintf(stderr, "GLES_COMPOSE_FAIL the Hack/Arabic raster does not open\n");
             return 1;
         }
         blit_raster_attach(&font, raster);
@@ -293,7 +294,7 @@ int main(void)
         view.combining_count = counts;
         view.cursor_visible = 0;
         view.surface_revision = 10;
-        compare("modern, emoji, arabic", &kms, out, &view);
+        compare("hack, emoji, arabic", &kms, out, &view);
         view.cursor_visible = 1; view.cursor_style = 1;
         view.cursor_x = 5; view.cursor_y = 3; view.surface_revision = 11;
         compare("block cursor on overhanging ink", &kms, out, &view);
@@ -342,7 +343,7 @@ int main(void)
         BlitRaster *raster = blit_raster_open(&font, "assets/fonts/text/Hack-Regular.ttf",
                                               "assets/fonts/NotoColorEmoji.ttf", 11, 22);
         int k, m;
-        if (raster == NULL || !blit_raster_set_arabic(raster, "assets/fonts/BlitArabicModern.ttf") ||
+        if (raster == NULL ||
             !blit_raster_set_arabic_words(raster, "assets/fonts/NotoNaskhArabic-Regular.ttf")) {
             fprintf(stderr, "GLES_COMPOSE_FAIL the Arabic words raster does not open\n");
             return 1;
@@ -367,6 +368,12 @@ int main(void)
         for (k = 0; k < 5; ++k) codepoints[5 * COLS + 8 + k] = line2[6 + k];
         foreground[1 * COLS + 10] = 0xff8040 + 1;                              /* colour mid-word */
         text(14, 3, "Latin", 0, 0, 0);
+        /* ADR 0243: a run the word face refuses (a Latin acute on a beh) is
+           drawn cell by cell from the glyph stack, beside a word. */
+        codepoints[5 * COLS + 16] = 0xfe8f;
+        combining[(5 * COLS + 16) * BLIT_MAX_COMBINING] = 0x0301;
+        counts[5 * COLS + 16] = 1;
+        codepoints[5 * COLS + 18] = 0xfe91; codepoints[5 * COLS + 19] = 0xfe90;
         view.cursor_visible = 0; view.surface_revision = 30;
         compare("arabic words", &kms, out, &view);
         view.cursor_visible = 1; view.cursor_style = 1;
@@ -379,11 +386,14 @@ int main(void)
         codepoints[3 * COLS + 4] = 0;
         view.surface_revision = 33;
         compare_damage("damage: a letter becomes a space", &kms, out, &view, 4, 3, 1, 1);
-        /* The far end of a six-cell word, beyond the companion's ink margins:
-           only the word's widening redraws its other end. */
+        /* The far end of a six-cell word, beyond any ink margin: only the
+           word's widening redraws its other end. */
         codepoints[1 * COLS + 7] = 0xfe8e;
         view.surface_revision = 34;
         compare_damage("damage: the far end of a long word", &kms, out, &view, 7, 1, 1, 1);
+        codepoints[5 * COLS + 17] = 0xfe92;
+        view.surface_revision = 35;
+        compare_damage("damage: a letter beside a refused run", &kms, out, &view, 17, 5, 1, 1);
         view.combining = NULL; view.combining_count = NULL;
     }
     /* Scaled images, as a wallpaper is: odd ratios up and down. */

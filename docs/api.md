@@ -1113,20 +1113,15 @@ cache and redraws, as a size change does. Fitted icons and symbols and cell
 geometry ignore it. It is stored in `document.font.hinting`; a document
 without it means `full`.
 
-`arabic` (`naskh` or `modern`; default `naskh`) chooses the face Arabic is
-drawn in (ADR 0241). `naskh` shapes runs of Arabic as words in Noto Naskh
-Arabic (`NotoNaskhArabic-Regular.ttf` in the fonts root), for every text
-font, pixel fonts included; Blit Arabic Modern stays on outline fonts for
-any run the word face cannot shape. `modern` draws Arabic cell by cell in
-Blit Arabic Modern, as before the setting existed. It can be sent alone or
-with the other controls, `active.arabic` reports it, and anything else is a
-400 `invalid_font_arabic`. A change rebuilds the glyph cache and redraws. A
-word face that cannot be attached fails the change with 422
-`font_apply_failed`, as a missing companion does, and the active font and
-setting stay as they were. It is stored in `document.font.arabic`; a
-document without it means `naskh`. The one exception is the boot font: a
-fonts root without the word face still starts, with `arabic` reported as
-`modern`, and that default is what a document without `arabic` then means.
+Arabic has one face and no setting (ADR 0241, 0243): runs of Arabic cells
+are shaped as words in Noto Naskh Arabic (`NotoNaskhArabic-Regular.ttf` in
+the fonts root), for every text font, pixel fonts included, and a run the
+face cannot shape (a scalar it lacks) is drawn cell by cell from the glyph
+stack. The `arabic` setting of 0.3.129 and 0.3.130 (`naskh` or `modern`,
+Blit Arabic Modern's cell-by-cell drawing) is gone with that face: sent to
+`PUT /v1/fonts` it is not a font control (alone it is a 400
+`font_configuration_empty`), and a stored document that still holds
+`font.arabic` loads; the key is ignored and not written back.
 
 The pen of Blit's colour icons is not a font setting: it is a cell
 attribute, SGR 68 (ADR 0221, which replaced 0.3.48's `icon_colour`; see
@@ -1193,8 +1188,8 @@ fonts root; `family` is the face's family name, null for a pixel font.
 `role` is one of `text` (a selectable text font; a font of masters has one
 entry per master), `icons`, `nerd`, `symbols`, `unifont` (the glyph stack,
 the last two several faces in the order they are tried), `colour`,
-`text_emoji`, `arabic_cells` (Blit Arabic Modern), `arabic_words` (Noto
-Naskh Arabic), `pixel_fallback` (`Blit-Terminus16.psf`, the boot font and
+`text_emoji`, `arabic_words` (Noto Naskh Arabic, the one Arabic face),
+`pixel_fallback` (`Blit-Terminus16.psf`, the boot font and
 every outline font's PSF fallback) and `pixel_wide` (`Blit-Unifont16.psf`,
 wide cells). `draw` is how the face is drawn: `cell` (in the cell, at its
 size), `fitted` (fitted to the text font's cap height and the cell),
@@ -1226,31 +1221,27 @@ the glyph stack behind it. A profile or size change validates the rasterizer
 before retiring the active state. Both native KMS compositors (CPU and GLES)
 share the same coverage and colour source, fallback policy and cell sizing.
 
-Every outline profile carries the Arabic companion `BlitArabicModern.ttf`:
-`profiles[].arabic_companion_path` names it (null for a pixel font), and
-`active.arabic_companion` reports the loaded `path`, `family`,
-`baseline_px` and `shaping`. With `arabic: "naskh"` the word face is
-attached too: `shaping` is `"words"` and `words_path` and `words_family`
-name it (Noto Naskh Arabic). Otherwise `shaping` is `"visual-cell-marks"`
-and the `words_` fields are absent. A pixel font has no companion, so under
-`naskh` its `path` and `family` are null beside the word face, and under
-`modern` `active.arabic_companion` is null. For example, Hack under the
-default:
+`active.arabic` reports the Arabic face the active raster has: its
+`family`, `path` and `shaping`, which is always `"words"`. It is null only
+when the face is not attached, a fonts root without its file at boot; every
+Arabic cell is then drawn from the glyph stack, and the first font change
+made once the file is back attaches it. For example:
 
 ```json
-"arabic": "naskh",
-"arabic_companion": {"path": "/usr/lib/blit/fonts/BlitArabicModern.ttf",
-  "family": "Blit Arabic Modern", "baseline_px": 18, "shaping": "words",
-  "words_path": "/usr/lib/blit/fonts/NotoNaskhArabic-Regular.ttf",
-  "words_family": "Noto Naskh Arabic"}
+"arabic": {"family": "Noto Naskh Arabic",
+  "path": "/usr/lib/blit/fonts/NotoNaskhArabic-Regular.ttf", "shaping": "words"}
 ```
 
-Availability includes the companion file; a failed font or size replacement
-keeps the active font. Arabic shares the Latin baseline and keeps ink that extends
-beyond a cell. Hibr supplies display-order presentation forms; Blit
-positions cell-local marks without applying a second bidi pass. Tested core
-letters, lam-alef, diacritics and Arabic-Indic digits `٠١٢٣٤٥٦٧٨٩` are a
-finite scope, not a promise of every Arabic or Quranic form.
+An outline profile is `available` only when the shared faces it needs are
+readable: the emoji faces, the PSF fallback and the Arabic face. A font or
+size change never loses the Arabic face the active raster has: if it cannot
+be attached the change fails with 422 `font_apply_failed` and the active
+font stays. Arabic words sit on the Latin baseline, fitted into the cells
+Hibr gave them; their ink may take a row above and below, never a column
+sideways. Hibr supplies display-order presentation forms; Blit recovers
+the letters and shapes them without applying a second bidi pass. Tested
+core letters, lam-alef, diacritics and Arabic-Indic digits `٠١٢٣٤٥٦٧٨٩`
+are a finite scope, not a promise of every Arabic or Quranic form.
 
 A `scale` given as an integer, such as `2`, means `2.0`. A size change
 recalculates pane geometry and resizes attached PTYs. Because a framebuffer
@@ -1294,7 +1285,7 @@ stored document, `effective` is what this process is using now, and
 the document's content changes, live or by request, and not when the writer
 later puts it on disk (that is `storage.saved_revision` catching up), so an
 `If-Match` fails only when there is something new to read (issue #150). The document
-holds `font` (`font_id` with `scale` or `size_px`, `hinting` and `arabic`) and `server` values:
+holds `font` (`font_id` with `scale` or `size_px`, and `hinting`) and `server` values:
 `render_interval_ms` (1–100), `pane_layout`, `display_backend`,
 `kms_compositor`, `kms_frame_timing`, `kms_async_pageflip`,
 `effects_animation_hz` (`"auto"` or 10–240; see "Animation"),
