@@ -2555,6 +2555,24 @@ assert_equal('a', cells.fetch([0, 0]).fetch('text'), 'CHT prefix')
 assert_equal('b', cells.fetch([16, 0]).fetch('text'),
              'CHT advances by tab stops')
 
+# SR-5: a huge count (2^31-1, 2^31, 2^32 and more) moves the cursor to the
+# edge, never past it into a negative column or row: the next character is
+# written at the right or bottom edge.
+{ 'a' => [19, 1], 'C' => [19, 1], 'e' => [1, 3], 'B' => [1, 3], 'I' => [19, 1] }.each do |final, (x, y)|
+  %w[2147483647 2147483648 4294967296 99999999999999999999].each do |count|
+    snapshot = run_case(base, "huge-count-#{final}-#{count}", "printf '\\033[2;2H\\033[#{count}#{final}X'")
+    cells = cell_map(snapshot)
+    assert_equal('X', cells.fetch([x, y], {}).fetch('text', nil), "CSI #{count} #{final} then X at #{x},#{y}")
+  end
+end
+%w[2147483647 4294967296].each do |count|
+  # VPA, plain and in origin mode inside a scroll region (rows 2-3).
+  snapshot = run_case(base, "huge-vpa-#{count}", "printf '\\033[#{count}dX'")
+  assert_equal('X', cell_map(snapshot).fetch([0, 3], {}).fetch('text', nil), "VPA #{count} to the bottom row")
+  snapshot = run_case(base, "huge-vpa-origin-#{count}", "printf '\\033[2;3r\\033[?6h\\033[#{count}dX'")
+  assert_equal('X', cell_map(snapshot).fetch([0, 2], {}).fetch('text', nil), "VPA #{count} in origin mode to the region's bottom")
+end
+
 snapshot = run_case(base, 'insert-line-column-hibr',
                     "printf '\\033[2;5HAB\\033[2;5H\\033[LX'",
                     width: 20, height: 6)

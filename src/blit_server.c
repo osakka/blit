@@ -10310,7 +10310,14 @@ static int terminal_number(const char **cursor, int *value)
         *value = 0;
         return 1;
     }
-    *value = (int)strtol(*cursor, &end, 10);
+    {
+        /* A count past any screen is saturated, here, once: a parameter
+           near INT_MAX added to a cursor overflowed it negative and the next
+           character was written before its row (security review SR-5). No
+           control means anything past 65535. */
+        long number = strtol(*cursor, &end, 10);
+        *value = number > 65535 || number < 0 ? 65535 : (int)number;
+    }
     if (end == *cursor)
         return 0;
     *cursor = end;
