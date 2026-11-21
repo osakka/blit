@@ -40,23 +40,23 @@ exercised with real dpkg in the Debian 13 release environment
 | SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token |
 | SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) -- fixed in 0.3.130 |
 | SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
-| SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` |
+| SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` -- fixed (release and commit to be filled) |
 | SR-7 | High | PTY master descriptors leak into every later session child, including ones run as another user -- fixed in 0.3.130 |
 | SR-8 | High | The root API token is put into the environment of children run as another user |
 | SR-9 | High, accepted exception | The API token is a root shell, sent over plain HTTP on 0.0.0.0, with no default command allowlist |
 | SR-10 | Medium | The helper reads the staged package three times by path, in a group-writable directory |
-| SR-11 | Medium | Both tokens are compared with `strcmp` |
+| SR-11 | Medium | Both tokens are compared with `strcmp` -- fixed (release and commit to be filled) |
 | SR-12 | Medium | An install blocks the server's main loop with no timeout; the console watchdog kills it at 120 s, mid-install |
 | SR-13 | Medium | dpkg accepts `blit` N-1 alone under `blit-compositor` N; only the helper keeps the pair together |
 | SR-14 | Medium | blit-compositor can be killed with SIGBUS through a memfd passed as a dmabuf |
 | SR-15 | Medium | A viewport source rectangle or buffer scale makes the drag-icon scaler read outside the buffer |
-| SR-16 | Medium | One CHT sequence (`CSI 2147483647 I`) stalls the server |
+| SR-16 | Medium | One CHT sequence (`CSI 2147483647 I`) stalls the server -- fixed (release and commit to be filled) |
 | SR-17 | Medium | Connection slots can be used up before authentication (HTTP and the frame socket) |
-| SR-18 | Low | `png_decode` leaks its compressed buffer on some error paths |
-| SR-19 | Low | HTTP headers are found by `strstr` over the whole request, case-sensitively |
+| SR-18 | Low | `png_decode` leaks its compressed buffer on some error paths -- fixed (release and commit to be filled) |
+| SR-19 | Low | HTTP headers are found by `strstr` over the whole request, case-sensitively -- fixed (release and commit to be filled) |
 | SR-20 | Low | The JSON key scanner matches keys at any depth |
 | SR-21 | Low | A failed install reports the head of dpkg's output, not the error |
-| SR-22 | Low | With no token (loopback only), nothing checks `Origin` or `Host` |
+| SR-22 | Low | With no token (loopback only), nothing checks `Origin` or `Host` -- fixed (release and commit to be filled) |
 | SR-23 | Info | OSC 52 text is stored unchecked; the version is sent before authentication |
 
 ### SR-1 (Critical): a frame-channel edit writes outside the image
@@ -235,6 +235,19 @@ Fix: clamp CSI parameters to the screen size at parse time
 
 ### SR-6 (High, with a precondition): `session_json` can overflow `GET /v1/login`'s stack buffer
 
+**Fixed** (release and commit to be filled): every member of `session_json` is written with `json_appendf`
+(bounded), whole or left out, with each closer held back from where its
+list or object opens, so the object is always whole JSON within its buffer;
+a program's own text (title, clipboard, notification) is left out first.
+`GET /v1/login`'s buffer is 64 KB like the other callers'. The precondition
+holds: a login program's OSC 52 and OSC 9 reach the login session.
+login_manager_gate: a login program sets a 127-quote title, a 4093-quote
+clipboard and a 1023-quote notification, and `GET /v1/login` and `GET
+/v1/terminal-sessions/{id}` are whole JSON carrying all three; the server
+before this change answered `GET /v1/login` with 8741 bytes that were not
+JSON. (No ASan build of the server exists; the bound was also checked with
+the login buffer cut to 600, 2000 and 8192 bytes: whole JSON each time.)
+
 - `session_json` appends with `used += snprintf(body + used, capacity - used, ...)`
   and no guard (`src/blit_server.c:16766-16803`).
 - The escaped OSC 52 clipboard alone can be 8191 bytes (`escaped_clipboard[8192]`
@@ -368,6 +381,16 @@ The server uses `mkostemp(path, O_CLOEXEC)`.
 
 ### SR-11 (Medium): both tokens are compared with `strcmp`
 
+**Fixed** (release and commit to be filled): `blit_token_equal` (src/blit_token.h) compares the API
+bearer token, the update token, the Hibr owner token, the frame token and
+blit-compositor's activation tokens: every byte of the secret is read, and
+the time depends only on the two lengths. `frame_token_equal`, which stopped
+at the shorter string, is gone. The bearer scheme name is matched in any
+case. token_compare_gate.sh: unit cases (equal, first and last byte,
+one short, one long, empty) and a source check that no `strcmp`, `strncmp`
+or `memcmp` names a token or the Authorization header; the source before
+this change had four.
+
 - Bearer: `src/blit_server.c:24788-24789`.
 - Update token: `src/blit_server.c:32075`.
 
@@ -471,6 +494,14 @@ before the buffer.
 
 ### SR-16 (Medium): one CHT sequence stalls the server
 
+**Fixed** (release and commit to be filled): CHT stops once the cursor stops moving (the last
+column), as CBT stops at the first, so its work is bounded by the row. SR-5's
+saturation at 65535 had already removed the 2^31 loop; what was left was
+65535 iterations per sequence, thousands of sequences per write.
+terminal_conformance: `CSI 2147483647 I` and 8000 `CSI 65535 I` in one write,
+then DSR, answered at the last column within 200 ms (4 ms); the server
+before this change took 2.9 s.
+
 `CSI 2147483647 I` runs `terminal_next_tab` that many times with no early
 exit (`src/blit_server.c:14847`). CBT does stop early. This holds every
 session and the display for seconds.
@@ -501,6 +532,12 @@ session and the display for seconds.
 
 ### SR-18 (Low): `png_decode` leaks on some error paths
 
+**Fixed** (release and commit to be filled): every refusal in `png_decode` leaves through one exit that
+frees the compressed, raw and RGBA buffers. terminal_conformance: 50 PNGs
+(o=z), each 6 MB of IDAT then a 769-byte PLTE, are all refused and the
+server's RSS grows by at most 64 MB (12 MB); the server before this change
+grew by 308 MB.
+
 If an IHDR, PLTE or tRNS chunk is refused after an IDAT has been
 collected, `png_decode` returns without freeing the compressed buffer
 (`src/blit_server.c:11203`, `11206`, `11208`, `11212`). That can be up to
@@ -513,6 +550,18 @@ collected, `png_decode` returns without freeing the compressed buffer
 > (or the gate runs under LSan with no leak).
 
 ### SR-19 (Low): headers are found by `strstr` over the whole request
+
+**Fixed** (release and commit to be filled): headers are found at the start of a line, between the
+request line and the blank line, by name in any case (`request_header_value`);
+`Content-Length` is a decimal number given once (two different values close
+the connection); `Sec-WebSocket-Key` uses the same lookup; a request with
+`Transfer-Encoding` is refused 501 `transfer_encoding_unsupported` before
+its body is read. http_header_gate.rb (from network_auth_gate.sh): the token
+only in the body gets 401 (was 200), lower-case `content-length:` with the
+body after a pause 201 (was 400), lower-case `authorization:` 200 (was
+401), a chunked
+request gets 501 (was 400 with the body ignored), conflicting
+Content-Lengths are not answered (was 201).
 
 `request_header` (`src/blit_server.c:7256`) and the `Content-Length`
 lookups (`32061`, `32643`) search the whole request, body included, and are
@@ -556,6 +605,20 @@ then of no use to the operator.
 > the failing postinst.
 
 ### SR-22 (Low): no `Origin` or `Host` check
+
+**Fixed** (release and commit to be filled): with no token, Blit's own origin is its listener's
+(`http://127.0.0.1:PORT`, `http://localhost:PORT`, `http://[::1]:PORT`), since
+it serves no pages. A request with any other `Origin` gets 403
+`cross_origin` (the WebSocket upgrade included), one whose `Host` is not
+loopback 403 `host_not_loopback` (not checked under
+`BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1`), one with a body that is not
+`application/json` 415 `unsupported_media_type`; docs/api.md and the
+OpenAPI description say so. With a token nothing changes. http_origin_gate.rb
+(from network_auth_gate.sh's tokenless server): eight refusals and no session
+created; a program, the server's own origin, `localhost` and
+`application/json; charset=utf-8` are still answered. The server before
+this change answered all eight, created seven sessions and upgraded the
+WebSocket.
 
 With no token, the server listens on loopback only (SR-9), and any web
 page in a browser on that host can POST a session (`text/plain` needs no

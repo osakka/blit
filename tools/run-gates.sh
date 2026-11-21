@@ -419,9 +419,11 @@ suite_schema() {
     run_gate observation_api_gate.rb ruby tools/tests/observation_api_gate.rb
     run_gate stream_replay_gate.rb ruby tools/tests/stream_replay_gate.rb
     run_gate diagnostic_auth_gate.sh "$ROOT"/tools/tests/diagnostic_auth_gate.sh
-    # network_auth_gate.sh invokes http_fragmentation_gate.rb and
-    # http_backpressure_gate.rb itself, passing them its port. They are
-    # sub-gates: running either standalone connects to nothing and raises.
+    run_gate token_compare_gate.sh "$ROOT"/tools/tests/token_compare_gate.sh
+    # network_auth_gate.sh invokes http_fragmentation_gate.rb,
+    # http_backpressure_gate.rb, http_header_gate.rb and http_origin_gate.rb
+    # itself, passing them its port. They are sub-gates: running one
+    # standalone connects to nothing and raises.
     if [ -x "$BINARY" ]; then
         run_gate network_auth_gate.sh env BLIT_GATE_BINARY="$BINARY" \
             "$ROOT"/tools/tests/network_auth_gate.sh

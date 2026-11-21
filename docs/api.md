@@ -112,6 +112,13 @@ mutations send a stable `Idempotency-Key`; for revisioned resources send the
 revision using the schema-defined `If-Match` precondition. If authentication
 is enabled, requests carry `Authorization: Bearer TOKEN`.
 
+Headers are read from the header block only -- never from the body -- and
+their names in any case (`content-length:` is `Content-Length:`). A body is
+framed by `Content-Length` alone: a request with `Transfer-Encoding` (chunked
+or any other) is refused `501` `transfer_encoding_unsupported` before its
+body is read, and one with two different `Content-Length` values is closed
+unanswered.
+
 | Outcome | Meaning | Correct action |
 | --- | --- | --- |
 | `2xx` | Accepted or completed according to that operation | Persist IDs/revisions; observe asynchronous work. |
@@ -142,6 +149,30 @@ The test-LAN package may bind to `0.0.0.0`, but that is not an authentication
 or firewall policy. Use a restricted management network and a real token. The
 update credential is separate from the API bearer token and is accepted only
 by the package-update headers.
+
+The scheme name is matched in any case (`bearer` is `Bearer`), and the token
+is compared in constant time, as the update token is.
+
+With no token, the server listens on loopback only, and answers nothing a
+web page in a browser on the same machine could send. Blit serves no pages,
+so the only origin it calls its own is its listener's:
+`http://127.0.0.1:PORT`, `http://localhost:PORT` or `http://[::1]:PORT`.
+Without a token a request is refused when it
+
+- carries any other `Origin` (`null` included): `403` `cross_origin`. This
+  covers the WebSocket upgrade, which browsers open across origins without
+  asking;
+- names a `Host` other than `127.0.0.1`, `localhost` or `[::1]` (any port):
+  `403` `host_not_loopback`. A page whose own name resolves to 127.0.0.1 (DNS
+  rebinding) sends that name. A server started with
+  `BLIT_ALLOW_UNAUTHENTICATED_NETWORK=1` does not check `Host`;
+- has a body that is not `Content-Type: application/json` (parameters such
+  as `; charset=utf-8` allowed): `415` `unsupported_media_type`. A form or a
+  `text/plain` body is how a page writes to a server without a preflight.
+
+A program sends no `Origin`, and every Blit client already sends JSON as
+`application/json`, so none of this changes what a program may do. With a
+token these checks are not made: a page cannot send the bearer token.
 
 ### The version handshake is mandatory
 

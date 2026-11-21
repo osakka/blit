@@ -2285,6 +2285,57 @@ assert_equal(0, graphics_case(base, 'kitty-png-truncated',
              'a truncated PNG creates no image')
 puts 'PASS kitty-png-rejects-malformed'
 
+# SR-18: a PNG refused at a chunk after its IDAT frees the IDAT data. 50 PNGs,
+# each with 6 MB of IDAT and then a PLTE too long to be one (o=z, so the wire
+# carries a few KB), are all refused, and the server's RSS stays flat. The
+# server before this change kept every IDAT: its RSS grew by 308 MB (12 MB
+# after it).
+soak_pid = ENV['BLIT_SOAK_PID']
+if soak_pid.nil? || soak_pid.empty?
+  puts 'SKIP kitty-png-refusal-frees: no BLIT_SOAK_PID (the server is not this gate\'s)'
+else
+  rss_kb = lambda do
+    File.read("/proc/#{Integer(soak_pid)}/status")[/^VmRSS:\s+(\d+)/, 1].to_i
+  end
+  leaky_png = "\x89PNG\r\n\x1a\n".b +
+              png_chunk('IHDR'.b, [1, 1, 8, 0, 0, 0, 0].pack('NNC5')) +
+              png_chunk('IDAT'.b, "\0".b * (6 * 1024 * 1024)) +
+              png_chunk('PLTE'.b, "\0".b * 769) +
+              png_chunk('IEND'.b, ''.b)
+  leaky_parts = Base64.strict_encode64(Zlib::Deflate.deflate(leaky_png)).scan(/.{1,4096}/)
+  leaky = Tempfile.new('kitty-png-refused')
+  leaky.binmode
+  50.times do |n|
+    leaky_parts.each_with_index do |part, i|
+      head = i.zero? ? "a=T,f=100,o=z,q=2,i=#{900 + n}," : ''
+      leaky.write("\e_G#{head}m=#{i == leaky_parts.length - 1 ? 0 : 1};#{part}\e\\")
+    end
+  end
+  leaky.flush
+  rss_before = rss_kb.call
+  created = request(base, 'POST', '/v1/terminal-sessions', {
+    'command' => '/bin/sh',
+    'arguments' => ['-c', "cat #{leaky.path}; sleep 0.3"],
+    'surface' => { 'width' => 20, 'height' => 4 }
+  })
+  state = nil
+  Timeout.timeout(60) do
+    loop do
+      state = request(base, 'GET', "/v1/terminal-sessions/#{created.fetch('id')}")
+      break unless %w[starting running].include?(state.fetch('state'))
+
+      sleep 0.05
+    end
+  end
+  growth_mb = (rss_kb.call - rss_before) / 1024
+  request(base, 'DELETE', "/v1/terminal-sessions/#{created.fetch('id')}")
+  leaky.close!
+  assert_equal(50, state.fetch('graphics_diagnostics').fetch('rejected'),
+               'every PNG with a refused PLTE after its IDAT is refused')
+  raise "50 refused PNGs grew the server's RSS by #{growth_mb} MB (at most 64)" if growth_mb > 64
+  puts "PASS kitty-png-refusal-frees growth=#{growth_mb}MB"
+end
+
 # Issue #15 / ADR 0060: placement ids, the source rectangle, and the delete
 # targets. The pixel behaviour is in kitty_placement_gate.rb; this is the
 # state and the refusals, which need no renderer.
@@ -2603,6 +2654,25 @@ end
   snapshot = run_case(base, "huge-vpa-origin-#{count}", "printf '\\033[2;3r\\033[?6h\\033[#{count}dX'")
   assert_equal('X', cell_map(snapshot).fetch([0, 2], {}).fetch('text', nil), "VPA #{count} in origin mode to the region's bottom")
 end
+
+# SR-16: CHT stops at the last column, so its work is bounded by the row, not
+# the count. One `CSI 2147483647 I` and then 8000 `CSI 65535 I` in one write
+# leave the cursor at the last column, and a DSR after them is answered within
+# 200 ms. The server before this change looped every count, with every
+# session and the display waiting: 2.9 s on the build host (4 ms after it).
+cht_flood = Tempfile.new('cht-flood')
+cht_flood.binmode
+cht_flood.write("\e[2147483647I" + "\e[65535I" * 8000)
+cht_flood.flush
+snapshot = run_case(base, 'cht-huge-count-bounded',
+                    "stty -icanon -echo min 0 time 50; s=$(date +%s%N); cat #{cht_flood.path}; " \
+                    "printf '\\033[6n'; r=$(dd if=/dev/tty bs=1 count=7 2>/dev/null | tr -d '\\033'); " \
+                    "e=$(date +%s%N); printf '\\r\\033[2K%s %d' \"$r\" $(((e - s) / 1000000))")
+cht_reply, cht_ms = row_text(snapshot).split
+assert_equal('[1;20R', cht_reply, 'CHT with a huge count ends at the last column')
+raise "CHT flood: the DSR reply took #{cht_ms} ms (at most 200)" unless Integer(cht_ms) <= 200
+puts "PASS cht-huge-count-bounded #{cht_ms}ms"
+cht_flood.close!
 
 snapshot = run_case(base, 'insert-line-column-hibr',
                     "printf '\\033[2;5HAB\\033[2;5H\\033[LX'",

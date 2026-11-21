@@ -157,16 +157,6 @@ static void frame_client_close(BlitRuntime *runtime, int index)
     memset(&runtime->frame_clients[index], 0, sizeof(runtime->frame_clients[index]));
 }
 
-/* Equal strings, in time that does not depend on where they first differ. */
-static int frame_token_equal(const char *a, const char *b)
-{
-    size_t la = strlen(a), lb = strlen(b), i;
-    unsigned char diff = (unsigned char)(la != lb);
-    for (i = 0; i < la && i < lb; ++i)
-        diff |= (unsigned char)(a[i] ^ b[i]);
-    return diff == 0;
-}
-
 /* The uids a session's frames may come from: the signed-in user of a
    login session, the account any other session runs as, and root. */
 static int frame_peer_allowed(const BlitSession *session, uid_t uid)
@@ -935,7 +925,7 @@ static void frame_hello(BlitRuntime *runtime, int index, const unsigned char *me
     for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
         BlitSession *session = &runtime->sessions[i];
         if (session->used && session->frame_token[0] != '\0' &&
-            frame_token_equal(session->frame_token, token) &&
+            blit_token_equal(token, session->frame_token) &&
             frame_peer_allowed(session, peer.uid)) {
             client->session_id = session->id;
             client->authenticated = 1;

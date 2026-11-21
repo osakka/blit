@@ -5,6 +5,15 @@ info:
   description: >-
     Network control, discovery, terminal-session, display, input, and
     diagnostic API for the blit terminal and display service.
+    Header names are matched in any case, in the header block only. A body
+    is framed by Content-Length alone: a request with Transfer-Encoding is
+    refused 501 transfer_encoding_unsupported. With no BLIT_AUTH_TOKEN (a
+    loopback listener), a request is refused 403 cross_origin when it carries
+    an Origin other than http://127.0.0.1:PORT, http://localhost:PORT or
+    http://[::1]:PORT; 403 host_not_loopback when its Host names anything but
+    127.0.0.1, localhost or [::1]; and 415 unsupported_media_type when it has
+    a body that is not application/json (docs/api.md, Endpoint and
+    authentication).
 servers:
   - url: http://localhost:8080
     description: Development HTTP over TCP
@@ -2126,7 +2135,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: opaque
-      description: Required when the server is configured with BLIT_AUTH_TOKEN.
+      description: >-
+        Required when the server is configured with BLIT_AUTH_TOKEN. The
+        scheme name is matched in any case; the token is compared in
+        constant time.
   parameters:
     IfMatch:
       name: If-Match

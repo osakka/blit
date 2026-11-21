@@ -21,6 +21,7 @@
 #include "blit_sha256.h"
 #include "blit_damage.h"
 #include "blit_ink.h"
+#include "blit_token.h"
 
 #include <arpa/inet.h>
 #include <sys/mman.h>
@@ -38,6 +39,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 /* After sys/ioctl.h, which defines the _IOWR the ALSA control ioctls are
    built from. A kernel UAPI header, not libasound: issue #68 speaks to the
@@ -3471,8 +3473,11 @@ static int json_appendf(char *body, size_t capacity, size_t *used,
     va_start(arguments, format);
     written = vsnprintf(body + *used, capacity - *used, format, arguments);
     va_end(arguments);
-    if (written < 0 || (size_t)written >= capacity - *used)
+    if (written < 0 || (size_t)written >= capacity - *used) {
+        /* What did not fit is not left half written after the end. */
+        body[*used] = '\0';
         return 0;
+    }
     *used += (size_t)written;
     return 1;
 }
@@ -7246,23 +7251,82 @@ static const char *request_body(const char *request)
     return separator ? separator + 4 : "";
 }
 
+/* The value of the header `name` (given with its colon) on a line after
+   `after` -- the start of the header block when NULL -- or NULL. Names are
+   matched at the start of a line, only between the request line and the
+   blank line that ends the header block, and without regard to case (RFC
+   9110). It used to be strstr over the whole request: a body holding
+   "Authorization: Bearer ..." was read as the header, a header sent in
+   lower case was not found, and a proxy and Blit could disagree on where a
+   request ends (security review SR-19). */
+static const char *request_header_value(const char *request, const char *name,
+                                        const char *after)
+{
+    const char *end = strstr(request, "\r\n\r\n");
+    const char *line = strchr(after != NULL ? after : request, '\n');
+    size_t name_length = strlen(name);
+
+    if (end == NULL)
+        end = request + strlen(request);
+    while (line != NULL && ++line < end) {
+        if (strncasecmp(line, name, name_length) == 0) {
+            line += name_length;
+            while (*line == ' ' || *line == '\t')
+                ++line;
+            return line;
+        }
+        line = strchr(line, '\n');
+    }
+    return NULL;
+}
+
 static int request_header(const char *request, const char *name,
                           char *value, size_t capacity)
 {
-    const char *cursor = strstr(request, name);
+    const char *cursor = request_header_value(request, name, NULL);
     size_t length = 0;
 
     if (cursor == NULL)
         return 0;
-    cursor += strlen(name);
-    while (*cursor == ' ' || *cursor == '\t')
-        ++cursor;
     while (cursor[length] != '\0' && cursor[length] != '\r' &&
            cursor[length] != '\n' && length + 1 < capacity)
         ++length;
     memcpy(value, cursor, length);
     value[length] = '\0';
     return length > 0;
+}
+
+/* The request's Content-Length into *length: 1 when it has one, 0 when it
+   has none (*length 0), -1 when it is not a decimal number or is given twice
+   with different values -- where a request ends is never a matter of which
+   header a reader believes (security review SR-19). */
+static int request_content_length(const char *request, size_t *length)
+{
+    const char *value = NULL;
+    int seen = 0;
+
+    *length = 0;
+    while ((value = request_header_value(request, "Content-Length:", value)) != NULL) {
+        size_t parsed = 0;
+        const char *cursor = value;
+        if (*cursor < '0' || *cursor > '9')
+            return -1;
+        while (*cursor >= '0' && *cursor <= '9') {
+            if (parsed > (SIZE_MAX - 9U) / 10U)
+                return -1;
+            parsed = parsed * 10U + (size_t)(*cursor - '0');
+            ++cursor;
+        }
+        while (*cursor == ' ' || *cursor == '\t')
+            ++cursor;
+        if (*cursor != '\r' && *cursor != '\n' && *cursor != '\0')
+            return -1;
+        if (seen && parsed != *length)
+            return -1;
+        *length = parsed;
+        seen = 1;
+    }
+    return seen;
 }
 
 /* Find a JSON object key without matching text inside a quoted string.  Blit
@@ -11163,7 +11227,11 @@ static int png_unfilter(unsigned char *raw, int height, size_t stride,
 /* Decode `length` bytes of PNG into a freshly allocated RGBA buffer.
    Returns 1 on success and fills the out parameters; the caller owns
    *pixels_out. Returns 0 and allocates nothing on any malformed, oversized
-   or unsupported input. */
+   or unsupported input: every refusal leaves through `refused`, which frees
+   what was gathered. A refusal of IHDR, PLTE or tRNS after an IDAT used to
+   return there and keep the compressed data -- up to 8 MB a picture, outside
+   the picture budget, as often as a program sent one (security review
+   SR-18). */
 static int png_decode(const unsigned char *data, size_t length,
                       unsigned char **pixels_out, int *width_out,
                       int *height_out)
@@ -11203,27 +11271,25 @@ static int png_decode(const unsigned char *data, size_t length,
             if (width < 1 || width > BLIT_GRAPHICS_MAX_WIDTH ||
                 height < 1 || height > BLIT_GRAPHICS_MAX_HEIGHT ||
                 depth != 8 || interlace != 0)
-                return 0;
+                goto refused;
             if (colour != 0 && colour != 2 && colour != 3 &&
                 colour != 4 && colour != 6)
-                return 0;
+                goto refused;
         } else if (memcmp(type, "PLTE", 4) == 0) {
-            if (chunk_length > sizeof(palette)) return 0;
+            if (chunk_length > sizeof(palette)) goto refused;
             memcpy(palette, body, chunk_length);
             palette_entries = (int)(chunk_length / 3);
         } else if (memcmp(type, "tRNS", 4) == 0 && colour == 3) {
-            if (chunk_length > sizeof(palette_alpha)) return 0;
+            if (chunk_length > sizeof(palette_alpha)) goto refused;
             memcpy(palette_alpha, body, chunk_length);
         } else if (memcmp(type, "IDAT", 4) == 0) {
             unsigned char *grown;
-            if (!have_header) return 0;
-            if (compressed_used + chunk_length > BLIT_GRAPHICS_MAX_BYTES) {
-                free(compressed);
-                return 0;
-            }
+            if (!have_header) goto refused;
+            if (compressed_used + chunk_length > BLIT_GRAPHICS_MAX_BYTES)
+                goto refused;
             grown = (unsigned char *)realloc(compressed,
                                              compressed_used + chunk_length);
-            if (grown == NULL) { free(compressed); return 0; }
+            if (grown == NULL) goto refused;
             compressed = grown;
             memcpy(compressed + compressed_used, body, chunk_length);
             compressed_used += chunk_length;
@@ -11232,36 +11298,30 @@ static int png_decode(const unsigned char *data, size_t length,
         }
         offset += 12 + chunk_length;
     }
-    if (!have_header || compressed == NULL || compressed_used == 0) {
-        free(compressed);
-        return 0;
-    }
+    if (!have_header || compressed == NULL || compressed_used == 0)
+        goto refused;
     channels = colour == 0 ? 1 : colour == 2 ? 3 : colour == 3 ? 1 :
                colour == 4 ? 2 : 4;
-    if (colour == 3 && palette_entries < 1) { free(compressed); return 0; }
+    if (colour == 3 && palette_entries < 1) goto refused;
     bytes_per_pixel = channels;
     stride = (size_t)width * (size_t)channels;
     raw_size = ((size_t)height) * (stride + 1);
     /* The inflated size is fixed by IHDR, so a decompression bomb cannot
        make this allocation grow: zlib is told the exact budget and fails
        if the stream does not match it. */
-    if (raw_size > BLIT_GRAPHICS_MAX_BYTES) { free(compressed); return 0; }
+    if (raw_size > BLIT_GRAPHICS_MAX_BYTES) goto refused;
     raw = (unsigned char *)malloc(raw_size);
-    if (raw == NULL) { free(compressed); return 0; }
+    if (raw == NULL) goto refused;
     inflated = (uLongf)raw_size;
     if (uncompress(raw, &inflated, compressed, (uLong)compressed_used) != Z_OK ||
-        (size_t)inflated != raw_size) {
-        free(compressed);
-        free(raw);
-        return 0;
-    }
+        (size_t)inflated != raw_size)
+        goto refused;
     free(compressed);
-    if (!png_unfilter(raw, height, stride, bytes_per_pixel)) {
-        free(raw);
-        return 0;
-    }
+    compressed = NULL;
+    if (!png_unfilter(raw, height, stride, bytes_per_pixel))
+        goto refused;
     rgba = (unsigned char *)malloc((size_t)width * (size_t)height * 4U);
-    if (rgba == NULL) { free(raw); return 0; }
+    if (rgba == NULL) goto refused;
     for (row = 0; row < height; ++row) {
         const unsigned char *line = raw + (size_t)row * (stride + 1) + 1;
         unsigned char *out = rgba + (size_t)row * (size_t)width * 4U;
@@ -11279,7 +11339,7 @@ static int png_decode(const unsigned char *data, size_t length,
                 break;
             case 3: {
                 int index = sample[0];
-                if (index >= palette_entries) { free(raw); free(rgba); return 0; }
+                if (index >= palette_entries) goto refused;
                 pixel[0] = palette[index * 3];
                 pixel[1] = palette[index * 3 + 1];
                 pixel[2] = palette[index * 3 + 2];
@@ -11302,6 +11362,12 @@ static int png_decode(const unsigned char *data, size_t length,
     *width_out = width;
     *height_out = height;
     return 1;
+
+refused:
+    free(compressed);
+    free(raw);
+    free(rgba);
+    return 0;
 }
 
 static int kitty_base64_value(unsigned char byte)
@@ -14852,8 +14918,18 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (command == 'I') {
         int count = has_first && first > 0 ? first : 1;
-        while (count-- > 0)
-            surface->cursor_x = terminal_next_tab(surface, surface->cursor_x);
+        /* CHT stops once the cursor stops moving, at the last column, as CBT
+           above stops at the first: the work is bounded by the tab stops in
+           the row, not by the count. It looped `count` times -- 65535 calls
+           for one `CSI 65535 I`, and a program could send thousands of them
+           at a time while every session and the display waited (security
+           review SR-16). */
+        while (count-- > 0) {
+            int next = terminal_next_tab(surface, surface->cursor_x);
+            if (next == surface->cursor_x)
+                break;
+            surface->cursor_x = next;
+        }
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
     } else if (intermediate == 0 && (command == 'L' || command == 'M')) {
         int count = has_first && first > 0 ? first : 1;
@@ -16717,19 +16793,54 @@ static const char *surface_mode_name(int mode)
     return "terminal";
 }
 
+/* Cut `body` back to `mark`: a member that did not fit whole is left out,
+   never left half written. */
+static void json_rewind(char *body, size_t *used, size_t mark)
+{
+    *used = mark;
+    body[mark] = '\0';
+}
+
+/* Room session_json keeps, while it writes a program's own text (title,
+   clipboard, notification), for the members that follow it -- every one of
+   them fixed in size but for the picture, input and status lists, which stop
+   on their own when they do not fit. */
+#define BLIT_SESSION_JSON_TAIL 4096U
+
+/* A session as JSON, in `capacity` bytes, always whole: every member is
+   written with json_appendf, which never writes past its bound, and one that
+   does not fit is left out (a list stops at the last entry that fits). The
+   closing brace is held back from the start, and each list's or object's
+   closer from where it opens. It used to add snprintf's return values with no
+   bound: an OSC 52 clipboard of quotes (8 KB escaped) and a notification
+   carried `used` past GET /v1/login's 8 KB buffer, `capacity - used` wrapped,
+   and the rest of the object was written past the end of that buffer on the
+   stack (security review SR-6). */
 static void session_json(BlitRuntime *runtime, BlitSession *session,
                          char *body, size_t capacity)
 {
     BlitSurface *surface = find_surface_id(runtime, session->id);
     const char *route_id = NULL;
     int route_index;
-    size_t used;
+    size_t used = 0;
+    size_t limit;
+    size_t text_limit;
+    size_t mark;
+    int whole;
     char escaped_title[256];
     char escaped_clipboard[8192];
     char escaped_notification[2048];
     char escaped_terminal_term[128];
     int native_ready;
 
+    if (capacity < 2) {
+        if (capacity > 0) body[0] = '\0';
+        return;
+    }
+    body[0] = '\0';
+    /* One byte held back for the object's closing brace. */
+    limit = capacity - 1;
+    text_limit = limit > BLIT_SESSION_JSON_TAIL ? limit - BLIT_SESSION_JSON_TAIL : 0;
     refresh_session_state(runtime, session);
     native_ready = native_login_ready(session, monotonic_us());
 
@@ -16755,7 +16866,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                 sizeof(escaped_notification));
     json_escape(session->terminal_term, escaped_terminal_term,
                 sizeof(escaped_terminal_term));
-    snprintf(body, capacity,
+    json_appendf(body, limit, &used,
              "{\"id\":\"%llu\",\"revision\":%llu,"
              "\"state\":\"%s\",\"surface_id\":\"%s\","
              "\"process_id\":%ld,\"surface_revision\":%llu,"
@@ -16765,48 +16876,41 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
              surface != NULL ? surface->revision : 0,
              session->focused ? "true" : "false",
              surface_mode_name(session->surface_mode));
-    used = strlen(body);
-    used += (size_t)snprintf(body + used, capacity - used,
-                             ",\"login_manager\":%s",
-                             session->login_manager ? "true" : "false");
-    used += (size_t)snprintf(body + used, capacity - used,
-                             ",\"text_layout\":\"%s\"",
-                             session->terminal_emoji_layout ? "emoji" : "scalar");
-    used += (size_t)snprintf(body + used, capacity - used,
-                             ",\"title\":\"%s\"", escaped_title);
+    if (used == 0) {
+        /* Not even the identity fits: an empty object, still JSON. */
+        json_appendf(body, capacity, &used, "{}");
+        return;
+    }
+    json_appendf(body, limit, &used, ",\"login_manager\":%s",
+                 session->login_manager ? "true" : "false");
+    json_appendf(body, limit, &used, ",\"text_layout\":\"%s\"",
+                 session->terminal_emoji_layout ? "emoji" : "scalar");
+    /* A program's own text: written whole while the fixed members after it
+       still fit, else left out. */
+    json_appendf(body, text_limit, &used, ",\"title\":\"%s\"", escaped_title);
     if (session->terminal_clipboard[0] != '\0')
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"clipboard\":\"%s\"",
-                                 escaped_clipboard);
+        json_appendf(body, text_limit, &used, ",\"clipboard\":\"%s\"",
+                     escaped_clipboard);
     if (session->terminal_notification[0] != '\0')
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"notification\":\"%s\"",
-                                 escaped_notification);
+        json_appendf(body, text_limit, &used, ",\"notification\":\"%s\"",
+                     escaped_notification);
     if (strcmp(session->state, "running") != 0)
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"exit_code\":%d", session->exit_code);
-    if (session->display_id[0]) {
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"display_id\":\"%s\"",
-                                 session->display_id);
-    }
-    if (session->pane_id[0]) {
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"pane_id\":\"%s\"", session->pane_id);
-    }
+        json_appendf(body, limit, &used, ",\"exit_code\":%d", session->exit_code);
+    if (session->display_id[0])
+        json_appendf(body, limit, &used, ",\"display_id\":\"%s\"",
+                     session->display_id);
+    if (session->pane_id[0])
+        json_appendf(body, limit, &used, ",\"pane_id\":\"%s\"", session->pane_id);
     if (route_id != NULL)
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"input_route\":\"%s\"", route_id);
-    if (surface != NULL) {
-        used += (size_t)snprintf(body + used, capacity - used,
-                                 ",\"cursor\":{\"x\":%d,\"y\":%d,"
-                                 "\"visible\":%s,\"style\":%d}", surface->cursor_x,
-                                 surface->cursor_y,
-                                 surface->cursor_visible ? "true" : "false",
-                                 surface->cursor_style);
-    }
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+        json_appendf(body, limit, &used, ",\"input_route\":\"%s\"", route_id);
+    if (surface != NULL)
+        json_appendf(body, limit, &used,
+                     ",\"cursor\":{\"x\":%d,\"y\":%d,"
+                     "\"visible\":%s,\"style\":%d}", surface->cursor_x,
+                     surface->cursor_y,
+                     surface->cursor_visible ? "true" : "false",
+                     surface->cursor_style);
+    json_appendf(body, limit, &used,
         ",\"hibr_attachment\":{\"resume_requested\":%s,"
         "\"reassert_attempts\":%d,\"owner_matches\":%d,"
         "\"unresolved\":%s,\"owner_registered\":%s,"
@@ -16821,14 +16925,12 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->hibr_owner_writes,
         session->hibr_owner_writes > 0 ? "true" : "false",
         session->attach_unsettled ? "false" : "true");
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+    json_appendf(body, limit, &used,
         ",\"hibr_desktop\":{\"role\":\"%s\",\"session\":\"%s\"}",
         (session->hibr_desktop_primary || native_ready) ? "primary" :
             (session->hibr_desktop_join ? "join" : "none"),
         native_ready ? "desktop" : session->hibr_desktop_session);
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+    json_appendf(body, limit, &used,
         ",\"terminal_capabilities\":{\"term\":\"%s\","
         "\"cell_pixels\":{\"width\":%d,\"height\":%d},"
         "\"graphics\":[\"kitty\",\"sixel\"],"
@@ -16838,8 +16940,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->terminal_cell_height,
         session->terminal_keyboard_flags[session->terminal_alternate ? 1 : 0],
         session->terminal_keyboard_depth[session->terminal_alternate ? 1 : 0]);
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+    json_appendf(body, limit, &used,
         ",\"terminal_defaults\":{"
         "\"foreground\":\"#%06x\","
         "\"background\":\"#%06x\","
@@ -16854,8 +16955,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
        response there is no way to tell "the client never enabled mouse
        reporting" from "Blit is dropping the events", which are opposite
        faults with the same symptom. */
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+    json_appendf(body, limit, &used,
         ",\"mouse_reporting\":{\"mode\":%d,\"sgr\":%s,\"pixels\":%s,"
         "\"pointer_lock\":%s,\"pointer_lock_refusals\":%lu}",
         session->terminal_mouse_mode,
@@ -16864,8 +16964,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->terminal_pointer_lock ? "true" : "false",
         session->terminal_pointer_lock_refusals);
     /* OSC 22 names are [a-z0-9_-] only, so they need no JSON escaping. */
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+    json_appendf(body, limit, &used,
         ",\"pointer_shape\":{\"requested\":%s%s%s,\"depth\":%d}",
         session->terminal_pointer_depth > 0 ? "\"" : "",
         session->terminal_pointer_depth > 0 ?
@@ -16873,9 +16972,9 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             "null",
         session->terminal_pointer_depth > 0 ? "\"" : "",
         session->terminal_pointer_depth);
-    used += (size_t)snprintf(body + used, capacity - used,
-                             ",\"graphics\":[");
-    {
+    /* The list holds back its "]" while it is written; each picture, its
+       "]}" as well while its placements are. */
+    if (json_appendf(body, limit - 1, &used, ",\"graphics\":[")) {
         int graphics_index;
         int first_graphics = 1;
         for (graphics_index = 0; graphics_index < session->graphics_count;
@@ -16884,7 +16983,7 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             if (!image->used) continue;
             /* ADR 0226: a session may hold thousands of pictures; the list
                stops while the rest of the object still fits. */
-            if (used + 8192 > capacity) break;
+            if (used + 8192 > limit) break;
             /* A checksum of the decoded samples, so a test can assert that
                two transmissions of the same picture produced the same
                picture.  Dimensions and byte counts agree for images that
@@ -16911,7 +17010,8 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                     top_height = top.height;
                 }
             }
-            used += (size_t)snprintf(body + used, capacity - used,
+            mark = used;
+            whole = json_appendf(body, limit - 3, &used,
                 "%s{\"id\":%u,\"protocol\":\"%s\",\"complete\":%s,\"visible\":%s,"
                 "\"width\":%d,\"height\":%d,\"format\":%d,"
                 "\"bytes\":%lu,\"pixel_crc32\":%lu,\"x\":%d,\"y\":%d,"
@@ -16932,13 +17032,16 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                0, then each numbered one, with their source rectangles. A
                placement whose rectangle starts outside the image is listed
                with the stored values rather than resolved ones. */
-            used += (size_t)snprintf(body + used, capacity - used,
-                ",\"placements\":[");
+            whole = whole && json_appendf(body, limit - 3, &used, ",\"placements\":[");
+            if (!whole) {
+                json_rewind(body, &used, mark);
+                break;
+            }
             {
                 int slot;
                 int first_placement = 1;
                 for (slot = -1; slot < image->placement_capacity &&
-                     used + 8192 <= capacity; ++slot) {
+                     used + 8192 <= limit; ++slot) {
                     BlitGraphicsPlacement placed;
                     BlitGraphicsDraw draw;
                     unsigned int placed_id = slot < 0 ? 0U :
@@ -16954,30 +17057,31 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
                         placed.src_w = draw.src_w;
                         placed.src_h = draw.src_h;
                     }
-                    used += (size_t)snprintf(body + used, capacity - used,
+                    if (!json_appendf(body, limit - 3, &used,
                         "%s{\"id\":%u,\"x\":%d,\"y\":%d,\"width\":%d,"
                         "\"height\":%d,\"z\":%d,\"source\":{\"x\":%d,"
                         "\"y\":%d,\"width\":%d,\"height\":%d}}",
                         first_placement ? "" : ",", placed_id, placed.x,
                         placed.y, placed.width, placed.height, placed.z,
                         placed.src_x, placed.src_y, placed.src_w,
-                        placed.src_h);
+                        placed.src_h))
+                        break;
                     first_placement = 0;
                 }
             }
-            used += (size_t)snprintf(body + used, capacity - used, "]}");
+            json_appendf(body, limit - 1, &used, "]}");
             first_graphics = 0;
         }
+        json_appendf(body, limit, &used, "]");
     }
-    used += (size_t)snprintf(body + used, capacity - used, "]");
     /* Always present: a session nothing went wrong in says so with zeros. */
     {
         char escaped_graphics_error[128];
         int kind;
         json_escape(session->graphics_last_error, escaped_graphics_error,
                     sizeof(escaped_graphics_error));
-        used += (size_t)snprintf(
-            body + used, capacity - used,
+        mark = used;
+        whole = json_appendf(body, limit, &used,
             ",\"graphics_memory\":{\"bytes\":%llu,\"budget\":%llu,"
             "\"images\":%d,\"placements\":%d,"
             "\"freed\":{\"unshown\":%lu,\"budget\":%lu},"
@@ -16992,18 +17096,20 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
             session->graphics_refused_ceiling, session->graphics_refused_budget,
             session->graphics_rejected, session->graphics_evicted,
             escaped_graphics_error);
-        for (kind = 0; kind < 16 && used < capacity; ++kind)
-            used += (size_t)snprintf(body + used, capacity - used, "%s\"%c\":%lu",
-                                     kind ? "," : "", kitty_delete_kinds[kind],
-                                     session->kitty_deletes[kind]);
-        if (used < capacity)
-            used += (size_t)snprintf(body + used, capacity - used,
-                                     "},\"delete_freed\":%lu}",
-                                     session->kitty_delete_freed);
+        for (kind = 0; kind < 16 && whole; ++kind)
+            whole = json_appendf(body, limit, &used, "%s\"%c\":%lu",
+                                 kind ? "," : "", kitty_delete_kinds[kind],
+                                 session->kitty_deletes[kind]);
+        whole = whole && json_appendf(body, limit, &used,
+                                      "},\"delete_freed\":%lu}",
+                                      session->kitty_delete_freed);
+        if (!whole)
+            json_rewind(body, &used, mark);
     }
-    /* ADR 0202: frames by descriptor into this session's images. */
-    used += (size_t)snprintf(
-        body + used, capacity - used,
+    /* ADR 0202: frames by descriptor into this session's images. The
+       object's "}" is held back while its input routes are written. */
+    mark = used;
+    if (json_appendf(body, limit - 1, &used,
         ",\"frames\":{\"accepted\":%lu,\"refused\":%lu,\"stale\":%lu,"
         "\"superseded\":%lu,\"last_error\":\"%s\","
         /* ADR 0223: those that came as dmabufs. */
@@ -17013,35 +17119,47 @@ static void session_json(BlitRuntime *runtime, BlitSession *session,
         session->frames_superseded, session->frames_last_error,
         session->dmabuf_accepted, session->dmabuf_released,
         session->dmabuf_refused_unavailable, session->dmabuf_refused_format,
-        session->dmabuf_refused_import, session->dmabuf_refused_invalid);
-    /* ADR 0228: its input routes to blit-compositor. */
-    if (used < capacity)
-        used += frame_input_json(runtime, session, body + used, capacity - used);
-    if (used < capacity)
-        used += (size_t)snprintf(body + used, capacity - used, "}");
+        session->dmabuf_refused_import, session->dmabuf_refused_invalid)) {
+        /* ADR 0228: its input routes to blit-compositor; routes that do not
+           fit are left out, and the member is left out if its head does
+           not. */
+        size_t input = frame_input_json(runtime, session, body + used,
+                                        limit - 1 - used);
+        if (input == 0)
+            body[used] = '\0';
+        used += input;
+        if (!json_appendf(body, limit, &used, "}"))
+            json_rewind(body, &used, mark);
+    }
     /* ADR 0203: the latest STA1 lines from its frame client, while they are
-       younger than the five seconds the panel shows them for. */
+       younger than the five seconds the panel shows them for. The list's
+       "]" and the age after it are held back while its lines are written. */
     {
         uint64_t now = monotonic_us();
         if (session->status_count > 0 && now >= session->status_us &&
-            now - session->status_us < BLIT_HUD_STATUS_US) {
+            now - session->status_us < BLIT_HUD_STATUS_US &&
+            limit > 48) {
             int line;
-            used += (size_t)snprintf(body + used, capacity - used, ",\"status\":{\"lines\":[");
-            for (line = 0; line < session->status_count && used < capacity; ++line) {
+            mark = used;
+            whole = json_appendf(body, limit - 48, &used, ",\"status\":{\"lines\":[");
+            for (line = 0; line < session->status_count && whole; ++line) {
                 char escaped[BLIT_HUD_STATUS_BYTES * 6 + 1];
                 json_escape(session->status_lines[line], escaped, sizeof(escaped));
-                used += (size_t)snprintf(body + used, capacity - used, "%s\"%s\"",
-                                         line ? "," : "", escaped);
+                if (!json_appendf(body, limit - 48, &used, "%s\"%s\"",
+                                  line ? "," : "", escaped))
+                    break;
             }
-            if (used < capacity)
-                used += (size_t)snprintf(body + used, capacity - used, "],\"age_ms\":%llu}",
-                                         (unsigned long long)((now - session->status_us) / 1000ULL));
+            whole = whole && json_appendf(body, limit, &used, "],\"age_ms\":%llu}",
+                (unsigned long long)((now - session->status_us) / 1000ULL));
+            if (!whole) {
+                json_rewind(body, &used, mark);
+                json_appendf(body, limit, &used, ",\"status\":null");
+            }
         } else {
-            used += (size_t)snprintf(body + used, capacity - used, ",\"status\":null");
+            json_appendf(body, limit, &used, ",\"status\":null");
         }
     }
-    if (used < capacity)
-        snprintf(body + used, capacity - used, "}");
+    json_appendf(body, capacity, &used, "}");
 }
 
 static const char *pane_surface_id(const BlitRuntime *runtime,
@@ -18809,7 +18927,9 @@ static void login_manager_json(BlitRuntime *runtime, char *body,
     BlitSession *session = runtime->login_session_id != 0 ?
         find_session_id(runtime, runtime->login_session_id) : NULL;
     const char *state = runtime->login_enabled ? "starting" : "disabled";
-    char session_body[8192];
+    /* As large as every other caller's: a login session's clipboard alone
+       is 8 KB escaped (security review SR-6). */
+    char session_body[65536];
     char escaped_command[512];
     char escaped_script[512];
     char escaped_display[256];
@@ -19174,9 +19294,8 @@ static void font_icons_response(int fd, const char *request, char *body, size_t 
     blit_sha256_hex(body, length, revision);
     snprintf(etag, sizeof(etag), "\"%s\"", revision);
     snprintf(extra, sizeof(extra), "ETag: %s\r\n", etag);
-    if (((request_header(request, "If-None-Match:", match, sizeof(match)) ||
-          request_header(request, "if-none-match:", match, sizeof(match))) &&
-         (strcmp(match, "*") == 0 || strstr(match, revision) != NULL))) {
+    if (request_header(request, "If-None-Match:", match, sizeof(match)) &&
+        (strcmp(match, "*") == 0 || strstr(match, revision) != NULL)) {
         send_http_with(fd, 304, "Not Modified", "application/json", "no-cache", extra, "");
         return;
     }
@@ -19719,23 +19838,16 @@ static void base64_encode(const unsigned char *input, size_t length,
 
 static int websocket_accept(const char *request, char *accept, size_t capacity)
 {
-    const char *prefix = "Sec-WebSocket-Key:";
-    const char *key = strstr(request, prefix);
     char combined[256];
     unsigned char digest[20];
     Sha1 sha;
-    size_t length = 0;
+    size_t length;
 
-    if (key == NULL)
+    if (!request_header(request, "Sec-WebSocket-Key:", combined, sizeof(combined)))
         return 0;
-    key += strlen(prefix);
-    while (*key == ' ' || *key == '\t') ++key;
-    while (key[length] != '\0' && key[length] != '\r' &&
-           key[length] != '\n' && length + 1 < sizeof(combined))
-        ++length;
-    if (length == 0 || length + 37 >= sizeof(combined))
+    length = strlen(combined);
+    if (length + 37 >= sizeof(combined))
         return 0;
-    memcpy(combined, key, length);
     memcpy(combined + length, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", 36);
     length += 36;
     sha1_init(&sha);
@@ -24776,6 +24888,93 @@ static void arabizi_convert_response(int fd, const char *payload, char *body, si
 static void input_keymap_response(int fd, BlitRuntime *runtime, const char *request,
                                   const char *path, char *body, size_t capacity);
 
+/* Does `host` (a Host value, or an origin's host and port) name this
+   machine's loopback -- 127.0.0.1, localhost or [::1] -- and, when `port` is
+   not negative, that port? The port may be left out only when it is 80. */
+static int http_loopback_authority(const char *host, size_t length, int port)
+{
+    static const char *const names[] = {"127.0.0.1", "localhost", "[::1]"};
+    size_t i;
+
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        size_t name_length = strlen(names[i]);
+        char digits[16];
+        if (length < name_length || strncasecmp(host, names[i], name_length) != 0)
+            continue;
+        if (length == name_length)
+            return port < 0 || port == 80;
+        if (host[name_length] != ':')
+            continue;
+        if (port < 0)
+            return 1;
+        snprintf(digits, sizeof(digits), "%d", port);
+        return length - name_length - 1 == strlen(digits) &&
+            memcmp(host + name_length + 1, digits, strlen(digits)) == 0;
+    }
+    return 0;
+}
+
+/* With no token, the listener is loopback only (SR-9), and a web page in a
+   browser on the same machine could still reach the session API, which runs
+   commands: a cross-origin POST in text/plain needs no preflight, a
+   WebSocket none at all, and a page whose own name resolves to 127.0.0.1
+   (DNS rebinding) is not cross-origin in the browser's eyes (security review
+   SR-22). Blit serves no pages, so the only origin it calls its own is its
+   listener's: http://127.0.0.1:PORT, http://localhost:PORT or
+   http://[::1]:PORT. Without a token a request is refused when
+     - it carries an Origin other than those: 403 cross_origin;
+     - the listener is loopback and its Host names anything else -- the port
+       aside: 403 host_not_loopback;
+     - it has a body that is not Content-Type: application/json: 415
+       unsupported_media_type (a form or a text/plain body is how a page
+       writes to a server without asking first).
+   A program that is not a browser sends no Origin, and every Blit client
+   already sends its JSON as application/json. With a token none of this is
+   needed: a page cannot send the bearer token. */
+static int http_tokenless_request_allowed(int fd, const BlitRuntime *runtime,
+                                          const char *request)
+{
+    const char *value;
+    size_t length;
+    size_t body_length = 0;
+
+    value = request_header_value(request, "Origin:", NULL);
+    if (value != NULL) {
+        length = strcspn(value, "\r\n");
+        while (length > 0 && (value[length - 1] == ' ' || value[length - 1] == '\t'))
+            --length;
+        if (length < 7 || strncasecmp(value, "http://", 7) != 0 ||
+            !http_loopback_authority(value + 7, length - 7, runtime->listener_port)) {
+            send_problem(fd, 403, "Forbidden", "cross_origin",
+                         "With no token, Blit answers no request from a web page: the Origin is not this server's.");
+            return 0;
+        }
+    }
+    value = request_header_value(request, "Host:", NULL);
+    if (value != NULL && !runtime->unauthenticated_network) {
+        length = strcspn(value, "\r\n");
+        while (length > 0 && (value[length - 1] == ' ' || value[length - 1] == '\t'))
+            --length;
+        if (!http_loopback_authority(value, length, -1)) {
+            send_problem(fd, 403, "Forbidden", "host_not_loopback",
+                         "With no token, Blit listens on loopback and answers only a Host that names it.");
+            return 0;
+        }
+    }
+    if (request_content_length(request, &body_length) > 0 && body_length > 0) {
+        value = request_header_value(request, "Content-Type:", NULL);
+        length = value != NULL ? strlen("application/json") : 0;
+        if (value == NULL || strncasecmp(value, "application/json", length) != 0 ||
+            (value[length] != '\0' && value[length] != ';' && value[length] != ' ' &&
+             value[length] != '\t' && value[length] != '\r' && value[length] != '\n')) {
+            send_problem(fd, 415, "Unsupported Media Type", "unsupported_media_type",
+                         "With no token, a request body must be sent as Content-Type: application/json.");
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void handle_request(int fd, BlitRuntime *runtime,
                            BlitHttpClient *client, const char *request)
 {
@@ -24793,19 +24992,22 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (runtime->auth_token[0] != '\0') {
         char authorization[320];
-        char expected[320];
         if (!request_header(request, "Authorization:", authorization,
                             sizeof(authorization))) {
             send_problem(fd, 401, "Unauthorized", "authentication_required",
                          "A bearer token is required.");
             return;
         }
-        snprintf(expected, sizeof(expected), "Bearer %s", runtime->auth_token);
-        if (strcmp(authorization, expected) != 0) {
+        /* The scheme's name is case-insensitive (RFC 9110); the token is
+           compared in constant time (security review SR-11). */
+        if (strncasecmp(authorization, "Bearer ", 7) != 0 ||
+            !blit_token_equal(authorization + 7, runtime->auth_token)) {
             send_problem(fd, 401, "Unauthorized", "authentication_failed",
                          "The bearer token is not valid.");
             return;
         }
+    } else if (!http_tokenless_request_allowed(fd, runtime, request)) {
+        return;
     }
 
     if (strcmp(path, "/v1/auxiliary-displays") == 0 && strcmp(method, "GET") == 0) {
@@ -25715,7 +25917,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "The terminal session does not exist.");
             return;
         }
-        if (strcmp(owner_token, session->hibr_session_token) != 0 ||
+        if (!blit_token_equal(owner_token, session->hibr_session_token) ||
             kill((pid_t)owner_pid, 0) < 0) {
             send_problem(fd, 403, "Forbidden", "hibr_owner_rejected",
                          "The owner PID is not live or the Blit session token is invalid.");
@@ -30831,8 +31033,7 @@ static void input_keymap_response(int fd, BlitRuntime *runtime, const char *requ
              "ETag: %s\r\nX-Blit-Keymap-Device: %s\r\nX-Blit-Repeat-Rate: %d\r\n"
              "X-Blit-Repeat-Delay: %d\r\n", etag, device == NULL ? "builtin" : device->id,
              rate, delay);
-    if ((request_header(request, "If-None-Match:", match, sizeof(match)) ||
-         request_header(request, "if-none-match:", match, sizeof(match))) &&
+    if (request_header(request, "If-None-Match:", match, sizeof(match)) &&
         (strcmp(match, "*") == 0 || strstr(match, revision) != NULL)) {
         send_http_with(fd, 304, "Not Modified", "text/plain; charset=utf-8", "no-cache", extra, "");
         return;
@@ -32057,7 +32258,6 @@ static int http_request_complete(const BlitHttpClient *client,
                                  size_t *required)
 {
     const char *headers_end;
-    const char *length_header;
     size_t header_length;
     size_t content_length = 0;
 
@@ -32065,10 +32265,8 @@ static int http_request_complete(const BlitHttpClient *client,
     if (headers_end == NULL)
         return 0;
     header_length = (size_t)(headers_end - client->request) + 4;
-    length_header = strstr(client->request, "Content-Length:");
-    if (length_header != NULL)
-        content_length = (size_t)strtoul(length_header + 15, NULL, 10);
-    if (content_length > sizeof(client->request) - header_length)
+    if (request_content_length(client->request, &content_length) < 0 ||
+        content_length > sizeof(client->request) - header_length)
         return -1;
     *required = header_length + content_length;
     return client->length >= *required ? 1 : 0;
@@ -32079,7 +32277,7 @@ static int update_authorized(const BlitRuntime *runtime, const char *request)
     char token[256];
     return runtime->update_token[0] != '\0' &&
         request_header(request, "X-Blit-Update-Token:", token, sizeof(token)) &&
-        strcmp(token, runtime->update_token) == 0;
+        blit_token_equal(token, runtime->update_token);
 }
 
 static int read_secret_file(const char *path, char *value, size_t capacity)
@@ -32640,6 +32838,18 @@ static void service_http_client(BlitRuntime *runtime, int index)
     client->length += (size_t)received;
     client->request[client->length] = '\0';
     headers_end = strstr(client->request, "\r\n\r\n");
+    /* Blit reads a body by Content-Length only. A chunked body would be
+       taken for an empty one and the chunks for the next request; a proxy
+       that reads them as chunks ends the request somewhere else (security
+       review SR-19). Refused before anything reads the body. */
+    if (headers_end != NULL &&
+        request_header_value(client->request, "Transfer-Encoding:", NULL) != NULL) {
+        send_problem(client->fd, 501, "Not Implemented",
+                     "transfer_encoding_unsupported",
+                     "Transfer-Encoding is not supported; send the body with Content-Length.");
+        remove_http_client(runtime, index);
+        return;
+    }
     if (headers_end != NULL &&
         strncmp(client->request, "PUT /v1/control/update ", 23) == 0) {
         size_t header_length = (size_t)(headers_end - client->request) + 4;
@@ -32647,7 +32857,6 @@ static void service_http_client(BlitRuntime *runtime, int index)
         size_t early = client->length > header_length ?
             client->length - header_length : 0;
         char packages[200];
-        const char *length_header = strstr(client->request, "Content-Length:");
         if (runtime->update_token[0] == '\0' ||
             !update_authorized(runtime, client->request)) {
             send_problem(client->fd, 403, "Forbidden", "update_disabled",
@@ -32655,8 +32864,8 @@ static void service_http_client(BlitRuntime *runtime, int index)
             remove_http_client(runtime, index);
             return;
         }
-        if (length_header != NULL)
-            content_length = (size_t)strtoull(length_header + 15, NULL, 10);
+        if (request_content_length(client->request, &content_length) < 0)
+            content_length = 0;
         if (content_length == 0 || content_length > 64U * 1024U * 1024U ||
             !request_header(client->request, "X-Blit-Packages:", packages,
                             sizeof(packages)) ||

@@ -63,6 +63,10 @@ BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
     ruby "$ROOT/tools/tests/http_fragmentation_gate.rb" "$PORT"
 BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
     ruby "$ROOT/tools/tests/http_backpressure_gate.rb" "$PORT"
+# Security review SR-19: headers from the header block only, in any case;
+# Transfer-Encoding refused.
+BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
+    ruby "$ROOT/tools/tests/http_header_gate.rb" "$PORT"
 
 unauth=$(curl -sS -o "$UNAUTH" -w '%{http_code}' \
     "http://127.0.0.1:$PORT/v1/server")
@@ -299,6 +303,10 @@ if [ "$default_bind" != 127.0.0.1 ] || [ "$default_auth" != none ]; then
          "bind=$default_bind authentication=$default_auth" >&2
     exit 1
 fi
+# Security review SR-22: with no token, nothing a web page could send is
+# answered -- a foreign Origin, a Host that is not loopback, a body that is
+# not JSON -- and a program still is.
+BLIT_GATE_PORT="$POSTURE_PORT" ruby "$ROOT/tools/tests/http_origin_gate.rb" "$POSTURE_PORT"
 kill "$posture_pid" 2>/dev/null || true
 wait "$posture_pid" 2>/dev/null || true
 posture_pid=

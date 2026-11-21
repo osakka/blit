@@ -105,6 +105,7 @@
 #include "blit_compositor_wire.h"
 #include "blit_pointer_names.h"
 #include "blit_crash.h"
+#include "blit_token.h"
 
 #ifndef BLIT_BUILD_VERSION
 #define BLIT_BUILD_VERSION "dev"
@@ -3473,7 +3474,7 @@ static void activation_activate(struct wl_client *client, struct wl_resource *re
     unsigned i;
     (void)client;
     for (i = 0; i < BC_TOKENS; ++i)
-        if (s->tokens[i].on && strcmp(s->tokens[i].text, token) == 0) k = &s->tokens[i];
+        if (s->tokens[i].on && blit_token_equal(token, s->tokens[i].text)) k = &s->tokens[i];
     if (k == NULL) {
         activation_refused(s, BC_ACT_LOGGED_UNKNOWN, "a token not issued here, used, or replaced by newer ones");
         return;
