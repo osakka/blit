@@ -9,6 +9,41 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-21: 0.3.130 HiDPI, idle inhibit, one font registry
+
+- **A program scale per display (ADR 0242, Gitea #170).** The layout's
+  optional 7th word sets a display's scale (100-400 by 25): Wayland
+  programs are told it (wl_output scale ceil(S), xdg-output logical size,
+  wp_fractional_scale_v1, preferred_buffer_scale), sized and positioned in
+  its units, and when it changes under a shown window (in place, a move to
+  another display, a layout after the window) the window is reconfigured
+  and its lines re-said in desktop pixels at the program's acknowledging
+  commit. X is told 1 (its own scale is a later step). Hibr's Program Scale
+  row follows, gated on 0.3.130.
+- **Idle inhibit (Gitea #171).** zwp_idle_inhibit_manager_v1: a visible
+  window's inhibitor is told to a desktop that offered `inhibit=1`
+  (`WINDOW inhibit <id> on|off`), re-sent on reconnect.
+- **One font registry (ADR 0243 step 1).** `fonts.source.json` declares
+  every face; a generated header gives the raster its faces; `/v1/fonts`
+  reports it. Every font gate's output unchanged byte for byte.
+- **Also shipped:** a screen of Arabic stays in its caches (4096x8 word
+  sets, a 4096 GPU atlas); a frame edit of another size is refused (SR-1);
+  terminal numbers saturate (SR-5); a bad XTGETTCAP name gets a refusal
+  (SR-4); the PTY master is close-on-exec (SR-7); `CSI n SP D` is not
+  cursor-back (ECMA-48 FNT).
+- **Gates:** `gates_all` 205/11, `gates_renderer` 89/1, `gates_renderer-gles`
+  68/0, all on 2ae2ea1b, the shipped commit, in a quiet window hibr held.
+  The first full pass failed compositor_log_cap_gate in all three suites:
+  the release clone had not built the compositor (a missing file); built,
+  and all three suites were run again whole.
+- **Release environment (Debian 13):** the release build's gates, including
+  rollback_recovery_gate (12 cases), passed.
+- **Live, the mini PC:** the update was verified; the smoke check passed at
+  the login screen (2 displays up, frames advancing 8 -> 20).
+- **Published** to hibr-apt (ab87df67) under HOLD/done with my-vpn-ea.
+  GitHub's mirror had failed since 14:26 (Gitea's pack-objects killed,
+  signal 9); a manual sync brought GitHub to the same head.
+
 ## 2026-11-21: 0.3.129 Arabic shaped as words; bold keeps a shape
 
 - **Arabic as words (ADR 0241).** Each run of Hibr's Arabic cells is shaped
