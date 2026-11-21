@@ -682,6 +682,7 @@ suite_lifecycle() {
     run_gate update_cancel_gate.sh "$ROOT"/tools/tests/update_cancel_gate.sh
     # SR-12: a 150 s install with the display and the API live throughout.
     run_gate update_install_live_gate.sh "$ROOT"/tools/tests/update_install_live_gate.sh
+    run_gate update_bearer_gate.sh "$ROOT"/tools/tests/update_bearer_gate.sh
     run_gate update_live_smoke_gate.sh "$ROOT"/tools/tests/update_live_smoke_gate.sh
     # SR-2: the release signature's verifier, blit-sign and the helper's
     # refusals (no root, nothing installed).

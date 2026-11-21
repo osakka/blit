@@ -3543,6 +3543,10 @@ the server stops waiting after 900 s. A failure's `detail` ends with what
 dpkg said last, its error (SR-21); a long one loses its start, marked `...`.
 
 Only a signed release is installed (from 0.3.133, security review SR-2).
+When the server has an API token, every update request -- the `PUT` and
+`POST .../cancel`, `POST .../reset` -- needs the bearer token as well as
+`X-Blit-Update-Token`; the update token alone is refused (`403`
+`update_disabled`; `401` from the API's own check on the `POST`s).
 The `PUT` carries `X-Blit-Signature`: the release's Ed25519 signature, 128
 lowercase hex digits, from the `blit-release_<version>_amd64.sig` file
 `tools/release/build-release.sh` writes beside the packages

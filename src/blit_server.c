@@ -2260,6 +2260,7 @@ static void update_status_json(const BlitRuntime *runtime, char *body,
                                size_t capacity);
 static int resize_session_surface(BlitSession *session, BlitSurface *surface,
                                   int width, int height);
+static int bearer_token_valid(const BlitRuntime *runtime, const char *request);
 static int update_authorized(const BlitRuntime *runtime, const char *request);
 static void cancel_update_upload(BlitRuntime *runtime, int fd,
                                  const char *request);
@@ -25283,10 +25284,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
                          "A bearer token is required.");
             return;
         }
-        /* The scheme's name is case-insensitive (RFC 9110); the token is
-           compared in constant time (security review SR-11). */
-        if (strncasecmp(authorization, "Bearer ", 7) != 0 ||
-            !blit_token_equal(authorization + 7, runtime->auth_token)) {
+        if (!bearer_token_valid(runtime, request)) {
             send_problem(fd, 401, "Unauthorized", "authentication_failed",
                          "The bearer token is not valid.");
             return;
@@ -32557,12 +32555,29 @@ static int http_request_complete(const BlitHttpClient *client,
     return client->length >= *required ? 1 : 0;
 }
 
+/* The API's bearer token, when the server has one: the scheme's name is
+   case-insensitive (RFC 9110), the token compared in constant time
+   (security review SR-11). The one check the API and the update route
+   share. */
+static int bearer_token_valid(const BlitRuntime *runtime, const char *request)
+{
+    char authorization[320];
+    return request_header(request, "Authorization:", authorization,
+                          sizeof(authorization)) &&
+        strncasecmp(authorization, "Bearer ", 7) == 0 &&
+        blit_token_equal(authorization + 7, runtime->auth_token);
+}
+
+/* The update route takes the update token and, when the server has an API
+   token, that bearer token as well (security review SR-2): the update token
+   alone, sent in clear, is not enough to replace Blit. */
 static int update_authorized(const BlitRuntime *runtime, const char *request)
 {
     char token[256];
     return runtime->update_token[0] != '\0' &&
         request_header(request, "X-Blit-Update-Token:", token, sizeof(token)) &&
-        blit_token_equal(token, runtime->update_token);
+        blit_token_equal(token, runtime->update_token) &&
+        (runtime->auth_token[0] == '\0' || bearer_token_valid(runtime, request));
 }
 
 static int read_secret_file(const char *path, char *value, size_t capacity)
@@ -32961,7 +32976,7 @@ static void cancel_update_upload(BlitRuntime *runtime, int fd,
 
     if (!update_authorized(runtime, request)) {
         send_problem(fd, 403, "Forbidden", "update_disabled",
-                     "A valid update token is required.");
+                     "A valid update token, and the API bearer token when the server has one, is required.");
         return;
     }
     if (update_install_running(runtime)) {
@@ -32997,7 +33012,7 @@ static void reset_update_state(BlitRuntime *runtime, int fd,
 
     if (!update_authorized(runtime, request)) {
         send_problem(fd, 403, "Forbidden", "update_disabled",
-                     "A valid update token is required.");
+                     "A valid update token, and the API bearer token when the server has one, is required.");
         return;
     }
     if (update_install_running(runtime)) {
@@ -33252,7 +33267,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
         if (runtime->update_token[0] == '\0' ||
             !update_authorized(runtime, client->request)) {
             send_problem(client->fd, 403, "Forbidden", "update_disabled",
-                         "A valid update token is required.");
+                         "A valid update token, and the API bearer token when the server has one, is required.");
             remove_http_client(runtime, index);
             return;
         }

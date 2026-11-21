@@ -917,7 +917,9 @@ paths:
         install has finished; the server keeps serving meanwhile, reports
         `installing` in the status, and refuses another upload with 409
         `update_installing`. A failure's detail ends with dpkg's own error.
-        Security review SR-2: the helper installs only a signed release.
+        Security review SR-2: when the server has an API token, the bearer
+        token is required as well as X-Blit-Update-Token. The helper
+        installs only a signed release.
         X-Blit-Signature is the release's Ed25519 signature over the
         statement the helper rebuilds from what the upload carries (each
         package's Version and SHA-256); without it, or when it does not

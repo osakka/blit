@@ -36,7 +36,7 @@ exercised with real dpkg in the Debian 13 release environment
 | ID | Severity | Finding |
 | --- | --- | --- |
 | SR-1 | Critical | A frame-channel edit writes outside the image (heap overflow in the root server) -- fixed in 0.3.130 |
-| SR-2 | High | An update needs only the update token, sent in clear, and nothing checks who built the package -- signatures fixed in 0.3.133; the bearer token on the update route is still open |
+| SR-2 | High | An update needs only the update token, sent in clear, and nothing checks who built the package -- fixed in 0.3.133 |
 | SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token |
 | SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) -- fixed in 0.3.130 |
 | SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
@@ -101,9 +101,13 @@ image's.
 
 ### SR-2 (High): an update needs only the update token, sent in clear, and nothing checks who built the package
 
-**Fixed** in 0.3.133 (Gitea #184), the signature half: releases are signed
-with a Blit Ed25519 key, the package carries the public half, and the
-helper refuses an update whose signature does not verify.
+**Fixed** in 0.3.133 (Gitea #184): releases are signed with a Blit Ed25519
+key, the package carries the public half, and the helper refuses an update
+whose signature does not verify; and when the server has an API token, the
+update route needs the bearer token as well as the update token
+(`bearer_token_valid`, the one check the API and the update route share;
+`update_bearer_gate`, which fails on 0.3.132 at an upload sent with the
+update token alone).
 
 - **What is signed.** A statement the helper rebuilds from what it
   installs: `blit-release-signature 1`, then `blit <Version> <sha256>` and,
