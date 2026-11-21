@@ -2646,8 +2646,15 @@ It speaks the frame channel above as a producer, with these additions.
     (`xdg_output`); Xwayland is told 1 and real pixels, so X does not
     change. A change of scale alone is applied in place. Send it only to
     a compositor of 0.3.130 or later: an earlier one takes a seven-word
-    line as unknown, and the display as gone. (Sizes, fractional scale and
-    X's own scale follow in later steps of ADR 0242.) `<name>` is the
+    line as unknown, and the display as gone. Every other line keeps
+    desktop pixels: the compositor converts `WINDOW size` (configuring the
+    smallest logical size that covers it), `limits`, `geometry`, `popup`,
+    `sub`, `view`, `menu`, `dragicon`, the `CLIP` drag and drop points and
+    `INPUT ptr` with the window's scale; `INPUT rel` and the wheel are not
+    scaled. Programs that use `wp_fractional_scale_v1` draw at the exact
+    scale. A window keeps the scale it was first placed with; a scale
+    that changes under a shown window, and X's own scale, follow in later
+    steps of ADR 0242. `<name>` is the
     desktop's own name for the display (one word, at most 63 bytes),
     `<x> <y>` its place in the desktop's pixels with the origin at the top
     left of the whole desktop (not negative, the display inside 32767),
