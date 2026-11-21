@@ -2985,6 +2985,353 @@ def scale_part(compositor, standin, work):
         listener.close()
 
 
+
+def scale_change_part(compositor, standin, work):
+    """ADR 0242 step 3: a scale that changes under a shown window. The
+    desktop plays the layout DP-1 at 150%, DP-2 at 100% and DP-3 at 150%,
+    every stand-in `--scale-frac` and sized 1000x600. Checked: a window
+    shown before the layout (on the compositor's first output, at 100%)
+    takes DP-1's 150% when the layout arrives -- told 180, configured
+    667x400 with no WINDOW size from the desktop, its crop said before the
+    frame drawn for it; the same layout again, and a move between DP-1 and
+    DP-3 (both 150%), change nothing; `WINDOW output` from DP-2 to DP-1 and
+    back is the change for that window only (limits and view said again
+    before its frame); DP-1 150% -> 200% in place: each window on it told
+    240 and configured 500x300 by the compositor, and before its frame its
+    limits, its CSD geometry, its popup and the popup's view, its
+    subsurfaces and their views said again in desktop pixels at 200%;
+    a hung program (`--hang`) on DP-1 is told nothing in new units while it
+    does not answer, its old lines stand, and the compositor goes on; once
+    it answers, its limits and view come before its frame; the window on
+    DP-2 is untouched throughout. Fails before the step: no configure
+    after a scale change (both repeat filters), or a window's scale kept
+    from its first placement."""
+    runtime = os.path.join(work, 'run-scale-change')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-scale-change-%d' % os.getpid()
+    listener = listen(name)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    env.pop('BLIT_SERVER_PORT', None)
+    log = os.path.join(work, 'compositor-scale-change.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env,
+                 open(os.path.join(work, 'compositor-scale-change.out'), 'w'))
+    clients, routes = [], []
+    seen = []
+    layout = ['DP-1 0 0 3840 2160 60000 150', 'DP-2 3840 0 3840 2160 60000', 'DP-3 0 2160 3840 2160 60000 150']
+
+    def pump(pred, why, wait=8.0):
+        end = time.time() + wait
+        while not pred():
+            if time.time() > end:
+                fail(why() if callable(why) else why)
+            got = desk.next(0.1)
+            if got is None:
+                continue
+            if got[0] == 'line':
+                seen.append(('line', got[1]))
+            elif got[0] == 'frame':
+                os.close(got[2])
+                seen.append(('frame', got[1][0], got[1][2], got[1][3]))
+            else:
+                for fd in got[2]:
+                    os.close(fd)
+                seen.append(('frm3', got[1][0], got[1][2], got[1][3]))
+
+    def quiet(seconds):
+        end = time.time() + seconds
+        pump(lambda: time.time() > end, 'unreachable', seconds + 5)
+
+    def lines(since=0):
+        return [e[1] for e in seen[since:] if e[0] == 'line']
+
+    def at(entry, since=0):
+        for i in range(since, len(seen)):
+            if seen[i] == entry:
+                return i
+        return -1
+
+    def line(text, since=0, wait=8.0):
+        pump(lambda: at(('line', text), since) >= 0, lambda: 'no %r; after %d: %r' % (text, since, seen[since:]), wait)
+        return at(('line', text), since)
+
+    def frame(image, w, h, since=0, wait=8.0):
+        pump(lambda: at(('frame', image, w, h), since) >= 0,
+             lambda: 'no %dx%d frame of %d; after %d: %r' % (w, h, image, since, seen[since:]), wait)
+        return at(('frame', image, w, h), since)
+
+    def about(win, since):
+        """The lines since `since` that name picture `win` first."""
+        return [l for l in lines(since) if len(l.split()) > 2 and l.split()[2] == str(win)]
+
+    def printed(path):
+        return open(path).read()
+
+    def wait_print(path, text, since=0, wait=8.0):
+        pump(lambda: text in printed(path)[since:],
+             lambda: 'the stand-in did not print %r:\n%s' % (text, printed(path)[since:]), wait)
+
+    def before(texts, image, w, h, since):
+        """Each line of `texts` said after `since` and before the window's
+        first w x h frame after it."""
+        f = frame(image, w, h, since)
+        for t in texts:
+            i = line(t, since)
+            check(i < f, lambda: '%r came after the frame of %d: %r' % (t, image, seen[since:]))
+
+    def window(flags, title):
+        path = os.path.join(work, 'standin-scale-change-%s.out' % title)
+        since = len(seen)
+        clients.append(start([standin] + flags + [title], cenv, open(path, 'w')))
+        pump(lambda: any(l.startswith('WINDOW title ') and l.endswith(' ' + title) for l in lines(since)),
+             lambda: 'no window %s:\n%s' % (title, printed(path)))
+        win = int(next(l for l in lines(since) if l.startswith('WINDOW title ') and l.endswith(' ' + title)).split()[2])
+        line('WINDOW decor %d %s' % (win, 'client' if '--csd' in flags else 'server'), since)
+        return win, path, since
+
+    def send_layout(*displays):
+        for d in displays:
+            desk.send('WINDOW layout %s' % d)
+        desk.send('WINDOW layout end')
+
+    try:
+        desk = Desktop(listener, b'OK dmabuf=0 window=1\n')
+        desk.line('WINDOW display blit-0 -')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+
+        # 1. A window shown before the layout: at 100%, 1000x600 drawn at
+        # its pixels; the layout puts it on DP-1 at 150%.
+        e, e_out, since = window(['--scale-frac'], 'Early')
+        wait_print(e_out, 'STANDIN preferred scale 120\n')
+        desk.send('WINDOW size %d 1000 600' % e)
+        frame(e, 1000, 600, since)
+        check(not [l for l in about(e, since) if l.startswith('WINDOW view')], 'a view at 100%')
+        mark, said = len(seen), len(printed(e_out))
+        desk.send('WINDOW primary DP-1')
+        send_layout(*layout)
+        wait_print(e_out, 'STANDIN preferred scale 180\n', said)
+        wait_print(e_out, 'STANDIN configure 667x400\n', said)
+        check(printed(e_out)[said:].index('STANDIN preferred scale 180') <
+              printed(e_out)[said:].index('STANDIN configure 667x400'), 'configured before told 180')
+        before(['WINDOW limits %d 96 72 0 0' % e, 'WINDOW view %d 0 0 1000 600 1000 600' % e], e, 1001, 600, mark)
+
+        # 2. Windows at 150% on DP-1: a popup, a CSD frame, subsurfaces; and
+        # one on DP-2 at 100%.
+        a, a_out, since = window(['--scale-frac', '--popup'], 'Pop')
+        desk.send('WINDOW size %d 1000 600' % a)
+        frame(a, 1001, 600, since)
+        pump(lambda: any(l.startswith('WINDOW popup ') for l in lines(since)), 'no popup')
+        pop = int(next(l for l in lines(since) if l.startswith('WINDOW popup ')).split()[2])
+        line('WINDOW popup %d %d 18 95' % (pop, a), since)
+        frame(pop, 120, 90, since)
+        d, d_out, since = window(['--scale-frac', '--csd'], 'Csd')
+        desk.send('WINDOW size %d 1000 600' % d)
+        line('WINDOW geometry %d 15 15 971 570' % d, since)
+        frame(d, 1001, 600, since)
+        b, b_out, since = window(['--scale-frac', '--sub-pair'], 'Pair')
+        desk.send('WINDOW size %d 1000 600' % b)
+        wait_print(b_out, 'STANDIN sub pair')
+
+        def subs_of(root, since):
+            got = {}
+            for l in lines(since):
+                if l.startswith('WINDOW sub ') and l.split()[3] == str(root):
+                    got[int(l.split()[2])] = l
+            return got
+        pump(lambda: len(subs_of(b, since)) == 3 and
+             subs_of(b, since)[max(subs_of(b, since))].endswith(' 0 45 49 30 above'),
+             lambda: 'not three subsurfaces: %r' % seen[since:])
+        (s1, s2, s3) = sorted(subs_of(b, since))
+        desk.send('WINDOW primary DP-2')
+        c, c_out, since = window(['--scale-frac'], 'Other')
+        desk.send('WINDOW size %d 1000 600' % c)
+        frame(c, 1000, 600, since)
+        # GTK 3's kind (buffer scale) and a program that knows no scale.
+        i, i_out, since = window(['--scale-int'], 'Int')
+        wait_print(i_out, 'STANDIN preferred buffer scale 1\n')
+        desk.send('WINDOW size %d 1000 600' % i)
+        frame(i, 1000, 600, since)
+        n, n_out, since = window(['--scale-none'], 'Plain')
+        desk.send('WINDOW size %d 1000 600' % n)
+        frame(n, 1000, 600, since)
+        check(not [l for l in lines(since) if l.startswith('WINDOW view')], 'a view at 100%')
+        desk.send('WINDOW primary DP-1')
+        # A hung program at 150%: activated, given the keymap, H stops it.
+        h, h_out, since = window(['--scale-frac', '--hang'], 'Hung')
+        desk.send('WINDOW size %d 1000 600 activated' % h)
+        frame(h, 1001, 600, since)
+        line('WINDOW view %d 0 0 1000 600 1000 600' % h, since)
+        keymap = us_keymap()
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[h])
+        routes.append(route)
+        memfd = os.memfd_create('gate-keymap', os.MFD_CLOEXEC | os.MFD_ALLOW_SEALING)
+        os.write(memfd, keymap + b'\0')
+        fcntl.fcntl(memfd, 1033, 0x0f)
+        socket.send_fds(route, [b'INPUT keymap %d 7 %d 30 250\n' % (h, len(keymap) + 1)], [memfd])
+        os.close(memfd)
+        hung = clients[-1]
+        all_out = [e_out, a_out, d_out, b_out, c_out, h_out, i_out, n_out]
+
+        # 3. The same layout again, and a move between two displays at 150%:
+        # nothing said, nothing configured.
+        quiet(0.5)
+        mark, counts = len(seen), [printed(o).count('STANDIN configure ') for o in all_out]
+        send_layout(*layout)
+        desk.send('WINDOW output %d 3840 2160 60000 DP-3' % e)
+        wait_for(lambda: 'window %d: display DP-3' % e in settled(log), 'not moved to DP-3')
+        desk.send('WINDOW output %d 3840 2160 60000 DP-1' % e)
+        wait_for(lambda: settled(log).count('window %d: display DP-1' % e) == 1, 'not moved back to DP-1')
+        quiet(0.6)
+        check([printed(o).count('STANDIN configure ') for o in all_out] == counts and
+              not [l for l in lines(mark) if l.split()[0] == 'WINDOW'],
+              lambda: 'an unchanged scale configured or said something: %r' % seen[mark:])
+
+        # 4. WINDOW output: the window on DP-2 (100%) to DP-1 (150%) and back;
+        # only it is told and configured.
+        mark, said = len(seen), len(printed(c_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-1' % c)
+        wait_print(c_out, 'STANDIN preferred scale 180\n', said)
+        wait_print(c_out, 'STANDIN configure 667x400\n', said)
+        before(['WINDOW limits %d 96 72 0 0' % c, 'WINDOW view %d 0 0 1000 600 1000 600' % c], c, 1001, 600, mark)
+        mark, said = len(seen), len(printed(c_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-2' % c)
+        wait_print(c_out, 'STANDIN preferred scale 120\n', said)
+        wait_print(c_out, 'STANDIN configure 1000x600\n', said)
+        before(['WINDOW limits %d 64 48 0 0' % c, 'WINDOW view %d -' % c], c, 1000, 600, mark)
+        quiet(0.3)
+        check([printed(o).count('STANDIN configure ') for o in all_out if o != c_out] ==
+              [n for o, n in zip(all_out, counts) if o != c_out] and
+              not [l for l in lines(mark) if l.split()[0] == 'WINDOW' and l.split()[2] != str(c)],
+              lambda: 'a move of one window changed another: %r' % seen[mark:])
+
+        # The integer program to DP-1 and back (told 2, its 1334x800 shown
+        # at 1000x600; told 1, at its pixels), then to DP-1 to stay; the
+        # plain one enlarged at 150% and at its pixels again.
+        mark, said = len(seen), len(printed(i_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-1' % i)
+        wait_print(i_out, 'STANDIN preferred buffer scale 2\n', said)
+        wait_print(i_out, 'STANDIN configure 667x400\n', said)
+        check(printed(i_out)[said:].index('STANDIN preferred buffer scale 2') <
+              printed(i_out)[said:].index('STANDIN configure 667x400'), 'configured before told 2')
+        before(['WINDOW limits %d 96 72 0 0' % i, 'WINDOW view %d 0 0 1333 800 1000 600' % i], i, 1334, 800, mark)
+        mark, said = len(seen), len(printed(i_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-2' % i)
+        wait_print(i_out, 'STANDIN preferred buffer scale 1\n', said)
+        wait_print(i_out, 'STANDIN configure 1000x600\n', said)
+        before(['WINDOW limits %d 64 48 0 0' % i, 'WINDOW view %d -' % i], i, 1000, 600, mark)
+        mark, said = len(seen), len(printed(i_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-1' % i)
+        before(['WINDOW view %d 0 0 1333 800 1000 600' % i], i, 1334, 800, mark)
+        mark, said = len(seen), len(printed(n_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-1' % n)
+        wait_print(n_out, 'STANDIN configure 667x400\n', said)
+        before(['WINDOW limits %d 96 72 0 0' % n, 'WINDOW view %d 0 0 667 400 1000 600' % n], n, 667, 400, mark)
+        mark, said = len(seen), len(printed(n_out))
+        desk.send('WINDOW output %d 3840 2160 60000 DP-2' % n)
+        wait_print(n_out, 'STANDIN configure 1000x600\n', said)
+        before(['WINDOW limits %d 64 48 0 0' % n, 'WINDOW view %d -' % n], n, 1000, 600, mark)
+        check('STANDIN preferred' not in printed(n_out), lambda: 'the plain program was told a scale:\n' + printed(n_out))
+
+        # 5. DP-1 150% -> 200% in place, the hung program hung first.
+        route.sendall(b'INPUT key %d 35 press\nINPUT frame %d 1\n' % (h, h))
+        wait_print(h_out, 'STANDIN hang\n')
+        mark = len(seen)
+        said = [len(printed(o)) for o in all_out]
+        send_layout('DP-1 0 0 3840 2160 60000 200', *layout[1:])
+        for o, k in zip(all_out, said):
+            if o not in (c_out, h_out, i_out, n_out):
+                wait_print(o, 'STANDIN preferred scale 240\n', k)
+                wait_print(o, 'STANDIN configure 500x300\n', k)
+        # The integer program: its whole number is still 2, not said again;
+        # its 1000x600 at buffer scale 2 is shown at its pixels.
+        wait_print(i_out, 'STANDIN configure 500x300\n', said[6])
+        before(['WINDOW limits %d 128 96 0 0' % i, 'WINDOW view %d -' % i], i, 1000, 600, mark)
+        check('STANDIN preferred buffer scale' not in printed(i_out)[said[6]:],
+              lambda: 'the whole number 2 was said again:\n' + printed(i_out)[said[6]:])
+        check(desk.sock and comp.poll() is None, 'the compositor ended')
+        before(['WINDOW limits %d 128 96 0 0' % e, 'WINDOW view %d -' % e], e, 1000, 600, mark)
+        before(['WINDOW limits %d 128 96 0 0' % a, 'WINDOW view %d -' % a, 'WINDOW popup %d %d 24 126' % (pop, a),
+                'WINDOW view %d 0 0 120 90 160 120' % pop], a, 1000, 600, mark)
+        before(['WINDOW limits %d 128 96 0 0' % d, 'WINDOW geometry %d 20 20 960 560' % d], d, 1000, 600, mark)
+        before(['WINDOW limits %d 128 96 0 0' % b, 'WINDOW sub %d %d 0 0 66 40 above' % (s1, b),
+                'WINDOW sub %d %d 66 0 66 40 above' % (s2, b), 'WINDOW sub %d %d 0 60 66 40 above' % (s3, b),
+                'WINDOW view %d 0 0 50 30 66 40' % s1, 'WINDOW view %d 0 0 50 30 66 40' % s2,
+                'WINDOW view %d 0 0 49 30 66 40' % s3], b, 1000, 600, mark)
+        check(not [l for l in about(d, mark) if l.startswith('WINDOW view')],
+              lambda: 'a window with a geometry was given a view: %r' % lines(mark))
+        # Not one line of a window before its frame in the old units, nor
+        # said twice.
+        for win, old in ((e, ['WINDOW limits %d 96 72 0 0' % e]), (d, ['WINDOW geometry %d 15 15 971 570' % d])):
+            check(not [l for l in about(win, mark) if l in old], lambda: 'old units after the change: %r' % lines(mark))
+        check(about(d, mark).count('WINDOW geometry %d 20 20 960 560' % d) == 1,
+              lambda: 'the geometry said more than once: %r' % lines(mark))
+        # The hung one: nothing of it, its old lines standing; DP-2's
+        # window untouched; the compositor answering.
+        quiet(1.0)
+        check(not about(h, mark), lambda: 'the hung window was said in new units: %r' % about(h, mark))
+        for win, o, k in ((c, c_out, said[4]), (n, n_out, said[7])):
+            check(not about(win, mark) and 'STANDIN preferred' not in printed(o)[k:] and
+                  'STANDIN configure' not in printed(o)[k:],
+                  lambda: 'a window on DP-2 was touched: %r\n%s' % (about(win, mark), printed(o)[k:]))
+        mark2 = len(seen)
+        desk.send('WINDOW size %d 1200 600' % e)
+        wait_print(e_out, 'STANDIN configure 600x300\n')
+        frame(e, 1200, 600, mark2)
+        # Answering again: told 240, configured, its lines before its frame.
+        mark = len(seen)
+        os.kill(hung.pid, signal.SIGUSR1)
+        wait_print(h_out, 'STANDIN resume\n')
+        wait_print(h_out, 'STANDIN preferred scale 240\n', said[5])
+        wait_print(h_out, 'STANDIN configure 500x300 activated\n', said[5])
+        before(['WINDOW limits %d 128 96 0 0' % h, 'WINDOW view %d -' % h], h, 1000, 600, mark)
+        route.sendall(b'INPUT key %d 35 release\nINPUT frame %d 2\n' % (h, h))
+
+        # 6. Two changes before one acknowledgement: hung again, DP-1 to 150%
+        # and back to 200%; answering, it acknowledges each configure and
+        # draws for each -- each frame comes after the lines of its own scale.
+        route.sendall(b'INPUT key %d 35 press\nINPUT frame %d 3\n' % (h, h))
+        pump(lambda: printed(h_out).count('STANDIN hang\n') == 2, lambda: 'no second hang:\n' + printed(h_out))
+        said6, mark6 = len(printed(h_out)), len(seen)
+        send_layout(*layout)
+        send_layout('DP-1 0 0 3840 2160 60000 200', *layout[1:])
+        quiet(1.0)
+        check(not about(h, mark6), lambda: 'the hung window was said: %r' % about(h, mark6))
+        mark = len(seen)
+        os.kill(hung.pid, signal.SIGUSR1)
+        wait_print(h_out, 'STANDIN configure 500x300 activated\n', said6)
+        f150 = frame(h, 1001, 600, mark)
+        f200 = frame(h, 1000, 600, f150)
+        for t in ('WINDOW limits %d 96 72 0 0' % h, 'WINDOW view %d 0 0 1000 600 1000 600' % h):
+            check(mark <= line(t, mark) < f150, lambda: '%r not before the 150%% frame: %r' % (t, seen[mark:]))
+        for t in ('WINDOW limits %d 128 96 0 0' % h, 'WINDOW view %d -' % h):
+            check(f150 < line(t, f150) < f200, lambda: '%r not between the frames: %r' % (t, seen[mark:]))
+        route.sendall(b'INPUT key %d 35 release\nINPUT frame %d 4\n' % (h, h))
+
+        check(comp.poll() is None, 'the compositor ended')
+        quit_compositor(desk, comp)
+        text = settled(log)
+        for win, pct in ((e, 150), (c, 150), (c, 100), (i, 150), (i, 100), (n, 150), (n, 100), (e, 200), (a, 200),
+                         (d, 200), (b, 200), (h, 200), (i, 200)):
+            check('window %d: scale %d%%' % (win, pct) in text,
+                  lambda: 'the log does not say window %d took %d%%:\n%s' % (win, pct, text))
+        return ('before-layout=100->150(told 180,667x400,crop before frame) same-layout=nothing '
+                'same-scale-move=nothing output=100->150->100(one window,limits+view before frame; '
+                'int=told 2,1334x800->view 1333x800@1000x600,told 1,view -; none=667x400->1000x600,view -) '
+                '150->200=told 240,500x300 unasked,limits+view+geometry 20,20+960x560+popup 24,126+'
+                'popup-view 120x90@160x120+subs 0|66+66,0+60 before each frame '
+                'int200=not told 2 again,1000x600 view - '
+                'hung=nothing in new units until it answered,then limits+view before its frame dp2=untouched '
+                'two-changes-one-ack=150 lines,1001x600,200 lines,1000x600')
+    finally:
+        for sock in routes:
+            sock.close()
+        for p in clients + [comp]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -3757,6 +4104,7 @@ def main():
             # A server of its own, for its keymap.
             print('COMPOSITOR_INPUT_OK %s' % input_part(server, compositor, standin, work))
         print('COMPOSITOR_SCALE_OK %s' % scale_part(compositor, standin, work))
+        print('COMPOSITOR_SCALE_CHANGE_OK %s' % scale_change_part(compositor, standin, work))
     except SystemExit:
         # A failure shows what each process said before the work goes.
         for name in sorted(os.listdir(work)):

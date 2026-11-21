@@ -2,9 +2,9 @@
 
 - Status: accepted (the owner's decisions, 2026-11-21, through hibr);
   landing in steps: step 1 (the layout's scale word, the outputs' scale
-  and logical size, X told 1) and step 2 (sizes, units and fractional
-  scale; a window keeps the scale it was first placed with until step 3)
-  in 0.3.130. Hibr's Program Scale row waits for step 3 (live change).
+  and logical size, X told 1), step 2 (sizes, units and fractional
+  scale) and step 3 (a scale that changes under a shown window, applied
+  at the program's acknowledging commit) in 0.3.130.
 - Decided: the program scale is Hibr's, a fixed "Program Scale" row per
   display (Control Panel > Displays, default 100%, set by hand, never
   derived from the cell size: a font change does not move it); X programs

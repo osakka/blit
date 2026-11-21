@@ -2682,9 +2682,16 @@ It speaks the frame channel above as a producer, with these additions.
     `sub`, `view`, `menu`, `dragicon`, the `CLIP` drag and drop points and
     `INPUT ptr` with the window's scale; `INPUT rel` and the wheel are not
     scaled. Programs that use `wp_fractional_scale_v1` draw at the exact
-    scale. A window keeps the scale it was first placed with; a scale
-    that changes under a shown window, and X's own scale, follow in later
-    steps of ADR 0242. `<name>` is the
+    scale. A scale that changes under a shown window -- a set naming
+    another scale for its display, or `WINDOW output` to a display of
+    another scale -- is told to its program, and the compositor configures
+    the window again at its last `WINDOW size` itself (the desktop's
+    pixels did not change, so no line is needed); the window's lines keep
+    the old scale until the program's commit that acknowledges that
+    configure, where its `limits`, `geometry`, `view`, `popup` and `sub`
+    lines are said again before that frame. A program that never answers
+    keeps its old lines. X's own scale follows in a later step of ADR
+    0242. `<name>` is the
     desktop's own name for the display (one word, at most 63 bytes),
     `<x> <y>` its place in the desktop's pixels with the origin at the top
     left of the whole desktop (not negative, the display inside 32767),

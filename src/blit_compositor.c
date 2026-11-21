@@ -312,9 +312,23 @@ struct bc_xdg {
     int replay;                       /* the re-announce pass: 1 announced, 2 its
                                          parent still to say (WINDOW parent) */
     /* ADR 0242: a Wayland top-level's program scale in 120ths, its tree's
-       (popups, subsurfaces, drag icon): the display's it was first placed
-       on; 0 until then, and for X windows, which are always 120. */
-    uint32_t scale_n;
+       (popups, subsurfaces, drag icon), as applied: every line of the tree
+       in pixels, and its input, are converted with it. Fixed when it is
+       announced (its display's, 120 with none); 0 until then, and for X
+       windows, which are always 120. A display of another scale (a new
+       layout, `WINDOW output`) changes `conf_n` at once -- the scale its
+       tree is told and its configures are at -- and `scale_n` only at the
+       commit after the program acknowledges a configure at the new scale:
+       its frames and its lines always agree. While a change waits
+       (`scale_wait`), `scale_serial` is the first configure at `conf_n`
+       and `prev_serial` the first at `prev_n` (0 none), the change before
+       it not yet acknowledged; an acknowledgement sets `scale_next`, the
+       scale of the configure it acknowledges, applied at the next commit.
+       `scale_resay`: that commit says its limits and geometry again in the
+       new units. */
+    uint32_t scale_n, conf_n, prev_n, scale_next;
+    uint32_t scale_serial, prev_serial;
+    int scale_wait, scale_resay;
     int32_t shown_w, shown_h;         /* its size in its surface pixels: its buffer's,
                                          or its viewport's, its scale's (#159) */
     /* The `WINDOW view` the desktop has for it (Gitea #159). */
@@ -882,6 +896,7 @@ static void unlink_resource(struct wl_resource *resource)
 
 static void window_set_output(struct bc_xdg *x, struct bc_output *o);
 static void window_take_scale(struct bc_xdg *x, struct bc_output *o);
+static void window_scale_apply(struct bc_xdg *x);
 static struct bc_output *output_default(struct bc_server *s);
 static uint32_t pic_scale_n(struct bc_xdg *x);
 static uint32_t output_scale_n(const struct bc_output *o);
@@ -950,12 +965,13 @@ static void send_limits(struct bc_xdg *x)
 
 /* `WINDOW limits` when they change (xdg's at the commit that applies them,
    X's WM_NORMAL_HINTS when the property does): pixels, 0 for none. */
-static void window_set_limits(struct bc_xdg *x, int32_t min_w, int32_t min_h, int32_t max_w, int32_t max_h)
+static int window_set_limits(struct bc_xdg *x, int32_t min_w, int32_t min_h, int32_t max_w, int32_t max_h)
 {
-    if (x->min_w == min_w && x->min_h == min_h && x->max_w == max_w && x->max_h == max_h) return;
+    if (x->min_w == min_w && x->min_h == min_h && x->max_w == max_w && x->max_h == max_h) return 0;
     x->min_w = min_w; x->min_h = min_h;
     x->max_w = max_w; x->max_h = max_h;
     if (x->id) send_limits(x);
+    return x->id != 0;
 }
 
 /* `WINDOW appmenu`: where the window's program serves its menus (the
@@ -1167,9 +1183,13 @@ static void send_toplevel_configure(struct bc_xdg *x)
     if (x->decoration)
         zxdg_toplevel_decoration_v1_send_configure(x->decoration, x->decor_mode);
     /* ADR 0242: the desktop's pixels as the smallest logical size that
-       covers them. */
-    xdg_toplevel_send_configure(x->toplevel, bc_scale_configure(x->size_w, pic_scale_n(x)),
-                                bc_scale_configure(x->size_h, pic_scale_n(x)), &states);
+       covers them, at the scale its program was told (conf_n: the new one
+       while a change waits for its acknowledgement). */
+    {
+        uint32_t n = x->conf_n ? x->conf_n : pic_scale_n(x);
+        xdg_toplevel_send_configure(x->toplevel, bc_scale_configure(x->size_w, n), bc_scale_configure(x->size_h, n),
+                                    &states);
+    }
     wl_array_release(&states);
     x->serial = wl_display_next_serial(x->server->display);
     xdg_surface_send_configure(x->resource, x->serial);
@@ -1821,8 +1841,10 @@ static struct bc_xdg *surface_window(struct bc_surface *surface)
    (geometry, offsets, shown sizes, the view, limits) and is converted where
    a line is written or read (blit_compositor_wire.h's bc_scale_*), with the
    scale of the window's top-level: a Wayland top-level takes its display's
-   when it is first placed on one and keeps it (a later change of display
-   or of scale is applied by a later step); X windows are always 1. */
+   when it is announced, and another when its display's scale changes or
+   it moves to a display of another scale -- told and configured at once,
+   applied at the program's acknowledging commit (window_scale_follow,
+   window_scale_apply); X windows are always 1. */
 
 /* An output's program scale in 120ths: 120 without one. */
 static uint32_t output_scale_n(const struct bc_output *o)
@@ -1850,7 +1872,8 @@ static uint32_t pic_scale_n(struct bc_xdg *x)
 }
 
 /* The scale a surface's program is told: its tree's once placed (a drag
-   icon's, the dragging window's); before
+   icon's, the dragging window's), the one it is configured at (conf_n:
+   during a change, the new one); before
    that (a fractional object made before the first commit) the display a
    new window goes to; always 120 for the compositor's own Xwayland. */
 static uint32_t surface_scale_n(struct bc_surface *surface)
@@ -1860,18 +1883,18 @@ static uint32_t surface_scale_n(struct bc_surface *surface)
     struct bc_xdg *top = pic_top(surface->dragicon && s->dragout.icon == surface ? s->dragout.window
                                                                                  : surface_pic(surface));
     if (s->x.client && wl_resource_get_client(surface->resource) == s->x.client) return BC_SCALE_ONE;
-    if (top && (top->xwin || top->scale_n)) return top->xwin ? BC_SCALE_ONE : top->scale_n;
+    if (top && (top->xwin || top->conf_n)) return top->xwin ? BC_SCALE_ONE : top->conf_n;
     return output_scale_n(output_default(s));
 }
 
 /* wl_surface.preferred_buffer_scale (ceil(S), wl_surface v6) and
    wp_fractional_scale_v1.preferred_scale (n), each when it is not what the
-   surface was last told. */
+   surface was last told (the whole number may stay when n changes). */
 static void surface_scale_tell(struct bc_surface *surface)
 {
     uint32_t n = surface_scale_n(surface);
 #ifdef WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION
-    if (surface->told_n != n &&
+    if ((surface->told_n == 0 || bc_scale_int(surface->told_n) != bc_scale_int(n)) &&
         wl_resource_get_version(surface->resource) >= WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION)
         wl_surface_send_preferred_buffer_scale(surface->resource, bc_scale_int(n));
 #endif
@@ -2453,6 +2476,9 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
         }
     }
     surface_view(surface);
+    /* ADR 0242 step 3: the commit after its program acknowledged a
+       configure at a new scale takes it, before anything of it is said. */
+    if (x && x->toplevel && x->scale_next) window_scale_apply(x);
     if (!(attached && buffer) && pic && pic->mapped && pic->id && surface->buf_w > 0 &&
         (pic->shown_w != surface->view[4] || pic->shown_h != surface->view[5] ||
          view_wire(pic, dv) != pic->view_said ||
@@ -2479,12 +2505,16 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
     }
 
     if (x && (x->toplevel || x->popup)) {
+        int resay = x->toplevel && x->id && x->scale_resay;
+        x->scale_resay = 0;
         if (x->pending_geometry) {
             int changed = x->gx != x->pgx || x->gy != x->pgy || x->gw != x->pgw || x->gh != x->pgh;
             x->gx = x->pgx; x->gy = x->pgy; x->gw = x->pgw; x->gh = x->pgh;
             x->pending_geometry = 0;
             /* The window inside its buffer (ADR 0229): its shadows outside. */
-            if (changed && x->toplevel && x->id) send_geometry(x);
+            if ((changed || resay) && x->toplevel && x->id) send_geometry(x);
+        } else if (resay && x->gw > 0 && x->gh > 0) {
+            send_geometry(x);
         }
         if (x->toplevel && x->decor_dropped && !x->decoration) {
             x->decor_dropped = 0;
@@ -2493,7 +2523,9 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
                 if (x->id) send_decor(x);
             }
         }
-        if (x->toplevel) window_set_limits(x, x->pmin_w, x->pmin_h, x->pmax_w, x->pmax_h);
+        if (x->toplevel && !window_set_limits(x, x->pmin_w, x->pmin_h, x->pmax_w, x->pmax_h) && resay &&
+            (x->min_w || x->min_h || x->max_w || x->max_h))
+            send_limits(x);
         if (attached && buffer && !x->acked) {
             wl_resource_post_error(x->resource, XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER,
                                    "a buffer committed before the first configure was acknowledged");
@@ -5008,15 +5040,91 @@ static void output_surface_event(struct bc_output *o, struct bc_surface *surface
     }
 }
 
-/* ADR 0242: a Wayland top-level's tree takes display `o`'s scale, once:
-   until a later step applies a change at the program's acknowledging
-   commit, a window keeps the scale it was first placed at, so its frames
-   and its lines always agree. */
+/* ADR 0242: a Wayland top-level's tree takes display `o`'s scale when it
+   is announced, before its first line in pixels (120 on no display). A
+   later change goes through window_scale_follow. */
 static void window_take_scale(struct bc_xdg *x, struct bc_output *o)
 {
-    if (x->scale_n || o == NULL) return;
-    x->scale_n = output_scale_n(o);
+    if (x->scale_n) return;
+    x->scale_n = x->conf_n = output_scale_n(o);
     if (x->scale_n != BC_SCALE_ONE && x->id) logf_("window %u: scale %u%%", x->id, o->scale_pct);
+}
+
+/* ADR 0242 step 3: a Wayland top-level whose display's scale is not the
+   one its program was told -- the display's scale changed (layout_end),
+   or the window went to a display of another scale (WINDOW output, a
+   display gone) -- is told the new one on every surface of its tree, and
+   configured again at the desktop's last size with it, by the compositor:
+   the desktop's pixels did not change, so neither side's repeat filter
+   would pass a WINDOW size. The tree keeps its applied scale until the
+   commit that acknowledges that configure (window_scale_apply); a window
+   with no configure to acknowledge (unmapped) takes it at once. A second
+   change before the acknowledgement is configured again the same way,
+   even back to the applied scale. Nothing at an unchanged scale. */
+static void window_scale_follow(struct bc_xdg *x)
+{
+    struct bc_server *s = x->server;
+    struct bc_xdg *e;
+    uint32_t n;
+    if (!window_is_toplevel(x) || x->xwin || x->id == 0 || x->scale_n == 0 || x->output == NULL) return;
+    n = output_scale_n(x->output);
+    if (n == x->conf_n) return;
+    logf_("window %u: on %s at %u%% (was %u%%): told and configured again", x->id, x->output->name,
+          x->output->scale_pct, x->conf_n * 5 / 6);
+    /* A change not yet acknowledged stays known: its configure may be
+       the one the program acknowledges next. */
+    x->prev_n = x->scale_wait ? x->conf_n : 0;
+    x->prev_serial = x->scale_serial;
+    x->conf_n = n;
+    /* Its tree by its pictures, not their outputs (a subsurface's is set
+       only when it is said); the drag icon with its dragging window. */
+    if (x->surface) surface_scale_tell(x->surface);
+    wl_list_for_each(e, &s->windows, link)
+        if (e != x && e->surface && pic_top(e) == x) surface_scale_tell(e->surface);
+    if (s->dragout.icon && s->dragout.window == x) surface_scale_tell(s->dragout.icon);
+    if (x->toplevel && x->initial) {
+        send_toplevel_configure(x);
+        x->scale_serial = x->serial;
+        x->scale_wait = 1;
+    } else {
+        x->scale_next = n;
+        window_scale_apply(x);
+    }
+}
+
+/* ADR 0242 step 3: the tree takes the scale its program was configured at
+   -- at the commit after the acknowledgement, before anything of that
+   commit is said -- and every line of it in pixels is said again in the
+   new units before its frame: its popups (parents first) and their views,
+   the subsurfaces of it and of each popup, bottom to top; its own limits
+   and geometry with this commit's (surface_apply, scale_resay), its view
+   with its frame (picture_frame), or without one when it changed. */
+static void window_scale_apply(struct bc_xdg *x)
+{
+    struct bc_server *s = x->server;
+    struct bc_xdg *e;
+    uint32_t n = x->scale_next;
+    x->scale_next = 0;
+    if (n == x->conf_n) {
+        x->scale_wait = 0;
+        x->prev_n = 0;
+    }
+    if (n == 0 || n == x->scale_n) return;
+    x->scale_n = n;
+    if (x->id == 0) return;
+    logf_("window %u: scale %u%%", x->id, x->scale_n * 5 / 6);
+    x->scale_resay = 1;
+    wl_list_for_each_reverse(e, &s->windows, link)
+        if (e->popup && e->id && e->parent && e->parent->id && pic_top(e) == x) {
+            popup_say(e);
+            view_say(e);
+        }
+    /* Each subsurface said again, its place in the order made unknown. */
+    wl_list_for_each(e, &s->windows, link)
+        if (e->subsurface && pic_top(e) == x) e->sent_index = -1;
+    subs_show(x, NULL, 1);
+    wl_list_for_each_reverse(e, &s->windows, link)
+        if (e->popup && e->id && pic_top(e) == x) subs_show(e, NULL, 1);
 }
 
 /* Moves a window (and so its surface) onto output `o`, NULL for none. */
@@ -5030,13 +5138,13 @@ static void window_set_output(struct bc_xdg *x, struct bc_output *o)
     x->output = o;
     if (o) {
         ++o->windows;
-        /* ADR 0242: a Wayland top-level takes the scale of the display it
-           is first placed on (window_take_scale); its tree is told it. */
-        if (window_is_toplevel(x) && !x->xwin) window_take_scale(x, o);
         if (x->surface) {
             output_surface_event(o, x->surface, 1);
             surface_scale_tell(x->surface);
         }
+        /* ADR 0242: a Wayland top-level on a display of another scale is
+           told it and configured again (window_scale_follow). */
+        if (window_is_toplevel(x) && !x->xwin) window_scale_follow(x);
     }
 }
 
@@ -5343,6 +5451,10 @@ static void layout_end(struct bc_server *s)
         logf_("layout: %d displays, %dx%d", wl_list_length(&s->outputs), s->layout_w, s->layout_h);
         x_layout_changed(s);
     }
+    /* ADR 0242 step 3: each Wayland top-level on a display whose scale
+       changed in place, after its outputs said so (output_changed). */
+    wl_list_for_each(x, &s->windows, link)
+        if (window_is_toplevel(x) && !x->xwin) window_scale_follow(x);
 }
 
 /* `WINDOW primary <name>`. */
@@ -6100,9 +6212,14 @@ static void xdg_ack_configure(struct wl_client *client, struct wl_resource *reso
     /* Any configure since the last (un)map counts: a client mid-resize may
        ack an older one. An ack while none is outstanding (one sent before
        an unmap) is late, not an error. */
-    (void)serial;
     if (x->configured)
         x->acked = 1;
+    /* ADR 0242 step 3: a configure at a new scale acknowledged (that one
+       or a later one): its next commit applies that scale. */
+    if (x->toplevel && x->scale_wait) {
+        if ((int32_t)(serial - x->scale_serial) >= 0) x->scale_next = x->conf_n;
+        else if (x->prev_n && (int32_t)(serial - x->prev_serial) >= 0) x->scale_next = x->prev_n;
+    }
 }
 
 static const struct xdg_surface_interface xdg_surface_impl = {
