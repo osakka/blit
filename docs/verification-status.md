@@ -9,6 +9,32 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-21: 0.3.132 security fixes: the server and the update path
+
+- **Server (security review SR-6, 11, 16, 18, 19, 22; Gitea #188, #193,
+  #198, #200, #201, #204):** `GET /v1/login` is always whole JSON (it
+  could overflow an 8 KB stack buffer); tokens are compared in constant
+  time; a huge CHT count no longer stalls the server; png_decode frees on
+  every refusal; HTTP headers are read from the header block only, in any
+  case, and Transfer-Encoding is refused; with no token, a foreign Origin,
+  a non-loopback Host or a non-JSON body is refused.
+- **Update path (SR-10, 12, 13, 21; #192, #194, #195, #203, #209):** the
+  helper checks and installs its own copy of each package; an install no
+  longer blocks the server (409 `update_installing` meanwhile; dpkg
+  bounded at 600 s); blit can no longer be rolled back without its
+  compositor (for rollbacks to 0.3.132 or later); a failure reports
+  dpkg's error; a retired package (blit-gamescope, steamer) is replaced
+  instead of blocking every update.
+- **Gates:** `gates_all` 206/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on c412ef86, the shipped commit, first pass, in a quiet window
+  hibr held. New: token_compare_gate, http_header_gate, http_origin_gate,
+  update_install_live_gate; each new case fails on 0.3.131.
+- **Release environment (Debian 13):** update_pair_gate 9 cases (new:
+  retired, swapped, bound) and rollback_recovery_gate 12 cases passed.
+- **Live, the mini PC:** the update was verified; the smoke check passed at
+  the login screen (2 displays up, frames advancing 11 -> 24).
+- **Published** to hibr-apt (b7305ee) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-21: 0.3.131 icons at U+101000; one Arabic face
 
 - **Blit's icons moved to U+101000-U+101495 (ADR 0243).** The Glyph
