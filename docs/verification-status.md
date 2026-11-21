@@ -9,6 +9,35 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-21: 0.3.129 Arabic shaped as words; bold keeps a shape
+
+- **Arabic as words (ADR 0241).** Each run of Hibr's Arabic cells is shaped
+  as one word with HarfBuzz in Noto Naskh Arabic 2.021 (pinned, unhinted,
+  OFL), the alef at the text font's cap height, fitted into exactly the
+  cells it was given, and drawn as per-cell slices of the word: joined,
+  with its tashkeel, on the CPU and the GPU (one sprite per word), outline
+  and pixel fonts alike. Damage widens to whole words; the block cursor
+  marks its cell. The `arabic` font setting chooses `naskh` (the default)
+  or `modern` (one letter per cell, as before).
+- **Bold keeps a shape that fills its cell (ADR 0240, Gitea #183).** Hibr's
+  bold window buttons in Hack were D-shaped; a shape that reaches its last
+  column is narrowed by a column before the overstrike. Text bold is
+  unchanged.
+- **Gates:** `gates_all` 202/11, `gates_renderer` 88/1, `gates_renderer-gles`
+  68/0, all on 3ef85b6, the shipped commit, in a quiet window hibr held.
+  New: arabic_word_text, arabic_word_slice, arabic_word_view, bold_shape;
+  gles_compose_gate gained four word scenes; modern_font_api_gate the
+  setting. An earlier full pass failed bold_shape (over the runner's 300 s:
+  made two minutes) and one frame-timing gate under the load of my own
+  rerun; the next, presentation_effects_gate once (3/3 alone), and its
+  suite was run again whole.
+- **Release environment (Debian 13):** compositor_gate, xwayland_gate (once
+  failed under load, then passed alone and in the rerun), the packaging
+  suite and update_pair.
+- **Live, the mini PC:** the update was verified; the smoke check passed at
+  the login screen (2 displays up, frames advancing 8 -> 21).
+- **Published** to hibr-apt (0579dad) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-20: 0.3.128 a backlog pass: /tmp, the parser's strings, package floors
 
 - **/tmp no longer collects Blit's leftovers.** The server removes a Hibr
