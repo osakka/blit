@@ -3542,6 +3542,24 @@ another `PUT`, `POST .../reset` or `POST .../cancel` is `409`
 the server stops waiting after 900 s. A failure's `detail` ends with what
 dpkg said last, its error (SR-21); a long one loses its start, marked `...`.
 
+Only a signed release is installed (from 0.3.133, security review SR-2).
+The `PUT` carries `X-Blit-Signature`: the release's Ed25519 signature, 128
+lowercase hex digits, from the `blit-release_<version>_amd64.sig` file
+`tools/release/build-release.sh` writes beside the packages
+(`tools/deploy/update-live.sh` sends it). A value that is not exactly that
+is `400` `update_invalid` before any byte is staged. The server only passes
+it on: the root helper rebuilds the statement it signs from what the upload
+carries -- each package's `Version` and SHA-256 -- and installs only when it
+verifies under one of the release keys the installed package holds
+(`/usr/lib/blit/release-keys`). An upload without the header, signed by
+another key, or with a signature made for other packages or another
+version, is refused with nothing installed: `500` `update_install_failed`,
+whose `detail` (and the status's) says which -- `the update is not signed`,
+`the release signature does not verify`, or `no release key`. So is a
+`blit` older than 0.3.133, signed or not: a rollback below the first
+release that verifies is root's own `dpkg` (see the runbook in
+[the security review](security-review-2026-11.md)).
+
 ### Restart after an update
 
 The package never restarts Blit (ADR 0008), and an update through the API

@@ -1,4 +1,4 @@
-.TH BLIT-UPDATE-HELPER 8 "2026-11-12" "Blit @VERSION@" "System Administration"
+.TH BLIT-UPDATE-HELPER 8 "2026-11-21" "Blit @VERSION@" "System Administration"
 .SH NAME
 blit-update-helper \- installs Blit packages uploaded through the API
 .SH SYNOPSIS
@@ -11,8 +11,8 @@ A client uploads
 and
 .B blit-compositor
 of one version with
-.B "PUT /v1/control/update"
-and the update token; the server stores each in
+.BR "PUT /v1/control/update" ,
+the update token and the release's signature; the server stores each in
 .I /var/lib/blit/updates/
 and asks the helper to install them.
 The server never installs packages itself, so it can run without
@@ -44,6 +44,30 @@ and, optionally,
 .BR blit-compositor ,
 at one version;
 .IP 5. 4
+verifies the release signature: the statement
+.RS 4
+.EX
+blit-release-signature 1
+blit \fIversion\fP \fIsha256\fP
+blit-compositor \fIversion\fP \fIsha256\fP
+.EE
+.RE
+.IP "" 4
+rebuilt from what the update carries (each copy's
+.B Version
+field and SHA-256; the second line only when it carries
+.BR blit-compositor ),
+must verify, as Ed25519 (RFC 8032), under one of the public keys in
+.IR /usr/lib/blit/release-keys/*.pub .
+An unsigned update, one signed by any other key, and a signature made for
+other packages or another version are refused;
+.IP 6. 4
+refuses a
+.B blit
+older than 0.3.133, the first release whose helper verifies signatures,
+even when it is signed: such a rollback is root's own
+.BR dpkg (1);
+.IP 7. 4
 refuses an update without
 .B blit-compositor
 when the host has it installed, because
@@ -51,7 +75,7 @@ when the host has it installed, because
 depends on
 .B blit
 of exactly its own version; if the host does not have it, it is not added;
-.IP 6. 4
+.IP 8. 4
 installs them with one
 .BR dpkg (1)
 .B \-\-install \-\-abort\-after=1
@@ -62,9 +86,9 @@ first, or on a rollback
 first, since
 .B blit
 breaks every newer compositor \(em stopped after 600 seconds;
-.IP 7. 4
+.IP 9. 4
 removes the staged files and its copies, whether it installed them or refused;
-.IP 8. 4
+.IP 10. 4
 after an install, reloads systemd and restarts
 .BR blit.service .
 .PP
@@ -81,9 +105,14 @@ One line per connection, within 3 seconds:
 .PP
 .RS 4
 .EX
-UPDATE \fIpath\fP \fIsha256\fP [\fIpath\fP \fIsha256\fP]
+UPDATE \fIpath\fP \fIsha256\fP [\fIpath\fP \fIsha256\fP] [SIGNATURE \fIhex\fP]
 .EE
 .RE
+.PP
+.I hex
+is the release signature, 128 lowercase hex digits, as the client sent it
+in
+.BR X-Blit-Signature .
 .SH EXIT STATUS
 .TP
 .B 0
@@ -104,6 +133,12 @@ Uploaded packages, until the helper has answered.
 .TP
 .I /var/lib/blit-update-helper/
 The helper's copies of them, mode 0700, until it has answered.
+.TP
+.I /usr/lib/blit/release-keys/
+The public halves of Blit's release keys, one
+.I *.pub
+file each, installed by the package. A release adds the next key before
+it is used; a key whose file is gone no longer verifies anything.
 .TP
 .I /etc/blit/update.token
 The token the server requires for an update; see

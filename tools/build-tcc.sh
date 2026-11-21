@@ -60,7 +60,22 @@ case "$target" in
         "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -ldl
         ;;
     helper)
-        compile -O2 -std=c99 -- "$ROOT/src/blit_update_helper.c"
+        # With Monocypher's Ed25519 (vendor/monocypher): the release
+        # signature's verifier (security review SR-2).
+        # shellcheck disable=SC2046
+        compile -O2 -std=c99 -- "$ROOT/src/blit_update_helper.c" \
+            $("$ROOT/tools/build-flags.sh" --sources helper)
+        # shellcheck disable=SC2046
+        "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list")
+        ;;
+    sign)
+        # tools/release/blit-sign: makes a release key and signs a release
+        # with it (docs/development-workflow.md). A release tool, never
+        # packaged; the same statement, key format and Ed25519 as the
+        # helper's verifier.
+        # shellcheck disable=SC2046
+        compile -O2 -std=c99 -- "$ROOT/tools/release/blit-sign.c" \
+            $("$ROOT/tools/build-flags.sh" --sources helper)
         # shellcheck disable=SC2046
         "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list")
         ;;
@@ -165,7 +180,7 @@ case "$target" in
         "$ROOT/tools/tcc-link.sh" exe "$output" $(cat "$objects/list") -- $libs -ldl
         ;;
     *)
-        echo "blit: unknown TCC target '$target' (use server, helper, adapter, or compositor)" >&2
+        echo "blit: unknown TCC target '$target' (use server, helper, sign, adapter, or compositor)" >&2
         exit 1
         ;;
 esac

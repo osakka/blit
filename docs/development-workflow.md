@@ -350,10 +350,10 @@ tools/build-tcc.sh build/blit/blit-compositor compositor
 BLIT_HIBR_ROOT=$hibr tools/run-gates.sh all >build/gates-all.txt
 tools/run-gates.sh renderer >build/gates-renderer.txt
 tools/run-gates.sh renderer-gles >build/gates-renderer-gles.txt
-BLIT_HIBR_ROOT=$hibr tools/release/build-release.sh $out
+BLIT_HIBR_ROOT=$hibr tools/release/build-release.sh $out   # signs last: see "Release signing"
 tools/release/record-gates.sh releases/X.Y.Z.yaml build/gates-*.txt
 tools/release/generate-manifest.sh --check $out/blit_X.Y.Z-1_amd64.deb releases/X.Y.Z.yaml
-tools/deploy/update-live.sh HOST $out/blit_X.Y.Z-1_amd64.deb
+tools/deploy/update-live.sh HOST $out/blit_X.Y.Z-1_amd64.deb   # sends $out/blit-release_X.Y.Z-1_amd64.sig
 ```
 
 `build-release.sh` builds the binaries, runs `compositor_gate` and
@@ -362,7 +362,7 @@ the packaging suite on the package, `update_pair_gate.sh` (a real
 `dpkg --install` of the pair, as root in the environment) and
 `rollback_recovery_gate.sh` (rollback and recovery, rehearsed the same way;
 see the [security review](security-review-2026-11.md)), and stops at the
-first failure. The packages are then published to Hibr's apt repository
+first failure; when all have passed it signs the release (below). The packages are then published to Hibr's apt repository
 with the hibr-apt repository's `publish.sh`, given each `.deb`.
 
 `packaging/build-deb.sh` writes two packages to the output directory:
@@ -378,6 +378,43 @@ recorded and checked. The documentation is installed once, under
 `/usr/share/doc/blit/docs`. The hibr-apt repository should keep the old
 `blit-font-sources_20120503-1_all.deb` for as long as it serves a `blit`
 of 0.3.130 or earlier, the GPL source of that release's Arabic font.
+
+### Release signing
+
+Hosts install only a signed release through the API (security review SR-2,
+[ADR 0232](adr/0232-an-update-installs-blit-and-its-compositor-together.md)):
+the update helper verifies an Ed25519 signature over each package's
+`Version` and SHA-256 against the public keys the installed `blit` holds
+(`/usr/lib/blit/release-keys`, from `packaging/release-keys/*.pub`).
+
+- **The key.** Made once, by the owner, on the release host:
+  `tools/release/keygen blit-release-1`. It writes the secret half to
+  `~/.config/blit-release/ed25519.secret` (directory 0700, file 0600; set
+  `BLIT_RELEASE_KEY` for another path, never inside a checkout) and the
+  public half to `packaging/release-keys/blit-release-1.pub`, which is
+  committed. It refuses to overwrite either. Keep an offline copy of the
+  secret: without it no release can be signed that today's hosts take, and
+  they then take updates only from root's own `dpkg`.
+  `packaging/build-deb.sh` builds no package without a public key.
+- **Signing.** `build-release.sh` checks the key first
+  (`tools/release/sign-release.sh --check`: present, the caller's, 0600,
+  outside the checkout, its public half in `packaging/release-keys`), and,
+  after every gate has passed, signs on the host -- the key never enters
+  the build environment -- writing `blit-release_X.Y.Z-1_amd64.sig` beside
+  the packages and checking it verifies under the repository's keys and the
+  ones the package installs. `tools/release/sign-release.sh BLIT_DEB` does
+  the same by hand. `update-live.sh` sends the `.sig` and refuses to start
+  without it. `BLIT_RELEASE_KEY` overrides the key path for both.
+- **Rotation.** Make the next key with `BLIT_RELEASE_KEY=<new path>
+  tools/release/keygen blit-release-2` and commit its `.pub`; that release
+  is still signed with key 1, so hosts that only know key 1 take it. From
+  the next release on, sign with key 2 (`BLIT_RELEASE_KEY=<new path>`).
+  Removing `blit-release-1.pub` in a later release revokes key 1 on every
+  host that installs it.
+- **Rollback.** Down to 0.3.133 through the API with that release's own
+  `.sig`; below it, root's own `dpkg` (the helper refuses an older `blit`
+  even signed). See the runbook in the
+  [security review](security-review-2026-11.md).
 
 `releases/<version>.yaml` is generated from the package, not written by
 hand, apart from a `notes:` line the operator may add. The

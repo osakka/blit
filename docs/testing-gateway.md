@@ -87,13 +87,16 @@ packages whose SHA-256 was independently recorded (the release manifest's
 `package_sha256` and `compositor_package_sha256`).
 `tools/deploy/update-live.sh HOST blit_X.Y.Z-1_amd64.deb` does this.
 By hand, the two packages go back to back, with `X-Blit-Packages` naming
-each one's length and SHA-256 (ADR 0232):
+each one's length and SHA-256 (ADR 0232), and, from 0.3.133, the release's
+signature beside them in `X-Blit-Signature` (security review SR-2; the
+helper refuses an update without it):
 
 ```sh
 cat blit_X.Y.Z-1_amd64.deb blit-compositor_X.Y.Z-1_amd64.deb > body
 curl --fail --request PUT \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header "X-Blit-Packages: BLIT_BYTES:BLIT_SHA256 COMPOSITOR_BYTES:COMPOSITOR_SHA256" \
+  --header "X-Blit-Signature: $(cat blit-release_X.Y.Z-1_amd64.sig)" \
   --header 'Content-Type: application/vnd.debian.binary-package' \
   --data-binary @body \
   http://127.0.0.1:8080/v1/control/update

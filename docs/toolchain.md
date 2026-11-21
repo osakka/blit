@@ -127,6 +127,7 @@ header and the programs' RELRO.
 | Linker | the system's `cc` and `ld` (`tools/tcc-link.sh`) |
 | Target | x86-64 Linux |
 | HarfBuzz headers | `vendor/harfbuzz`: pinned unmodified 6.0.0 public headers only |
+| Ed25519 (update helper, `tools/release/blit-sign`) | `vendor/monocypher`: pinned unmodified Monocypher 4.0.3 sources (BSD-2-Clause or CC0-1.0), compiled by TCC; `tools/build-flags.sh --sources helper` lists them |
 | KMS runtime | Not testable here: no `/dev/dri` device node exposed |
 
 ## Build environment

@@ -20,6 +20,10 @@
 #   build-flags.sh --sources server    the server's C sources besides
 #                                      src/blit_server.c (which a gate may
 #                                      include instead), hibr-ime's with them
+#   build-flags.sh --sources helper    the update helper's C sources besides
+#                                      src/blit_update_helper.c: Monocypher
+#                                      (vendor/monocypher, Ed25519), which
+#                                      tools/release/blit-sign.c also takes
 #
 # hibr-ime (ADR 0233): the input methods, built in from a checkout of the
 # tag in packaging/IME_VERSION -- build/hibr-ime-<version>, or BLIT_IME_ROOT
@@ -219,8 +223,15 @@ case $1 in
     ls "$ime"/src/*.c "$ime"/methods/*/*.c
     ;;
 --sources)
-    [ "${2:-}" = server ] || die "usage: build-flags.sh --sources server"
     here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+    if [ "${2:-}" = helper ]; then
+        # Security review SR-2: the release signature's verifier. No
+        # dependency of the system's: pinned sources (vendor/monocypher).
+        echo "$here/vendor/monocypher/monocypher.c"
+        echo "$here/vendor/monocypher/monocypher-ed25519.c"
+        exit 0
+    fi
+    [ "${2:-}" = server ] || die "usage: build-flags.sh --sources server|helper"
     ime=$(ime_root) || exit 1
     for f in blit_kms.c blit_vt.c blit_font.c blit_raster.c; do echo "$here/src/$f"; done
     ls "$ime"/src/*.c "$ime"/methods/*/*.c

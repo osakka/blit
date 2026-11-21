@@ -15,6 +15,14 @@
 # paths (/run/blit/update.sock, /var/lib/blit/updates): the helper release N
 # ships, which is the one that has to install N-1 on a rollback.
 #
+# Release signatures (security review SR-2): the helper is built with a
+# gate key directory (UPDATE_KEYS_DIR) holding a throwaway key made here,
+# and every request, and every update-live.sh run, carries a signature by it
+# over the packages it carries. A real N-1 below the oldest release the
+# helper installs (UPDATE_OLDEST_RELEASE, the first that verifies) cannot be
+# rehearsed through the helper: a rollback that far is root's own dpkg, and
+# the gate says so and stops.
+#
 # The operator's state is set once on N-1 -- an edited /etc/blit/blit.env
 # (BLIT_EXPECT_DESKTOP=0 and a line of the operator's own), the generated
 # update token, and a settings document in /var/lib/blit/settings.json --
@@ -118,6 +126,10 @@ if [ "$#" -eq 2 ]; then
     test -f "$comp_old" || fail "no $comp_old beside $blit_old"
     dpkg --compare-versions "$old" lt "$version" ||
         fail "the previous release $old is not older than $version"
+    oldest=$(sed -n 's/^#define UPDATE_OLDEST_RELEASE "\(.*\)"$/\1/p' "$root/src/blit_update_helper.c")
+    [ -n "$oldest" ] || fail "no UPDATE_OLDEST_RELEASE in the helper"
+    dpkg --compare-versions "$old" ge "$oldest~" ||
+        fail "the previous release $old is older than $oldest, the oldest the helper installs (SR-2): a rollback to it is root's own dpkg, not this rehearsal (docs/security-review-2026-11.md)"
     previous=real
 else
     old=${version%-1}-0
@@ -134,12 +146,36 @@ grep -q "blit (= $version)" <<EOF || fail "blit-compositor $version does not pin
 $(dpkg-deb -f "$comp_new" Depends)
 EOF
 
-# The helper release N ships, at its deployed paths.
-mkdir -p /run/blit
-cc -std=gnu11 -O1 -o "$helper" "$root/src/blit_update_helper.c" ||
-    fail "helper did not build"
+# The helper release N ships, at its deployed paths, but for its release
+# keys: the gate's own (SR-2), made here.
+mkdir -p /run/blit "$work/keys"
+sources=$("$root/tools/build-flags.sh" --sources helper)
+# shellcheck disable=SC2086
+cc -std=gnu11 -O1 -DUPDATE_KEYS_DIR="\"$work/keys\"" -o "$helper" \
+    "$root/src/blit_update_helper.c" $sources || fail "helper did not build"
+sign=$work/blit-sign
+# shellcheck disable=SC2086
+cc -std=gnu11 -O1 -o "$sign" "$root/tools/release/blit-sign.c" $sources ||
+    fail "blit-sign did not build"
+"$sign" keygen "$work/gate.secret" "$work/keys/gate-1.pub" >/dev/null || fail "keygen"
 
 sha() { sha256sum "$1" | cut -c1-64; }
+# signature FILE...: the gate key's signature over what FILE... are, as
+# tools/release/sign-release.sh signs a release.
+signature() {
+    bv= bs= cv= cs=
+    for f do
+        case "$(dpkg-deb -f "$f" Package)" in
+            blit) bv=$(dpkg-deb -f "$f" Version) bs=$(sha "$f") ;;
+            blit-compositor) cv=$(dpkg-deb -f "$f" Version) cs=$(sha "$f") ;;
+        esac
+    done
+    if [ -n "$cv" ]; then
+        "$sign" sign "$work/gate.secret" "$bv" "$bs" "$cv" "$cs"
+    else
+        "$sign" sign "$work/gate.secret" "$bv" "$bs"
+    fi
+}
 installed() {   # PACKAGE -> "<status> <version>", or "absent"
     v=$(dpkg-query --show --showformat='${db:Status-Status} ${Version}' "$1" 2>/dev/null || true)
     case "$v" in
@@ -174,16 +210,21 @@ kept() {   # CASE
 }
 
 # FILE SHA [FILE SHA]: staged as the server stages them (mkstemp's
-# blit-update-XXXXXX in the staging directory), then the helper asked; the
-# staged copies must be gone after its answer.
+# blit-update-XXXXXX in the staging directory), then the helper asked,
+# with the gate key's signature over them; the staged copies must be gone
+# after its answer.
 ask() {
     request=
+    files=
     while [ "$#" -ge 2 ]; do
         staged=$(mktemp "$staging/blit-update-XXXXXX")
         cp "$1" "$staged"
         request="$request $staged $2"
+        files="$files $1"
         shift 2
     done
+    # shellcheck disable=SC2086
+    request="$request SIGNATURE $(signature $files)"
     rm -f "$socket"
     "$helper" >"$work/helper.log" 2>&1 &
     helper_pid=$!
@@ -488,9 +529,14 @@ eval "$(sed -n '/^smoke_state()/,/^}/p' "$root/tools/deploy/update-live.sh")"
 mkdir -p "$work/tree/tools/deploy" "$work/tree/releases"
 cp "$root/tools/deploy/update-live.sh" "$work/tree/tools/deploy/"
 live() {   # BLIT_DEB -> update-live.sh's exit status; its output in $work/live.log
-    p=$1
-    pv=$(dpkg-deb -f "$p" Version)
-    c=$(dirname "$p")/blit-compositor_${pv}_amd64.deb
+    # The pair copied to a directory of its own with the gate key's
+    # signature beside it (SR-2), as a release's directory has the real one.
+    pv=$(dpkg-deb -f "$1" Version)
+    d=$(mktemp -d "$work/live.XXXXXX")
+    cp "$1" "$(dirname "$1")/blit-compositor_${pv}_amd64.deb" "$d/"
+    p=$d/$(basename "$1")
+    c=$d/blit-compositor_${pv}_amd64.deb
+    signature "$p" "$c" >"$d/blit-release_${pv}_amd64.sig"
     printf 'package: %s\npackage_sha256: %s\ncompositor_package: %s\ncompositor_package_sha256: %s\n' \
         "$(basename "$p")" "$(sha "$p")" "$(basename "$c")" "$(sha "$c")" \
         >"$work/tree/releases/${pv%-*}.yaml"

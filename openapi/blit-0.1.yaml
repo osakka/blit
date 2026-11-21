@@ -917,6 +917,14 @@ paths:
         install has finished; the server keeps serving meanwhile, reports
         `installing` in the status, and refuses another upload with 409
         `update_installing`. A failure's detail ends with dpkg's own error.
+        Security review SR-2: the helper installs only a signed release.
+        X-Blit-Signature is the release's Ed25519 signature over the
+        statement the helper rebuilds from what the upload carries (each
+        package's Version and SHA-256); without it, or when it does not
+        verify under a release key the host's package installed, the update
+        is refused, nothing installed, with 500 `update_install_failed` and
+        a detail saying why. A blit older than 0.3.133 is refused even
+        signed.
       parameters:
         - in: header
           name: X-Blit-Update-Token
@@ -927,6 +935,15 @@ paths:
           required: true
           description: '`<length>:<sha256>` per package, space-separated, at most two'
           schema: {type: string, pattern: '^[1-9][0-9]*:[0-9a-f]{64}( [1-9][0-9]*:[0-9a-f]{64})?$'}
+        - in: header
+          name: X-Blit-Signature
+          required: false
+          description: >-
+            The release signature (blit-release_<version>_amd64.sig), 128
+            lowercase hex digits; any other value is 400 `update_invalid`.
+            Not required by the server, which passes it to the helper; the
+            helper refuses an update without it.
+          schema: {type: string, pattern: '^[0-9a-f]{128}$'}
       requestBody:
         required: true
         content:

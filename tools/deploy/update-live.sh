@@ -7,9 +7,13 @@ set -eu
 # ADR 0232: PACKAGE is the release's blit .deb; blit-compositor of the same
 # version must sit beside it. Both go in one upload, and the host's helper
 # installs the compositor too when the host has it.
+# Security review SR-2: so must the release's signature,
+# blit-release_<version>_amd64.sig (tools/release/sign-release.sh). It goes
+# as X-Blit-Signature; the host's helper refuses the update unless it
+# verifies under one of the host's release keys.
 
 usage() {
-    echo "usage: $0 HOST BLIT_PACKAGE (blit-compositor of its version beside it)" >&2
+    echo "usage: $0 HOST BLIT_PACKAGE (blit-compositor of its version and the release's .sig beside it)" >&2
     echo "set BLIT_UPDATE_TOKEN or BLIT_UPDATE_TOKEN_FILE; optionally set BLIT_AUTH_TOKEN or BLIT_AUTH_TOKEN_FILE" >&2
     exit 2
 }
@@ -42,6 +46,21 @@ test -f "$compositor" || {
     exit 2
 }
 compositor_sha256=$(sha256sum "$compositor" | awk '{print $1}')
+signature_file=$(dirname "$package")/blit-release_${package_version}_amd64.sig
+test -f "$signature_file" || {
+    echo "update refused: the release's signature $signature_file is not beside $package" \
+         "(tools/release/sign-release.sh writes it; a host refuses an unsigned update)" >&2
+    exit 2
+}
+signature=$(sed -n '1p' "$signature_file")
+case "$signature" in
+    *[!0-9a-f]*|'') signature_ok=0 ;;
+    *) [ "${#signature}" -eq 128 ] && signature_ok=1 || signature_ok=0 ;;
+esac
+[ "$signature_ok" = 1 ] || {
+    echo "update refused: $signature_file is not a release signature (128 lowercase hex digits)" >&2
+    exit 2
+}
 repo_root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 manifest="$repo_root/releases/$version.yaml"
 test -f "$manifest" || {
@@ -126,6 +145,7 @@ echo "$status" | grep -q '"active":false' || {
 http_code=$(curl_auth --request PUT \
     -H "X-Blit-Update-Token: $update_token" \
     -H "X-Blit-Packages: $parts" \
+    -H "X-Blit-Signature: $signature" \
     -H 'Content-Type: application/vnd.debian.binary-package' \
     --data-binary "@$tmpdir/body" \
     -o "$tmpdir/response" -w '%{http_code}' \

@@ -1,0 +1,22 @@
+{
+  "version": "4.0.3",
+  "purpose": "Ed25519 (RFC 8032) signature verification for the update helper and signing for tools/release/blit-sign: unmodified sources, compiled into those two programs only.",
+  "archive_url": "https://monocypher.org/download/monocypher-4.0.3.tar.gz",
+  "archive_sha256": "8cc9bc341a66249016db9bd70e9142d8d0aef9945973744b1ac05dbc55d8ee66",
+  "archive_sha512": "40904ada5c7ee4f7741733e38b69a30a4b0561cbffba5ffe7c2dce16136d540251ec0d9056ff606510d3b5b708fb8a40db7e0870d4a0b2dc17ba2bfb880f8965",
+  "licence": "BSD-2-Clause OR CC0-1.0 (LICENCE.md)",
+  "files": {
+    "LICENCE.md": "5f8360e4c06ddcc584bdb4b210c6af824c4bb301e6a9a521869b6d90795ca4b3",
+    "monocypher.c": "57eb914fc88136119bd41655cccb8c250048bf54d470540625186f8ab16f64be",
+    "monocypher.h": "c494da712122da7ff679fdcf318a5317e84972b6c950fe9d896212947797facd",
+    "monocypher-ed25519.c": "60fce3578fb00b00da96490653d993c4cb427b1e1be38183285c66e04d22cc18",
+    "monocypher-ed25519.h": "abc4fad381879f5c29176ebe014b9189956b3dfe0a3e36459b6990bc57212380"
+  },
+  "upstream_paths": {
+    "LICENCE.md": "LICENCE.md",
+    "monocypher.c": "src/monocypher.c",
+    "monocypher.h": "src/monocypher.h",
+    "monocypher-ed25519.c": "src/optional/monocypher-ed25519.c",
+    "monocypher-ed25519.h": "src/optional/monocypher-ed25519.h"
+  }
+}

@@ -103,6 +103,39 @@ elf_hardened "$stage/usr/lib/blit/bin/blit-update-helper" program
 elf_hardened "$stage/usr/lib/blit/hibr/console-blit.so" shared
 glibc_covered "$package" "$stage/usr/lib/blit/bin/blit-server" \
     "$stage/usr/lib/blit/bin/blit-update-helper" "$stage/usr/lib/blit/hibr/console-blit.so"
+# Security review SR-2 (Gitea #184): the helper verifies every update
+# against the release keys the package installs. Each of
+# packaging/release-keys/*.pub is there, the same bytes, root's, 0644, and
+# nothing else is; there is at least one (a package without one would take
+# no update but root's own dpkg). No secret key is anywhere in the package:
+# no *.secret file, no line of a secret key file.
+release_keys_dir=$stage/usr/lib/blit/release-keys
+shipped_keys=$(cd "$release_keys_dir" 2>/dev/null && find . -mindepth 1 | sed 's|^\./||' | sort | tr '\n' ' ' || true)
+expected_keys=$(cd "$root/packaging/release-keys" && find . -maxdepth 1 -name '*.pub' -type f |
+    sed 's|^\./||' | sort | tr '\n' ' ')
+if [ -z "$expected_keys" ] || [ "$shipped_keys" != "$expected_keys" ]; then
+    echo "PACKAGE_ARTIFACT_FAIL /usr/lib/blit/release-keys holds '$shipped_keys', packaging/release-keys '$expected_keys'" >&2
+    exit 1
+fi
+for key in $expected_keys; do
+    if ! cmp -s "$root/packaging/release-keys/$key" "$release_keys_dir/$key" ||
+       ! grep -qxE 'blit-release-ed25519-public [0-9a-f]{64}' "$release_keys_dir/$key" ||
+       [ "$(wc -l <"$release_keys_dir/$key")" != 1 ] ||
+       [ "$(dpkg-deb -c "$package" | awk -v f="./usr/lib/blit/release-keys/$key" '$6 == f { print $1, $2 }')" != "-rw-r--r-- root/root" ]; then
+        echo "PACKAGE_ARTIFACT_FAIL release key $key is not packaging/release-keys/$key, one key line, root's, 0644" >&2
+        exit 1
+    fi
+done
+secret_files=$(find "$stage" -name '*.secret' | sed "s|^$stage||")
+secret_lines=$(grep -rlxE 'blit-release-ed25519-secret [0-9a-f]{64}' "$stage" | sed "s|^$stage||" || true)
+if [ -n "$secret_files$secret_lines" ]; then
+    echo "PACKAGE_ARTIFACT_FAIL the package carries a secret key: $secret_files $secret_lines" >&2
+    exit 1
+fi
+test -f "$stage/usr/share/doc/blit/monocypher-LICENCE.md" || {
+    echo "PACKAGE_ARTIFACT_FAIL Monocypher's licence is not installed beside the helper" >&2
+    exit 1
+}
 # ADR 0227: Spleen is one text font of five masters.
 for master in 6x12 8x16 12x24 16x32 32x64; do
     test -f "$stage/usr/lib/blit/fonts/text/spleen/spleen-$master.otf"
@@ -417,5 +450,5 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     rm -rf "$rebuild"
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-compositor>>self conflicts+replaces=steamer,blit-gamescope elf=stack-RW,relro\n' \
-    "$version" "$actual_hash" "$reproducible" "$compositor" "$hibr_frame_v5"
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-compositor>>self conflicts+replaces=steamer,blit-gamescope elf=stack-RW,relro release_keys=%s\n' \
+    "$version" "$actual_hash" "$reproducible" "$compositor" "$hibr_frame_v5" "$(echo $expected_keys | wc -w)"

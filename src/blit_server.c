@@ -600,6 +600,10 @@ typedef struct {
     size_t update_lengths[BLIT_UPDATE_MAX_PACKAGES];
     char update_paths[BLIT_UPDATE_MAX_PACKAGES][256];
     char update_sha256[BLIT_UPDATE_MAX_PACKAGES][65];
+    /* SR-2: X-Blit-Signature, the release's signature over the packages,
+       passed to the helper, which verifies it; empty when the request had
+       none (the helper then refuses the update). */
+    char update_signature[129];
     /* SR-12: the upload is complete and the helper is installing it; the
        client waits for the answer, not read and not timed out as idle. */
     int update_installing;
@@ -32792,13 +32796,18 @@ static int start_update_helper(BlitRuntime *runtime, int index,
         snprintf(detail, capacity, "root update helper is unavailable");
         return 0;
     }
-    /* UPDATE <path> <sha256> [<path> <sha256>]: the helper owns which of
-       them it installs (ADR 0232). */
+    /* UPDATE <path> <sha256> [<path> <sha256>] [SIGNATURE <hex>]: the
+       helper owns which of them it installs (ADR 0232), and whether the
+       signature makes them a release (SR-2). At most 6 + 2 * (1 + 255 + 1
+       + 64) + 11 + 128 + 1 bytes: it fits. */
     length = snprintf(line, sizeof(line), "UPDATE");
     for (part = 0; part < client->update_count; ++part)
         length += snprintf(line + length, sizeof(line) - (size_t)length,
                            " %s %s", client->update_paths[part],
                            client->update_sha256[part]);
+    if (client->update_signature[0] != '\0')
+        length += snprintf(line + length, sizeof(line) - (size_t)length,
+                           " SIGNATURE %s", client->update_signature);
     length += snprintf(line + length, sizeof(line) - (size_t)length, "\n");
     if (send(fd, line, (size_t)length, MSG_NOSIGNAL) != length) {
         close(fd);
@@ -33239,6 +33248,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
         size_t early = client->length > header_length ?
             client->length - header_length : 0;
         char packages[200];
+        char signature[160];
         if (runtime->update_token[0] == '\0' ||
             !update_authorized(runtime, client->request)) {
             send_problem(client->fd, 403, "Forbidden", "update_disabled",
@@ -33264,6 +33274,25 @@ static void service_http_client(BlitRuntime *runtime, int index)
                          "A bounded body and X-Blit-Packages (<length>:<sha256> per package, summing to Content-Length) are required.");
             remove_http_client(runtime, index);
             return;
+        }
+        /* SR-2: the release signature is the helper's to verify; here it
+           is only taken whole, as exactly what the helper's line can
+           carry, or refused before any byte is staged. */
+        client->update_signature[0] = '\0';
+        if (request_header(client->request, "X-Blit-Signature:", signature,
+                           sizeof(signature))) {
+            size_t i, length = strlen(signature);
+            for (i = 0; i < length; ++i)
+                if (!((signature[i] >= '0' && signature[i] <= '9') ||
+                      (signature[i] >= 'a' && signature[i] <= 'f')))
+                    break;
+            if (length != 128 || i != length) {
+                send_problem(client->fd, 400, "Bad Request", "update_invalid",
+                             "X-Blit-Signature is the release's signature: 128 lowercase hex digits.");
+                remove_http_client(runtime, index);
+                return;
+            }
+            memcpy(client->update_signature, signature, 129);
         }
         /* Large curl/http clients may wait for this before sending the
            remainder of the package body. */

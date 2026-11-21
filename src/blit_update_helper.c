@@ -14,6 +14,8 @@
 #include <dirent.h>
 #include <sys/select.h>
 
+#include "blit_release_signature.h"
+
 #ifndef UPDATE_SOCKET
 #define UPDATE_SOCKET "/run/blit/update.sock"
 #endif
@@ -29,6 +31,21 @@
    (StateDirectory=blit), and the staging directory is group-writable. */
 #ifndef UPDATE_PRIVATE_DIR
 #define UPDATE_PRIVATE_DIR "/var/lib/blit-update-helper"
+#endif
+/* Security review SR-2 (Gitea #184): the public halves of Blit's release
+   keys, one *.pub file each (src/blit_release_signature.h). The package
+   installs them; a release adds the next key before it signs with it, and
+   removing a file revokes that key. */
+#ifndef UPDATE_KEYS_DIR
+#define UPDATE_KEYS_DIR "/usr/lib/blit/release-keys"
+#endif
+/* The oldest release this helper installs, signed or not: the first one
+   whose helper verifies signatures. Below it, a signed package would put
+   back a helper that installs anything, so a rollback that far is root's
+   own dpkg (docs/security-review-2026-11.md, the runbook). A later release
+   may raise it, to keep a fixed hole from being installed again. */
+#ifndef UPDATE_OLDEST_RELEASE
+#define UPDATE_OLDEST_RELEASE "0.3.133"
 #endif
 #define COMMAND_DETAIL_CAPACITY 384
 /* SR-12: every command is bounded. dpkg --install gets ten minutes, far
@@ -317,6 +334,52 @@ static int copy_staged(UpdatePackage *package)
     return 1;
 }
 
+/* SR-2: the update is the release its signature names. The statement is
+   rebuilt from what the update carries -- every package, the compositor
+   too on a host that does not have it, so one signature serves every host
+   -- and must verify under one of the installed release keys. */
+static int signature_verified(const UpdatePackage *packages, int blit,
+                              int compositor, const char *signature_hex,
+                              char *detail, size_t detail_capacity)
+{
+    char statement[BLIT_RELEASE_STATEMENT_CAPACITY];
+    char matched[256];
+    uint8_t signature[64];
+    size_t length;
+    int keys = 0;
+    if (signature_hex[0] == '\0') {
+        snprintf(detail, detail_capacity,
+                 "the update is not signed: a release's packages come with its "
+                 "signature (X-Blit-Signature)");
+        return 0;
+    }
+    if (!blit_release_signature_parse(signature_hex, signature)) {
+        snprintf(detail, detail_capacity,
+                 "the signature is not 128 lowercase hex digits");
+        return 0;
+    }
+    length = blit_release_statement(statement, sizeof(statement),
+        packages[blit].version, packages[blit].sha256,
+        compositor >= 0 ? packages[compositor].version : NULL,
+        compositor >= 0 ? packages[compositor].sha256 : NULL);
+    if (length == 0) {
+        snprintf(detail, detail_capacity, "package identity check failed");
+        return 0;
+    }
+    if (blit_release_verify_directory(UPDATE_KEYS_DIR, 1, signature, statement,
+                                      length, matched, sizeof(matched), &keys))
+        return 1;
+    if (keys == 0)
+        snprintf(detail, detail_capacity,
+                 "no release key in " UPDATE_KEYS_DIR "; nothing can be verified");
+    else
+        snprintf(detail, detail_capacity,
+                 "the release signature does not verify: these packages, at "
+                 "this version, were not signed by a release key in "
+                 UPDATE_KEYS_DIR);
+    return 0;
+}
+
 /* Only a file the server staged: UPDATE_STAGING_DIR/blit-update-<name>,
    no further directories. The helper is root, and it deletes what it was
    handed, so it must never be handed anything else. */
@@ -329,6 +392,7 @@ static int staged_path(const char *path)
 }
 
 static int request_update(UpdatePackage *packages, int count,
+                          const char *signature,
                           char *detail, size_t detail_capacity)
 {
     char *arguments[4 + UPDATE_MAX_PACKAGES];
@@ -381,6 +445,16 @@ static int request_update(UpdatePackage *packages, int count,
         strcmp(packages[compositor].version, packages[blit].version) != 0) {
         snprintf(detail, detail_capacity,
                  "blit and blit-compositor versions differ");
+        return 0;
+    }
+    if (!signature_verified(packages, blit, compositor, signature, detail,
+                            detail_capacity))
+        return 0;
+    if (version_lower(packages[blit].version, UPDATE_OLDEST_RELEASE "~")) {
+        snprintf(detail, detail_capacity,
+                 "blit %s is older than " UPDATE_OLDEST_RELEASE
+                 ", the oldest release this helper installs; a rollback that "
+                 "far is root's own dpkg", packages[blit].version);
         return 0;
     }
     if (package_present("blit-compositor")) {
@@ -445,6 +519,47 @@ static int read_line(int fd, char *line, size_t capacity)
     return used > 0 && line[used - 1] == '\n';
 }
 
+/* UPDATE <path> <sha256> [<path> <sha256>] [SIGNATURE <hex>]: the number
+   of packages, or 0 when the line is not that. Every field is taken whole
+   or the line is refused; nothing is cut to fit. SIGNATURE is empty when
+   the line has none (the update is then refused, unsigned), and "-" when
+   it is not 128 characters. */
+static int parse_request(char *line, UpdatePackage *packages, char *signature)
+{
+    char *fields[8];
+    char *cursor = line, *save = NULL;
+    int count = 0, i, packages_count;
+    signature[0] = '\0';
+    while (count < 8 && (fields[count] = strtok_r(cursor, " \n", &save)) != NULL) {
+        cursor = NULL;
+        ++count;
+    }
+    if (count == 8 || count < 3 || strcmp(fields[0], "UPDATE") != 0)
+        return 0;
+    if (count >= 5 && strcmp(fields[count - 2], "SIGNATURE") == 0) {
+        /* A signature of the wrong length is kept as one that cannot
+           parse: the update is refused for it, by name, and its staged
+           files are still removed. */
+        if (strlen(fields[count - 1]) == BLIT_RELEASE_SIGNATURE_HEX)
+            memcpy(signature, fields[count - 1], BLIT_RELEASE_SIGNATURE_HEX + 1);
+        else
+            memcpy(signature, "-", 2);
+        count -= 2;
+    }
+    packages_count = (count - 1) / 2;
+    if ((count - 1) % 2 != 0 || packages_count < 1 ||
+        packages_count > UPDATE_MAX_PACKAGES)
+        return 0;
+    for (i = 0; i < packages_count; ++i) {
+        const char *path = fields[1 + 2 * i], *sha256 = fields[2 + 2 * i];
+        if (strlen(path) >= sizeof(packages[i].path) || strlen(sha256) != 64)
+            return 0;
+        memcpy(packages[i].path, path, strlen(path) + 1);
+        memcpy(packages[i].sha256, sha256, 65);
+    }
+    return packages_count;
+}
+
 int main(int argc, char **argv)
 {
     struct sockaddr_un address;
@@ -466,6 +581,7 @@ int main(int argc, char **argv)
         int client_fd = accept(server_fd, NULL, NULL);
         char line[1024];
         UpdatePackage packages[UPDATE_MAX_PACKAGES];
+        char signature[BLIT_RELEASE_SIGNATURE_HEX + 1];
         int count;
         char detail[COMMAND_DETAIL_CAPACITY];
         int updated = 0;
@@ -477,25 +593,10 @@ int main(int argc, char **argv)
         if (!read_line(client_fd, line, sizeof(line))) {
             close(client_fd); continue;
         }
-        /* UPDATE <path> <sha256> [<path> <sha256>] */
         memset(packages, 0, sizeof(packages));
-        {
-            int consumed = 0, fields;
-            fields = sscanf(line, "UPDATE %255s %64s %n", packages[0].path,
-                            packages[0].sha256, &consumed);
-            count = fields == 2 ? 1 : 0;
-            if (count == 1 && line[consumed] != '\0' &&
-                line[consumed] != '\n') {
-                int tail = 0;
-                if (sscanf(line + consumed, "%255s %64s %n", packages[1].path,
-                           packages[1].sha256, &tail) == 2 &&
-                    line[consumed + tail] == '\0')
-                    count = 2;
-                else
-                    count = 0;
-            }
-        }
-        if (count > 0 && request_update(packages, count, detail, sizeof(detail)))
+        count = parse_request(line, packages, signature);
+        if (count > 0 && request_update(packages, count, signature, detail,
+                                        sizeof(detail)))
             updated = 1;
         /* Installed or refused, a staged package has served its purpose;
            every deployment used to leave one behind (ADR 0232). So has

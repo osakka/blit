@@ -188,6 +188,27 @@ chmod 0755 "$stage/usr/share/blit/probes/blit-live-image-probe.hibr"
 # model that can silently omit a desktop component. QEMU fixtures may still
 # set BLIT_HIBR_DESKTOP_SESSION to their complete staged Hibr tree.
 chmod 0755 "$stage/usr/lib/blit/bin/blit-update-helper"
+# Security review SR-2 (Gitea #184): the public halves of Blit's release
+# keys, against which the helper verifies every update's signature. A
+# package without one would leave its host taking no update but root's own
+# dpkg, so there is no package without one. The secret halves never come
+# near this tree (tools/release/keygen, docs/development-workflow.md).
+install -d -m 0755 "$stage/usr/lib/blit/release-keys"
+release_keys=0
+for key in "$ROOT"/packaging/release-keys/*.pub; do
+	[ -f "$key" ] || continue
+	if [ "$(wc -l <"$key")" != 1 ] ||
+	   ! grep -qx 'blit-release-ed25519-public [0-9a-f]\{64\}' "$key"; then
+		echo "blit: $key is not a release public key (blit-release-ed25519-public <64 hex>)" >&2
+		exit 1
+	fi
+	install -m 0644 "$key" "$stage/usr/lib/blit/release-keys/"
+	release_keys=$((release_keys + 1))
+done
+if [ "$release_keys" = 0 ]; then
+	echo "blit: no release key in packaging/release-keys: the owner makes one with tools/release/keygen (docs/development-workflow.md, \"Release signing\")" >&2
+	exit 1
+fi
 cp -a "$ROOT/packaging/blit-update-helper.service" \
     "$stage/lib/systemd/system/"
 cp -a "$ROOT/packaging/blit.service" "$stage/lib/systemd/system/"
@@ -244,8 +265,14 @@ its own licence and credits, in /usr/share/hibr-ime/arabizi/.
 The Hibr adapter, /usr/lib/blit/hibr/console-blit.so, is built from Hibr's
 source and is distributed under the GNU Lesser General Public License,
 version 3 or later (/usr/share/common-licenses/LGPL-3).
+The update helper, /usr/lib/blit/bin/blit-update-helper, includes
+Monocypher 4.0.3 (Copyright (c) 2017-2023 Loup Vaillant, Michael Savage and
+Fabio Scotoni), under the 2-clause BSD licence or CC0 1.0, at the user's
+choice; the text is in /usr/share/doc/blit/monocypher-LICENCE.md.
 EOF
 chmod 0644 "$stage/usr/share/doc/blit/copyright"
+install -m 0644 "$ROOT/vendor/monocypher/LICENCE.md" \
+	"$stage/usr/share/doc/blit/monocypher-LICENCE.md"
 cp -a "$VERSION_FILE" "$stage/usr/share/doc/blit/VERSION"
 # What a running Blit reads to notice it was updated under it (ADR 0205).
 printf '%s\n' "$version" > "$stage/usr/lib/blit/VERSION"
@@ -369,6 +396,15 @@ if command -v systemctl >/dev/null 2>&1; then
     # inside its own dpkg child.
     systemctl enable blit-update-helper.service || true
     systemctl enable blit.service || true
+    # Security review SR-2: a helper that is running stays the old program
+    # until it restarts, and an old one verifies nothing (and refuses the
+    # signed request a new server sends). Installed through the API, the
+    # helper is this postinst's own parent, and it exits after answering, so
+    # systemd starts the new one; restarting it here would kill this very
+    # dpkg. Installed any other way (apt, root's dpkg), restart it now.
+    if ! grep -q 'blit-update-helper\.service' /proc/self/cgroup 2>/dev/null; then
+        systemctl try-restart blit-update-helper.service || true
+    fi
 fi
 exit 0
 EOF

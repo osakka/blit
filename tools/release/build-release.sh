@@ -10,7 +10,14 @@
 # releases/<version>.yaml from the server package; and
 # package_artifact_gate on it; then, as root in throwaway containers of the
 # same environment, update_pair_gate (ADR 0232) and rollback_recovery_gate
-# (Gitea #112). Prints the packages' sha256 last.
+# (Gitea #112); and last, on this host and only once every gate has passed,
+# the release's signature (tools/release/sign-release.sh, security review
+# SR-2) beside the packages: blit-release_<version>-1_amd64.sig. Prints the
+# packages' sha256 last.
+#
+# The signing key (BLIT_RELEASE_KEY, by default
+# ~/.config/blit-release/ed25519.secret; tools/release/keygen) is checked
+# before anything is built, and never enters the build environment.
 #
 # BLIT_HIBR_ROOT is the Hibr tree of packaging/HIBR_VERSION the console
 # adapter is built against (packaging/build-deb.sh); it and OUTDIR must be
@@ -35,6 +42,10 @@ done
 out=/blit${out#"$ROOT"}
 hibr=/blit${hibr#"$ROOT"}
 version=$(sed -n '1p' "$ROOT/packaging/VERSION")
+# SR-2: the key that will sign this release is here, private, and its
+# public half is one the packages install -- checked now, not after an
+# hour of gates.
+"$ROOT/tools/release/sign-release.sh" --check
 
 BLIT_HIBR_ROOT=$hibr "$ROOT/tools/build-env/run.sh" sh -eu -c '
 out=$1 version=$2
@@ -55,7 +66,7 @@ tools/build-tcc.sh
 tools/build-tcc.sh build/blit/blit-update-helper helper
 gate compositor_gate sh tools/tests/compositor_gate.sh
 gate xwayland_gate sh tools/tests/xwayland_gate.sh
-rm -f "$out"/*.deb
+rm -f "$out"/*.deb "$out"/*.sig   # a signature is only ever over gated packages
 packaging/build-deb.sh "$out"
 tools/release/generate-manifest.sh "$out/blit_${version}-1_amd64.deb" "releases/$version.yaml"
 gate package_gate env BLIT_GATE_PACKAGE="$out/blit_${version}-1_amd64.deb" tools/run-gates.sh packaging
@@ -90,10 +101,14 @@ if ! BLIT_BUILD_ENV_ROOT=1 "$ROOT/tools/build-env/run.sh" \
 fi
 grep ROLLBACK_RECOVERY_GATE_PASS "$rollback_log"
 
+# SR-2: every gate has passed; the release is signed, on this host.
+"$ROOT/tools/release/sign-release.sh" "$ROOT${out#/blit}/blit_${version}-1_amd64.deb"
+
 "$ROOT/tools/build-env/run.sh" sh -eu -c '
 out=$1 version=$2
 for p in blit blit-compositor; do
     dpkg-deb -f "$out/${p}_${version}-1_amd64.deb" Package Version Depends | paste -sd " "
 done
 cd "$out" && sha256sum blit_*.deb blit-compositor_*.deb
+cat "blit-release_${version}-1_amd64.sig"
 ' build-release "$out" "$version"

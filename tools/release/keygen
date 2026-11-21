@@ -1,0 +1,40 @@
+#!/bin/sh
+# tools/release/keygen NAME
+#
+# Security review SR-2 (Gitea #184): a new Blit release key. The secret half
+# goes to BLIT_RELEASE_KEY, by default ~/.config/blit-release/ed25519.secret
+# (its directory made 0700, the file 0600); the public half to
+# packaging/release-keys/NAME.pub, to be committed, and installed by every
+# package from the next release on. Refuses to overwrite either; refuses a
+# secret path inside the checkout. NAME is lower-case letters, digits and
+# dashes: blit-release-1, then blit-release-2 for the next key.
+#
+# The secret never enters the repository, a package or the build
+# environment. Keep a copy of it offline: without it, no release can be
+# signed that today's hosts will take, and they then take updates only from
+# root's own dpkg (docs/development-workflow.md, "Release signing").
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+fail() { echo "blit: $*" >&2; exit 1; }
+[ "$#" -eq 1 ] || { echo "usage: tools/release/keygen NAME   (e.g. blit-release-1)" >&2; exit 2; }
+name=$1
+case "$name" in
+    ''|*[!a-z0-9-]*|-*) fail "NAME is lower-case letters, digits and dashes (blit-release-1)" ;;
+esac
+public=$ROOT/packaging/release-keys/$name.pub
+secret=${BLIT_RELEASE_KEY:-${HOME:?}/.config/blit-release/ed25519.secret}
+[ ! -e "$public" ] || fail "$public exists; a key is never overwritten"
+[ ! -e "$secret" ] || fail "$secret exists; a key is never overwritten (set BLIT_RELEASE_KEY for another)"
+secret_dir=$(dirname -- "$secret")
+case "$(readlink -m -- "$secret_dir")/" in
+    "$ROOT"/*) fail "$secret is inside the checkout; the secret key must never be" ;;
+esac
+mkdir -p -m 0700 -- "$secret_dir"
+sign=$ROOT/build/blit/blit-sign
+"$ROOT/tools/build-tcc.sh" "$sign" sign >/dev/null
+mkdir -p "$ROOT/packaging/release-keys"
+(umask 077 && "$sign" keygen "$secret" "$public") >/dev/null
+chmod 0644 "$public"
+echo "secret key: $secret (0600; keep an offline copy)"
+echo "public key: packaging/release-keys/$name.pub -- commit it: git add packaging/release-keys/$name.pub"

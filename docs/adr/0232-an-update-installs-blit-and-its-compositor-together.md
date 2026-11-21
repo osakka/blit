@@ -179,3 +179,68 @@ Recorded for 0.3.97 (docs/verification-status.md):
   cases), rollback_recovery_gate's `local-half` requires dpkg's refusal
   when N-1 carries the Breaks and `failed-configure` the postinst's error,
   and update_install_live_gate is new.
+
+## Amended in 0.3.133 (security review SR-2, Gitea #184): only a signed release
+
+- **The helper installs only a release the owner signed.** It rebuilds a
+  statement from what the update carries -- `blit-release-signature 1`,
+  `blit <Version> <sha256>` and, when carried, `blit-compositor <Version>
+  <sha256>`, from its own copies (src/blit_release_signature.h) -- and
+  installs only when the signature verifies as Ed25519 (RFC 8032) under one
+  of `/usr/lib/blit/release-keys/*.pub`. The check comes after the hashes
+  and the identity checks and before the compositor is left out on a host
+  without it, so one signature over the pair serves every host. Unsigned,
+  another key, other packages or another version: refused, nothing
+  installed, the reason in the answer.
+- **Transport.** `PUT /v1/control/update` takes `X-Blit-Signature: <128
+  lowercase hex>`; the server refuses any other value (400
+  `update_invalid`) and passes it to the helper as `SIGNATURE <hex>` at the
+  end of the request line. The server does not require it: the helper is
+  still the one place the rule lives, and an upload without it is refused
+  there. `tools/deploy/update-live.sh` sends the
+  `blit-release_<version>_amd64.sig` beside the packages and refuses to
+  start without it.
+- **Crypto with no new dependency.** Monocypher 4.0.3 (BSD-2-Clause or
+  CC0-1.0), unmodified and pinned in `vendor/monocypher` (archive and file
+  hashes in `source.json`), compiled by TCC into the helper and into
+  `tools/release/blit-sign`, the release tool that makes keys and signs.
+  No gpg or openssl on either side.
+- **Keys.** Public halves in `packaging/release-keys/*.pub`, installed by
+  `blit`; `build-deb.sh` builds no package without one. The secret half
+  never enters the repository, a package or the build environment:
+  `tools/release/keygen` writes it to `~/.config/blit-release/ed25519.secret`
+  (0600), and `build-release.sh` checks it first and signs last, on the
+  host, after every gate (`tools/release/sign-release.sh`). Rotation: a
+  release adds the next key while signed with the current one; removing a
+  key file revokes it.
+- **A floor for rollbacks.** Rollbacks to older signed releases are kept
+  (the rollback runbook needs them), but the helper refuses a `blit` older
+  than 0.3.133, the first release that verifies, even signed: a signature
+  can never reinstall a helper that installs anything. Below it is root's
+  own dpkg. A later release may raise the floor.
+- **Bootstrap.** As in 0.3.97: through the API, 0.3.133 is installed by the
+  0.3.132 helper, which verifies nothing; it exits after answering and
+  systemd starts the new one, so every update after it must be signed.
+  Installed by apt or root's dpkg instead, the old helper process would
+  keep running (installing unsigned uploads, refusing a new server's signed
+  line), so the postinst now restarts a running helper unless it runs under
+  the helper itself.
+- Evidence: `release_signature_gate` (new, light: RFC 8032 vectors and the
+  refusals, `blit-sign`, and the helper's refusals with its install
+  replaced by a failing hook); `update_pair_gate` signs every request with
+  a throwaway key and gains `unsigned`, `other-key`, `old-pair-signature`,
+  `other-hashes`, `blit-alone-signature`, `rotation` and `below-oldest`
+  (16 cases); `rollback_recovery_gate` signs what it hands the helper and
+  `update-live.sh`; `package_artifact_gate` checks the packaged keys and
+  that no secret is packaged. The heavy gates' new cases first run in the
+  0.3.133 release build.
+- Lab evidence (2026-11-21), real dpkg in a scratch root only: the 0.3.132
+  helper installs the 0.3.133 pair from a 0.3.132 server's request; the
+  0.3.133 helper refuses unsigned, other-key, other-version, other-hash and
+  truncated signatures with nothing changed, installs a signed update,
+  rolls back to a signed 0.3.133, refuses a signed 0.3.132 (the floor),
+  rotates and revokes keys, and installs `blit` alone from the pair's
+  signature on a host without the compositor; through this checkout's
+  `blit-server` the same refusals are 500 `update_install_failed` with the
+  reason, a malformed header 400 with nothing staged, and the signed pair
+  202 and installed. The postinst's helper restart is not shown there.

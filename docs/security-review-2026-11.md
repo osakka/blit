@@ -36,7 +36,7 @@ exercised with real dpkg in the Debian 13 release environment
 | ID | Severity | Finding |
 | --- | --- | --- |
 | SR-1 | Critical | A frame-channel edit writes outside the image (heap overflow in the root server) -- fixed in 0.3.130 |
-| SR-2 | High | An update needs only the update token, sent in clear, and nothing checks who built the package |
+| SR-2 | High | An update needs only the update token, sent in clear, and nothing checks who built the package -- signatures fixed in 0.3.133; the bearer token on the update route is still open |
 | SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token |
 | SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) -- fixed in 0.3.130 |
 | SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
@@ -100,6 +100,92 @@ image's.
 > the image that still applies.
 
 ### SR-2 (High): an update needs only the update token, sent in clear, and nothing checks who built the package
+
+**Fixed** in 0.3.133 (Gitea #184), the signature half: releases are signed
+with a Blit Ed25519 key, the package carries the public half, and the
+helper refuses an update whose signature does not verify.
+
+- **What is signed.** A statement the helper rebuilds from what it
+  installs: `blit-release-signature 1`, then `blit <Version> <sha256>` and,
+  when the update carries it, `blit-compositor <Version> <sha256>` -- each
+  copy's own control field and hash (src/blit_release_signature.h). A
+  signature therefore names exactly one pair of files at one version; it
+  cannot be replayed for another package, another version, or the pair
+  rearranged. The statement covers everything the update carries, before
+  the helper leaves the compositor out on a host without it, so one
+  signature serves both kinds of host.
+- **Where it is checked.** In the root helper, after the copy (SR-10), the
+  hash and the identity checks, before anything is installed: the
+  signature must verify (RFC 8032 Ed25519, Monocypher 4.0.3, pinned in
+  `vendor/monocypher`) under one of `/usr/lib/blit/release-keys/*.pub`,
+  which the package installs root's, 0644; the helper skips a key file that
+  is a link, or that others may write. Unsigned, signed by another key, or
+  signed for other packages or another version: refused with the reason,
+  nothing installed; the `PUT` answers 500 `update_install_failed` and the
+  status says why. The server only passes `X-Blit-Signature` on (it refuses
+  a value that is not 128 lowercase hex digits with 400 `update_invalid`),
+  so a member of group `blit` talking to the helper's socket directly
+  (SR-3) can no longer choose the package either: it can only hand over a
+  release the owner signed.
+- **Keys.** The public halves are committed in `packaging/release-keys/`
+  and `packaging/build-deb.sh` will not build a package without one. The
+  secret half is the owner's, outside every checkout and package
+  (`~/.config/blit-release/ed25519.secret`, 0600, made by
+  `tools/release/keygen`); `tools/release/build-release.sh` checks it
+  before building and signs on the host once every gate has passed
+  (`tools/release/sign-release.sh`), writing
+  `blit-release_<version>_amd64.sig` beside the packages, which
+  `tools/deploy/update-live.sh` sends. Rotation: a release adds the next
+  key while still signed with the current one; deleting a key file in a
+  later release revokes that key on every host that installs it.
+- **Downgrades.** A rollback to an older signed release is allowed: the
+  rollback runbook below needs it. The floor is the first release that
+  verifies: the helper refuses a `blit` older than 0.3.133 even when it is
+  signed (`UPDATE_OLDEST_RELEASE`), so a signature can never put back a
+  helper that installs anything. What remains is accepted: someone holding
+  the update token can replay an older *signed* release, at or above the
+  floor, with whatever bugs that release had. They can install only what
+  the owner built and gated, and a later release can raise the floor past
+  a release with a hole that matters.
+- **Bootstrap.** Through the API, 0.3.133 is installed by the 0.3.132
+  helper, which verifies nothing (the 0.3.132 server does not pass
+  `X-Blit-Signature` on); the helper exits after answering and systemd
+  starts the new one, so every later update must be signed. Installed any
+  other way (`apt upgrade`, root's `dpkg`), the old helper process would
+  keep running -- installing an unsigned upload, and refusing the signed
+  line a new server sends -- so from 0.3.133 the postinst restarts a
+  running helper, unless it is itself running under the helper (the API
+  path, where that would kill its own dpkg). That postinst step needs the
+  release build and a live check; it cannot be shown in a scratch root.
+  Checked in a lab (2026-11-21) with real dpkg in a scratch root only
+  (`--root`/`--admindir`/`--force-not-root` wrappers) and scratch packages:
+  the 0.3.132 helper, given the 0.3.133 pair as a 0.3.132 server sends it,
+  installs it; the 0.3.133 helper on 0.3.133 refuses an unsigned 0.3.134,
+  one signed by a key it does not hold, one carrying 0.3.133's signature,
+  one signed for 0.3.134's versions with 0.3.133's hashes, and a truncated
+  signature, each with nothing changed; installs the signed 0.3.134, rolls
+  back to the signed 0.3.133, refuses the signed 0.3.132 (the floor), takes
+  a second key added to its directory and refuses a removed one, and on a
+  host without the compositor installs `blit` alone from the pair's
+  signature. The whole chain -- `curl` PUT to this checkout's
+  `blit-server`, the helper, the scratch root -- answered 500
+  `update_install_failed` "the update is not signed" and "does not verify"
+  with nothing installed, 400 for a malformed header with nothing staged,
+  and 202 for the signed pair, installed.
+- **Not fixed here:** the ticket's second half, that `PUT
+  /v1/control/update` also require the API bearer token (an HTTP gate
+  showing 401 without `Authorization`). The update token is still sent in
+  clear (SR-9); it now only lets its holder install a release the owner
+  signed.
+- Gates: `release_signature_gate` (light: the pinned sources, RFC 8032
+  vectors, a flipped bit, another key, S + L, the statement, a truncated or
+  malformed signature, rotation, what is not a key, `blit-sign`, and the
+  helper's refusals with its install replaced by a failing hook);
+  `update_pair_gate` cases `unsigned`, `other-key`, `old-pair-signature`,
+  `other-hashes`, `blit-alone-signature`, `rotation` and `below-oldest`;
+  `rollback_recovery_gate` signs everything it hands the helper or
+  `update-live.sh`; `package_artifact_gate` checks the keys are packaged
+  and no secret is.
 
 - `PUT /v1/control/update` is handled before `handle_request`
   (`src/blit_server.c:32636-32650`), so the bearer token is never checked
@@ -761,7 +847,9 @@ BLIT_BUILD_ENV_ROOT=1 tools/build-env/run.sh \
 ```
 
 Both packages must be inside the checkout, each with its `blit-compositor`
-beside it. The gate uses real dpkg and the checkout's update helper at its
+beside it. From 0.3.133 the gate signs what it hands the helper with a
+throwaway key, and refuses a real N-1 older than 0.3.133: the helper does
+not install it (SR-2), and a rollback that far is root's own dpkg. The gate uses real dpkg and the checkout's update helper at its
 deployed paths. The last four cases also use the installed `blit-server`
 (on the gates' mock display, bound to 127.0.0.1, with a drawing stand-in
 for Hibr's login screen) and `tools/deploy/update-live.sh`, unchanged.
@@ -795,9 +883,17 @@ downgrade and exits 0, and the helper does not check what was installed).
 ### Runbook
 
 - **The API is up** (the smoke check failed, or the install failed): run
-  `tools/deploy/update-live.sh HOST <N-1 blit .deb>` with N-1's packages
-  and `releases/<N-1>.yaml`. The helper installs the older pair; dpkg warns
-  that it is downgrading, which is expected.
+  `tools/deploy/update-live.sh HOST <N-1 blit .deb>` with N-1's packages,
+  its `blit-release_<N-1>-1_amd64.sig` beside them, and
+  `releases/<N-1>.yaml`. The helper installs the older pair; dpkg warns
+  that it is downgrading, which is expected. From 0.3.133 (SR-2) only to
+  0.3.133 or later: an older N-1 is unsigned and below the helper's floor,
+  so it is the next item's root `dpkg`, whether or not the API is up.
+- **N-1's signature.** `update-live.sh` needs N-1's
+  `blit-release_<N-1>-1_amd64.sig`; the next release build clears its
+  output directory, and hibr-apt carries only the packages. Any copy of
+  N-1's packages can be signed again with `tools/release/sign-release.sh
+  <N-1 blit .deb>` (the same key, or a newer one N-1's hosts know).
 - **The API is down** (the new server does not start): from a root shell on
   the host, `dpkg --install blit-compositor_<N-1>-1_amd64.deb
   blit_<N-1>-1_amd64.deb`, always both and the compositor first (from
