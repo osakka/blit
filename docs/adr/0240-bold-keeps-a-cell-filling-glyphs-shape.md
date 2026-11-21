@@ -68,7 +68,10 @@ advance fits the cell.
 ## Evidence
 
 `tools/tests/bold_shape_gate.sh` draws through `draw_cell_glyphs` for every
-shipped text font, cell heights 8-64 and full, light and no hinting, over
+shipped text font -- run as `bold_shape` (the five outline fonts) and
+`bold_shape_pixel` (Spleen's masters and the pixel font's raster: 426,303
+more cells, 390 symmetric shapes, 0 failures) -- cell heights 8-64 and
+full, light and no hinting, over
 ASCII, Latin-1, punctuation and bullets and the shape blocks (arrows,
 technical, geometric shapes, miscellaneous symbols, dingbats, symbols and
 arrows): 1,191,015 bold cells, 0 failures. Symmetric shapes that reach

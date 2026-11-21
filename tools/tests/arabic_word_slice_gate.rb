@@ -17,7 +17,9 @@ lines << 'fe92;fe92;fe92;20;fe8f;fe8f;20;fe8f,301'          # cut word, letters 
 lines << (['fe92'] * 40).join(';')                            # a run longer than 32 cells
 manifest = JSON.parse(File.read('assets/fonts/arabic-fonts.source.json'))
 naskh = "assets/fonts/#{manifest.fetch('naskh').fetch('file')}"
-fonts = Dir['assets/fonts/text/*-Regular.ttf'].sort
+# Every shipped text font: the outline fonts, Spleen's masters, and the
+# pixel font's own raster.
+fonts = Dir['assets/fonts/text/*-Regular.ttf'].sort + ['assets/fonts/text/spleen', 'pixel']
 fonts = [ARGV[0]] if ARGV[0]
 Dir.mktmpdir('blit-word-slice') do |work|
   bin = File.join(work, 'gate')

@@ -62,7 +62,8 @@ int main(int argc, char **argv)
                 unsigned i;
                 if (width < 4 || width + 10 > CELLS_W - 8 || height + 10 > CELLS_H - 8) continue;
                 font.raster_state = NULL; font.raster_free = NULL;
-                r = blit_raster_open(&fallback, argv[f], argv[2], width, height);
+                r = strcmp(argv[f], "pixel") ? blit_raster_open(&fallback, argv[f], argv[2], width, height)
+                                             : blit_raster_open_pixel(&fallback, argv[2], width, height);
                 if (!r || !blit_raster_set_hinting(r, (BlitRasterHinting)hinting)) return 2;
                 blit_raster_attach(&font, r);
                 regular_get = font.raster_get;

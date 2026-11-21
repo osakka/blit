@@ -252,9 +252,10 @@ Landed (2026-11-20), each failing on a broken build:
   text, 15 words of 15, no joiner in a whole word; a cut word keeps its
   joins, letters left apart stay apart (fails with the letters left in
   visual order, and without the cut word's ZWJ);
-- `arabic_word_slice_gate`, every shipped text font, heights 8-64: 5,700
-  words, 30,210 slices composing their words exactly, 1,425 words keeping
-  their tashkeel's ink, 285 refusals of a mark the face lacks (a Latin
+- `arabic_word_slice_gate`, every shipped text font (the five outline
+  fonts, Spleen's masters and the pixel font's raster), heights 8-64:
+  7,980 words, 42,294 slices composing their words exactly, 1,995 words
+  keeping their tashkeel's ink, 399 refusals of a mark the face lacks (a Latin
   acute on a beh: Noto Naskh 2.021 has every Arabic mark), no ink dropped,
   bold the whole word's overstrike, and words unlike their cells shaped one
   by one (fails with a slice one pixel off, and with words two rows low);

@@ -77,7 +77,10 @@ int main(int argc, char **argv)
         int h;
         for (h = 8; h <= 64; ++h) {
             int w = (h + 1) / 2, l;
-            BlitRaster *r = blit_raster_open(&fallback, argv[f], argv[2], w, h);
+            /* "pixel": the pixel font's own raster (ADR 0199), which borrows
+               the stack and takes the word face like any other. */
+            BlitRaster *r = strcmp(argv[f], "pixel") ? blit_raster_open(&fallback, argv[f], argv[2], w, h)
+                                                    : blit_raster_open_pixel(&fallback, argv[2], w, h);
             unsigned char *plane = NULL;
             int pw = (MAX_COLS + 2) * w, ph = (MAX_LINES * 2 + 2) * h;
             if (!r || !blit_raster_set_arabic_words(r, argv[3])) { fprintf(stderr, "open %s %d\n", argv[f], h); return 2; }
