@@ -2,8 +2,8 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale]]] [--animate n] [--lock] [--sub] [--csd] [--clip] [--view-script]
-                       [--cursor] [--appmenu] [--activate] [--xdg-output] [title]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale]]] [--animate n] [--lock] [--sub|--sub-pair] [--csd] [--clip] [--view-script]
+                       [--cursor] [--appmenu] [--activate] [--xdg-output] [--scale-frac [--scale-frac-twice]|--scale-int|--scale-none] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
    and a pointer, as programs do), wl_output (printing each mode it is
@@ -128,6 +128,28 @@
    (`-` for none), `STANDIN ti commit <text>` and `STANDIN ti done
    <serial>` (ADR 0233).
 
+   ADR 0242, the program scale, three kinds of program; each combines with
+   the modes above, every surface it draws (the window, popups,
+   subsurfaces, the drag icon) drawn the same way, the pattern in buffer
+   pixels, each draw printed with ` buffer <w>x<h>`, and each new point a
+   drop moves to printed `STANDIN drop motion <x> <y>`:
+   --scale-frac binds wp_fractional_scale_manager_v1, takes a fractional
+   object for its window's surface before its first commit and prints
+   each `STANDIN preferred scale <n>`; it draws round(w * n / 120) (half
+   away from zero) with a viewport destination of w x h at buffer scale 1.
+   --scale-frac-twice also asks for a second fractional object for that
+   surface at its first sized configure: the compositor's
+   fractional_scale_exists ends it.
+   --scale-int binds wl_compositor at version 6 (4 otherwise), prints
+   each `STANDIN preferred buffer scale <k>`, and draws w * k at
+   set_buffer_scale(k) -- k the preferred buffer scale, or before one the
+   scale of the output its window entered.
+   --scale-none: neither, as every mode before it (the enlarged case).
+   --sub-pair, at the first sized configure: three desynchronized
+   subsurfaces of 33x20, `sub` at 0,0, a second at 33,0 (they meet), and
+   a third at 0,30 whose buffer is one pixel narrower than its scale
+   says (a program rounding otherwise); `STANDIN sub pair`.
+
    The pattern, which compositor_gate.py checks pixel for pixel: at (x, y)
    red = x & 255, green = y & 255,
    blue = 0x80 | ((x >> 8) & 7) << 3 | ((y >> 8) & 7).
@@ -162,6 +184,7 @@
 #include "xdg-activation-v1-client-protocol.h"
 #include "xdg-output-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
+#include "fractional-scale-v1-client-protocol.h"
 #include <time.h>
 
 #define FOURCC_XR24 0x34325258u
@@ -205,6 +228,7 @@ struct standin {
         struct wl_output *output;
         char name[64];
         int32_t mode_w, mode_h, refresh;
+        int32_t scale;                /* wl_output.scale */
         /* --xdg-output */
         uint32_t global;
         int32_t x, y, lx, ly, lw, lh;
@@ -293,6 +317,19 @@ struct standin {
     struct xdg_toplevel *child;
     int32_t child_w, child_h;
     unsigned draws, releases, frames;
+    /* ADR 0242: --scale-frac 1, --scale-int 2, --scale-none 3 */
+    int scale_mode, frac_twice, frac_twiced;
+    struct wp_fractional_scale_manager_v1 *frac_manager;
+    struct wp_fractional_scale_v1 *frac;
+    uint32_t frac_n;                  /* the preferred scale, 120ths (0 none yet) */
+    int32_t buffer_k;                 /* --scale-int: preferred_buffer_scale (0 none yet) */
+    int32_t entered_scale;            /* the scale of the output its window entered */
+    wl_fixed_t drop_mx, drop_my;      /* the last drop motion said */
+    struct { struct wl_surface *surface; struct wp_viewport *viewport; } vps[8];
+    /* --sub-pair */
+    int sub_pair, pair_made;
+    struct wl_surface *pair_surface[3];
+    struct wl_subsurface *pair_sub[3];
 };
 
 struct standin_buffer {
@@ -377,14 +414,55 @@ static const struct wp_presentation_feedback_listener presentation_feedback_list
     presentation_sync_output, presentation_presented, presentation_discarded,
 };
 
+/* --scale-frac: the surface's viewport, made once. */
+static struct wp_viewport *scale_viewport(struct standin *s, struct wl_surface *surface)
+{
+    size_t i;
+    if (surface == s->surface && s->viewport) return s->viewport;
+    for (i = 0; i < sizeof(s->vps) / sizeof(s->vps[0]); ++i) {
+        if (s->vps[i].surface == surface) return s->vps[i].viewport;
+        if (s->vps[i].surface == NULL && s->viewporter) {
+            s->vps[i].surface = surface;
+            s->vps[i].viewport = wp_viewporter_get_viewport(s->viewporter, surface);
+            return s->vps[i].viewport;
+        }
+    }
+    return NULL;
+}
+
+/* A surface about to be destroyed: its --scale-frac viewport with it. */
+static void scale_viewport_forget(struct standin *s, struct wl_surface *surface)
+{
+    size_t i;
+    for (i = 0; i < sizeof(s->vps) / sizeof(s->vps[0]); ++i)
+        if (s->vps[i].surface == surface) {
+            wp_viewport_destroy(s->vps[i].viewport);
+            s->vps[i].surface = NULL;
+            s->vps[i].viewport = NULL;
+        }
+}
+
 static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_t h)
 {
     struct standin_buffer *b = calloc(1, sizeof(*b));
     struct wl_shm_pool *pool;
     struct wl_callback *cb;
-    int32_t stride = w * 4, x, y;
+    int32_t stride, x, y, lw = w, lh = h;
     int fd;
     if (b == NULL) return -1;
+    /* ADR 0242: the buffer for the scale its program kind takes. */
+    if (s->scale_mode == 1 && s->frac_n) {
+        w = (int32_t)(((int64_t)lw * s->frac_n * 2 + 120) / 240);
+        h = (int32_t)(((int64_t)lh * s->frac_n * 2 + 120) / 240);
+        if (s->pair_made && surface == s->pair_surface[2]) --w;   /* one short (--sub-pair) */
+        if (scale_viewport(s, surface)) wp_viewport_set_destination(scale_viewport(s, surface), lw, lh);
+    } else if (s->scale_mode == 2) {
+        int32_t k = s->buffer_k > 0 ? s->buffer_k : s->entered_scale > 0 ? s->entered_scale : 1;
+        w = lw * k;
+        h = lh * k;
+        wl_surface_set_buffer_scale(surface, k);
+    }
+    stride = w * 4;
     b->s = s;
     b->w = w;
     b->h = h;
@@ -441,8 +519,10 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     if (s->animated == 0) clock_gettime(CLOCK_MONOTONIC, &s->first_draw);
     wl_surface_commit(surface);
     ++s->draws;
-    printf("STANDIN drew %s%dx%d\n", surface == s->surface ? "" :
-           surface == s->child_surface ? "child " : surface == s->sub_surface ? "sub " : surface == s->icon_surface ? "icon " : "popup ", w, h);
+    printf("STANDIN drew %s%dx%d", surface == s->surface ? "" :
+           surface == s->child_surface ? "child " : surface == s->sub_surface ? "sub " : surface == s->icon_surface ? "icon " : "popup ", lw, lh);
+    if (s->scale_mode) printf(" buffer %dx%d", w, h);
+    printf("\n");
     fflush(stdout);
     return 0;
 }
@@ -601,6 +681,7 @@ static void popup_done(void *data, struct xdg_popup *p)
     printf("STANDIN popup done\n");
     xdg_popup_destroy(s->popup);
     xdg_surface_destroy(s->popup_xdg);
+    scale_viewport_forget(s, s->popup_surface);
     wl_surface_destroy(s->popup_surface);
     s->popup = NULL;
     s->popup_xdg = NULL;
@@ -792,6 +873,26 @@ static void sub_next(struct standin *s)
     fflush(stdout);
 }
 
+/* --sub-pair: three desynchronized 33x20 subsurfaces -- at 0,0 (`sub`),
+   at 33,0 (meeting it) and at 0,30 (its buffer one pixel short). */
+static void sub_pair(struct standin *s)
+{
+    static const int32_t at[3][2] = { { 0, 0 }, { 33, 0 }, { 0, 30 } };
+    int i;
+    s->pair_made = 1;
+    for (i = 0; i < 3; ++i) {
+        s->pair_surface[i] = wl_compositor_create_surface(s->compositor);
+        s->pair_sub[i] = wl_subcompositor_get_subsurface(s->subcompositor, s->pair_surface[i], s->surface);
+        wl_subsurface_set_position(s->pair_sub[i], at[i][0], at[i][1]);
+        wl_subsurface_set_desync(s->pair_sub[i]);
+        draw(s, s->pair_surface[i], 33, 20);
+    }
+    s->sub_surface = s->pair_surface[0];
+    wl_surface_commit(s->surface);
+    printf("STANDIN sub pair\n");
+    fflush(stdout);
+}
+
 static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t serial)
 {
     struct standin *s = data;
@@ -865,6 +966,14 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
         fflush(stdout);
     }
     if (s->sub_script) sub_next(s);
+    if (s->sub_pair && !s->pair_made) sub_pair(s);
+    if (s->frac_twice && !s->frac_twiced) {
+        /* A second fractional object for one surface: the program's error. */
+        s->frac_twiced = 1;
+        wp_fractional_scale_manager_v1_get_fractional_scale(s->frac_manager, s->surface);
+        printf("STANDIN second fractional object\n");
+        fflush(stdout);
+    }
     if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
         s->want_popup = 0;
@@ -1125,7 +1234,14 @@ static void data_device_leave(void *data, struct wl_data_device *d)
 
 static void data_device_motion(void *data, struct wl_data_device *d, uint32_t t, wl_fixed_t x, wl_fixed_t y)
 {
-    (void)data; (void)d; (void)t; (void)x; (void)y;
+    struct standin *s = data;
+    (void)d; (void)t;
+    /* ADR 0242's gate: where a scaled drop moves; said once per point. */
+    if (s->scale_mode && (x != s->drop_mx || y != s->drop_my)) {
+        s->drop_mx = x;
+        s->drop_my = y;
+        printf("STANDIN drop motion %d %d\n", wl_fixed_to_int(x), wl_fixed_to_int(y));
+    }
 }
 
 /* --drop: read what was dropped, as text/uri-list, and say it. */
@@ -1642,7 +1758,9 @@ static void output_done(void *data, struct wl_output *o)
 
 static void output_scale(void *data, struct wl_output *o, int32_t factor)
 {
-    (void)data; (void)o;
+    struct standin_output *out = data;
+    (void)o;
+    out->scale = factor;
     printf("STANDIN output scale %d\n", factor);
 }
 
@@ -1719,6 +1837,7 @@ static void surface_enter(void *data, struct wl_surface *surface, struct wl_outp
 {
     struct standin *s = data;
     struct standin_output *out = find_output(s, o);
+    if (surface == s->surface && out) s->entered_scale = out->scale;
     printf("STANDIN %senter %s %dx%d@%d\n", surface == s->surface ? "" : "child ",
            out ? out->name : "?", out ? out->mode_w : 0, out ? out->mode_h : 0,
            out ? out->refresh : 0);
@@ -1731,7 +1850,36 @@ static void surface_leave(void *data, struct wl_surface *surface, struct wl_outp
     printf("STANDIN %sleave %s\n", surface == s->surface ? "" : "child ", out ? out->name : "?");
 }
 
-static const struct wl_surface_listener surface_listener = { surface_enter, surface_leave };
+/* wl_surface v6 (only --scale-int binds wl_compositor 6): the scale and
+   transform it would have its buffers drawn at. */
+static void surface_preferred_scale(void *data, struct wl_surface *surface, int32_t factor)
+{
+    struct standin *s = data;
+    if (surface == s->surface) s->buffer_k = factor;
+    printf("STANDIN preferred buffer scale %d%s\n", factor, surface == s->surface ? "" : " (other)");
+    fflush(stdout);
+}
+
+static void surface_preferred_transform(void *data, struct wl_surface *surface, uint32_t transform)
+{
+    (void)data; (void)surface; (void)transform;
+}
+
+static const struct wl_surface_listener surface_listener = {
+    surface_enter, surface_leave, surface_preferred_scale, surface_preferred_transform,
+};
+
+/* --scale-frac: wp_fractional_scale_v1's preferred scale, 120ths. */
+static void fractional_preferred(void *data, struct wp_fractional_scale_v1 *f, uint32_t scale)
+{
+    struct standin *s = data;
+    (void)f;
+    s->frac_n = scale;
+    printf("STANDIN preferred scale %u\n", scale);
+    fflush(stdout);
+}
+
+static const struct wp_fractional_scale_v1_listener fractional_listener = { fractional_preferred };
 
 static const struct zwp_linux_dmabuf_feedback_v1_listener feedback_listener;
 
@@ -1741,7 +1889,10 @@ static void global(void *data, struct wl_registry *registry, uint32_t name, cons
     struct standin *s = data;
     printf("STANDIN global %s %u\n", interface, version);
     if (strcmp(interface, wl_compositor_interface.name) == 0)
-        s->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
+        s->compositor = wl_registry_bind(registry, name, &wl_compositor_interface,
+                                         s->scale_mode == 2 && version >= 6 ? 6 : 4);
+    else if (strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0 && s->scale_mode == 1)
+        s->frac_manager = wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1);
     else if (strcmp(interface, wl_subcompositor_interface.name) == 0)
         s->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
     else if (strcmp(interface, wl_data_device_manager_interface.name) == 0)
@@ -1892,6 +2043,11 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--popup-tree") == 0) s.want_popup = s.popup_tree = 1;
         else if (strcmp(argv[i], "--gone-on-ctrl-d") == 0) s.gone_on_ctrl_d = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
+        else if (strcmp(argv[i], "--sub-pair") == 0) s.sub_pair = 1;
+        else if (strcmp(argv[i], "--scale-frac") == 0) s.scale_mode = 1;
+        else if (strcmp(argv[i], "--scale-frac-twice") == 0) s.scale_mode = 1, s.frac_twice = 1;
+        else if (strcmp(argv[i], "--scale-int") == 0) s.scale_mode = 2;
+        else if (strcmp(argv[i], "--scale-none") == 0) s.scale_mode = 3;
         else if (strcmp(argv[i], "--csd") == 0) s.csd = 1;
         else if (strcmp(argv[i], "--clip") == 0) s.clip = 1;
         else if (strcmp(argv[i], "--cursor") == 0) s.cursor = 1;
@@ -1992,6 +2148,16 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
     wl_surface_add_listener(s.surface, &surface_listener, &s);
+    if (s.scale_mode == 1) {
+        /* Before the first commit, as GTK 4 does: its preferred scale comes
+           before the first configure. */
+        if (s.frac_manager == NULL || s.viewporter == NULL) {
+            fprintf(stderr, "STANDIN --scale-frac: no wp_fractional_scale_manager_v1 or wp_viewporter\n");
+            return 1;
+        }
+        s.frac = wp_fractional_scale_manager_v1_get_fractional_scale(s.frac_manager, s.surface);
+        wp_fractional_scale_v1_add_listener(s.frac, &fractional_listener, &s);
+    }
     s.xdg_surface = xdg_wm_base_get_xdg_surface(s.wm_base, s.surface);
     xdg_surface_add_listener(s.xdg_surface, &xdg_surface_listener, &s);
     s.toplevel = xdg_surface_get_toplevel(s.xdg_surface);
@@ -2098,6 +2264,15 @@ int main(int argc, char **argv)
     if (s.ti_manager) zwp_text_input_manager_v3_destroy(s.ti_manager);
     if (s.ddm) wl_data_device_manager_destroy(s.ddm);
     if (s.sub_viewport) wp_viewport_destroy(s.sub_viewport);
+    /* ADR 0242's objects. */
+    for (i = 0; i < 3; ++i) {
+        if (s.pair_sub[i]) wl_subsurface_destroy(s.pair_sub[i]);
+        if (s.pair_surface[i] && s.pair_surface[i] != s.sub_surface) wl_surface_destroy(s.pair_surface[i]);
+    }
+    for (i = 0; i < (int)(sizeof(s.vps) / sizeof(s.vps[0])); ++i)
+        if (s.vps[i].viewport) wp_viewport_destroy(s.vps[i].viewport);
+    if (s.frac) wp_fractional_scale_v1_destroy(s.frac);
+    if (s.frac_manager) wp_fractional_scale_manager_v1_destroy(s.frac_manager);
     if (s.viewport) wp_viewport_destroy(s.viewport);
     if (s.viewporter) wp_viewporter_destroy(s.viewporter);
     if (s.inhibitor) zwp_idle_inhibitor_v1_destroy(s.inhibitor);

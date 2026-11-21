@@ -705,6 +705,79 @@ typedef struct {
     int action;             /* CLIP dragend: 0 none, 1 copy, 2 move */
 } BcLine;
 
+/* ADR 0242: a program scale in 120ths, wp_fractional_scale_v1's unit (125%
+   is 150, S = n / 120). Every number on the channel is a desktop pixel; the
+   compositor converts at the wire, each way, with the scale of the window's
+   tree. At 120 every helper gives its input back unchanged: at 100% the
+   wire is the bytes it was. */
+#define BC_SCALE_ONE 120u
+
+static uint32_t bc_scale_n(uint32_t pct)
+{
+    return pct >= 100 && pct <= 400 ? pct * 6 / 5 : BC_SCALE_ONE;
+}
+
+/* The whole-number scale at or above it, ceil(S): wl_output.scale and
+   wl_surface.preferred_buffer_scale. */
+static int32_t bc_scale_int(uint32_t n)
+{
+    return (int32_t)((n + BC_SCALE_ONE - 1) / BC_SCALE_ONE);
+}
+
+/* Out: a logical edge `e` (a position, or a position plus a size) in
+   desktop pixels, round(e * S) half away from zero. A size is the
+   difference of its two edges, so neighbours tile. */
+static int32_t bc_scale_edge(int32_t e, uint32_t n)
+{
+    int64_t v = (int64_t)e * n;
+    if (n == BC_SCALE_ONE) return e;
+    return (int32_t)(v >= 0 ? (2 * v + BC_SCALE_ONE) / (2 * BC_SCALE_ONE)
+                            : -((-2 * v + BC_SCALE_ONE) / (2 * BC_SCALE_ONE)));
+}
+
+/* The span from logical `x` to `x + w` in desktop pixels. */
+static int32_t bc_scale_span(int32_t x, int32_t w, uint32_t n)
+{
+    return bc_scale_edge(x + w, n) - bc_scale_edge(x, n);
+}
+
+/* In: `WINDOW size`'s W desktop pixels as the logical size configured, the
+   smallest w whose pixels cover it (round(w * S) >= W): ceil((2W - 1) * 60
+   / n). A program's own size said back configures that size again. 0 (the
+   program chooses) stays 0. */
+static int32_t bc_scale_configure(int32_t W, uint32_t n)
+{
+    int64_t w;
+    if (n == BC_SCALE_ONE || W <= 0) return W;
+    w = ((2 * (int64_t)W - 1) * (BC_SCALE_ONE / 2) + n - 1) / n;
+    return w < 1 ? 1 : (int32_t)w;
+}
+
+/* Out: a program's minimum (ceil(m * S)) and maximum (floor(m * S)) in
+   desktop pixels, so a size within them configures within the program's;
+   0 (none) stays 0. */
+static int32_t bc_scale_min(int32_t m, uint32_t n)
+{
+    if (n == BC_SCALE_ONE || m <= 0) return m;
+    return (int32_t)(((int64_t)m * n + BC_SCALE_ONE - 1) / BC_SCALE_ONE);
+}
+
+static int32_t bc_scale_max(int32_t m, uint32_t n)
+{
+    if (n == BC_SCALE_ONE || m <= 0) return m;
+    return (int32_t)((int64_t)m * n / BC_SCALE_ONE);
+}
+
+/* In: a desktop pixel as wl_fixed_t (24.8) logical, p * 120 * 256 / n
+   rounded to the nearest 256th: the pointer keeps the display's whole
+   precision. At 120 it is wl_fixed_from_int's p * 256. */
+static int32_t bc_scale_in_fixed(int32_t p, uint32_t n)
+{
+    int64_t v = (int64_t)p * 256 * BC_SCALE_ONE;
+    if (n == BC_SCALE_ONE) return p * 256;
+    return (int32_t)(v >= 0 ? (2 * v + n) / (2 * (int64_t)n) : -((-2 * v + n) / (2 * (int64_t)n)));
+}
+
 /* One media type word at *p into out (BC_CLIP_TYPE_BYTES + 1); advances. */
 static int bc_read_type(const char **p, char *out)
 {

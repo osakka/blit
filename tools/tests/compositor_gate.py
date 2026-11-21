@@ -2636,6 +2636,355 @@ def dragout_part(compositor, standin, work):
         listener.close()
 
 
+def scale_part(compositor, standin, work):
+    """ADR 0242 step 2: a program scale per display, pixels on the wire.
+    The desktop plays a layout with DP-1 at 150% and DP-2 at 200% (and one
+    display at each step 125-400 for the echo); every number on the
+    channel stays a desktop pixel, converted by the compositor with the
+    scale of the window's tree. The stand-in plays three kinds of program:
+    `--scale-frac` (wp_fractional_scale_v1 and a viewport), `--scale-int`
+    (preferred_buffer_scale, buffer scale ceil(S)) and `--scale-none`.
+    Checked: the preferred scales before the first configure; `WINDOW size
+    3 1000 600` configures 667x400 at 150% and 500x300 at 200%; the views
+    (a fractional frame of 1001 cropped to 1000 at its own pixels, none at
+    200%, GTK 3's 1334x800 shrunk, an unscaled program's enlarged); the
+    shown size said back configures the same size again (at 150%, 200% and
+    every step 125-400, three widths each); limits, CSD geometry, the
+    window menu, a popup, subsurfaces by edges (two meeting with no gap),
+    near identity 1:1 (one a pixel over cropped, one a pixel short at its
+    buffer's size); the pointer and a drop point divided, relative motion
+    not; a press in a scaled subsurface; a drag icon's offset and its 256
+    px bound in desktop pixels; a second fractional object the program's
+    error, the compositor going on. Fails before the step: configured
+    1000x600 at every scale, no preferred scale."""
+    runtime = os.path.join(work, 'run-scale')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-scale-%d' % os.getpid()
+    listener = listen(name)
+    env = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+    env.pop('WAYLAND_DISPLAY', None)
+    log = os.path.join(work, 'compositor-scale.log')
+    comp = start([compositor, '--x11', 'off', '--log', log], env, open(os.path.join(work, 'compositor-scale.out'), 'w'))
+    clients, routes = [], []
+    seen = []
+    uris = b'file:///home/me/scaled.txt\r\n'
+
+    def rha(num, den):
+        return (2 * num + den) // (2 * den)
+
+    def conf(W, n):
+        return max(1, -((-(2 * W - 1) * 60) // n))
+
+    def pump(pred, why, wait=8.0):
+        """Reads the channel into `seen` -- ('line', text), ('frame', id,
+        w, h) -- until pred() holds; a drop's reads are answered."""
+        end = time.time() + wait
+        while not pred():
+            if time.time() > end:
+                fail(why() if callable(why) else why)
+            got = desk.next(0.1)
+            if got is None:
+                continue
+            if got[0] == 'line':
+                seen.append(('line', got[1]))
+                if got[1].startswith('CLIP read ') and desk.clip_fds:
+                    fd = desk.clip_fds.pop(0)
+                    os.write(fd, uris)
+                    os.close(fd)
+            elif got[0] == 'frame':
+                os.close(got[2])
+                seen.append(('frame', got[1][0], got[1][2], got[1][3]))
+            else:
+                for fd in got[2]:
+                    os.close(fd)
+                seen.append(('frm3', got[1][0], got[1][2], got[1][3]))
+
+    def lines(since=0):
+        return [e[1] for e in seen[since:] if e[0] == 'line']
+
+    def at(entry, since=0):
+        for i in range(since, len(seen)):
+            if seen[i] == entry:
+                return i
+        return -1
+
+    def line(text, since=0, wait=8.0):
+        pump(lambda: at(('line', text), since) >= 0, lambda: 'no %r; after %d: %r' % (text, since, seen[since:]), wait)
+        return at(('line', text), since)
+
+    def frame(image, w, h, since=0, wait=8.0):
+        pump(lambda: at(('frame', image, w, h), since) >= 0,
+             lambda: 'no %dx%d frame of %d; after %d: %r' % (w, h, image, since, seen[since:]), wait)
+        return at(('frame', image, w, h), since)
+
+    def printed(path):
+        return open(path).read()
+
+    def wait_print(path, text, wait=8.0):
+        pump(lambda: text in printed(path), lambda: 'the stand-in did not print %r:\n%s' % (text, printed(path)), wait)
+
+    def window(flags, title):
+        """A stand-in: its id, from its WINDOW new, once its hints are said."""
+        path = os.path.join(work, 'standin-scale-%s.out' % title)
+        since = len(seen)
+        clients.append(start([standin] + flags + [title], cenv, open(path, 'w')))
+        pump(lambda: any(l.startswith('WINDOW title ') and l.endswith(' ' + title) for l in lines(since)),
+             lambda: 'no window %s:\n%s' % (title, printed(path)))
+        win = int(next(l for l in lines(since) if l.startswith('WINDOW title ') and l.endswith(' ' + title)).split()[2])
+        line('WINDOW decor %d %s' % (win, 'client' if '--csd' in flags else 'server'), since)
+        return win, path, since
+
+    def route(win, *events):
+        if win not in [r[0] for r in routes]:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(desk.input_socks[win])
+            routes.append((win, sock, [0]))
+        _, sock, count = next(r for r in routes if r[0] == win)
+        text = b''
+        for e in events:
+            count[0] += 1
+            text += b'INPUT %s\nINPUT frame %d %d\n' % ((e % BLIT_PICTURE).encode(), BLIT_PICTURE, count[0])
+        sock.sendall(text)
+
+    try:
+        desk = Desktop(listener, b'OK dmabuf=0 window=1 drag=1\n')
+        desk.line('WINDOW display blit-0 -')
+        cenv = dict(env, WAYLAND_DISPLAY='blit-0')
+        steps = list(range(125, 401, 25))
+        layout = ['DP-1 0 0 3840 2160 60000 150', 'DP-2 3840 0 3840 2160 60000 200']
+        layout += ['S%d %d 2160 1920 1080 60000 %d' % (pct, i * 1920, pct) for i, pct in enumerate(steps)]
+        desk.send('WINDOW primary DP-1')
+        for l in layout:
+            desk.send('WINDOW layout %s' % l)
+        desk.send('WINDOW layout end')
+
+        # 1. A fractional program at 150%: told 180 before its first
+        # configure; limits 64x48 -> 96x72; 256x160 of its own drawn
+        # 384x240, shown at its pixels; 1000x600 configured 667x400, drawn
+        # 1001x600, cropped to 1000 at its pixels; its popup at 12,63 is
+        # 18,95; the shown size said back configures 667 again.
+        a, a_out, since = window(['--scale-frac', '--popup', '--drop'], 'Frac')
+        check('WINDOW limits %d 96 72 0 0' % a in lines(since), lambda: 'limits not 96x72: %r' % lines(since))
+        frame(a, 384, 240, since)
+        check(not [l for l in lines(since) if l.startswith('WINDOW view %d ' % a)],
+              lambda: 'a fractional frame of its own size was given a view: %r' % lines(since))
+        text = printed(a_out)
+        check('STANDIN preferred scale 180' in text and
+              text.index('STANDIN preferred scale 180') < text.index('STANDIN configure '),
+              lambda: 'not told 180 before its first configure:\n' + text)
+        mark = len(seen)
+        desk.send('WINDOW size %d 1000 600' % a)
+        wait_print(a_out, 'STANDIN configure 667x400\n')
+        view_at = line('WINDOW view %d 0 0 1000 600 1000 600' % a, mark)
+        check(view_at < frame(a, 1001, 600, mark), 'the crop came after its frame')
+        pump(lambda: any(l.startswith('WINDOW popup ') for l in lines(mark)), 'no popup')
+        popup_line = next(l for l in lines(mark) if l.startswith('WINDOW popup '))
+        pid = int(popup_line.split()[2])
+        check(popup_line == 'WINDOW popup %d %d 18 95' % (pid, a), 'the popup at logical 12,63 was %r' % popup_line)
+        frame(pid, 120, 90, mark)
+        check(not [l for l in lines(mark) if l.startswith('WINDOW view %d ' % pid)],
+              lambda: 'the popup drawn for its scale was given a view: %r' % lines(mark))
+        mark = len(seen)
+        desk.send('WINDOW size %d 1001 600' % a)
+        pump(lambda: printed(a_out).count('STANDIN configure 667x400\n') == 2,
+             lambda: 'the shown size said back did not configure 667 again:\n' + printed(a_out))
+        line('WINDOW view %d -' % a, mark)
+        frame(a, 1001, 600, mark)
+        check('STANDIN configure 668x' not in printed(a_out), 'the echo configured another size')
+        # The pointer: 150.00,90.00 desktop is 100,60 logical; relative
+        # motion stays the device's counts.
+        route(a, 'ptr %d 151.50 90.00', 'ptr %d 150.00 90.00', 'rel %d 10 0')
+        wait_print(a_out, 'STANDIN pointer enter main 101.00 60.00\n')
+        wait_print(a_out, 'STANDIN pointer motion 100.00 60.00\n')
+        wait_print(a_out, 'STANDIN relative 10.00 0.00\n')
+        # A drop point: desktop 150,90 enters at 100,60 (and moves there),
+        # read and taken; then a hover at 300,180 enters at 200,120.
+        mark = len(seen)
+        desk.send('CLIP drop 7 %d 150 90 text/uri-list' % a)
+        wait_print(a_out, 'STANDIN drop enter 100 60 text/uri-list')
+        line('CLIP dropped 7 taken', mark)
+        wait_print(a_out, 'STANDIN drop got file:///home/me/scaled.txt||')
+        check('STANDIN drop motion 100 60' in printed(a_out), lambda: 'no motion at 100,60:\n' + printed(a_out))
+        mark = len(seen)
+        desk.send('CLIP drag 8 %d 300 180 text/uri-list' % a)
+        wait_print(a_out, 'STANDIN drop enter 200 120 text/uri-list')
+        line('CLIP hover 8 copy', mark)
+        desk.send('CLIP leave 8')
+
+        # 2. GTK 3's kind at 150%: told 2, draws at 2, shrunk by 0.75 --
+        # the buffer rectangle that maps to the body.
+        b, b_out, since = window(['--scale-int'], 'Int')
+        wait_print(b_out, 'STANDIN configure ')
+        check('STANDIN preferred buffer scale 2' in printed(b_out) and printed(b_out).index(
+              'STANDIN preferred buffer scale 2') < printed(b_out).index('STANDIN configure '),
+              lambda: 'not told buffer scale 2 before its first configure:\n' + printed(b_out))
+        view_at = line('WINDOW view %d 0 0 512 320 384 240' % b, since)
+        check(view_at < frame(b, 512, 320, since), 'the view came after its frame')
+        mark = len(seen)
+        desk.send('WINDOW size %d 1000 600' % b)
+        wait_print(b_out, 'STANDIN configure 667x400\n')
+        view_at = line('WINDOW view %d 0 0 1333 800 1000 600' % b, mark)
+        check(view_at < frame(b, 1334, 800, mark), 'the view came after its frame')
+
+        # 3. A program that knows no scale: enlarged by 1.5.
+        c, c_out, since = window(['--scale-none'], 'None')
+        line('WINDOW view %d 0 0 256 160 384 240' % c, since)
+        frame(c, 256, 160, since)
+        mark = len(seen)
+        desk.send('WINDOW size %d 1000 600' % c)
+        wait_print(c_out, 'STANDIN configure 667x400\n')
+        view_at = line('WINDOW view %d 0 0 667 400 1000 600' % c, mark)
+        check(view_at < frame(c, 667, 400, mark), 'the view came after its frame')
+
+        # 4. Its own frame (CSD): geometry 10 inside, by edges; the window
+        # menu at 5,6 of its geometry (15,16 of its surface) at 23,24.
+        d, d_out, since = window(['--scale-frac', '--csd'], 'Csd')
+        line('WINDOW geometry %d 15 15 354 210' % d, since)
+        frame(d, 384, 240, since)
+        mark = len(seen)
+        desk.send('WINDOW size %d 1000 600' % d)
+        line('WINDOW geometry %d 15 15 971 570' % d, mark)
+        frame(d, 1001, 600, mark)
+        check(not [l for l in lines(mark) if l.startswith('WINDOW view %d ' % d)],
+              lambda: 'a window with a geometry was cropped: %r' % lines(mark))
+        mark = len(seen)
+        route(d, 'ptr %d 75.00 75.00', 'btn %d 273 press')
+        line('WINDOW menu %d 23 24' % d, mark)
+        route(d, 'btn %d 273 release')
+
+        # 5. Subsurfaces by edges: 0..33 and 33..66 meet at 50 with no gap;
+        # the second's buffer (50) a pixel over its span (49) cropped at its
+        # pixels; the third's a pixel short (49 of 50): its own size. A
+        # press in a scaled subsurface reaches it.
+        e, e_out, since = window(['--scale-frac', '--sub-pair'], 'Pair')
+        frame(e, 384, 240, since)
+        mark = len(seen)
+        desk.send('WINDOW size %d 1000 600' % e)
+        wait_print(e_out, 'STANDIN sub pair')
+
+        def last_subs():
+            got = {}
+            for l in lines(mark):
+                if l.startswith('WINDOW sub '):
+                    got[int(l.split()[2])] = l
+            return got
+        pump(lambda: len(last_subs()) == 3 and len([x for x in seen[mark:] if x[0] == 'frame' and x[1] in last_subs()]) >= 3,
+             lambda: 'not three subsurfaces: %r' % seen[mark:])
+        (s1, s2, s3) = sorted(last_subs())
+        # Their places apply at the parent's commit after them.
+        want_subs = {s1: 'WINDOW sub %d %d 0 0 50 30 above' % (s1, e), s2: 'WINDOW sub %d %d 50 0 49 30 above' % (s2, e),
+                     s3: 'WINDOW sub %d %d 0 45 49 30 above' % (s3, e)}
+        pump(lambda: last_subs() == want_subs,
+             lambda: 'the subsurfaces (the first at 0,0 50x30, the second meeting it at 50 49x30, the third a pixel '
+             'short at its own 49x30): %r' % sorted(last_subs().values()))
+        # Placed at 33 (its buffer drawn at 0 first), its pixel over is cut.
+        check('WINDOW view %d 0 0 49 30 49 30' % s2 in lines(mark) and lines(mark)[-1] != 'WINDOW view %d -' % s2,
+              lambda: 'the second\'s pixel over was not cropped: %r' % seen[mark:])
+        check(not [l for l in lines(mark) if l.startswith('WINDOW view %d ' % s1) or l.startswith('WINDOW view %d ' % s3)],
+              lambda: 'a subsurface at its own pixels was given a view: %r' % lines(mark))
+        route(e, 'ptr %d 15.00 15.00', 'btn %d 272 press', 'btn %d 272 release')
+        wait_print(e_out, 'STANDIN pointer enter sub 10.00 10.00\n')
+        wait_print(e_out, 'STANDIN button 272 1\n')
+
+        # 6. A drag icon at 150%: its offset (-10,-5) is -15,-8; its 200x40
+        # drawn 300x60 for the scale, bounded at 256 in desktop pixels.
+        f, f_out, since = window(['--scale-frac', '--drag-out', '--drag-icon', '200x40'], 'Drag')
+        frame(f, 384, 240, since)
+        mark = len(seen)
+        route(f, 'ptr %d 30.00 30.00', 'btn %d 272 press')
+        pump(lambda: any(re.fullmatch(r'WINDOW dragicon \d+ o1 -15 -8', l) for l in lines(mark)),
+             lambda: 'no drag icon at -15,-8: %r' % lines(mark))
+        icon = int(next(l for l in lines(mark) if re.fullmatch(r'WINDOW dragicon \d+ o1 -15 -8', l)).split()[2])
+        frame(icon, 256, 51, mark)
+        desk.send('CLIP dragend o1 copy')
+        line('WINDOW gone %d' % icon, mark)
+        route(f, 'btn %d 272 release')
+
+        # 7. A second fractional object on one surface: the program's
+        # protocol error; the compositor and the others go on.
+        t_out = os.path.join(work, 'standin-scale-Twice.out')
+        twice = start([standin, '--scale-frac-twice', 'Twice'], cenv, open(t_out, 'w'))
+        clients.append(twice)
+        pump(lambda: any(l.endswith(' Twice') and l.startswith('WINDOW title ') for l in lines(since)), 'no Twice')
+        tw = int(next(l for l in lines(since) if l.endswith(' Twice') and l.startswith('WINDOW title ')).split()[2])
+        desk.send('WINDOW size %d 400 300' % tw)
+        pump(lambda: twice.poll() is not None, 'a second fractional object did not end its program')
+        check(twice.returncode != 0 and 'wp_fractional_scale_manager_v1' in printed(t_out) and
+              'error' in printed(t_out).lower(), lambda: 'no fractional_scale_exists:\n' + printed(t_out))
+        check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
+
+        # 8. At 200%: told 240; 1000x600 configured 500x300, drawn 1000x600,
+        # no view; 1001 (said back after a 501) configures 501 again.
+        desk.send('WINDOW primary DP-2')
+        g, g_out, since = window(['--scale-frac'], 'Frac200')
+        check('WINDOW limits %d 128 96 0 0' % g in lines(since), lambda: 'limits not 128x96: %r' % lines(since))
+        wait_print(g_out, 'STANDIN preferred scale 240')
+        frame(g, 512, 320, since)
+        mark = len(seen)
+        desk.send('WINDOW size %d 1000 600' % g)
+        wait_print(g_out, 'STANDIN configure 500x300\n')
+        frame(g, 1000, 600, mark)
+        check(not [l for l in lines(since) if l.startswith('WINDOW view %d ' % g)],
+              lambda: 'a view at 200%%: %r' % lines(since))
+        mark = len(seen)
+        desk.send('WINDOW size %d 1001 600' % g)
+        wait_print(g_out, 'STANDIN configure 501x300\n')
+        line('WINDOW view %d 0 0 1001 600 1001 600' % g, mark)
+        frame(g, 1002, 600, mark)
+        desk.send('WINDOW size %d 1002 600' % g)
+        pump(lambda: printed(g_out).count('STANDIN configure 501x300\n') == 2,
+             lambda: 'the shown size said back did not configure 501 again:\n' + printed(g_out))
+
+        # 9. Every step 125-400, three widths each: the configured size is
+        # the smallest that covers the body, and the shown size said back
+        # configures it again.
+        echoes = 0
+        for pct in steps:
+            n = pct * 6 // 5
+            desk.send('WINDOW primary S%d' % pct)
+            h, h_out, since = window(['--scale-frac'], 'Echo%d' % pct)
+            wait_print(h_out, 'STANDIN preferred scale %d' % n)
+            # One width from each range whose shown size differs from it (so
+            # the echo passes the desktop's repeat filter).
+            widths = [next(W for W in r if rha(conf(W, n) * n, 120) != W)
+                      for r in (range(1000, 1100), range(777, 877), range(333, 433))]
+            for W in widths:
+                w0 = conf(W, n)
+                check(rha(w0 * n, 120) >= W and (w0 == 1 or rha((w0 - 1) * n, 120) < W), 'the rule at %d' % W)
+                hh = conf(600, n)
+                desk.send('WINDOW size %d %d 600' % (h, W))
+                want = 'STANDIN configure %dx%d\n' % (w0, hh)
+                wait_print(h_out, want)
+                count = printed(h_out).count(want)
+                desk.send('WINDOW size %d %d 600' % (h, rha(w0 * n, 120)))
+                pump(lambda: printed(h_out).count(want) == count + 1,
+                     lambda: 'at %d%% the shown size %d said back did not configure %d again:\n%s'
+                     % (pct, rha(w0 * n, 120), w0, printed(h_out)))
+                echoes += 1
+            desk.send('WINDOW close %d' % h)
+            line('WINDOW gone %d' % h, since)
+
+        check(comp.poll() is None, 'the compositor ended')
+        quit_compositor(desk, comp)
+        text = settled(log)
+        check('window %d: scale 150%%' % a in text and 'window %d: scale 200%%' % g in text,
+              lambda: 'the log does not say the windows\' scales:\n' + text)
+        return ('told=preferred_scale 180/240,buffer_scale 2 before the first configure limits=96x72,128x96 '
+                'frac150=667x400,1001->view 1000(1:1) int150=1334x800->view 1333x800@1000x600 '
+                'none150=667x400->1000x600 frac200=500x300,no-view echo=%d(150,200,125-400) '
+                'csd=geometry 15,15+971x570,menu 23,24 popup=18,95 subs=0+50|50+49(crop),short=own-size '
+                'ptr=150,90->100,60 rel=10 unscaled drop=150,90->100,60(enter,motion,taken) drag=300,180->200,120 press-in-sub dragicon=-15,-8,256x51 '
+                'second-fractional=program-error,others-unharmed' % echoes)
+    finally:
+        for _, sock, _ in routes:
+            sock.close()
+        for p in clients + [comp]:
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+
+
 def dmabuf_part(compositor, standin, work):
     """linux-dmabuf against a desktop that answers dmabuf=1 with a formats=
     list: each commit an FRM3 of the client's own plane (the same file, no
@@ -3407,6 +3756,7 @@ def main():
             blit_part(server, compositor, standin, work)
             # A server of its own, for its keymap.
             print('COMPOSITOR_INPUT_OK %s' % input_part(server, compositor, standin, work))
+        print('COMPOSITOR_SCALE_OK %s' % scale_part(compositor, standin, work))
     except SystemExit:
         # A failure shows what each process said before the work goes.
         for name in sorted(os.listdir(work)):

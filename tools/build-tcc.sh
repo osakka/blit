@@ -120,7 +120,9 @@ case "$target" in
         # (staging since 1.31) is how Xwayland names each X window's surface;
         # xdg-activation-v1 (staging) is a program asking for the focus;
         # xdg-output-unstable-v1 gives each display its place in the
-        # desktop's layout, from which Xwayland builds X's RandR outputs.
+        # desktop's layout, from which Xwayland builds X's RandR outputs;
+        # fractional-scale-v1 (staging since 1.31) tells programs a display's
+        # program scale in 120ths (ADR 0242).
         : > "$proto/sources"
         for xml in "$protocols/stable/xdg-shell/xdg-shell.xml" \
                    "$protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml" \
@@ -136,6 +138,7 @@ case "$target" in
                    "$protocols/unstable/xdg-output/xdg-output-unstable-v1.xml" \
                    "$protocols/unstable/text-input/text-input-unstable-v3.xml" \
                    "$protocols/stable/viewporter/viewporter.xml" \
+                   "$protocols/staging/fractional-scale/fractional-scale-v1.xml" \
                    "$protocols/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml" \
                    "$plasma/appmenu.xml"; do
             base=$(basename "$xml" .xml)

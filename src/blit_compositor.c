@@ -98,6 +98,7 @@
 #include "xdg-output-unstable-v1-server-protocol.h"
 #include "text-input-unstable-v3-server-protocol.h"
 #include "viewporter-server-protocol.h"
+#include "fractional-scale-v1-server-protocol.h"
 #include "idle-inhibit-unstable-v1-server-protocol.h"
 #include "ime.h"
 #include "blit_ime_root.h"
@@ -201,6 +202,11 @@ struct bc_surface {
     uint64_t last_done_us;            /* when frame callbacks were last answered */
     /* wl_surface.set_buffer_scale, pending and committed (1 unset). */
     int32_t pending_scale, scale;
+    /* ADR 0242: its wp_fractional_scale_v1 (NULL none), and the scale in
+       120ths its preferred_buffer_scale and its preferred_scale last said
+       (0 nothing yet). */
+    struct wl_resource *frac;
+    uint32_t told_n, frac_n;
     /* wp_viewport (0.3.115): pending and committed; a source width of -1
        and a destination width of -1 are unset. */
     struct wl_resource *viewport;
@@ -305,6 +311,10 @@ struct bc_xdg {
                                          none): sent again on a new channel */
     int replay;                       /* the re-announce pass: 1 announced, 2 its
                                          parent still to say (WINDOW parent) */
+    /* ADR 0242: a Wayland top-level's program scale in 120ths, its tree's
+       (popups, subsurfaces, drag icon): the display's it was first placed
+       on; 0 until then, and for X windows, which are always 120. */
+    uint32_t scale_n;
     int32_t shown_w, shown_h;         /* its size in its surface pixels: its buffer's,
                                          or its viewport's, its scale's (#159) */
     /* The `WINDOW view` the desktop has for it (Gitea #159). */
@@ -871,7 +881,11 @@ static void unlink_resource(struct wl_resource *resource)
 /* ---- WINDOW lines ---- */
 
 static void window_set_output(struct bc_xdg *x, struct bc_output *o);
+static void window_take_scale(struct bc_xdg *x, struct bc_output *o);
 static struct bc_output *output_default(struct bc_server *s);
+static uint32_t pic_scale_n(struct bc_xdg *x);
+static uint32_t output_scale_n(const struct bc_output *o);
+static void surface_scale_tell(struct bc_surface *surface);
 static struct bc_output *x_output_of(struct bc_server *s, struct bc_xwin *w);
 static struct wl_resource *output_resource(struct bc_output *o, struct wl_client *client);
 
@@ -928,8 +942,9 @@ static void window_ask_activate(struct bc_xdg *x, const char *reason)
 
 static void send_limits(struct bc_xdg *x)
 {
-    bc_wire_line(&x->server->wire, "WINDOW limits %u %d %d %d %d", x->id, x->min_w, x->min_h,
-                 x->max_w, x->max_h);
+    uint32_t n = pic_scale_n(x);
+    bc_wire_line(&x->server->wire, "WINDOW limits %u %d %d %d %d", x->id, bc_scale_min(x->min_w, n),
+                 bc_scale_min(x->min_h, n), bc_scale_max(x->max_w, n), bc_scale_max(x->max_h, n));
     x->limits_sent = 1;
 }
 
@@ -956,11 +971,26 @@ static void send_appmenu(struct bc_xdg *x)
         bc_wire_line(&x->server->wire, "WINDOW appmenu %u - -", x->id);
 }
 
-/* `WINDOW geometry`: the window's rectangle in its surface pixels. */
+/* ADR 0242: a size `d` in desktop pixels over the desktop's `W` by at most
+   the rounding (ceil(S)), cut to it; anything else as it is. */
+static int32_t scale_cut(int32_t d, int32_t W, uint32_t n)
+{
+    return n != BC_SCALE_ONE && W > 0 && d > W && d - W <= bc_scale_int(n) ? W : d;
+}
+
+/* `WINDOW geometry`: the window's rectangle in its surface pixels -- in
+   desktop pixels by its edges (ADR 0242), cut to the configured size where
+   the rounding made it larger. */
 static void send_geometry(struct bc_xdg *x)
 {
-    bc_wire_line(&x->server->wire, "WINDOW geometry %u %d %d %d %d", x->id, x->gx, x->gy, x->gw,
-                 x->gh);
+    uint32_t n = pic_scale_n(x);
+    int32_t gx = bc_scale_edge(x->gx, n), gy = bc_scale_edge(x->gy, n);
+    int32_t gw = bc_scale_span(x->gx, x->gw, n), gh = bc_scale_span(x->gy, x->gh, n);
+    if (x->size_told) {
+        gw = scale_cut(gw, x->size_w, n);
+        gh = scale_cut(gh, x->size_h, n);
+    }
+    bc_wire_line(&x->server->wire, "WINDOW geometry %u %d %d %d %d", x->id, gx, gy, gw, gh);
 }
 
 static void send_decor(struct bc_xdg *x)
@@ -1026,7 +1056,10 @@ static void announce_hints(struct bc_xdg *x, int parent)
 static void announce_toplevel(struct bc_xdg *x)
 {
     BcWire *w = &x->server->wire;
+    struct bc_output *o = x->xwin ? x_output_of(x->server, x->xwin) : output_default(x->server);
     x->id = bc_wire_new_id(w);
+    /* Its scale before its first line in pixels (its limits, geometry). */
+    if (!x->xwin) window_take_scale(x, o);
     announce_hints(x, xdg_parent_id(x));
     if (x->minimize) bc_wire_line(w, "WINDOW minimize %u", x->id);
     x->minimize = 0;
@@ -1041,9 +1074,19 @@ static void announce_toplevel(struct bc_xdg *x)
     /* On the primary display until the desktop says which display it is
        on (without a layout, the first output); an X toplevel on the
        display it is in, in X space (x_output_of). */
-    window_set_output(x, x->xwin ? x_output_of(x->server, x->xwin) : output_default(x->server));
+    window_set_output(x, o);
     /* A lock asked for before the window was announced is asked for now. */
     if (x->surface) constraint_ask_surface(x->surface);
+}
+
+/* `WINDOW popup <id> <parent> <x> <y>`: its offset in the parent's surface
+   pixels, one rounding of the logical offset in desktop pixels (ADR 0242). */
+static void popup_say(struct bc_xdg *x)
+{
+    struct bc_xdg *p = x->parent;
+    uint32_t n = pic_scale_n(x);
+    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, bc_scale_edge(p->gx + x->px, n),
+                 bc_scale_edge(p->gy + x->py, n));
 }
 
 /* A popup's appearance, at its initial commit once its parent has an id:
@@ -1053,8 +1096,7 @@ static void announce_popup(struct bc_xdg *x)
     struct bc_xdg *p = x->parent;
     if (p == NULL || p->id == 0) return;
     x->id = bc_wire_new_id(&x->server->wire);
-    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + x->px,
-                 p->gy + x->py);
+    popup_say(x);
     logf_("popup %u: parent %u at %d,%d%s", x->id, p->id, p->gx + x->px, p->gy + x->py,
           x->xpopup ? " (an X override-redirect window)" : "");
     window_set_output(x, p->output);
@@ -1124,7 +1166,10 @@ static void send_toplevel_configure(struct bc_xdg *x)
     }
     if (x->decoration)
         zxdg_toplevel_decoration_v1_send_configure(x->decoration, x->decor_mode);
-    xdg_toplevel_send_configure(x->toplevel, x->size_w, x->size_h, &states);
+    /* ADR 0242: the desktop's pixels as the smallest logical size that
+       covers them. */
+    xdg_toplevel_send_configure(x->toplevel, bc_scale_configure(x->size_w, pic_scale_n(x)),
+                                bc_scale_configure(x->size_h, pic_scale_n(x)), &states);
     wl_array_release(&states);
     x->serial = wl_display_next_serial(x->server->display);
     xdg_surface_send_configure(x->resource, x->serial);
@@ -1182,7 +1227,7 @@ static void popup_moved(struct bc_xdg *x, int32_t px, int32_t py)
     x->px = px;
     x->py = py;
     if (x->id == 0 || p == NULL || p->id == 0) return;
-    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + px, p->gy + py);
+    popup_say(x);
     logf_("popup %u: moved by its program to %d,%d", x->id, p->gx + px, p->gy + py);
 }
 
@@ -1769,6 +1814,74 @@ static struct bc_xdg *surface_window(struct bc_surface *surface)
     return window_is_toplevel(x) ? x : NULL;
 }
 
+/* ---- the program scale (ADR 0242) ----
+
+   Every number on the frame channel is a desktop pixel; a program draws in
+   its logical pixels at its tree's scale. Stored state stays logical
+   (geometry, offsets, shown sizes, the view, limits) and is converted where
+   a line is written or read (blit_compositor_wire.h's bc_scale_*), with the
+   scale of the window's top-level: a Wayland top-level takes its display's
+   when it is first placed on one and keeps it (a later change of display
+   or of scale is applied by a later step); X windows are always 1. */
+
+/* An output's program scale in 120ths: 120 without one. */
+static uint32_t output_scale_n(const struct bc_output *o)
+{
+    return o ? bc_scale_n(o->scale_pct) : BC_SCALE_ONE;
+}
+
+/* The top-level whose scale a picture takes: its own, a popup's down its
+   chain, a subsurface's root's, the drag icon's dragging window's. */
+static struct bc_xdg *pic_top(struct bc_xdg *x)
+{
+    if (x && x->server && x == x->server->dragout.icon_pic) x = x->server->dragout.window;
+    if (x && x->subsurface) x = sub_root(x, NULL, NULL);
+    while (x && window_is_popup(x) && x->parent) x = x->parent;
+    return x;
+}
+
+/* The scale a picture's lines are converted with: 120 for X and for a
+   tree not placed yet. */
+static uint32_t pic_scale_n(struct bc_xdg *x)
+{
+    struct bc_xdg *top = pic_top(x);
+    if (top == NULL || top->xwin || top->scale_n == 0) return BC_SCALE_ONE;
+    return top->scale_n;
+}
+
+/* The scale a surface's program is told: its tree's once placed (a drag
+   icon's, the dragging window's); before
+   that (a fractional object made before the first commit) the display a
+   new window goes to; always 120 for the compositor's own Xwayland. */
+static uint32_t surface_scale_n(struct bc_surface *surface)
+{
+    struct bc_server *s = surface->server;
+    /* A drag icon has no picture of its own here: its dragging window's. */
+    struct bc_xdg *top = pic_top(surface->dragicon && s->dragout.icon == surface ? s->dragout.window
+                                                                                 : surface_pic(surface));
+    if (s->x.client && wl_resource_get_client(surface->resource) == s->x.client) return BC_SCALE_ONE;
+    if (top && (top->xwin || top->scale_n)) return top->xwin ? BC_SCALE_ONE : top->scale_n;
+    return output_scale_n(output_default(s));
+}
+
+/* wl_surface.preferred_buffer_scale (ceil(S), wl_surface v6) and
+   wp_fractional_scale_v1.preferred_scale (n), each when it is not what the
+   surface was last told. */
+static void surface_scale_tell(struct bc_surface *surface)
+{
+    uint32_t n = surface_scale_n(surface);
+#ifdef WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION
+    if (surface->told_n != n &&
+        wl_resource_get_version(surface->resource) >= WL_SURFACE_PREFERRED_BUFFER_SCALE_SINCE_VERSION)
+        wl_surface_send_preferred_buffer_scale(surface->resource, bc_scale_int(n));
+#endif
+    surface->told_n = n;
+    if (surface->frac && surface->frac_n != n) {
+        wp_fractional_scale_v1_send_preferred_scale(surface->frac, n);
+        surface->frac_n = n;
+    }
+}
+
 /* Synchronized, by its own mode or an ancestor's (wl_subsurface). */
 static int sub_effectively_sync(const struct bc_xdg *sub)
 {
@@ -2128,6 +2241,7 @@ static void subs_parent_applied(struct bc_surface *parent);
 
 static void surface_view(struct bc_surface *surface);
 static void view_say(struct bc_xdg *x);
+static int view_wire(struct bc_xdg *x, int32_t *out);
 
 /* An area average of `w` x `h` 32-bit pixels into `nw` x `nh`. */
 static void dragicon_scale(const unsigned char *src, uint32_t w, uint32_t h, uint32_t stride, uint32_t *dst,
@@ -2158,10 +2272,12 @@ static void dragicon_scale(const unsigned char *src, uint32_t w, uint32_t h, uin
     }
 }
 
+/* Its offset in desktop pixels with the dragging window's scale (ADR 0242). */
 static void dragicon_say(struct bc_server *s)
 {
-    bc_wire_line(&s->wire, "WINDOW dragicon %u o%u %d %d", s->dragout.icon_id, s->dragout.n, s->dragout.ix,
-                 s->dragout.iy);
+    uint32_t n = pic_scale_n(s->dragout.window);
+    bc_wire_line(&s->wire, "WINDOW dragicon %u o%u %d %d", s->dragout.icon_id, s->dragout.n,
+                 bc_scale_edge(s->dragout.ix, n), bc_scale_edge(s->dragout.iy, n));
 }
 
 /* The drag's end, or its icon's: gone. */
@@ -2196,6 +2312,7 @@ static void dragicon_begin(struct bc_server *s, struct bc_surface *surface, int3
     s->dragout.ix = ix;
     s->dragout.iy = iy;
     dragicon_say(s);
+    surface_scale_tell(surface);      /* the dragging window's scale (ADR 0242) */
 }
 
 static void dragicon_size(uint32_t w, uint32_t h, uint32_t *nw, uint32_t *nh)
@@ -2219,7 +2336,9 @@ static int dragicon_dmabuf_scaled(struct bc_server *s, struct bc_surface *surfac
     uint32_t *small;
     unsigned char *map;
     int rc;
-    const int32_t *v = surface->view;
+    int32_t v[6];
+    /* Its view in desktop pixels (ADR 0242), bounded there. */
+    view_wire(s->dragout.icon_pic, v);
     dragicon_size((uint32_t)v[4], (uint32_t)v[5], &nw, &nh);
     map = mmap(NULL, bytes, PROT_READ, MAP_SHARED, b->fds[0], 0);
     if (map == MAP_FAILED) return send_dmabuf(s->dragout.icon_pic, b);
@@ -2247,18 +2366,22 @@ static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer
     struct bc_server *s = surface->server;
     struct wl_shm_buffer *shm;
     uint32_t w, h, nw, nh, format;
-    int rc;
+    int32_t v[6];
+    int rc, on;
     if (s->dragout.icon != surface || s->dragout.icon_id == 0) return BC_SENT_NONE;
     if (surface->pending_ox || surface->pending_oy) {
         s->dragout.ix += surface->pending_ox;
         s->dragout.iy += surface->pending_oy;
         dragicon_say(s);
     }
-    if (!attached || buffer == NULL) return BC_SENT_NONE;
+    if (!attached || buffer == NULL || s->dragout.icon_pic == NULL) return BC_SENT_NONE;
+    /* Its view and the bound in desktop pixels, the dragging window's scale
+       (ADR 0242): the same as its surface's at 100%. */
+    on = view_wire(s->dragout.icon_pic, v);
     if ((shm = wl_shm_buffer_get(buffer)) == NULL) {
         struct bc_dmabuf *b = dmabuf_from_buffer(buffer);
-        if (b == NULL || s->dragout.icon_pic == NULL) return BC_SENT_NONE;
-        if ((surface->view_on || b->width > BC_DRAGICON_MAX || b->height > BC_DRAGICON_MAX) &&
+        if (b == NULL) return BC_SENT_NONE;
+        if ((on || b->width > BC_DRAGICON_MAX || b->height > BC_DRAGICON_MAX) &&
             dmabuf_copyable(b))
             return dragicon_dmabuf_scaled(s, surface, b);
         /* Tiled, not readable here: its frame as it is, and the view, for
@@ -2271,16 +2394,15 @@ static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer
     format = wl_shm_buffer_get_format(shm);
     if (format != BC_SHM_ARGB8888 && format != BC_SHM_XRGB8888) return BC_SENT_NONE;
     /* Its viewport's crop and size, or the buffer's (Gitea #159), bounded. */
-    dragicon_size((uint32_t)surface->view[4], (uint32_t)surface->view[5], &nw, &nh);
+    dragicon_size((uint32_t)v[4], (uint32_t)v[5], &nw, &nh);
     wl_shm_buffer_begin_access(shm);
-    if (!surface->view_on && nw == w && nh == h) {
+    if (!on && nw == w && nh == h) {
         rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, wl_shm_buffer_get_data(shm), w, h,
                               (uint32_t)wl_shm_buffer_get_stride(shm), format);
     } else {
         uint32_t *small = malloc((size_t)nw * nh * 4);
         rc = -1;
         if (small) {
-            const int32_t *v = surface->view;
             uint32_t stride = (uint32_t)wl_shm_buffer_get_stride(shm);
             dragicon_scale((const unsigned char *)wl_shm_buffer_get_data(shm) + (size_t)v[1] * stride +
                                (size_t)v[0] * 4,
@@ -2316,6 +2438,7 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
                           struct wl_list *frames, struct wl_list *feedback)
 {
     struct bc_xdg *x = surface->xdg, *sub = surface->sub, *pic = surface_pic(surface);
+    int32_t dv[6];
     int sent = 0;
 
     /* The frame callbacks and feedback wait for Blit to take the next
@@ -2332,8 +2455,8 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
     surface_view(surface);
     if (!(attached && buffer) && pic && pic->mapped && pic->id && surface->buf_w > 0 &&
         (pic->shown_w != surface->view[4] || pic->shown_h != surface->view[5] ||
-         surface->view_on != pic->view_said ||
-         (surface->view_on && memcmp(pic->view_sent, surface->view, sizeof(pic->view_sent)) != 0))) {
+         view_wire(pic, dv) != pic->view_said ||
+         (pic->view_said && memcmp(pic->view_sent, dv, sizeof(pic->view_sent)) != 0))) {
         /* Its viewport or scale changed with no new buffer: the frame it
            has, shown the new way. */
         pic->shown_w = surface->view[4];
@@ -2522,6 +2645,62 @@ static void surface_view(struct bc_surface *surface)
     surface->view_on = v[0] != 0 || v[1] != 0 || v[2] != bw || v[3] != bh || v[4] != bw || v[5] != bh;
 }
 
+/* ADR 0242: the picture's view as the desktop is told it (out[6]): the
+   buffer rectangle in buffer pixels shown at a size in desktop pixels --
+   its edges' span from its logical offset in the picture it is drawn on (a
+   subsurface's root, a popup's parent), at its tree's scale. Near
+   identity is 1:1: a buffer its program drew for this scale (a fractional
+   object, a viewport destination, or buffer scale ceil(S) at a whole S)
+   within ceil(S) pixels of that span is shown at its own pixels, cropped
+   where larger, its own size where smaller -- never stretched by a pixel.
+   A top-level with no geometry over the desktop's size by the rounding is
+   cropped to it (the excess cut from the right and bottom). Returns
+   whether that is anything but the buffer at its pixels. At 120 it is
+   the surface's own view, as before. */
+static int view_wire(struct bc_xdg *x, int32_t *out)
+{
+    struct bc_surface *surface = x->surface;
+    const int32_t *v = surface->view;
+    uint32_t n = pic_scale_n(x);
+    int32_t ox = 0, oy = 0, k, dw, dh, bw = surface->buf_w, bh = surface->buf_h;
+    int one;
+    memcpy(out, v, 6 * sizeof(*out));
+    if (n == BC_SCALE_ONE || bw <= 0 || bh <= 0) return surface->view_on;
+    if (x->subsurface) sub_root(x, &ox, &oy);
+    else if (window_is_popup(x) && x->parent) ox = x->parent->gx + x->px, oy = x->parent->gy + x->py;
+    k = bc_scale_int(n);
+    dw = bc_scale_span(ox, v[4], n);
+    dh = bc_scale_span(oy, v[5], n);
+    one = (surface->frac || (surface->viewport && surface->vp_dst[0] != -1) ||
+           (n % BC_SCALE_ONE == 0 && surface->scale == k)) &&
+          abs(v[2] - dw) <= k && abs(v[3] - dh) <= k;
+    if (one) {
+        if (out[2] > dw) out[2] = dw;
+        else dw = out[2];
+        if (out[3] > dh) out[3] = dh;
+        else dh = out[3];
+    }
+    if (window_is_toplevel(x) && x->size_told && !(x->gw > 0 && x->gh > 0)) {
+        int32_t cw = scale_cut(dw, x->size_w, n), ch = scale_cut(dh, x->size_h, n);
+        /* The buffer pixels that map to the desktop's size. */
+        if (cw != dw) {
+            int32_t sw = one ? cw : (int32_t)(((int64_t)cw * v[2] * 2 * BC_SCALE_ONE + (int64_t)v[4] * n) /
+                                              (2 * (int64_t)v[4] * n));
+            out[2] = sw < out[2] ? (sw < 1 ? 1 : sw) : out[2];
+            dw = cw;
+        }
+        if (ch != dh) {
+            int32_t sh = one ? ch : (int32_t)(((int64_t)ch * v[3] * 2 * BC_SCALE_ONE + (int64_t)v[5] * n) /
+                                              (2 * (int64_t)v[5] * n));
+            out[3] = sh < out[3] ? (sh < 1 ? 1 : sh) : out[3];
+            dh = ch;
+        }
+    }
+    out[4] = dw;
+    out[5] = dh;
+    return out[0] != 0 || out[1] != 0 || out[2] != bw || out[3] != bh || dw != bw || dh != bh;
+}
+
 /* `WINDOW view <id> <sx> <sy> <sw> <sh> <dw> <dh>` when the picture's view
    is not the one the desktop has, `WINDOW view <id> -` when it is back to
    the buffer at its pixels; after the picture is described (its WINDOW
@@ -2529,12 +2708,13 @@ static void surface_view(struct bc_surface *surface)
 static void view_say(struct bc_xdg *x)
 {
     struct bc_surface *surface = x->surface;
+    int32_t dv[6];
     int on;
     if (surface == NULL || x->id == 0 || (x->subsurface && !x->sub_shown)) return;
-    on = surface->view_on;
-    if (on == x->view_said && (!on || memcmp(x->view_sent, surface->view, sizeof(x->view_sent)) == 0)) return;
+    on = view_wire(x, dv);
+    if (on == x->view_said && (!on || memcmp(x->view_sent, dv, sizeof(x->view_sent)) == 0)) return;
     if (on) {
-        const int32_t *v = surface->view;
+        const int32_t *v = dv;
         bc_wire_line(&x->server->wire, "WINDOW view %u %d %d %d %d %d %d", x->id, v[0], v[1], v[2], v[3],
                      v[4], v[5]);
         memcpy(x->view_sent, v, sizeof(x->view_sent));
@@ -2645,6 +2825,62 @@ static void bind_viewporter(struct wl_client *client, void *data, uint32_t versi
         return;
     }
     wl_resource_set_implementation(r, &viewporter_impl, data, NULL);
+}
+
+/* ---- wp_fractional_scale_manager_v1 (ADR 0242) ----
+
+   A surface's preferred scale in 120ths: its tree's, said at once and when
+   it changes (surface_scale_tell). A program that uses it draws its buffer
+   at round(w * S) with a viewport destination of w (its logical size),
+   which is shown at its own pixels (view_wire). One per surface: a second
+   is the program's fractional_scale_exists. */
+static void fractional_destroyed(struct wl_resource *resource)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(resource);
+    if (surface == NULL) return;
+    surface->frac = NULL;
+    surface->frac_n = 0;
+}
+
+static const struct wp_fractional_scale_v1_interface fractional_impl = {
+    .destroy = bc_destroy_request,
+};
+
+static void fractional_get(struct wl_client *client, struct wl_resource *resource, uint32_t id,
+                           struct wl_resource *surface_resource)
+{
+    struct bc_surface *surface = wl_resource_get_user_data(surface_resource);
+    struct wl_resource *r;
+    if (surface->frac) {
+        wl_resource_post_error(resource, WP_FRACTIONAL_SCALE_MANAGER_V1_ERROR_FRACTIONAL_SCALE_EXISTS,
+                               "the surface has a fractional scale object");
+        return;
+    }
+    r = wl_resource_create(client, &wp_fractional_scale_v1_interface, wl_resource_get_version(resource), id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &fractional_impl, surface, fractional_destroyed);
+    surface->frac = r;
+    surface->frac_n = 0;
+    surface_scale_tell(surface);
+}
+
+static const struct wp_fractional_scale_manager_v1_interface fractional_manager_impl = {
+    .destroy = bc_destroy_request,
+    .get_fractional_scale = fractional_get,
+};
+
+static void bind_fractional(struct wl_client *client, void *data, uint32_t version, uint32_t id)
+{
+    struct wl_resource *r = wl_resource_create(client, &wp_fractional_scale_manager_v1_interface,
+                                               (int)version, id);
+    if (r == NULL) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r, &fractional_manager_impl, data, NULL);
 }
 
 /* ---- zwp_idle_inhibit_manager_v1 (#171) ----
@@ -2812,8 +3048,10 @@ static void surface_destroyed(struct wl_resource *resource)
         if (had) window_inhibit_update(x);
     }
     if (surface->dragicon && surface->server->dragout.icon == surface) dragicon_end(surface->server);
-    /* Its viewport outlives it, inert (no_surface on use). */
+    /* Its viewport outlives it, inert (no_surface on use); so does its
+       fractional scale object. */
     if (surface->viewport) wl_resource_set_user_data(surface->viewport, NULL);
+    if (surface->frac) wl_resource_set_user_data(surface->frac, NULL);
     set_pending_buffer(surface, NULL);
     callbacks_destroy(&surface->pending_frames);
     callbacks_destroy(&surface->frames);
@@ -3933,10 +4171,14 @@ static void drop_answered(struct bc_server *s)
 static void drop_motion(struct bc_server *s)
 {
     struct bc_drop *d = &s->drop;
+    uint32_t n = pic_scale_n(window_by_id(s, d->window));
     int i;
+    /* d->x, d->y stay the desktop's pixels (XDND takes them as they are);
+       a Wayland program is told its logical ones (ADR 0242). */
     for (i = 0; i < d->ndevices; ++i)
         if (d->devices[i] && drop_device_live(s, d->devices[i]))
-            wl_data_device_send_motion(d->devices[i], now_ms(), wl_fixed_from_int(d->x), wl_fixed_from_int(d->y));
+            wl_data_device_send_motion(d->devices[i], now_ms(), bc_scale_in_fixed(d->x, n),
+                                       bc_scale_in_fixed(d->y, n));
 }
 
 /* Before the drop: another motion while the program has not answered, and
@@ -4152,8 +4394,9 @@ static void drop_begin(struct bc_server *s, const BcLine *l, int hover)
             wl_data_offer_send_offer(offer, t);
         if (wl_resource_get_version(offer) >= 3)
             wl_data_offer_send_source_actions(offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
-        wl_data_device_send_enter(dev, serial, x->surface->resource, wl_fixed_from_int(l->x),
-                                  wl_fixed_from_int(l->y), offer);
+        /* The point in the program's logical pixels (ADR 0242). */
+        wl_data_device_send_enter(dev, serial, x->surface->resource, bc_scale_in_fixed(l->x, pic_scale_n(x)),
+                                  bc_scale_in_fixed(l->y, pic_scale_n(x)), offer);
         d->devices[d->ndevices] = dev;
         d->offers[d->ndevices] = offer;
         ++d->ndevices;
@@ -4312,16 +4555,31 @@ static void window_resend(struct bc_xdg *x);
 static int subs_show(struct bc_xdg *root, struct bc_xdg *fresh, int resend)
 {
     struct bc_sub_at at[BC_SUBS_MAX];
+    int32_t place[BC_SUBS_MAX][4];
     struct bc_server *s;
+    uint32_t sn;
     int n, i, changed = 0;
     if (root == NULL || root->id == 0) return 0;
     s = root->server;
     if (s->link != BC_LINK_UP || !s->wire.window) return 0;
     n = subs_collect(root, at);
+    /* ADR 0242: each in desktop pixels, its offset rounded once and its
+       size its edges' span (or its buffer's, near identity: view_wire). */
+    sn = pic_scale_n(root);
     for (i = 0; i < n; ++i) {
         struct bc_xdg *c = at[i].sub;
-        if (!c->sub_shown || c->sent_x != at[i].x || c->sent_y != at[i].y ||
-            c->sent_w != c->shown_w || c->sent_h != c->shown_h || c->sent_above != at[i].above ||
+        int32_t dv[6];
+        place[i][0] = bc_scale_edge(at[i].x, sn);
+        place[i][1] = bc_scale_edge(at[i].y, sn);
+        place[i][2] = c->shown_w;
+        place[i][3] = c->shown_h;
+        if (sn != BC_SCALE_ONE && c->surface) {
+            view_wire(c, dv);
+            place[i][2] = dv[4];
+            place[i][3] = dv[5];
+        }
+        if (!c->sub_shown || c->sent_x != place[i][0] || c->sent_y != place[i][1] ||
+            c->sent_w != place[i][2] || c->sent_h != place[i][3] || c->sent_above != at[i].above ||
             c->sent_index != i)
             changed = 1;
     }
@@ -4330,20 +4588,20 @@ static int subs_show(struct bc_xdg *root, struct bc_xdg *fresh, int resend)
         struct bc_xdg *c = at[i].sub;
         int was = c->sub_shown;
         if (c->id == 0) c->id = bc_wire_new_id(&s->wire);
-        bc_wire_line(&s->wire, "WINDOW sub %u %u %d %d %d %d %s", c->id, root->id, at[i].x, at[i].y,
-                     c->shown_w, c->shown_h, at[i].above ? "above" : "below");
+        bc_wire_line(&s->wire, "WINDOW sub %u %u %d %d %d %d %s", c->id, root->id, place[i][0], place[i][1],
+                     place[i][2], place[i][3], at[i].above ? "above" : "below");
         c->sub_shown = 1;
-        c->sent_x = at[i].x;
-        c->sent_y = at[i].y;
-        c->sent_w = c->shown_w;
-        c->sent_h = c->shown_h;
+        c->sent_x = place[i][0];
+        c->sent_y = place[i][1];
+        c->sent_w = place[i][2];
+        c->sent_h = place[i][3];
         c->sent_above = at[i].above;
         c->sent_index = i;
         view_say(c);
         window_set_output(c, root->output);
         if (!was) {
-            logf_("subsurface %u: window %u at %d,%d %dx%d %s", c->id, root->id, at[i].x, at[i].y,
-                  c->shown_w, c->shown_h, at[i].above ? "above" : "below");
+            logf_("subsurface %u: window %u at %d,%d %dx%d %s", c->id, root->id, place[i][0], place[i][1],
+                  place[i][2], place[i][3], at[i].above ? "above" : "below");
             if (c != fresh && resend) window_resend(c);
         }
     }
@@ -4610,6 +4868,8 @@ static void subcompositor_get_subsurface(struct wl_client *client, struct wl_res
     surface->role = BC_ROLE_SUBSURFACE;
     surface->sub = sub;
     wl_resource_set_implementation(r, &subsurface_impl, sub, subsurface_destroyed);
+    /* Its tree's scale (ADR 0242), before its first buffer. */
+    surface_scale_tell(surface);
 }
 
 static const struct wl_subcompositor_interface subcompositor_impl = {
@@ -4748,6 +5008,17 @@ static void output_surface_event(struct bc_output *o, struct bc_surface *surface
     }
 }
 
+/* ADR 0242: a Wayland top-level's tree takes display `o`'s scale, once:
+   until a later step applies a change at the program's acknowledging
+   commit, a window keeps the scale it was first placed at, so its frames
+   and its lines always agree. */
+static void window_take_scale(struct bc_xdg *x, struct bc_output *o)
+{
+    if (x->scale_n || o == NULL) return;
+    x->scale_n = output_scale_n(o);
+    if (x->scale_n != BC_SCALE_ONE && x->id) logf_("window %u: scale %u%%", x->id, o->scale_pct);
+}
+
 /* Moves a window (and so its surface) onto output `o`, NULL for none. */
 static void window_set_output(struct bc_xdg *x, struct bc_output *o)
 {
@@ -4759,7 +5030,13 @@ static void window_set_output(struct bc_xdg *x, struct bc_output *o)
     x->output = o;
     if (o) {
         ++o->windows;
-        if (x->surface) output_surface_event(o, x->surface, 1);
+        /* ADR 0242: a Wayland top-level takes the scale of the display it
+           is first placed on (window_take_scale); its tree is told it. */
+        if (window_is_toplevel(x) && !x->xwin) window_take_scale(x, o);
+        if (x->surface) {
+            output_surface_event(o, x->surface, 1);
+            surface_scale_tell(x->surface);
+        }
     }
 }
 
@@ -5547,7 +5824,8 @@ static void toplevel_show_window_menu(struct wl_client *client, struct wl_resour
     (void)client; (void)seat;
     /* x, y are in window geometry coordinates: the surface's are the
        geometry's origin plus them. */
-    if (x) bc_wire_line(&x->server->wire, "WINDOW menu %u %d %d", x->id, x->gx + mx, x->gy + my);
+    if (x) bc_wire_line(&x->server->wire, "WINDOW menu %u %d %d", x->id, bc_scale_edge(x->gx + mx, pic_scale_n(x)),
+                        bc_scale_edge(x->gy + my, pic_scale_n(x)));
 }
 
 static void toplevel_move(struct wl_client *client, struct wl_resource *resource,
@@ -5797,6 +6075,8 @@ static void xdg_get_popup(struct wl_client *client, struct wl_resource *resource
     positioner_place(p, &x->px, &x->py);
     if (x->parent == NULL)
         logf_("a popup with no parent is not shown");
+    /* Its top-level's scale (ADR 0242), before its first configure. */
+    if (x->surface) surface_scale_tell(x->surface);
 }
 
 static void xdg_set_window_geometry(struct wl_client *client, struct wl_resource *resource,
@@ -7385,19 +7665,26 @@ static void input_line(struct bc_server *s, struct bc_input_conn *conn, const ch
         return;
     }
     case BC_INPUT_PTR: {
-        double lx, ly, ox, oy;
+        double lx, ly, ox, oy, px = in.x, py = in.y;
+        uint32_t n = pic_scale_n(x);
         struct bc_surface *target;
         if (s->dragout.n && s->dragout.window == x) return;   /* the desktop's drag of it */
         /* A locked pointer does not move: only relative motion. */
         if (window_locked(s, x)) return;
+        /* ADR 0242: Blit's desktop pixels in the program's logical ones;
+           every hit test below is logical. */
+        if (n != BC_SCALE_ONE) {
+            px = in.x * BC_SCALE_ONE / n;
+            py = in.y * BC_SCALE_ONE / n;
+        }
         if (s->buttons_down && s->ptr_focus) {
             /* The implicit grab: the surface a button went down on. */
             target = s->ptr_focus;
             surface_origin(target, &ox, &oy);
-            lx = in.x - ox;
-            ly = in.y - oy;
+            lx = px - ox;
+            ly = py - oy;
         } else {
-            target = pointer_target(s, x, in.x, in.y, &lx, &ly);
+            target = pointer_target(s, x, px, py, &lx, &ly);
         }
         /* X's stacking first, so X finds the window Blit's pointer is over. */
         x_pointer_over(s, target);
@@ -12114,7 +12401,7 @@ static void reannounce(struct bc_server *s)
             if (x->initial) announce_popup(x);
             continue;
         }
-        bc_wire_line(w, "WINDOW popup %u %u %d %d", x->id, p->id, p->gx + x->px, p->gy + x->py);
+        popup_say(x);
         if (x->hidden) bc_wire_line(w, "WINDOW hide %u", x->id);
         ++windows;
     }
@@ -12485,6 +12772,8 @@ int main(int argc, char **argv)
                           BC_VERSION(1, xdg_activation_v1_interface), &server, bind_activation) ||
         !wl_global_create(server.display, &wp_viewporter_interface,
                           BC_VERSION(1, wp_viewporter_interface), &server, bind_viewporter) ||
+        !wl_global_create(server.display, &wp_fractional_scale_manager_v1_interface,
+                          BC_VERSION(1, wp_fractional_scale_manager_v1_interface), &server, bind_fractional) ||
         !wl_global_create(server.display, &zwp_idle_inhibit_manager_v1_interface,
                           BC_VERSION(1, zwp_idle_inhibit_manager_v1_interface), &server, bind_inhibit_manager)) {
         logf_("could not create the globals");

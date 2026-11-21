@@ -424,6 +424,73 @@ static void channel(void)
     close(sv[1]);
 }
 
+/* ADR 0242: the scale's conversions, against proto/rounding.py's rules,
+   exhaustively over every step 100-400 and widths 1-8192: the configured
+   size covers the body by at most ceil(S) - 1 and is the smallest that
+   does; a program's own size said back configures it again; edges tile;
+   limits keep a size within them within the program's; 100% is the
+   identity everywhere. */
+static int32_t rha_ref(int64_t num, int64_t den)
+{
+    return (int32_t)(num >= 0 ? (2 * num + den) / (2 * den) : -((-2 * num + den) / (2 * den)));
+}
+
+static void scale(void)
+{
+    uint32_t pct;
+    long cover = 0, minimal = 0, echo = 0, tile = 0, limits = 0, worst_excess = 0;
+    EXPECT(bc_scale_n(100) == 120 && bc_scale_n(125) == 150 && bc_scale_n(150) == 180 && bc_scale_n(400) == 480 &&
+           bc_scale_n(0) == 120 && bc_scale_n(99) == 120, "pct to 120ths");
+    EXPECT(bc_scale_int(120) == 1 && bc_scale_int(150) == 2 && bc_scale_int(240) == 2 && bc_scale_int(270) == 3,
+           "ceil(S)");
+    /* wire.md's examples at 150% (180) and 200% (240). */
+    EXPECT(bc_scale_configure(1000, 180) == 667 && bc_scale_configure(600, 180) == 400, "1000x600 at 150%%");
+    EXPECT(bc_scale_configure(1000, 240) == 500 && bc_scale_configure(600, 240) == 300, "1000x600 at 200%%");
+    EXPECT(bc_scale_configure(1001, 180) == 667, "the shown size said back at 150%%");
+    EXPECT(bc_scale_configure(0, 180) == 0, "0 stays 0");
+    EXPECT(bc_scale_edge(667, 180) == 1001 && bc_scale_edge(-5, 180) == -8 && bc_scale_edge(-10, 180) == -15 &&
+           bc_scale_edge(5, 180) == 8 && bc_scale_edge(12, 180) == 18 && bc_scale_edge(63, 180) == 95, "edges");
+    EXPECT(bc_scale_span(0, 33, 180) == 50 && bc_scale_span(33, 33, 180) == 49, "spans tile");
+    EXPECT(bc_scale_min(64, 180) == 96 && bc_scale_min(48, 180) == 72 && bc_scale_max(0, 180) == 0 &&
+           bc_scale_max(101, 180) == 151 && bc_scale_min(0, 180) == 0, "limits");
+    EXPECT(bc_scale_in_fixed(150, 180) == 100 * 256 && bc_scale_in_fixed(90, 180) == 60 * 256 &&
+           bc_scale_in_fixed(-3, 120) == -3 * 256, "points in");
+    for (pct = 100; pct <= 400; pct += 25) {
+        uint32_t n = bc_scale_n(pct);
+        int32_t k = bc_scale_int(n), W, w0, x;
+        for (W = 1; W <= 8192; ++W) {
+            int32_t w = bc_scale_configure(W, n), d = rha_ref((int64_t)w * n, 120);
+            if (d < W || d - W > k - 1) ++cover;
+            if (d - W > worst_excess) worst_excess = d - W;
+            if (w > 1 && rha_ref((int64_t)(w - 1) * n, 120) >= W) ++minimal;
+            if (bc_scale_min(W, n) != (int32_t)(((int64_t)W * n + 119) / 120)) ++limits;
+        }
+        for (w0 = 1; w0 < 5000; ++w0) {
+            int32_t mn = bc_scale_min(w0, n), mx = bc_scale_max(w0, n);
+            if (bc_scale_configure(rha_ref((int64_t)w0 * n, 120), n) != w0) ++echo;
+            /* A body at the program's minimum or maximum configures within it. */
+            if (bc_scale_configure(mn, n) < w0 || bc_scale_configure(mx, n) > w0) ++limits;
+            if (bc_scale_edge(w0, n) != rha_ref((int64_t)w0 * n, 120)) ++cover;
+        }
+        for (x = 0; x < 300; ++x)
+            for (W = 1; W < 60; ++W)
+                if (bc_scale_edge(x, n) + bc_scale_span(x, W, n) != bc_scale_edge(x + W, n) ||
+                    bc_scale_span(x, W, n) + bc_scale_span(x + W, 7, n) != bc_scale_span(x, W + 7, n))
+                    ++tile;
+        if (pct == 100)
+            for (W = -300; W <= 8192; ++W)
+                if (bc_scale_edge(W, n) != W || bc_scale_configure(W, n) != W || bc_scale_min(W, n) != W ||
+                    bc_scale_max(W, n) != W || bc_scale_in_fixed(W, n) != W * 256)
+                    ++cover;
+    }
+    EXPECT(cover == 0, "%ld sizes not covered within ceil(S) - 1, or 100%% not the identity", cover);
+    EXPECT(minimal == 0, "%ld configured sizes not the smallest that covers", minimal);
+    EXPECT(echo == 0, "%ld own sizes said back configured another size", echo);
+    EXPECT(tile == 0, "%ld placements by edges leave a gap or overlap", tile);
+    EXPECT(limits == 0, "%ld limits that do not keep a size within the program's", limits);
+    EXPECT(worst_excess == 3, "the largest excess is %ld, not 3 (at 400%%)", worst_excess);
+}
+
 int main(void)
 {
     hello();
@@ -431,8 +498,9 @@ int main(void)
     lines();
     input();
     convert();
+    scale();
     channel();
     if (failures) return 1;
-    printf("COMPOSITOR_WIRE_UNIT_OK hello(inhibit=1) layout(scale%%) text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first)\n");
+    printf("COMPOSITOR_WIRE_UNIT_OK hello(inhibit=1) layout(scale%%) scale(configure,echo,edges,limits,in;100-400x8192) text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first)\n");
     return 0;
 }
