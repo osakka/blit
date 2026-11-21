@@ -653,7 +653,7 @@ enum {
     BC_LINE_UNKNOWN = 0,
     BC_LINE_SIZE,           /* WINDOW size <id> <w> <h> [fullscreen] [maximized] [activated] [tiled-*] */
     BC_LINE_OUTPUT,         /* WINDOW output <id> <w> <h> <mHz> [<name>] */
-    BC_LINE_LAYOUT,         /* WINDOW layout <name> <x> <y> <w> <h> <mHz> */
+    BC_LINE_LAYOUT,         /* WINDOW layout <name> <x> <y> <w> <h> <mHz> [<scale%>] */
     BC_LINE_LAYOUT_END,     /* WINDOW layout end */
     BC_LINE_PRIMARY,        /* WINDOW primary <name> */
     BC_LINE_CLOSE,          /* WINDOW close <id> */
@@ -692,6 +692,7 @@ typedef struct {
     unsigned tiled;         /* BC_TILED_*: the edges the desktop put it against */
     int on;                 /* WINDOW lock */
     uint32_t refresh_mhz;   /* WINDOW output, WINDOW layout (0 unknown) */
+    uint32_t scale_pct;     /* WINDOW layout: the display's program scale, 100-400 by 25 (ADR 0242) */
     int32_t x, y;           /* WINDOW layout */
     char name[BC_NAME_BYTES + 1];   /* WINDOW layout, WINDOW primary */
     uint64_t sequence;      /* FRAME release */
@@ -1039,8 +1040,17 @@ static int bc_parse_line(const char *line, BcLine *out)
             bc_read_u32(&p, BC_SIZE_MAX, &a) != 0 || *p++ != ' ' ||
             bc_read_u32(&p, BC_SIZE_MAX, &b) != 0 || *p++ != ' ' ||
             bc_read_u32(&p, 1000000UL, &out->refresh_mhz) != 0 || a == 0 || b == 0 ||
-            x + a > BC_SIZE_MAX || y + b > BC_SIZE_MAX || (*p != '\0' && *p != '\n'))
+            x + a > BC_SIZE_MAX || y + b > BC_SIZE_MAX)
             return out->kind = BC_LINE_UNKNOWN;
+        /* ADR 0242: an optional program scale, a percentage, 100 to 400 in
+           steps of 25; absent is 100. */
+        out->scale_pct = 100;
+        if (*p == ' ') {
+            ++p;
+            if (bc_read_u32(&p, 400, &out->scale_pct) != 0 || out->scale_pct < 100 || out->scale_pct % 25)
+                return out->kind = BC_LINE_UNKNOWN;
+        }
+        if (*p != '\0' && *p != '\n') return out->kind = BC_LINE_UNKNOWN;
         out->x = (int32_t)x;
         out->y = (int32_t)y;
         out->width = (int32_t)a;

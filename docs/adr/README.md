@@ -267,6 +267,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0239 — Control strings are read by character, C1 is one control raw or encoded, and CAN/SUB end a string](0239-control-strings-read-by-character.md)
 - [0240 — Bold keeps the shape of a glyph that fills its cell](0240-bold-keeps-a-cell-filling-glyphs-shape.md)
 - [0241 — Arabic is shaped as words and drawn as slices](0241-arabic-shaped-as-words-and-drawn-as-slices.md)
+- [0242 — A program scale per display, pixels on the wire](0242-hidpi-program-scale.md)
 
 ## Status
 

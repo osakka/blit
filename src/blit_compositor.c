@@ -144,6 +144,7 @@ struct bc_output {
     int32_t x, y;                     /* its place in the desktop's layout; 0,0 without one */
     int32_t width, height;
     uint32_t refresh_mhz;             /* 0: unknown (a layout's display may say so) */
+    uint32_t scale_pct;               /* its program scale, 100-400 (ADR 0242); 100 without a layout */
     int windows;                      /* windows on it */
     int number;                       /* without a layout: BLIT-<number>, from 1 */
     char name[BC_NAME_BYTES + 1];     /* wl_output's and xdg_output's name, so X's */
@@ -159,6 +160,7 @@ struct bc_display {
     char name[BC_NAME_BYTES + 1];
     int32_t x, y, width, height;
     uint32_t refresh_mhz;
+    uint32_t scale_pct;
 };
 
 /* A wl_region: its add and subtract rectangles in order. A point is in it
@@ -4666,6 +4668,29 @@ static void output_send_geometry(struct bc_output *o, struct wl_resource *r)
                             WL_OUTPUT_TRANSFORM_NORMAL);
 }
 
+/* ADR 0242: what a client is told of an output's scale. Xwayland is told 1
+   and real pixels, always (X's coordinates do not change with the scale);
+   every other client the whole-number scale at or above the display's,
+   and a logical size of its pixels over the scale. */
+static int output_is_x(struct wl_resource *r)
+{
+    return g_server && g_server->x.client && wl_resource_get_client(r) == g_server->x.client;
+}
+
+static int32_t output_int_scale(const struct bc_output *o, struct wl_resource *r)
+{
+    uint32_t pct = o->scale_pct ? o->scale_pct : 100;
+    return output_is_x(r) ? 1 : (int32_t)((pct + 99) / 100);
+}
+
+static void output_logical_size(const struct bc_output *o, struct wl_resource *r, int32_t *w, int32_t *h)
+{
+    uint32_t pct = o->scale_pct ? o->scale_pct : 100;
+    if (output_is_x(r) || pct == 100) { *w = o->width; *h = o->height; return; }
+    *w = (int32_t)(((int64_t)o->width * 100 + pct / 2) / pct);
+    *h = (int32_t)(((int64_t)o->height * 100 + pct / 2) / pct);
+}
+
 static void output_send_mode(struct bc_output *o, struct wl_resource *r)
 {
     wl_output_send_mode(r, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED, o->width,
@@ -4674,8 +4699,10 @@ static void output_send_mode(struct bc_output *o, struct wl_resource *r)
 
 static void xdg_output_send_place(struct bc_output *o, struct wl_resource *r)
 {
+    int32_t w, h;
+    output_logical_size(o, r, &w, &h);
     zxdg_output_v1_send_logical_position(r, o->x, o->y);
-    zxdg_output_v1_send_logical_size(r, o->width, o->height);
+    zxdg_output_v1_send_logical_size(r, w, h);
 }
 
 /* The output's place or mode changed: every client that bound it told,
@@ -4687,6 +4714,8 @@ static void output_changed(struct bc_output *o, int moved)
     wl_resource_for_each(r, &o->resources) {
         if (moved) output_send_geometry(o, r);
         output_send_mode(o, r);
+        if (wl_resource_get_version(r) >= WL_OUTPUT_SCALE_SINCE_VERSION)
+            wl_output_send_scale(r, output_int_scale(o, r));
     }
     wl_resource_for_each(r, &o->xdg_resources) {
         xdg_output_send_place(o, r);
@@ -4751,7 +4780,7 @@ static void bind_output(struct wl_client *client, void *data, uint32_t version, 
     wl_list_insert(&o->resources, wl_resource_get_link(r));
     output_send_geometry(o, r);
     if (version >= WL_OUTPUT_SCALE_SINCE_VERSION)
-        wl_output_send_scale(r, 1);
+        wl_output_send_scale(r, output_int_scale(o, r));
     if (version >= WL_OUTPUT_NAME_SINCE_VERSION)
         wl_output_send_name(r, o->name);
     if (version >= WL_OUTPUT_DESCRIPTION_SINCE_VERSION)
@@ -4779,6 +4808,7 @@ static struct bc_output *output_create(struct bc_server *s, const char *name, in
     o->width = w;
     o->height = h;
     o->refresh_mhz = mhz;
+    o->scale_pct = 100;
     o->number = wl_list_length(&s->outputs) + 1;
     if (name) snprintf(o->name, sizeof(o->name), "%s", name);
     else snprintf(o->name, sizeof(o->name), "BLIT-%d", o->number);
@@ -4928,6 +4958,7 @@ static void layout_line(struct bc_server *s, const BcLine *l)
     s->staged[i].width = l->width;
     s->staged[i].height = l->height;
     s->staged[i].refresh_mhz = l->refresh_mhz;
+    s->staged[i].scale_pct = l->scale_pct ? l->scale_pct : 100;
 }
 
 /* `WINDOW layout end`: the set applied (the section's comment). */
@@ -4966,12 +4997,16 @@ static void layout_end(struct bc_server *s)
                 logf_("display %s: no global (out of memory)", d->name);
                 continue;
             }
+            o->scale_pct = d->scale_pct;
             logf_("display %s: %dx%d at %d,%d, %u mHz (new)", d->name, d->width, d->height, d->x, d->y,
                   d->refresh_mhz);
             changed = 1;
         } else if (o->x != d->x || o->y != d->y || o->width != d->width || o->height != d->height ||
-                   o->refresh_mhz != d->refresh_mhz) {
+                   o->refresh_mhz != d->refresh_mhz || o->scale_pct != d->scale_pct) {
             int moved = o->x != d->x || o->y != d->y;
+            if (o->scale_pct != d->scale_pct)
+                logf_("display %s: program scale %u%%", d->name, d->scale_pct);
+            o->scale_pct = d->scale_pct;
             o->follow = 1;
             o->from_x = o->x;
             o->from_y = o->y;

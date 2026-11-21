@@ -424,6 +424,21 @@ def layout_part(desk, standin, env, display, work, log):
         desk.send('WINDOW output 14 1920 1080 75000 DP-2')
         wait_for(lambda: 'window 14: display DP-2' in settled(log), lambda: 'the named display:\n' + why())
         wait_for(lambda: 'STANDIN enter DP-2 1920x1080@75000' in printed(), lambda: 'not on DP-2:\n' + why())
+        # ADR 0242: DP-1 at a program scale of 150%: told scale 2 and a
+        # logical size of its pixels over 1.5, in place; then 200%.
+        said = len(printed())
+        send_set('DP-1 2560 0 1920 1080 75000 150', 'DP-2 4480 0 1920 1080 75000')
+        for want in ('STANDIN output scale 2',
+                     'STANDIN layout DP-1 at 2560,0 mode 1920x1080@75000 logical 2560,0 1280x720 DP-1\n'):
+            wait_for(lambda: want in printed()[said:], lambda: 'no %r at 150%%:\n%s' % (want, why()))
+        said = len(printed())
+        send_set('DP-1 2560 0 1920 1080 75000 200', 'DP-2 4480 0 1920 1080 75000')
+        wait_for(lambda: 'STANDIN layout DP-1 at 2560,0 mode 1920x1080@75000 logical 2560,0 960x540 DP-1\n'
+                 in printed()[said:], lambda: 'no 960x540 at 200%:\n' + why())
+        check('removed' not in printed()[said:] and 'STANDIN output name' not in printed()[said:],
+              lambda: 'a scale change removed or added an output:\n' + printed()[said:])
+        check('display DP-1: program scale 150%' in settled(log) and 'display DP-1: program scale 200%' in settled(log),
+              lambda: 'the log does not say the program scales:\n' + settled(log))
         for want in ('display BLIT-1: gone', 'display HDMI-A-1: gone',
                      'display HDMI-A-1: 2560x1440 at 1920,0, 0 mHz (new)', 'layout: 2 displays, 6400x1080'):
             check(want in settled(log), lambda: 'the log does not say %r:\n%s' % (want, settled(log)))
@@ -445,7 +460,7 @@ def layout_part(desk, standin, env, display, work, log):
             client.wait()
     return ('before=BLIT-1@0,0 primary+set->BLIT-1,2 removed DP-1@0,0 HDMI-A-1@1920,0(0 mHz) window->HDMI-A-1 '
             'output->DP-1 repeat=nothing moved+retimed=in place gone=HDMI-A-1 same-mode=stays on DP-1 '
-            'named=DP-2')
+            'named=DP-2 scale=150%->2,1280x720 200%->960x540 in place')
 
 
 def activation_part(desk, standin, env, display, work, log):

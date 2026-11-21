@@ -2637,8 +2637,17 @@ It speaks the frame channel above as a producer, with these additions.
     space ("X programs", below). Without a layout, as before 0.3.88: one
     `wl_output` per distinct mode, all at 0,0; until the first, a window is
     on a 1920x1080 60 Hz output.
-  - `WINDOW layout <name> <x> <y> <w> <h> <mHz>` (0.3.88), one per display,
-    then `WINDOW layout end`: the desktop's displays. `<name>` is the
+  - `WINDOW layout <name> <x> <y> <w> <h> <mHz> [<scale%>]` (0.3.88; the
+    scale since 0.3.130, ADR 0242), one per display, then `WINDOW layout
+    end`: the desktop's displays. `<scale%>`, optional, is the display's
+    program scale, 100 to 400 in steps of 25 (absent: 100): Wayland
+    programs on it are told the whole-number scale at or above it
+    (`wl_output.scale`) and a logical size of its pixels over the scale
+    (`xdg_output`); Xwayland is told 1 and real pixels, so X does not
+    change. A change of scale alone is applied in place. Send it only to
+    a compositor of 0.3.130 or later: an earlier one takes a seven-word
+    line as unknown, and the display as gone. (Sizes, fractional scale and
+    X's own scale follow in later steps of ADR 0242.) `<name>` is the
     desktop's own name for the display (one word, at most 63 bytes),
     `<x> <y>` its place in the desktop's pixels with the origin at the top
     left of the whole desktop (not negative, the display inside 32767),

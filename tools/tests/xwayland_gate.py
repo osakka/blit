@@ -1849,10 +1849,17 @@ def x_layout_part(desk, lines_to, printed, log):
     # place there; X has one display.
     send_set('DP-1 0 0 1920 1080 0')
     displays(['monitor DP-1 0,0 1920x1080 primary', 'primary DP-1', 'root 1920x1080', 'where main 0,0 400x300'])
+    # ADR 0242: DP-1 at a program scale of 200%: X is told scale 1 and real
+    # pixels, so what X sees does not change.
+    send_set('DP-1 0 0 1920 1080 0 200')
+    wait_for(lambda: 'display DP-1: program scale 200%' in c.log(), lambda: 'the scale was not taken:\n' + c.why())
+    time.sleep(0.5)
+    displays(['monitor DP-1 0,0 1920x1080 primary', 'primary DP-1', 'root 1920x1080', 'where main 0,0 400x300'])
     return ('layout: before=BLIT-1@0,0,no primary set=DP-1@0,0(0 mHz)+HDMI-A-1@1920,0 primary=HDMI-A-1->DP-1 '
             'root=4480x1440 window 1 followed->%d,%d output->DP-1 fullscreen->HDMI-A-1 origin 2560x1440 '
             'panel %d 1800,1000->1720,980 inside DP-1, 300x150->1620,930, ->HDMI-A-1 3540,930, far corner presses '
-            'swapped=window 1 with HDMI-A-1->0,0 gone=HDMI-A-1->window 1 to DP-1' % (mx + 1920, my, pid))
+            'swapped=window 1 with HDMI-A-1->0,0 gone=HDMI-A-1->window 1 to DP-1 scale200=X unchanged'
+            % (mx + 1920, my, pid))
 
 
 def x_part(compositor, standin, server, work, wl_standin=None):
