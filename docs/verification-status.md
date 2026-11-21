@@ -9,6 +9,28 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-21: 0.3.131 icons at U+101000; one Arabic face
+
+- **Blit's icons moved to U+101000-U+101495 (ADR 0243).** The Glyph
+  Protocol reserved U+100000-U+1003FF; every icon moved by +0x1000, the
+  catalogue's shape unchanged (Hibr reads it by id). The old range draws
+  the same glyphs through one mapping until a later release drops it;
+  `GET /v1/fonts/icons` says `deprecated_range`. icon_transition_gate holds
+  every old codepoint to the new one's pixels, CPU and GPU, and fails
+  without the mapping.
+- **Blit Arabic Modern retired (ADR 0243).** Arabic is shaped as words in
+  Noto Naskh Arabic alone; the `arabic` setting, the per-cell companion,
+  the FreeMono-derived face and the blit-font-sources package are gone.
+  `active.arabic` reports the face; a stored `font.arabic` is ignored.
+- **Gates:** `gates_all` 204/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on dfe33a4c, the shipped commit, first pass, in a quiet window
+  hibr held (the first minutes beside Longwire's light `make check`).
+- **Release environment (Debian 13):** the release build's gates passed.
+- **Live, the mini PC:** the update was verified; the smoke check passed at
+  the login screen (2 displays up, frames advancing 10 -> 22).
+- **Published** to hibr-apt under HOLD/done with my-vpn-ea. The Blit pane
+  0.1.40 (no Arabic row) is committed in hibr-apps (b951f03).
+
 ## 2026-11-21: 0.3.130 HiDPI, idle inhibit, one font registry
 
 - **A program scale per display (ADR 0242, Gitea #170).** The layout's
