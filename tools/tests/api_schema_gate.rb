@@ -46,7 +46,7 @@ font_active = schema.dig('components','schemas','FontProfiles','properties','act
 raise 'font size policy observation missing' unless
   %w[sizing size_px cell_pixels].all? { |key| font_active.fetch('required').include?(key) } &&
   font_active.dig('properties','sizing','enum') == %w[scale pixels]
-raise "unexpected path count #{paths.length}" unless paths.length == 54
+raise "unexpected path count #{paths.length}" unless paths.length == 57
 # ADR 0233: the Arabizi engine's dry run.
 raise 'arabizi convert contract missing' unless
   paths.dig('/v1/input/arabizi/convert','post','operationId') == 'convertArabizi' &&
@@ -67,6 +67,23 @@ raise 'font icon discovery contract missing' unless
   schema.dig('components','schemas','FontIconCatalogue','required').sort ==
     %w[revision version profiles columns namespace license icons text_glyphs retired cell_geometry].sort &&
   schema.dig('components','schemas','FontIcon','properties','signal_level','maximum') == 4
+# ADR 0243 step 3: glyph sets by set and name -- the listing, a page, a
+# lookup; the address grammar as the draft writes it; 128 a page; retired
+# is its own answer; GET /v1/fonts reports the sets.
+glyph_schemas = schema.dig('components','schemas')
+raise 'glyph sets contract missing' unless
+  paths.dig('/v1/fonts/sets','get','operationId') == 'listGlyphSets' &&
+  paths.dig('/v1/fonts/sets/{set_id}','get','operationId') == 'listGlyphSetNames' &&
+  paths.dig('/v1/fonts/sets/{set_id}/{name}','get','operationId') == 'lookUpGlyphName' &&
+  paths.dig('/v1/fonts/sets/{set_id}/{name}','get','responses','410','content','application/problem+json','schema','$ref') ==
+    '#/components/schemas/GlyphNameRetired' &&
+  glyph_schemas.dig('GlyphSetId','pattern') == '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' && glyph_schemas.dig('GlyphSetId','maxLength') == 32 &&
+  glyph_schemas.dig('GlyphName','pattern') == '^[a-z0-9][a-z0-9_-]*$' && glyph_schemas.dig('GlyphName','maxLength') == 96 &&
+  glyph_schemas.dig('GlyphSetPage','properties','names','maxItems') == 128 &&
+  paths.dig('/v1/fonts/sets/{set_id}','get','parameters').any? { |p| p['name'] == 'limit' && p.dig('schema','maximum') == 128 } &&
+  glyph_schemas.dig('GlyphSet','required') == %w[id owner scope version count faces] &&
+  glyph_schemas.dig('GlyphSet','properties','scope','enum') == %w[portable terminal-local] &&
+  glyph_schemas.dig('FontProfiles','required').include?('sets')
 # ADR 0212: a catalogue a client can map dynamically -- every cell_geometry
 # entry typed with what it is and which pens to set, a revision, an ETag and
 # a conditional request.

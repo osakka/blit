@@ -8,7 +8,9 @@
   `src/`, `/v1/fonts` reporting it; every font gate's output byte for byte
   as before (`font_registry_gate`). Step 2, the Glyph Protocol's `s` and
   `q`, built in 0.3.133 (below, "Step 2 as built"; `glyph_protocol_gate`).
-  Step 3 is still a draft
+  Step 3's set level, the amendment's registry `sets` and the HTTP lookup,
+  built in 0.3.134 (below, "Step 3's set level as built";
+  `glyph_sets_gate`); its in-band `names` capability is still a draft
 - Date: 2026-11-21
 - Scope: the font registry (`assets/fonts/`), the raster's stack
   (`src/blit_raster.c`, `src/blit_font.c`), `/v1/fonts`, the terminal
@@ -141,6 +143,81 @@ in `docs/terminal.md` ("Glyph Protocol").
   ASCII, an unknown verb, or an `s`, `q` or `c` over 1024 bytes gets no
   reply.
 
+## Step 3's set level as built (0.3.134)
+
+The amendment below, "A set is a table of names, not a face", built as far
+as HTTP; the in-band verbs (`q ; name=`, `n`) and the `names` capability
+are not, and nothing in band changed.
+
+- **The registry.** `fonts.source.json` has a `sets` level: the registered
+  owner tokens (`blit`, `emoji`, `nerd`), the two scopes, and one entry per
+  names source -- `blit` (owner `blit`, scope `terminal-local`, face
+  `blit-icons`, names the catalogue's `icons`, `text_glyphs` and
+  `cell_geometry`, version `sha256`: the catalogue's SHA-256 as packaged,
+  its revision) and `nerd` (owner `nerd`, scope `portable`, face
+  `symbols-nerd-font-mono`, names `nerd-glyphnames-v3.4.0.json` split by
+  prefix, version `3.4.0`). The catalogue is unchanged.
+- **Derived, not listed.** `tools/fonts/build-font-registry.py` derives the
+  set ids from the sources (`blit`, and one `nerd-<prefix>` per prefix the
+  Nerd file has: 17), checks every name against the draft's grammar (one
+  name per glyph per set, no codepoint in U+100000-U+100495, the Nerd
+  file's own METADATA version equal to the registry's), and writes the
+  sources, the 18 sets and the retired names to `src/blit_font_registry.h`.
+  Codepoint ranges are derived from the names at start and reported with
+  a set's listing, never declared.
+- **Names at run time, not compiled in.** `src/blit_glyph_sets.h` reads the
+  two packaged names files once at start into one table sorted by set and
+  name (bytewise), resolves aliases (a glyph's canonical name is the
+  bytewise smallest of its names in its set) and the ranges, and answers
+  every lookup by binary search. Compiling the names in was the
+  alternative: it would duplicate the packaged catalogue the blit set's
+  version must hash (the same file `GET /v1/fonts/icons` serves and Hibr
+  reads), and every catalogue edit would need the header regenerated. The
+  cost, measured: 11,939 names (830 live and 345 retired in `blit`, 10,764 in the Nerd sets) in a table of 474 KB (24-byte records, a names pool, the replacements and ranges); about 16 ms once at start in the tcc build (13 ms read outside the server, 7-8 ms built with gcc -O2; 3 ms of it the catalogue's SHA-256), and about 0.6 MB more resident (24.4 against 23.9 MB at idle beside 0.3.133); a lookup is a binary search. A source that cannot be read is not
+  served and the diagnostics log says why; the server starts.
+- **HTTP.** `GET /v1/fonts` gains `sets` (`{id, owner, scope, version,
+  count, faces}`); `GET /v1/fonts/sets` lists them; `GET
+  /v1/fonts/sets/{set}` pages a set's listed names (at most 128 a page,
+  `after`, `limit`, `more`), with its ranges; `GET
+  /v1/fonts/sets/{set}/{name}` answers a record (`codepoints`, `alias_of`,
+  `deprecated` and `replaced_by`, `tile`), a retired name a 410 `retired`.
+  The grammar is checked before any lookup: outside it, a 400
+  `malformed_query` with one fixed body (nothing echoed); `unknown_set` and
+  `unknown_name` are 404s. Authenticated like every route; read-only.
+- **Where the data changed the draft.** The draft's registry example had
+  `"retired_names": []`, assuming the catalogue's `retired` list held the
+  names. It holds codepoint ranges only (43 ranges, 345 codepoints), and
+  the catalogue's history shows 345 ids published and since removed --
+  exactly one at each of those codepoints: the 16 large phone icons
+  (0.3.5), the 288 colourways of non-folder file kinds (0.3.8) and the 35
+  Slate dark glyphs (0.3.39, ADR 0211). Section 6 says a terminal-local
+  set's retired names are answered retired for good, never unknown, so
+  the registry carries all 345, each with the codepoint it had; a
+  colourway is `replaced_by` its kind's one look (`file-<kind>-classic-<side>`,
+  as 0.3.8's notes say every colour slot drew it), a Slate dark glyph its
+  Slate light one (which draws both since ADR 0211), the phones nothing.
+  The scope is spelled `terminal-local` everywhere (the draft's JSON
+  example said `terminal`). The registry's version rule for the catalogue
+  is `sha256`; the retired names are in the registry, not the file, so a
+  change to them alone would not change the version -- they change only
+  with a catalogue change that removes ids. HTTP pages take the draft's
+  128-entry bound; its 4096-octet bound is the in-band frame's. `emoji` is
+  registered as an owner but not served: `emoji-test.txt` is not in the
+  package.
+- **The gate.** `glyph_sets_gate` reads the catalogue, the Nerd file and
+  the registry's retired names itself and holds the server to them: the
+  sets, counts and versions in `GET /v1/fonts` and `GET /v1/fonts/sets`;
+  every set paged through (every listed name, codepoint, alias, tile and
+  the ranges); every name looked up, deprecated and retired ones included;
+  the retired names equal to the catalogue's retired codepoints and, with
+  the history present, every id the catalogue ever published live or
+  retired; the 11 clashes per set, with no `-`/`_` folding; the grammar
+  (uppercase, too long, empty, bad hyphens, separators, encoded and raw
+  control and non-ASCII bytes, bad queries) one fixed 400; the paging
+  bounds; 404 `unknown_set` and `unknown_name`, 410 `retired`; the bearer
+  token; 405 for other methods. It fails on 0.3.133 (no `sets`).
+  `font_registry_gate` prints the same line as before.
+
 ## Decided (the owner's, 2026-11-21)
 
 - **Blit's icon codepoints: decided (the owner, 2026-11-21), built in
@@ -190,7 +267,7 @@ in `docs/terminal.md` ("Glyph Protocol").
     an installed copy overlaps no file. hibr-apt should keep the package while it serves a
     `blit` of 0.3.130 or earlier, the GPL source of that release's face.
 
-## Amendment (DRAFT, 2026-11-21): the set level and the standard path
+## Amendment (2026-11-21; the set level built in 0.3.134, the in-band verbs still a draft): the set level and the standard path
 
 - **A set is a table of names, not a face.** One file declares both:
   `fonts.source.json` gains `sets` (id, owner, scope, faces, names

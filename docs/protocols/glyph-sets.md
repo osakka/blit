@@ -1,11 +1,16 @@
 # Glyph sets: looking a glyph up by set and name
 
-> **Status: DRAFT. Not implemented.** Blit does not answer any of this
-> yet. Step 2 of ADR 0243 is built (0.3.133): Blit answers the Glyph
-> Protocol's own `s` (`fmt=` empty, no `cap`) and `q ; cp=`, following
-> section 9 below and section 8's no-echo and fixed-alphabet rules
-> ([terminal reference](../terminal.md#glyph-protocol));
-> it does not list `names`, and nothing here (`name`, `n`) is answered.
+> **Status: DRAFT; the set level is built, the in-band capability is
+> not.** From 0.3.134 Blit's registry has the `sets` level of section 3.2
+> and serves its sets, names, aliases, deprecations and retirements over
+> HTTP (`GET /v1/fonts/sets`, [API guide](../api.md#glyph-sets);
+> ADR 0243, "Step 3's set level as built"), by section 4's grammar and
+> section 6's lifetime rules. Nothing in band is answered: Blit does not
+> list `names`, and `q ; name=` and `n` are not implemented. Step 2 of
+> ADR 0243 is built (0.3.133): Blit answers the Glyph Protocol's own `s`
+> (`fmt=` empty, no `cap`) and `q ; cp=`, following section 9 below and
+> section 8's no-echo and fixed-alphabet rules
+> ([terminal reference](../terminal.md#glyph-protocol)).
 > This document is the proposal behind step 3 of
 > [ADR 0243](../adr/0243-glyph-multiplexing.md). It is written as an
 > optional capability, `names`, of the Glyph Protocol, to be offered to
@@ -80,7 +85,7 @@ reports. Registering a new owner token is a change to this table.
 | --- | --- | --- | --- | --- | --- |
 | `nerd` | `nerd-cod`, `nerd-custom`, `nerd-dev`, `nerd-extra`, `nerd-fa`, `nerd-fae`, `nerd-iec`, `nerd-indent`, `nerd-indentation`, `nerd-linux`, `nerd-md`, `nerd-oct`, `nerd-pl`, `nerd-ple`, `nerd-pom`, `nerd-seti`, `nerd-weather` | Nerd Fonts' `glyphnames.json` for the release | the Nerd name `<prefix>-<rest>` is the address `nerd-<prefix>/<rest>`, unchanged otherwise | portable | the Nerd Fonts release, `3.4.0` |
 | `emoji` | `emoji` | Unicode's `emoji-test.txt`, entries marked `fully-qualified` or `component` | section 3.3 | portable | the Emoji version, `18.0` |
-| `blit` | `blit` | Blit's icon catalogue, its `icons`, `text_glyphs` and `cell_geometry` entries | the entry's `id`, unchanged | terminal-local | the catalogue's revision (SHA-256 of the packaged file) |
+| `blit` | `blit` | Blit's icon catalogue, its `icons`, `text_glyphs` and `cell_geometry` entries, and the retired names Blit's registry carries | the entry's `id`, unchanged | terminal-local | the catalogue's revision (SHA-256 of the packaged file) |
 
 Blit's catalogue has 830 ids: 554 icons, 38 text glyphs and 238 cell
 geometry pieces (window chrome). They share one namespace (every id is
@@ -90,6 +95,13 @@ have 830 distinct codepoints, so the set has no aliases. One icon,
 `hibr-pen`, also has a monochrome text form at U+270E (its `text_alias`);
 a lookup answers its own codepoint, U+101001, and this version of the
 protocol does not report the text form.
+
+The catalogue's `retired` list keeps codepoints, not names (43 ranges,
+345 codepoints). The ids that held them -- the 16 large phone icons, the
+288 colourways of non-folder file kinds and the 35 Slate dark glyphs --
+are in the catalogue's history, one at each retired codepoint, and are the
+set's retired names (section 6): Blit's registry carries them, since the
+catalogue's shape is frozen.
 
 Nerd Fonts' sets are taken as the file spells them, including its two
 indent prefixes (`indent` and `indentation`): a terminal implementing
@@ -118,17 +130,26 @@ declared in one place. The catalogue
 changed in any way: Hibr reads it by id, and its keys, ids and
 `codepoint` field stay as they are.
 
+As built in 0.3.134 (shortened):
+
 ```json
 "sets": {
-  "adr": "ADR 0243 step 3: every glyph set Blit answers for, by set/name",
+  "adr": "ADR 0243 step 3, the set level ...",
+  "owners": ["blit", "emoji", "nerd"],
+  "scopes": {"portable": "...", "terminal-local": "..."},
   "blit": {
     "owner": "blit",
-    "scope": "terminal",
+    "scope": "terminal-local",
     "faces": ["blit-icons"],
     "names": {"file": "icons/catalogue.json", "format": "blit-catalogue",
               "lists": ["icons", "text_glyphs", "cell_geometry"]},
-    "version": "sha256-of-names",
-    "retired_names": []
+    "version": "sha256",
+    "retired_names": {
+      "file-asm-amber-left": {"codepoint": "1011B9", "replaced_by": ["file-asm-classic-left"]},
+      "phone-off-large-left": {"codepoint": "101023"},
+      "slate-dark-close": {"codepoint": "101280", "replaced_by": ["slate-light-close"]},
+      ...
+    }
   },
   "nerd": {
     "owner": "nerd",
@@ -137,15 +158,21 @@ changed in any way: Hibr reads it by id, and its keys, ids and
     "names": {"file": "nerd-glyphnames-v3.4.0.json", "format": "nerd-glyphnames",
               "split": "prefix"},
     "version": "3.4.0"
-  },
-  "emoji": {
-    "owner": "emoji",
-    "scope": "portable",
-    "faces": ["noto-color-emoji", "noto-emoji"],
-    "names": {"file": "../unicode/emoji-18.0/emoji-test.txt", "format": "unicode-emoji-test",
-              "statuses": ["fully-qualified", "component"]},
-    "version": "18.0"
   }
+}
+```
+
+The `emoji` entry is to be added once its names file is in the package
+(`assets/unicode` is not packaged today):
+
+```json
+"emoji": {
+  "owner": "emoji",
+  "scope": "portable",
+  "faces": ["noto-color-emoji", "noto-emoji"],
+  "names": {"file": "../unicode/emoji-18.0/emoji-test.txt", "format": "unicode-emoji-test",
+            "statuses": ["fully-qualified", "component"]},
+  "version": "18.0"
 }
 ```
 
@@ -156,23 +183,28 @@ changed in any way: Hibr reads it by id, and its keys, ids and
 - **Codepoint ranges are derived, not declared.** A Nerd set is not one
   range (`oct` runs from U+2665 to U+F533; `iec` is outside the Private
   Use Areas altogether), so ranges are computed from the names source
-  for the generated reference and never treated as authoritative.
+  and never treated as authoritative: Blit computes them from its table
+  at start and reports them with a set's listing (descriptive only).
 - **Retired names** live here, not in the catalogue (whose shape is
   frozen): an id removed from the catalogue is moved to `retired_names`
-  with what replaced it, and is answered as retired forever
-  (section 6).
+  with the codepoint it had (which the catalogue's `retired` list keeps)
+  and what replaced it, and is answered as retired forever (section 6).
 - **Names are available at run time.** The catalogue and the Nerd names
   file are already in the package (`/usr/lib/blit/fonts`); the server
   reads the names sources the registry names once, at start, into a
   sorted table, and answers from it. The generated header
-  (`src/blit_font_registry.h`) gains only the set list (id, names file,
-  format, faces), so no file is named twice. `emoji-test.txt` is not
+  (`src/blit_font_registry.h`) gains only the sources (key, owner,
+  scope, names file, format, version, faces), the derived set list, and
+  the retired names (which are in no names file), so no file is named
+  twice and no name a file holds is copied. `emoji-test.txt` is not
   packaged today; serving `emoji` needs it, or a names file generated
   from it, in the package.
 - **One answer everywhere.** `GET /v1/fonts` reports the sets (id,
-  scope, version, count, faces), a new `GET /v1/fonts/sets/{id}` serves
-  a set's names, and the in-band replies below are built from the same
-  table. A gate holds the three equal (section 10.3).
+  owner, scope, version, count, faces), `GET /v1/fonts/sets/{id}` serves
+  a set's names and `GET /v1/fonts/sets/{id}/{name}` a name's record
+  (built in 0.3.134), and the in-band replies below are to be built from
+  the same table. A gate holds them equal (section 10.3; for HTTP,
+  `glyph_sets_gate`).
 
 ### 3.3 The emoji name rule
 

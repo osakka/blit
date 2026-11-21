@@ -117,6 +117,14 @@ Nerd `custom-*` names belong to the pinned upstream Nerd catalogue; they are
 to the same character. Use the complete name and pinned version when
 resolving a Nerd symbol; do not infer a scalar from an icon's label.
 
+From 0.3.134 Blit answers that lookup itself, by **set and name** (ADR 0243
+step 3, [API guide](api.md#glyph-sets)): `GET /v1/fonts/sets/nerd-fa/bluetooth`
+is Font Awesome's U+F293, `nerd-md/bluetooth` Material Design's U+F00AF,
+`blit/bluetooth` Blit's own U+101006. The 17 Nerd categories are the sets
+`nerd-<prefix>` (names spelled as Nerd spells them after the prefix,
+version 3.4.0); Blit's catalogue is the set `blit`, its deprecated ids
+resolving with `replaced_by` and its retired ones answered `retired`.
+
 ## Special additions: the application contract
 
 The authoritative mapping is [icons/catalogue.json](../assets/fonts/icons/catalogue.json),
@@ -563,7 +571,8 @@ or physical conformance guarantees; internal issue #110 tracks the rest.
   semantic IDs, profile compatibility, one-cell allocation and signal levels;
   served by the existing discovery endpoint.
 - [Pinned Nerd glyph names](../assets/fonts/nerd-glyphnames-v3.4.0.json): all
-  names, aliases, scalar hex and UTF-8 characters; not a new HTTP endpoint.
+  names, aliases, scalar hex and UTF-8 characters; served by set and name
+  as the `nerd-*` glyph sets (`GET /v1/fonts/sets`).
 - [Generated native coverage](fonts/coverage.json): exact SHA256 and inclusive
   scalar ranges from each native font's best Unicode cmap. This is asset
   coverage, not runtime routing, fallback, ink or shaping conformance.

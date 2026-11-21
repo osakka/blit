@@ -205,6 +205,114 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/fonts/sets:
+    get:
+      tags: [terminals]
+      operationId: listGlyphSets
+      summary: The glyph sets Blit answers for by set and name
+      description: >-
+        ADR 0243 step 3 (docs/protocols/glyph-sets.md): every glyph set the
+        font registry declares and the server could read, in bytewise order
+        of id, the same list GET /v1/fonts reports as `sets`. A set is a
+        table of names, not a face. Takes no query.
+      responses:
+        '200':
+          description: The served sets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sets]
+                properties:
+                  sets:
+                    type: array
+                    items: {$ref: '#/components/schemas/GlyphSet'}
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/fonts/sets/{set_id}:
+    parameters:
+      - $ref: '#/components/parameters/GlyphSetId'
+    get:
+      tags: [terminals]
+      operationId: listGlyphSetNames
+      summary: A page of a glyph set's names
+      description: >-
+        The names the set lists, in bytewise order, at most 128 a page (the
+        draft's page bound; HTTP has no 4096-octet frame, so the entry
+        bound alone applies). Deprecated and retired names are not listed;
+        look them up. Aliases are listed, with `alias_of`. `after` starts
+        the page after that name, whether or not the set has it; `more`
+        says another page follows the last name listed. A set id outside
+        the grammar, a bad `after` or `limit`, a repeated or unknown
+        parameter is a 400 `malformed_query` whose body echoes nothing of
+        the request; a set this server does not serve is a 404
+        `unknown_set`.
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: {$ref: '#/components/schemas/GlyphName'}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 128, default: 128}
+      responses:
+        '200':
+          description: One page of names
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlyphSetPage'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/fonts/sets/{set_id}/{name}:
+    parameters:
+      - $ref: '#/components/parameters/GlyphSetId'
+      - name: name
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/GlyphName'}
+    get:
+      tags: [terminals]
+      operationId: lookUpGlyphName
+      summary: Look a glyph up by set and name
+      description: >-
+        One name's record, from the table the server read at start: its
+        codepoint, and what its set says of it (an alias's canonical name,
+        a deprecation and what replaces it, which tile of a multi-cell
+        picture it is). Names are compared exactly: no case folding, and
+        `-` and `_` are different characters (Nerd's `nerd-md/phone_off` is
+        not `nerd-md/phone-off`). A deprecated name resolves; a retired one
+        is a 410 `retired`, with `replaced_by` when it was replaced; a name
+        the set never had is a 404 `unknown_name`; an unknown set a 404
+        `unknown_set`; an address outside the grammar, or any query, a 400
+        `malformed_query` that echoes nothing.
+      responses:
+        '200':
+          description: The name's record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GlyphNameRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '410':
+          description: The name was retired. It no longer resolves and is never reused.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/GlyphNameRetired'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/graphics:
     get:
       tags: [hardware]
@@ -2189,6 +2297,12 @@ components:
       required: true
       schema:
         $ref: '#/components/schemas/ResourceId'
+    GlyphSetId:
+      name: set_id
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/GlyphSetId'
   responses:
     Problem:
       description: Typed API or hardware failure
@@ -2472,7 +2586,7 @@ components:
       additionalProperties: false
     FontProfiles:
       type: object
-      required: [revision, active, profiles, registry]
+      required: [revision, active, profiles, registry, sets]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         active:
@@ -2585,6 +2699,160 @@ components:
               file: {type: string, description: Relative to the fonts root.}
               family: {type: [string, 'null'], description: Its family name; null for a pixel font.}
             additionalProperties: false
+        sets:
+          type: array
+          description: >-
+            ADR 0243 step 3: the glyph sets this server answers for by set
+            and name (GET /v1/fonts/sets), from the registry's sets level and
+            the names files it read at start, in bytewise order of id. A set
+            is a table of names, not a face; faces names the registry faces
+            that draw it.
+          items: {$ref: '#/components/schemas/GlyphSet'}
+      additionalProperties: false
+    GlyphSetId:
+      type: string
+      minLength: 1
+      maxLength: 32
+      pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+      description: >-
+        A set id (glyph sets section 4.1): its owner token (blit, nerd,
+        emoji) and hyphen-joined parts, 1-32 octets.
+    GlyphName:
+      type: string
+      minLength: 1
+      maxLength: 96
+      pattern: '^[a-z0-9][a-z0-9_-]*$'
+      description: A name within a set, as its source spells it (section 4.1), 1-96 octets.
+    GlyphCodepoints:
+      type: array
+      minItems: 1
+      maxItems: 32
+      description: >-
+        The codepoint, in lowercase hex without padding; an array so that a
+        sequence (an emoji set, later) has the same shape. Never in
+        U+100000-U+1003FF, the Glyph Protocol's registration block.
+      items: {type: string, pattern: '^[0-9a-f]{1,6}$'}
+    GlyphTile:
+      type: object
+      description: >-
+        Which cell of a picture drawn across several cells this name is:
+        its column and row from 0, and the picture's size in cells.
+      required: [column, row, columns, rows]
+      properties:
+        column: {type: integer, minimum: 0}
+        row: {type: integer, minimum: 0}
+        columns: {type: integer, minimum: 1}
+        rows: {type: integer, minimum: 1}
+      additionalProperties: false
+    GlyphSet:
+      type: object
+      required: [id, owner, scope, version, count, faces]
+      properties:
+        id: {$ref: '#/components/schemas/GlyphSetId'}
+        owner:
+          type: string
+          enum: [blit, emoji, nerd]
+          description: Who publishes the set's names (the draft's registered owner tokens).
+        scope:
+          type: string
+          enum: [portable, terminal-local]
+          description: >-
+            portable: the codepoints are the owner's published table, the
+            same in every terminal at this version (Nerd Fonts).
+            terminal-local: chosen by this terminal (Blit's own set);
+            another terminal may draw something else there.
+        version:
+          type: string
+          pattern: '^[a-z0-9.-]{1,64}$'
+          description: >-
+            Changes whenever the set's table does: the Nerd Fonts release
+            (3.4.0), or for blit the SHA-256 of the catalogue as packaged,
+            GET /v1/fonts/icons' revision.
+        count:
+          type: integer
+          minimum: 0
+          description: >-
+            The names the set lists: aliases included, deprecated and
+            retired names not (blit lists 808 of its 830 ids).
+        faces:
+          type: array
+          description: The registry faces that draw the set (registry ids).
+          items: {type: string}
+      additionalProperties: false
+    GlyphSetPage:
+      type: object
+      required: [set, ranges, names, more]
+      properties:
+        set: {$ref: '#/components/schemas/GlyphSet'}
+        ranges:
+          type: array
+          description: >-
+            The runs of codepoints the set's live names cover, derived from
+            the names at start; descriptive, never authoritative (a set is
+            not one range).
+          items:
+            type: object
+            required: [first, last]
+            properties:
+              first: {type: string, pattern: '^[0-9a-f]{1,6}$'}
+              last: {type: string, pattern: '^[0-9a-f]{1,6}$'}
+            additionalProperties: false
+        names:
+          type: array
+          maxItems: 128
+          items:
+            type: object
+            required: [name, codepoints]
+            properties:
+              name: {$ref: '#/components/schemas/GlyphName'}
+              codepoints: {$ref: '#/components/schemas/GlyphCodepoints'}
+              alias_of:
+                allOf: [{$ref: '#/components/schemas/GlyphName'}]
+                description: The canonical name, for an alias (the bytewise smallest of a glyph's names).
+              tile: {$ref: '#/components/schemas/GlyphTile'}
+            additionalProperties: false
+        more: {type: boolean, description: Another page follows after the last name listed.}
+      additionalProperties: false
+    GlyphNameRecord:
+      type: object
+      required: [set, scope, version, name, codepoints]
+      properties:
+        set: {$ref: '#/components/schemas/GlyphSetId'}
+        scope: {type: string, enum: [portable, terminal-local]}
+        version: {type: string, pattern: '^[a-z0-9.-]{1,64}$'}
+        name: {$ref: '#/components/schemas/GlyphName'}
+        codepoints: {$ref: '#/components/schemas/GlyphCodepoints'}
+        alias_of:
+          allOf: [{$ref: '#/components/schemas/GlyphName'}]
+          description: Present only when the name asked for is an alias; the canonical name.
+        deprecated:
+          type: boolean
+          const: true
+          description: The name still resolves; its set says to use replaced_by.
+        replaced_by:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/GlyphName'}
+        tile: {$ref: '#/components/schemas/GlyphTile'}
+      additionalProperties: false
+    GlyphNameRetired:
+      type: object
+      description: A problem (RFC 9457) whose extension members say which name, and what replaced it.
+      required: [type, title, status, code, detail, set, version, name, retired]
+      properties:
+        type: {type: string, const: about:blank}
+        title: {type: string, const: Gone}
+        status: {type: integer, const: 410}
+        code: {type: string, const: retired}
+        detail: {type: string}
+        set: {$ref: '#/components/schemas/GlyphSetId'}
+        version: {type: string}
+        name: {$ref: '#/components/schemas/GlyphName'}
+        retired: {type: boolean, const: true}
+        replaced_by:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/GlyphName'}
       additionalProperties: false
     ServerDetails:
       type: object

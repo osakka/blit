@@ -455,6 +455,7 @@ suite_font() {
     run_gate font_fit_gate.py python3 tools/tests/font_fit_gate.py
     run_gate font_assets_gate.rb ruby tools/tests/font_assets_gate.rb
     run_gate font_registry_gate.rb ruby tools/tests/font_registry_gate.rb
+    run_gate glyph_sets_gate.rb ruby tools/tests/glyph_sets_gate.rb
     run_gate blit_icons_rebuild_gate.sh sh tools/tests/blit_icons_rebuild_gate.sh
     run_gate hibr_ui_glyphs_gate.sh sh tools/tests/hibr_ui_glyphs_gate.sh
     run_gate font_discovery_gate.rb ruby tools/tests/font_discovery_gate.rb

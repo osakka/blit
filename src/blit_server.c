@@ -19,6 +19,7 @@
 #include "blit_audio_control.h"
 #include "blit_cell_geometry.h"
 #include "blit_sha256.h"
+#include "blit_glyph_sets.h"     /* ADR 0243 step 3: glyph sets by set and name */
 #include "blit_damage.h"
 #include "blit_ink.h"
 #include "blit_token.h"
@@ -19423,6 +19424,202 @@ static void font_registry_json(char *body, size_t capacity, size_t *used)
     }
 }
 
+/* ADR 0243 step 3: a served glyph set as GET /v1/fonts and GET
+   /v1/fonts/sets report it. count is the names it lists: not deprecated,
+   not retired (glyph sets section 7.4); aliases are listed. */
+static void glyph_set_json(const BlitGlyphSet *set, char *body, size_t capacity, size_t *used)
+{
+    const BlitGlyphSource *source = &blit_glyph_sets.sources[set->source];
+    const char *face = source->faces;
+    json_appendf(body, capacity, used,
+        "{\"id\":\"%s\",\"owner\":\"%s\",\"scope\":\"%s\",\"version\":\"%s\",\"count\":%lu,\"faces\":[",
+        set->id, source->owner, source->scope, blit_glyph_set_version(set), (unsigned long)set->listed);
+    while (face && *face) {
+        const char *comma = strchr(face, ',');
+        int n = comma ? (int)(comma - face) : (int)strlen(face);
+        json_appendf(body, capacity, used, "%s\"%.*s\"", face == source->faces ? "" : ",", n, face);
+        face = comma ? comma + 1 : NULL;
+    }
+    json_appendf(body, capacity, used, "]}");
+}
+
+static void glyph_sets_json(char *body, size_t capacity, size_t *used)
+{
+    int s, first = 1;
+    for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) {
+        if (!blit_glyph_sets.sets[s].loaded) continue;
+        if (!first) json_appendf(body, capacity, used, ",");
+        glyph_set_json(&blit_glyph_sets.sets[s], body, capacity, used);
+        first = 0;
+    }
+}
+
+/* One name's record: its codepoint(s) in lowercase hex, and what the set
+   says of it (alias_of, deprecated and replaced_by, tile). A listing entry
+   is the same without the set's own fields. */
+static void glyph_name_json(const BlitGlyphName *name, char *body, size_t capacity, size_t *used)
+{
+    unsigned i;
+    json_appendf(body, capacity, used, "\"name\":\"%s\"", blit_glyph_name_text(name));
+    if (!(name->flags & BLIT_GLYPH_FLAG_RETIRED))
+        json_appendf(body, capacity, used, ",\"codepoints\":[\"%lx\"]", (unsigned long)name->codepoint);
+    if (name->alias >= 0)
+        json_appendf(body, capacity, used, ",\"alias_of\":\"%s\"",
+                     blit_glyph_name_text(&blit_glyph_sets.names[name->alias]));
+    if (name->flags & BLIT_GLYPH_FLAG_DEPRECATED)
+        json_appendf(body, capacity, used, ",\"deprecated\":true");
+    if (name->flags & BLIT_GLYPH_FLAG_RETIRED)
+        json_appendf(body, capacity, used, ",\"retired\":true");
+    if (name->by_count) {
+        json_appendf(body, capacity, used, ",\"replaced_by\":[");
+        for (i = 0; i < name->by_count; ++i)
+            json_appendf(body, capacity, used, "%s\"%s\"", i ? "," : "",
+                         blit_glyph_sets.pool + blit_glyph_sets.by[name->by + i]);
+        json_appendf(body, capacity, used, "]");
+    }
+    if (name->tile[2])
+        json_appendf(body, capacity, used,
+                     ",\"tile\":{\"column\":%u,\"row\":%u,\"columns\":%u,\"rows\":%u}",
+                     name->tile[0], name->tile[1], name->tile[2], name->tile[3]);
+}
+
+static void glyph_query_malformed(int fd)
+{
+    /* Nothing of the request is echoed: a value that did not parse is
+       never written back (glyph sets section 8). */
+    send_problem(fd, 400, "Bad Request", "malformed_query",
+        "A set id is 1-32 octets of a-z, 0-9 and single hyphens, starting with a letter; "
+        "a name is 1-96 octets of a-z, 0-9, hyphen and underscore, starting with a letter or "
+        "a digit. A listing takes after (a name) and limit (1-128), each at most once; "
+        "a lookup takes no query.");
+}
+
+/* GET /v1/fonts/sets[/{set}[/{name}]]: rest is the path after /v1/fonts/sets.
+   Every id and name is held to the address grammar before it is looked up;
+   a lookup is a binary search in the table read at start. */
+static void font_sets_response(int fd, const char *rest, char *body, size_t capacity)
+{
+    const char *id = rest + 1, *end;
+    const BlitGlyphSet *set;
+    size_t used = 0, n;
+
+    if (*rest == '\0') {
+        json_appendf(body, capacity, &used, "{\"sets\":[");
+        glyph_sets_json(body, capacity, &used);
+        json_appendf(body, capacity, &used, "]}");
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (*rest != '/') {
+        glyph_query_malformed(fd);
+        return;
+    }
+    end = id + strcspn(id, "/?");
+    n = (size_t)(end - id);
+    if (!blit_glyph_set_id_valid(id, n)) {
+        glyph_query_malformed(fd);
+        return;
+    }
+    if ((set = blit_glyph_set_find(id, n)) == NULL) {
+        char detail[96];
+        snprintf(detail, sizeof(detail), "This terminal serves no glyph set %.*s.", (int)n, id);
+        send_problem(fd, 404, "Not Found", "unknown_set", detail);
+        return;
+    }
+    if (*end == '/') {
+        const char *name = end + 1;
+        const BlitGlyphName *record;
+        size_t length = strlen(name);
+        if (!blit_glyph_name_valid(name, length)) {
+            glyph_query_malformed(fd);
+            return;
+        }
+        if ((record = blit_glyph_name_find(set, name, length)) == NULL) {
+            char detail[192];
+            snprintf(detail, sizeof(detail), "The glyph set %s has no name %s, and never had.", set->id, name);
+            send_problem(fd, 404, "Not Found", "unknown_name", detail);
+            return;
+        }
+        if (record->flags & BLIT_GLYPH_FLAG_RETIRED) {
+            /* Retired: no longer resolves, never reused (section 6). A
+               problem with the record's members as its extensions. */
+            json_appendf(body, capacity, &used,
+                "{\"type\":\"about:blank\",\"title\":\"Gone\",\"status\":410,\"code\":\"retired\","
+                "\"detail\":\"%s/%s was retired: it no longer resolves and is never reused.\","
+                "\"set\":\"%s\",\"version\":\"%s\",",
+                set->id, blit_glyph_name_text(record), set->id, blit_glyph_set_version(set));
+            glyph_name_json(record, body, capacity, &used);
+            json_appendf(body, capacity, &used, "}");
+            send_http(fd, 410, "Gone", "application/problem+json", body);
+            return;
+        }
+        json_appendf(body, capacity, &used, "{\"set\":\"%s\",\"scope\":\"%s\",\"version\":\"%s\",",
+                     set->id, blit_glyph_sets.sources[set->source].scope, blit_glyph_set_version(set));
+        glyph_name_json(record, body, capacity, &used);
+        json_appendf(body, capacity, &used, "}");
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    {
+        /* The listing: a page of at most 128 listed names, bytewise, after
+           `after` whether or not it is still in the set (section 7.4). */
+        const char *query = *end == '?' ? end + 1 : NULL, *after = "";
+        size_t after_length = 0, index, k;
+        long limit = BLIT_GLYPH_PAGE_MAX;
+        int seen_after = 0, seen_limit = 0, listed = 0, first = 1;
+        while (query && *query) {
+            const char *amp = strchr(query, '&');
+            size_t length = amp ? (size_t)(amp - query) : strlen(query);
+            if (length > 6 && strncmp(query, "after=", 6) == 0 && !seen_after &&
+                blit_glyph_name_valid(query + 6, length - 6)) {
+                seen_after = 1;
+                after = query + 6;
+                after_length = length - 6;
+            } else if (length > 6 && length <= 9 && strncmp(query, "limit=", 6) == 0 && !seen_limit &&
+                       strspn(query + 6, "0123456789") >= length - 6 && query[6] != '0') {
+                seen_limit = 1;
+                limit = strtol(query + 6, NULL, 10);
+                if (limit < 1 || limit > BLIT_GLYPH_PAGE_MAX) {
+                    glyph_query_malformed(fd);
+                    return;
+                }
+            } else {
+                glyph_query_malformed(fd);
+                return;
+            }
+            query = amp ? amp + 1 : NULL;
+            if (amp && *query == '\0') {
+                glyph_query_malformed(fd);
+                return;
+            }
+        }
+        json_appendf(body, capacity, &used, "{\"set\":");
+        glyph_set_json(set, body, capacity, &used);
+        json_appendf(body, capacity, &used, ",\"ranges\":[");
+        for (k = 0; k < set->range_count; ++k)
+            json_appendf(body, capacity, &used, "%s{\"first\":\"%lx\",\"last\":\"%lx\"}", k ? "," : "",
+                         (unsigned long)blit_glyph_sets.ranges[2 * (set->range_first + k)],
+                         (unsigned long)blit_glyph_sets.ranges[2 * (set->range_first + k) + 1]);
+        json_appendf(body, capacity, &used, "],\"names\":[");
+        for (index = blit_glyph_name_after(set, after, after_length); index < set->end; ++index) {
+            const BlitGlyphName *record = &blit_glyph_sets.names[index];
+            if (record->flags & (BLIT_GLYPH_FLAG_DEPRECATED | BLIT_GLYPH_FLAG_RETIRED)) continue;
+            if (listed == limit) break;
+            json_appendf(body, capacity, &used, "%s{", first ? "" : ",");
+            glyph_name_json(record, body, capacity, &used);
+            json_appendf(body, capacity, &used, "}");
+            first = 0;
+            ++listed;
+        }
+        /* more: a listed name follows the last one on this page. */
+        for (; index < set->end; ++index)
+            if (!(blit_glyph_sets.names[index].flags & (BLIT_GLYPH_FLAG_DEPRECATED | BLIT_GLYPH_FLAG_RETIRED)))
+                break;
+        json_appendf(body, capacity, &used, "],\"more\":%s}", index < set->end ? "true" : "false");
+        send_http(fd, 200, "OK", "application/json", body);
+    }
+}
+
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_path[512];
@@ -19521,6 +19718,8 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
     }
     json_appendf(body, capacity, &used, "],\"registry\":[");
     font_registry_json(body, capacity, &used);
+    json_appendf(body, capacity, &used, "],\"sets\":[");
+    glyph_sets_json(body, capacity, &used);
     json_appendf(body, capacity, &used, "]}");
 }
 
@@ -27506,6 +27705,9 @@ static void handle_request(int fd, BlitRuntime *runtime,
         send_http(fd, 200, "OK", "application/json", body);
     } else if (strcmp(path, "/v1/fonts/icons") == 0) {
         font_icons_response(fd, request, body, sizeof(body));
+    } else if (strncmp(path, "/v1/fonts/sets", 14) == 0 &&
+               (path[14] == '\0' || path[14] == '/' || path[14] == '?')) {
+        font_sets_response(fd, path + 14, body, sizeof(body));
     } else if (strcmp(path, "/v1/settings") == 0) {
         settings_json(runtime, body, sizeof(body));
         send_http(fd, 200, "OK", "application/json", body);
@@ -33485,6 +33687,24 @@ int main(int argc, char **argv)
     update_init(&runtime);
     blit_font_load(&runtime.font);
     blit_font_load_wide(&runtime.wide_font);
+    /* ADR 0243 step 3: every glyph set's names, read once into one table.
+       A source that cannot be read is not served; the server starts. */
+    {
+        char detail[320];
+        int s, served = 0;
+        blit_glyph_sets_load();
+        for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) served += blit_glyph_sets.sets[s].loaded;
+        for (s = 0; s < BLIT_GLYPH_SOURCE_COUNT; ++s)
+            if (!blit_glyph_sets.sources[s].loaded) {
+                snprintf(detail, sizeof(detail), "glyph set source %s is not served: %s",
+                         blit_glyph_sets.sources[s].key, blit_glyph_sets.sources[s].error);
+                diagnostic_log(&runtime, "warning", "glyph_sets_unavailable", detail);
+            }
+        snprintf(detail, sizeof(detail), "%lu names in %d of %d sets, %lu bytes, read in %ld us",
+                 (unsigned long)blit_glyph_sets.count, served, BLIT_GLYPH_SET_COUNT,
+                 (unsigned long)blit_glyph_sets.bytes, blit_glyph_sets.load_us);
+        diagnostic_log(&runtime, "info", "glyph_sets_loaded", detail);
+    }
     runtime.font_scale_tenths = BLIT_FONT_SCALE_MIN_TENTHS;
     /* With no keyboard to ask, assume every keypad types digits, which is
        what it did before NumLock was honoured at all. EVIOCGLED corrects a

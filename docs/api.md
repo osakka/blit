@@ -440,7 +440,7 @@ status codes.
 | --- | --- | --- |
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
 | Hardware | `GET /v1/graphics`, `GET /v1/displays`, `GET/PATCH /v1/displays/{id}`, `GET /v1/audio`, `GET/PATCH /v1/audio/{id}`, `GET /v1/audio/cards`, `GET/PATCH /v1/audio/cards/{id}` | Discover and configure the GPU, outputs, sound devices and mixers |
-| Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, place panes |
+| Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET /v1/fonts/sets[/{set}[/{name}]]`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, look glyphs up by set and name, place panes |
 | Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
 | Auxiliary displays | `GET /v1/auxiliary-displays`, `POST /v1/auxiliary-displays/apply` | Start and place Hibr on the other monitors |
@@ -478,6 +478,7 @@ GET/POST/DELETE /v1/login                  the login screen and its signed-in se
 GET    /v1/auxiliary-displays              Hibr on the other monitors
 POST   /v1/auxiliary-displays/apply        start and place it
 GET    /v1/fonts/icons                     Blit's icon and glyph catalogue
+GET    /v1/fonts/sets[/{set}[/{name}]]     glyph sets: list, page, look up by name
 GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
@@ -1240,6 +1241,10 @@ example:
    "file": "Blit-Terminus16.psf", "family": null}
 ]
 ```
+
+`sets` (ADR 0243 step 3) is every glyph set this server answers for by set
+and name, the same list as `GET /v1/fonts/sets`: each `{id, owner, scope,
+version, count, faces}`. See [Glyph sets](#glyph-sets) below.
 
 Discover available profiles through `GET /v1/fonts`, not a version
 comparison. `colour_glyphs: true` does not imply full emoji-sequence
@@ -2112,6 +2117,118 @@ under every font, pixel fonts included (ADRs 0195 and 0199). Clients must
 send the documented characters; ASCII, Unicode or Nerd UI modes do not
 become multicolour on their own. The active `glyphs` and `mappings` counts
 describe the primary font file, not the glyph stack's repertoire.
+
+## Glyph sets
+
+A program that wants a glyph by name -- Blit's `bluetooth` icon, Font
+Awesome's `bluetooth` from Nerd Fonts, or Material Design's, which is a
+different glyph -- asks for it by **set and name** and prints the codepoint
+it gets back (ADR 0243 step 3; the address rules are
+[the glyph sets draft](protocols/glyph-sets.md), whose in-band form is not
+built yet). A set is a table of names, not a face. From 0.3.134:
+
+```text
+GET /v1/fonts/sets                       the sets, as GET /v1/fonts lists them
+GET /v1/fonts/sets/{set}[?after=&limit=] a page of a set's names
+GET /v1/fonts/sets/{set}/{name}          one name's record
+```
+
+**The sets.** `blit` is Blit's own icon catalogue (its `icons`,
+`text_glyphs` and `cell_geometry` ids, one namespace; 830 ids, 808 listed:
+the 22 deprecated ones are not), scope `terminal-local` (its codepoints are
+Blit's, and another terminal may draw something else there), version the
+SHA-256 of the catalogue as packaged -- `GET /v1/fonts/icons`' `revision`.
+The 17 `nerd-*` sets are Nerd Fonts 3.4.0's own (`nerd-cod`, `nerd-custom`,
+`nerd-dev`, `nerd-extra`, `nerd-fa`, `nerd-fae`, `nerd-iec`, `nerd-indent`,
+`nerd-indentation`, `nerd-linux`, `nerd-md`, `nerd-oct`, `nerd-pl`,
+`nerd-ple`, `nerd-pom`, `nerd-seti`, `nerd-weather`): the Nerd name
+`<prefix>-<rest>` is `nerd-<prefix>/<rest>`, spelled as Nerd spells it,
+scope `portable`, version `3.4.0`. Each set entry is `{id, owner, scope,
+version, count, faces}`, in bytewise order of id; `count` is the names the
+set lists (aliases included). Emoji names are not served yet: the Unicode
+table they come from is not in the package.
+
+```json
+{"sets": [
+  {"id": "blit", "owner": "blit", "scope": "terminal-local",
+   "version": "<sha-256 of icons/catalogue.json>", "count": 808, "faces": ["blit-icons"]},
+  {"id": "nerd-cod", "owner": "nerd", "scope": "portable", "version": "3.4.0",
+   "count": 438, "faces": ["symbols-nerd-font-mono"]},
+  ...
+]}
+```
+
+**Where the names come from.** The font registry
+(`assets/fonts/fonts.source.json`, `sets`) declares each names source; the
+set ids are derived from the sources (the Nerd file's prefixes make the
+`nerd-*` sets), never listed by hand. The server reads the packaged names
+files (`icons/catalogue.json`, `nerd-glyphnames-v3.4.0.json` in the fonts
+root) once, at start, into one table sorted by set and name; every answer
+is a search in it, never a file read. A names file that is missing or not
+what the build reads is not served (its sets are a 404 `unknown_set`, and
+the diagnostics log says why); the server starts either way.
+
+**A lookup** answers the name's record: its `codepoints` (lowercase hex, an
+array so that a sequence has the same shape), and what its set says of it.
+
+```text
+GET /v1/fonts/sets/blit/bluetooth
+  -> 200 {"set":"blit","scope":"terminal-local","version":"<sha-256>",
+          "name":"bluetooth","codepoints":["101006"]}
+GET /v1/fonts/sets/nerd-fa/bluetooth   -> 200 {..., "codepoints":["f293"]}
+GET /v1/fonts/sets/nerd-md/bluetooth   -> 200 {..., "codepoints":["f00af"]}
+GET /v1/fonts/sets/nerd-dev/aws
+  -> 200 {..., "name":"aws","codepoints":["e7ad"],"alias_of":"amazonwebservices"}
+GET /v1/fonts/sets/blit/wifi-1
+  -> 200 {..., "codepoints":["101002"],"deprecated":true,"replaced_by":["cellular-1"]}
+GET /v1/fonts/sets/blit/hui-right
+  -> 200 {..., "codepoints":["101019"],"tile":{"column":1,"row":0,"columns":2,"rows":1}}
+GET /v1/fonts/sets/blit/file-asm-amber-left
+  -> 410 {"code":"retired", ..., "name":"file-asm-amber-left","retired":true,
+          "replaced_by":["file-asm-classic-left"]}
+```
+
+- **Names are exact.** No case folding, and `-` and `_` are different
+  characters: Nerd spells Material Design's `phone_off` with `_`, so
+  `nerd-md/phone_off` resolves and `nerd-md/phone-off` is a 404
+  `unknown_name`, while `blit/phone-off` is Blit's own. Eleven Blit ids are
+  also Nerd names (`bluetooth` and `power` spelled the same, `battery-0`
+  to `battery-4`, `phone-off`, `phone-ring`, `phone-classic-off` and
+  `wifi-off` with Nerd's `_`); the set says which is meant.
+- **Aliases.** A glyph with several names in one set has one canonical
+  name, the bytewise smallest (Nerd's file marks none); the others answer
+  `alias_of`. Two sets that give the same codepoint are not aliases of
+  each other.
+- **Deprecated** names resolve, with `deprecated: true` and `replaced_by`.
+  **Retired** names no longer resolve and are never reused: a 410
+  `retired`, with `replaced_by` when something replaced them. Blit's
+  retired names are the 345 ids its catalogue once had at the codepoints
+  its `retired` list keeps (the large phones, the file colourways, Slate
+  dark); the registry carries them, since the catalogue's shape is frozen.
+- **Tiles.** A name that is one cell of a picture drawn across several
+  (the two-cell icons, the 4x2 discs, cell geometry that spans cells) says
+  which with `tile`: its `column` and `row` from 0 and the picture's
+  `columns` and `rows`.
+
+**A page** is `{set, ranges, names, more}`: `set` the set's entry, `ranges`
+the runs of codepoints its names cover (derived at start; descriptive,
+since a set is not one range), `names` up to `limit` entries in bytewise
+order (default and most 128), each `{name, codepoints}` with `alias_of` and
+`tile` where they apply, and `more: true` when another page follows: ask
+again with `after=` the last name listed. `after` need not be in the set.
+Deprecated and retired names are not listed; look them up.
+
+**Errors.** Every id and name is held to the address grammar before it is
+looked up: a set id is 1-32 octets of `a`-`z`, `0`-`9` and single hyphens,
+starting with a letter; a name 1-96 octets of `a`-`z`, `0`-`9`, `-` and
+`_`, starting with a letter or digit. Anything else -- an uppercase letter,
+a separator (`/ ; , = : . @`), a percent escape, a space or control byte, a
+bad or repeated `after` or `limit`, an unknown parameter, any query on a
+lookup -- is a 400 `malformed_query` whose body is always the same text,
+so nothing of the request is echoed. A set this server does not serve is a
+404 `unknown_set`; a name its set never had, a 404 `unknown_name`.
+Authentication is the same as other read endpoints; the routes are
+read-only (any other method is a 405).
 
 ## Picture memory
 
