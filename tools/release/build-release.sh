@@ -8,7 +8,9 @@
 # pass (a skip is a failure here: the environment has every dependency);
 # the packages (packaging/build-deb.sh) into OUTDIR; the release manifest
 # releases/<version>.yaml from the server package; and
-# package_artifact_gate on it. Prints the packages' sha256 last.
+# package_artifact_gate on it; then, as root in throwaway containers of the
+# same environment, update_pair_gate (ADR 0232) and rollback_recovery_gate
+# (Gitea #112). Prints the packages' sha256 last.
 #
 # BLIT_HIBR_ROOT is the Hibr tree of packaging/HIBR_VERSION the console
 # adapter is built against (packaging/build-deb.sh); it and OUTDIR must be
@@ -71,6 +73,22 @@ if ! BLIT_BUILD_ENV_ROOT=1 "$ROOT/tools/build-env/run.sh" \
     exit 1
 fi
 grep UPDATE_PAIR_GATE_PASS "$pair_log"
+
+# Gitea #112: the rollback and recovery rehearsal -- back to the previous
+# release through the helper and with root's own dpkg, an interrupted
+# update, a failed configure, damaged files, and update-live.sh against
+# the installed server -- in another throwaway container. The previous
+# release is fabricated from these packages; run it by hand with the real
+# one as its second argument (docs/security-review-2026-11.md).
+rollback_log=$ROOT${out#/blit}/rollback_recovery_gate.txt
+if ! BLIT_BUILD_ENV_ROOT=1 "$ROOT/tools/build-env/run.sh" \
+        sh tools/tests/rollback_recovery_gate.sh "$out/blit_${version}-1_amd64.deb" \
+        > "$rollback_log" 2>&1; then
+    tail -40 "$rollback_log" >&2
+    echo "blit: rollback_recovery_gate failed" >&2
+    exit 1
+fi
+grep ROLLBACK_RECOVERY_GATE_PASS "$rollback_log"
 
 "$ROOT/tools/build-env/run.sh" sh -eu -c '
 out=$1 version=$2

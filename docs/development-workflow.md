@@ -149,8 +149,9 @@ a function there, `suite_<name>`, listing its gates):
   boundary, fault traces, and the deploy script's smoke reading;
 - **packaging** -- the `.deb` artifact (allowlist, embedded version,
   install and service checks, checksums, ELF hardening) and the split
-  update upload; `update_pair_gate.sh` runs in the release build instead
-  (`tools/release/build-release.sh`), as root in the build environment;
+  update upload; `update_pair_gate.sh` and `rollback_recovery_gate.sh` run
+  in the release build instead (`tools/release/build-release.sh`), as root
+  in the build environment;
 - **timing** -- measured cadence, frame rate, the bounded PTY soak, the
   baseline sampler, and, with `BLIT_GATE_LIVE`, the live-host gates.
 
@@ -357,8 +358,10 @@ tools/deploy/update-live.sh HOST $out/blit_X.Y.Z-1_amd64.deb
 
 `build-release.sh` builds the binaries, runs `compositor_gate` and
 `xwayland_gate`, writes the packages, generates `releases/X.Y.Z.yaml`, runs
-the packaging suite on the package and `update_pair_gate.sh` (a real
-`dpkg --install` of the pair, as root in the environment), and stops at the
+the packaging suite on the package, `update_pair_gate.sh` (a real
+`dpkg --install` of the pair, as root in the environment) and
+`rollback_recovery_gate.sh` (rollback and recovery, rehearsed the same way;
+see the [security review](security-review-2026-11.md)), and stops at the
 first failure. The packages are then published to Hibr's apt repository
 with the hibr-apt repository's `publish.sh`, given each `.deb`.
 

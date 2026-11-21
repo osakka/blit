@@ -103,9 +103,12 @@ already be fixed.
 ### 7. Release acceptance (#112)
 
 Done: reproducible packages, releases built in the Debian 13 environment
-(0.3.80), and an install-and-update rehearsal with real dpkg
-(`update_pair_gate`, 0.3.97). Still to do: a security review, and a
-rehearsed rollback and recovery.
+(0.3.80), an install-and-update rehearsal with real dpkg
+(`update_pair_gate`, 0.3.97), a security review, and a rehearsed rollback
+and recovery (`rollback_recovery_gate`), both in
+[the November 2026 security review](security-review-2026-11.md). Still to
+do: fixing the review's findings (each written as a ticket there), and an
+automatic rollback when an update leaves no API to roll back through.
 
 ## Waiting for hardware
 

@@ -152,7 +152,8 @@ release there: the server, the update helper and the compositor;
 packages into OUTDIR; `releases/<version>.yaml`; and
 the packaging suite (`package_artifact_gate`, `update_restart_gate`), then
 `update_pair_gate.sh` as root in the environment (a real `dpkg --install`
-of the pair, ADR 0232). The host's own Debian 12 cannot build
+of the pair, ADR 0232), then `rollback_recovery_gate.sh` the same way (the
+rollback and recovery rehearsal of Gitea #112). The host's own Debian 12 cannot build
 `blit-compositor` (wayland-protocols 1.31, Xwayland 22.1); the environment
 is what lets this host release without another machine.
 
