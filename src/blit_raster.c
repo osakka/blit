@@ -39,8 +39,10 @@ struct RasterWord {
     unsigned long long serial;
     unsigned char *pixels[2];
 };
-#define WORD_SETS 2048
-#define WORD_WAYS 4
+/* 32,768 words: two displays full of distinct words (about 5,700 at 22 px
+   on 3840x2160) leave every set well under its eight ways. */
+#define WORD_SETS 4096
+#define WORD_WAYS 8
 #define WORD_MAX_BYTES (32U * 1024U * 1024U)
 
 struct BlitRaster {

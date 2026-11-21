@@ -12,8 +12,12 @@
    (an effect on) is
    composed by the CPU and uploaded instead, per frame. */
 
-#define KMS_ATLAS_SIZE 2048
-#define KMS_SPRITE_SLOTS 8192
+/* ADR 0241: the glyph atlas is 4096 square where the GPU allows it -- two
+   displays of distinct Arabic words need about 6 Mpx of sprites -- else
+   2048, as before. */
+#define KMS_ATLAS_SIZE 4096
+#define KMS_ATLAS_SIZE_MIN 2048
+#define KMS_SPRITE_SLOTS 16384
 #define KMS_SPRITE_MARGIN_Y 2
 /* ADR 0226: picture textures are a cache bounded by bytes, not slots. */
 #define KMS_IMAGE_TEXTURE_BUDGET (512ULL * 1024ULL * 1024ULL)
@@ -51,6 +55,7 @@ typedef struct {
 
 struct KmsGlesResources {
     BlitGlesTexture atlas;
+    int atlas_size;
     int shelf_x, shelf_y, shelf_height;
     KmsSprite sprites[KMS_SPRITE_SLOTS];
     int sprite_count;
@@ -132,8 +137,14 @@ static KmsGlesResources *kms_gles_resources(BlitKms *kms)
     if (kms->gles_resources == NULL) {
         kms->gles_resources = calloc(1, sizeof(KmsGlesResources));
         if (kms->gles_resources == NULL) return NULL;
+        kms->gles_resources->atlas_size = KMS_ATLAS_SIZE;
         kms->gles_resources->atlas = blit_gles_texture_create(
             kms->gles, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE, 4);
+        if (kms->gles_resources->atlas == 0) {
+            kms->gles_resources->atlas_size = KMS_ATLAS_SIZE_MIN;
+            kms->gles_resources->atlas = blit_gles_texture_create(
+                kms->gles, KMS_ATLAS_SIZE_MIN, KMS_ATLAS_SIZE_MIN, 4);
+        }
         if (kms->gles_resources->atlas == 0) {
             free(kms->gles_resources);
             kms->gles_resources = NULL;
@@ -178,13 +189,13 @@ static void kms_atlas_reset(KmsGlesResources *r)
 
 static int kms_atlas_place(KmsGlesResources *r, int w, int h, int *x, int *y)
 {
-    if (w > KMS_ATLAS_SIZE || h > KMS_ATLAS_SIZE) return -1;
-    if (r->shelf_x + w > KMS_ATLAS_SIZE) {
+    if (w > r->atlas_size || h > r->atlas_size) return -1;
+    if (r->shelf_x + w > r->atlas_size) {
         r->shelf_x = 0;
         r->shelf_y += r->shelf_height;
         r->shelf_height = 0;
     }
-    if (r->shelf_y + h > KMS_ATLAS_SIZE) return -1;
+    if (r->shelf_y + h > r->atlas_size) return -1;
     *x = r->shelf_x;
     *y = r->shelf_y;
     r->shelf_x += w;
@@ -628,7 +639,7 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
             offset = (column - rw->runs[run].start) * cw;
             if (sprite->w > offset && sprite->h > 0) {
                 int w = sprite->w - offset < cw ? sprite->w - offset : cw;
-                blit_gles_quad(kms->gles, sprite->mode, r->atlas, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE,
+                blit_gles_quad(kms->gles, sprite->mode, r->atlas, r->atlas_size, r->atlas_size,
                                sprite->atlas_x + offset, sprite->atlas_y, w, sprite->h,
                                x, y + sprite->dy, w, sprite->h, fg);
             }
@@ -642,7 +653,7 @@ static void kms_gles_glyph(BlitKms *kms, KmsGlesResources *r,
         view->combining_count ? view->combining_count[index] : 0,
         width, ch, lean, bold, 0, kms_sprite_pen(view, index));
     if (sprite == NULL || sprite->w == 0) return;
-    blit_gles_quad(kms->gles, sprite->mode, r->atlas, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE,
+    blit_gles_quad(kms->gles, sprite->mode, r->atlas, r->atlas_size, r->atlas_size,
                    sprite->atlas_x, sprite->atlas_y, sprite->w, sprite->h,
                    x + sprite->dx, y + sprite->dy, sprite->w, sprite->h, fg);
 }
@@ -657,7 +668,7 @@ static void kms_gles_window_glyph(BlitKms *kms, KmsGlesResources *r, uint32_t cp
         const KmsSprite *sprite = kms_sprite(kms, r, kms->font, NULL, cp, NULL, 0,
                                              width, ch, 0, 0, planes[i], 0);
         if (sprite == NULL || sprite->w == 0) continue;
-        blit_gles_quad(kms->gles, sprite->mode, r->atlas, KMS_ATLAS_SIZE, KMS_ATLAS_SIZE,
+        blit_gles_quad(kms->gles, sprite->mode, r->atlas, r->atlas_size, r->atlas_size,
                        sprite->atlas_x, sprite->atlas_y, sprite->w, sprite->h,
                        x + sprite->dx, y + sprite->dy, sprite->w, sprite->h,
                        planes[i] == WR_FG ? pens->fg : planes[i] == WR_LINE ? pens->line : pens->mix);
