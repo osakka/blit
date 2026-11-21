@@ -1,6 +1,7 @@
 # ADR 0217: Slimming the package: one copy of the documentation, font sources in their own package
 
 - Status: accepted
+- Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-11-05
 - Scope: `packaging/build-deb.sh`, `tools/tests/package_artifact_gate.sh`,
   `assets/fonts/README.md`, `docs/development-workflow.md`

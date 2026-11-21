@@ -554,8 +554,10 @@ or physical conformance guarantees; internal issue #110 tracks the rest.
 - [Generated native coverage](fonts/coverage.json): exact SHA256 and inclusive
   scalar ranges from each native font's best Unicode cmap. This is asset
   coverage, not runtime routing, fallback, ink or shaping conformance.
-- [Font provenance](../assets/fonts/fonts.source.json),
-  [Arabic provenance](../assets/fonts/arabic-fonts.source.json),
+- [Font registry and provenance](../assets/fonts/fonts.source.json) (ADR
+  0243: every face Blit ships, Arabic and the pixel fonts included, with its
+  id, role, how it is drawn, hash and licence; `GET /v1/fonts` reports it
+  as `registry`),
   [Emoji corpus](../assets/unicode/emoji-18.0/source.json), and
   [Hibr UI snapshot](../assets/fonts/hibr-ui-glyphs.json). The latter is
   generated from a Hibr release's wm/glyphs.hibr by

@@ -15,7 +15,7 @@ end
 lines = samples.map { |s| cells(s.fetch('visual')).map { |c| c.map { |x| x.to_s(16) }.join(',') }.join(';') }
 lines << 'fe92;fe92;fe92;20;fe8f;fe8f;20;fe8f,301'          # cut word, letters apart, a mark the face lacks
 lines << (['fe92'] * 40).join(';')                            # a run longer than 32 cells
-manifest = JSON.parse(File.read('assets/fonts/arabic-fonts.source.json'))
+manifest = JSON.parse(File.read('assets/fonts/fonts.source.json')).fetch('arabic')
 naskh = "assets/fonts/#{manifest.fetch('naskh').fetch('file')}"
 # Every shipped text font: the outline fonts, Spleen's masters, and the
 # pixel font's own raster.

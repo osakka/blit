@@ -7,7 +7,7 @@ require_relative 'build_flags'
 root = File.expand_path('../..', __dir__)
 abort 'usage: arabic_raster_gate.rb [ARABIC]' unless [0,1].include?(ARGV.size)
 Dir.chdir(root) do
-  manifest = JSON.parse(File.read('assets/fonts/arabic-fonts.source.json'))
+  manifest = JSON.parse(File.read('assets/fonts/fonts.source.json')).fetch('arabic')
   # ADR 0195: one Arabic companion serves every text font.
   %w[modern].each do |profile|
     entry = manifest.fetch(profile)

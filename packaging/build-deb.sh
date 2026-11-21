@@ -206,11 +206,14 @@ font_source_rel=sources/freefont-src-20120503.tar.gz
 font_source=$ROOT/assets/fonts/$font_source_rel
 font_source_url=https://ftp.gnu.org/gnu/freefont/freefont-src-20120503.tar.gz
 font_source_version=20120503-1
+# ADR 0243: the hash is the font registry's (its arabic section), the one
+# source_sha256 key in it; anything but one 64-hex value fails below.
 font_source_sha256=$(sed -n 's/.*"source_sha256": "\([0-9a-f]*\)".*/\1/p' \
-	"$ROOT/assets/fonts/arabic-fonts.source.json")
-if [ ! -f "$font_source" ] ||
+	"$ROOT/assets/fonts/fonts.source.json")
+if ! printf '%s\n' "$font_source_sha256" | grep -Eqx '[0-9a-f]{64}' ||
+   [ ! -f "$font_source" ] ||
    [ "$(sha256sum "$font_source" | awk '{print $1}')" != "$font_source_sha256" ]; then
-	echo "blit: FreeMono source archive missing or differs from arabic-fonts.source.json" >&2
+	echo "blit: FreeMono source archive missing or differs from fonts.source.json" >&2
 	exit 1
 fi
 rm -rf "$stage/usr/lib/blit/fonts/sources"
@@ -228,8 +231,8 @@ including sfd/FreeMono.sfd and the FontForge build scripts) is:
   sha256:   $font_source_sha256
 
 Blit's own derivation script is tools/fonts/build-arabic-profile.py in the
-Blit source tree; assets/fonts/arabic-fonts.source.json records the pinned
-hashes of the source and of the generated font.
+Blit source tree; assets/fonts/fonts.source.json (its arabic section)
+records the pinned hashes of the source and of the generated font.
 EOF
 chmod 0644 "$stage/usr/lib/blit/fonts/FreeMono-SOURCE.txt"
 # The repository documentation and OpenAPI schema are authoritative.  The

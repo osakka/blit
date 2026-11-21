@@ -20,7 +20,7 @@ parser.add_argument('--profile', choices=['modern'], required=True)  # ADR 0195:
 parser.add_argument('source', type=Path)
 parser.add_argument('output', type=Path)
 args = parser.parse_args()
-manifest = json.loads((root / 'assets/fonts/arabic-fonts.source.json').read_text())
+manifest = json.loads((root / 'assets/fonts/fonts.source.json').read_text())['arabic']  # ADR 0243: the one registry
 entry, build = manifest[args.profile], manifest['build']
 if hashlib.sha256(args.source.read_bytes()).hexdigest() != entry['upstream_sha256']:
     raise SystemExit('unreviewed Arabic source')

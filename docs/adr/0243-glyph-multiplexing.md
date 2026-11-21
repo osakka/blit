@@ -1,7 +1,11 @@
 # ADR 0243: Glyph multiplexing -- one registry, adopted protocols, published
 
 - Status: accepted as direction (the owner, 2026-11-21); two decisions open
-  (below); nothing built yet beyond what ADR 0195 already draws
+  (below). Step 1, the registry, built in 0.3.130: one manifest
+  (`assets/fonts/fonts.source.json`, the Arabic manifest folded in), a
+  generated header (`src/blit_font_registry.h`), no face file named in
+  `src/`, `/v1/fonts` reporting it; every font gate's output byte for byte
+  as before (`font_registry_gate`)
 - Date: 2026-11-21
 - Scope: the font registry (`assets/fonts/`), the raster's stack
   (`src/blit_raster.c`, `src/blit_font.c`), `/v1/fonts`, the terminal

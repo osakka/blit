@@ -146,12 +146,13 @@ source_commit=$(sed -n 's/^source_commit: //p' "$manifest")
 # ADR 0194: the font directory holds Blit's own fonts. The console fonts the
 # old profiles named, a stale build copy among them, and the stray Hack copy
 # must not come back, nor Iosevka Term, dropped in 0.2.37 for its size, nor
-# the fixed 16 px Spleen, replaced by the Spleen masters (ADR 0227).
+# the fixed 16 px Spleen, replaced by the Spleen masters (ADR 0227), nor the
+# Arabic manifest, folded into fonts.source.json, the one registry (ADR 0243).
 for gone in Uni2-Terminus16.psf Lat15-Terminus16.psf Hack-Regular.ttf Hack-LICENSE.txt \
         Blit-Hibr-Terminus16.psf Blit-Hibr-Spleen16.psf Blit-Hibr-Unifont16.psf \
         BlitModernNerd-Regular.ttf BlitRetroNerd-Regular.ttf BlitJetBrainlessNerd-Regular.ttf \
         BlitArabicRetro.ttf modern-fonts.source.json text/IosevkaTerm-Regular.ttf \
-        Blit-Spleen16.psf Blit-Spleen16.source.json; do
+        Blit-Spleen16.psf Blit-Spleen16.source.json arabic-fonts.source.json; do
     if [ -e "$stage/usr/lib/blit/fonts/$gone" ]; then
         echo "PACKAGE_ARTIFACT_FAIL retired font shipped: $gone" >&2
         exit 1
@@ -176,7 +177,7 @@ for icon_asset in $(git -C "$root" ls-tree --name-only "$source_commit" assets/f
         exit 1
     }
 done
-for font_asset in BlitArabicModern.ttf NotoNaskhArabic-Regular.ttf licenses/NotoNaskhArabic-OFL.txt arabic-fonts.source.json arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt; do
+for font_asset in BlitArabicModern.ttf NotoNaskhArabic-Regular.ttf licenses/NotoNaskhArabic-OFL.txt arabic-specimens.json FreeMono-LICENSE.txt FreeMono-README.txt FreeMono-AUTHORS.txt; do
     cmp -s <(git -C "$root" show "$source_commit:assets/fonts/$font_asset") \
         "$stage/usr/lib/blit/fonts/$font_asset" || {
         echo "PACKAGE_ARTIFACT_FAIL Arabic asset differs from recorded source: $font_asset" >&2
@@ -257,8 +258,9 @@ if [ -e "$stage/usr/lib/blit/docs" ]; then
     exit 1
 fi
 # The runtime package keeps only the pointer that carries the GPL source offer.
-font_source_sha=$(sed -n 's/^  *"source_sha256": "\(.*\)"/\1/p' \
-    "$root/assets/fonts/arabic-fonts.source.json")
+font_source_sha=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).dig("arabic", "modern", "source_sha256")' \
+    "$root/assets/fonts/fonts.source.json")
+printf '%s\n' "$font_source_sha" | grep -Eqx '[0-9a-f]{64}'
 note="$stage/usr/lib/blit/fonts/FreeMono-SOURCE.txt"
 test -f "$note"
 for needle in blit-font-sources https://ftp.gnu.org/gnu/freefont/freefont-src-20120503.tar.gz "$font_source_sha"; do

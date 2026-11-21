@@ -1,4 +1,5 @@
 #include "blit_raster.h"
+#include "blit_font_registry.h"
 #include "blit_cell_word.h"
 #include "blit_emoji_presentation.h"
 #include "blit_control_glyphs.h"
@@ -52,7 +53,7 @@ struct BlitRaster {
     FT_Face outline, colour, text_emoji, arabic;
     /* ADR 0195: the glyph stack beside the text font. Each may be absent;
        a missing face is skipped, never fatal. */
-    FT_Face icons, nerd, symbols[3], unifont[2];
+    FT_Face icons, nerd, symbols[BLIT_FACE_SYMBOLS_COUNT], unifont[BLIT_FACE_UNIFONT_COUNT];
     int cap; /* the text font's cap height in pixels: the icons' box */
     /* Blit's icon font, in its own units (ADR 0197): one column's advance,
        and the height of the box every icon is drawn in. A part spanning
@@ -136,8 +137,8 @@ void blit_raster_close(BlitRaster *raster)
     if (raster->arabic) FT_Done_Face(raster->arabic);
     if (raster->icons) FT_Done_Face(raster->icons);
     if (raster->nerd) FT_Done_Face(raster->nerd);
-    for (i = 0; i < 3; ++i) if (raster->symbols[i]) FT_Done_Face(raster->symbols[i]);
-    for (i = 0; i < 2; ++i) if (raster->unifont[i]) FT_Done_Face(raster->unifont[i]);
+    for (i = 0; i < BLIT_FACE_SYMBOLS_COUNT; ++i) if (raster->symbols[i]) FT_Done_Face(raster->symbols[i]);
+    for (i = 0; i < BLIT_FACE_UNIFONT_COUNT; ++i) if (raster->unifont[i]) FT_Done_Face(raster->unifont[i]);
     if (raster->text_emoji) FT_Done_Face(raster->text_emoji);
     if (raster->outline) FT_Done_Face(raster->outline);
     if (raster->colour) FT_Done_Face(raster->colour);
@@ -192,14 +193,13 @@ static void pixel_metrics(BlitRaster *raster)
    OS/2 sCapHeight where the font says, else the height of its H. */
 static void open_stack(BlitRaster *raster, const char *colour_path)
 {
-    static const char *const symbols[3] = {
-        "NotoSansSymbols2-Regular.ttf", "NotoSansSymbols-Regular.ttf", "NotoSansMath-Regular.ttf"
-    };
+    static const char *const symbols[BLIT_FACE_SYMBOLS_COUNT] = BLIT_FACE_SYMBOLS;
+    static const char *const unifont[BLIT_FACE_UNIFONT_COUNT] = BLIT_FACE_UNIFONT;
     const char *slash = strrchr(colour_path, '/');
     int length = slash ? (int)(slash - colour_path + 1) : 0, i;
     TT_OS2 *os2 = raster->outline ?
         (TT_OS2 *)FT_Get_Sfnt_Table(raster->outline, FT_SFNT_OS2) : NULL;
-    raster->icons = stack_face(raster, colour_path, length, "BlitIcons-Regular.ttf");
+    raster->icons = stack_face(raster, colour_path, length, BLIT_FACE_ICONS);
     if (raster->icons) {
         FT_Fixed advance = 0;
         TT_OS2 *icon_os2 = (TT_OS2 *)FT_Get_Sfnt_Table(raster->icons, FT_SFNT_OS2);
@@ -228,10 +228,11 @@ static void open_stack(BlitRaster *raster, const char *colour_path)
             }
         }
     }
-    raster->nerd = stack_face(raster, colour_path, length, "SymbolsNerdFontMono-Regular.ttf");
-    for (i = 0; i < 3; ++i) raster->symbols[i] = stack_face(raster, colour_path, length, symbols[i]);
-    raster->unifont[0] = stack_face(raster, colour_path, length, "Unifont-Regular.otf");
-    raster->unifont[1] = stack_face(raster, colour_path, length, "UnifontUpper-Regular.otf");
+    raster->nerd = stack_face(raster, colour_path, length, BLIT_FACE_NERD);
+    for (i = 0; i < BLIT_FACE_SYMBOLS_COUNT; ++i)
+        raster->symbols[i] = stack_face(raster, colour_path, length, symbols[i]);
+    for (i = 0; i < BLIT_FACE_UNIFONT_COUNT; ++i)
+        raster->unifont[i] = stack_face(raster, colour_path, length, unifont[i]);
     if (!raster->outline)
         return;  /* a pixel font's metrics come from its own H */
     if (os2 && os2->version >= 2 && os2->sCapHeight > 0)
@@ -405,7 +406,7 @@ BlitRaster *blit_raster_open(const BlitFont *fallback,
         char sibling[1024];
         const char *slash = strrchr(colour_path, '/');
         int columns;
-        if (snprintf(sibling, sizeof(sibling), "%.*sNotoEmojiText.ttf",
+        if (snprintf(sibling, sizeof(sibling), "%.*s" BLIT_FACE_TEXT_EMOJI,
                 slash ? (int)(slash - colour_path + 1) : 0, colour_path) >= (int)sizeof(sibling)) goto fail;
         if (FT_New_Face(raster->library, sibling, 0, &raster->text_emoji) ||
             !FT_IS_SCALABLE(raster->text_emoji) || FT_HAS_COLOR(raster->text_emoji) ||
@@ -2057,11 +2058,11 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
         if (!result && !pua) result = draw_fitted(raster, raster->nerd, FIT_ICON, scalar, &next, 0);
         if (!result && (text_selector || blit_emoji_variation(scalar)))
             result = draw_text_emoji(raster, scalar, &next);
-        for (face = 0; !result && face < 3; ++face)
+        for (face = 0; !result && face < BLIT_FACE_SYMBOLS_COUNT; ++face)
             result = draw_fitted(raster, raster->symbols[face], FIT_SYMBOL, scalar, &next, 0);
         /* A pixel font's wide characters stay pixels: Blit's wide PSF has
            them, so Unifont's outlines are only its one-column net. */
-        for (face = 0; !result && face < 2 && (!raster->pixel || columns == 1); ++face)
+        for (face = 0; !result && face < BLIT_FACE_UNIFONT_COUNT && (!raster->pixel || columns == 1); ++face)
             result = draw_fitted(raster, raster->unifont[face], FIT_SYMBOL, scalar, &next, 0);
     }
     if (result < 0 || (outline_colour && !result)) { free(next.pixels); return 0; }

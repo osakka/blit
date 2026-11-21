@@ -776,7 +776,7 @@ static void settings_apply_hud(BlitRuntime *runtime)
              settings.display_id);
     if (runtime->hud_enabled && !runtime->hud_font_loaded) {
         if (blit_font_load_path(&runtime->hud_font,
-                                blit_font_root_file("Blit-Terminus16.psf")) != 0)
+                                blit_font_root_file(BLIT_FACE_PIXEL_FALLBACK)) != 0)
             fprintf(stderr, "blit: performance panel font unavailable; using the built-in fallback\n");
         runtime->hud_font_loaded = 1;
     }

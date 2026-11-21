@@ -62,7 +62,27 @@ shrink its text.
 
 **Provenance:** `fonts.source.json` pins every file by SHA-256, with its
 upstream URL and licence. `font_assets_gate.rb` checks it, and that `text/`
-holds nothing unpinned. To rebuild Blit's icon font:
+holds nothing unpinned.
+
+**The one registry (ADR 0243):** `fonts.source.json` is also the one place a
+face is named. Every face Blit ships -- the text fonts, the glyph stack, the
+emoji faces, the Arabic faces (its `arabic` section) and the two pixel fonts
+(its `pixel` section) -- has an `id` (its family name in kebab form, a PSF's
+its file name), a `role` and a `draw`, both from the vocabulary in its
+`registry` section, and its `family` where it has one.
+`tools/fonts/build-font-registry.py` writes `src/blit_font_registry.h` from
+it, the only place the code takes a face's file name from, and
+`GET /v1/fonts` reports the same table as `registry`.
+`font_registry_gate.rb` checks the committed header is the generator's
+output, every face is pinned, no face's file name is written in `src/`, and
+the server lists every role. After changing a face:
+
+```sh
+python3 tools/fonts/build-font-registry.py src/blit_font_registry.h
+ruby tools/tests/font_registry_gate.rb
+```
+
+To rebuild Blit's icon font:
 
 ```sh
 PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-blit-icons.py assets/fonts/BlitIcons-Regular.ttf
@@ -259,7 +279,8 @@ supplies visual forms. The companion shares the primary Latin baseline.
 `GET /v1/fonts` identifies the loaded companion (`active.arabic_companion`)
 and each profile's `arabic_companion_path`; pixel fonts have none.
 
-Canonical source/output hashes and licences: `arabic-fonts.source.json`.
+Canonical source/output hashes and licences: the `arabic` section of
+`fonts.source.json`.
 `PYTHONPATH=$(tools/fonts/fonttools.sh) python3 tools/fonts/build-arabic-profile.py --profile modern SOURCE OUTPUT`
 needs a Python whose Unicode data is 14.0.0 (Python 3.11; the script refuses
 another) and uses pinned fontTools 4.60.1, Unicode 14.0.0 decompositions and HarfBuzz 6.0.0.

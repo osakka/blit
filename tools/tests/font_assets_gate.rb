@@ -1,8 +1,9 @@
 #!/usr/bin/env ruby
 # ADR 0195: every font file Blit ships is the one fonts.source.json pins,
 # with its licence: the text fonts in text/ (and nothing else there), the
-# glyph stack, the emoji faces, the Arabic companion, the Nerd catalogue
-# and Blit's icon sources. The text fonts are shipped unmodified, so their
+# glyph stack, the emoji faces, the Arabic faces, the pixel fonts, the Nerd
+# catalogue and Blit's icon sources. fonts.source.json is the one registry
+# (ADR 0243); font_registry_gate checks the code names its faces from it. The text fonts are shipped unmodified, so their
 # hashes are the upstream release's files.
 require 'json'
 require 'digest'
@@ -41,7 +42,7 @@ check(root, catalogue.fetch('file'), catalogue.fetch('sha256'), 'catalogue')
 scalars = JSON.parse(File.read(File.join(root, catalogue.fetch('file')))).values.grep(Hash).filter_map { |v| v['code'] }.uniq
 raise 'catalogue count mismatch' unless scalars.size == catalogue.fetch('unique_codepoints')
 manifest.fetch('icon_licenses').each { |entry| check(root, entry.fetch('file'), entry.fetch('sha256'), 'icon licence') }
-arabic = JSON.parse(File.read(File.join(root, 'arabic-fonts.source.json')))
+arabic = manifest.fetch('arabic')
 entry = arabic.fetch('modern')
 check(root, entry.fetch('file'), entry.fetch('sha256'), 'Arabic companion')
 check(root, entry.fetch('license_file'), entry.fetch('license_sha256'), 'Arabic licence')
@@ -51,5 +52,11 @@ check(root, arabic.fetch('specimens_file'), arabic.fetch('specimens_sha256'), 'A
 naskh = arabic.fetch('naskh')
 check(root, naskh.fetch('file'), naskh.fetch('sha256'), 'Arabic word face')
 check(root, naskh.fetch('license_file'), naskh.fetch('license_sha256'), 'Arabic word face licence')
+# ADR 0243: the pixel fonts, generated here and pinned like the rest.
+manifest.fetch('pixel').each_value do |entry|
+  check(root, entry.fetch('file'), entry.fetch('sha256'), 'pixel font')
+  check(root, entry.fetch('license_file'), entry.fetch('license_sha256'), 'pixel font licence')
+end
+raise 'a retired manifest is back: arabic-fonts.source.json' if File.exist?(File.join(root, 'arabic-fonts.source.json'))
 puts "FONT_ASSETS_PASS text=#{text.size} stack=icons+nerd+#{stack.fetch('symbols').size}_symbols+unifont " \
      "nerd_codepoints=#{scalars.size} colour=Noto#{manifest.fetch('colour').fetch('version')} source_hashes=exact licences=included"

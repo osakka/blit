@@ -6,6 +6,7 @@
 #include "blit_pointer_busy.h"     /* ADR 0235: the busy pointer's settings */   /* ADR 0234: shake to find the pointer */
 #include "blit_vt.h"
 #include "blit_font.h"
+#include "blit_font_registry.h"
 #include "blit_raster.h"
 #include "blit_graphics.h"
 #include "blit_crash.h"
@@ -19002,6 +19003,29 @@ static const char *const font_hinting_names[] = {"full", "light", "none"};
 enum { FONT_ARABIC_NASKH, FONT_ARABIC_MODERN };
 static const char *const font_arabic_names[] = {"naskh", "modern"};
 
+/* ADR 0243: every face Blit ships, from the registry's generated table, not
+   from the disk: the faces this build draws with, whatever the root holds. */
+typedef struct {
+    const char *id, *role, *draw, *file, *family;
+} FontRegistryFace;
+
+#define FONT_REGISTRY_FACE(id, role, draw, file, family) {id, role, draw, file, family},
+static const FontRegistryFace font_registry[] = { BLIT_FONT_REGISTRY(FONT_REGISTRY_FACE) };
+#undef FONT_REGISTRY_FACE
+
+static void font_registry_json(char *body, size_t capacity, size_t *used)
+{
+    size_t i;
+    for (i = 0; i < sizeof(font_registry) / sizeof(font_registry[0]); ++i) {
+        const FontRegistryFace *face = &font_registry[i];
+        char family[160] = "null";
+        if (face->family) snprintf(family, sizeof(family), "\"%s\"", face->family);
+        json_appendf(body, capacity, used,
+            "%s{\"id\":\"%s\",\"role\":\"%s\",\"draw\":\"%s\",\"file\":\"%s\",\"family\":%s}",
+            i ? "," : "", face->id, face->role, face->draw, face->file, family);
+    }
+}
+
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
 {
     char escaped_path[512];
@@ -19120,7 +19144,9 @@ static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
             escaped_reject, escaped_reason);
         first = 0;
     }
-    snprintf(body + used, capacity - used, "]}");
+    json_appendf(body, capacity, &used, "],\"registry\":[");
+    font_registry_json(body, capacity, &used);
+    json_appendf(body, capacity, &used, "]}");
 }
 
 /* One packaged catalogue is used by the generator and discovery API; do not
@@ -19133,7 +19159,7 @@ static int font_icons_json(char *body, size_t capacity)
        file icons took it past 16 KiB, then past 60). */
     size_t length, limit = capacity < 262144 ? capacity : 262144;
     int too_long, failed;
-    if (limit < 2 || snprintf(path, sizeof(path), "%s", blit_font_root_file("icons/catalogue.json"))
+    if (limit < 2 || snprintf(path, sizeof(path), "%s", blit_font_root_file(BLIT_FONT_ICON_CATALOGUE))
         >= (int)sizeof(path)) return 0;
     file = fopen(path, "rb");
     if (!file) return 0;
@@ -19268,7 +19294,7 @@ static int prepare_font_raster(BlitFont *font, const char *path,
     /* ADR 0195: the emoji faces and the glyph stack are the root's. A pixel
        font (ADR 0199) has no outline: it keeps its own glyphs and borrows
        the stack for those it lacks. */
-    snprintf(colour, sizeof(colour), "%s", blit_font_root_file("NotoColorEmoji.ttf"));
+    snprintf(colour, sizeof(colour), "%s", blit_font_root_file(BLIT_FACE_COLOUR));
     *result = blit_font_is_outline(path) ?
         blit_raster_open(font, path, colour,
                          font_cell_dimension(font, 1, scale, pixels),

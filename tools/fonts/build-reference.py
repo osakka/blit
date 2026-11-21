@@ -46,7 +46,8 @@ def ranges(values):
 def generate():
     if fontTools.__version__ != '4.60.1':
         raise SystemExit('Use pinned fontTools 4.60.1 (same as font builders)')
-    modern, arabic = load('fonts.source.json'), load('arabic-fonts.source.json')
+    modern = load('fonts.source.json')
+    arabic = modern['arabic']  # ADR 0243: one registry
     nerd = load(modern['catalogue']['file'])
     assert digest(FONTS / modern['catalogue']['file']) == modern['catalogue']['sha256']
     icons = load(modern['custom_icons']['catalogue'])

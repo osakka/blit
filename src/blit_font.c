@@ -1,4 +1,5 @@
 #include "blit_font.h"
+#include "blit_font_registry.h"
 #include "blit_raster.h"
 
 #include <unistd.h>
@@ -583,7 +584,7 @@ int blit_font_load_wide(BlitFont *font)
     if (font == NULL) return -1;
     if (configured != NULL && configured[0] != '\0')
         return blit_font_load_path(font, configured);
-    if (blit_font_load_path(font, blit_font_root_file("Blit-Unifont16.psf")) == 0)
+    if (blit_font_load_path(font, blit_font_root_file(BLIT_FACE_PIXEL_WIDE)) == 0)
         return 0;
     /* Not fatal: a wide cell falls back to the primary font's substitute,
        which is what every release before ADR 0062 did. */
@@ -655,19 +656,19 @@ const char *blit_font_profile_for_path(const char *path)
 /* ADR 0195: one Arabic companion serves every outline font. */
 const char *blit_font_arabic_path(const char *primary)
 {
-    return blit_font_is_outline(primary) ? blit_font_root_file("BlitArabicModern.ttf") : NULL;
+    return blit_font_is_outline(primary) ? blit_font_root_file(BLIT_FACE_ARABIC_CELLS) : NULL;
 }
 
 /* ADR 0241: the face Arabic words are shaped in, for every text font. */
 const char *blit_font_arabic_words_path(void)
 {
-    return blit_font_root_file("NotoNaskhArabic-Regular.ttf");
+    return blit_font_root_file(BLIT_FACE_ARABIC_WORDS);
 }
 
 int blit_font_profile_available(int index)
 {
     static const char *const needed[] = {
-        "NotoColorEmoji.ttf", "NotoEmojiText.ttf", "Blit-Terminus16.psf", "BlitArabicModern.ttf"
+        BLIT_FACE_COLOUR, BLIT_FACE_TEXT_EMOJI, BLIT_FACE_PIXEL_FALLBACK, BLIT_FACE_ARABIC_CELLS
     };
     const char *path = blit_font_profile_path(index);
     size_t i;
@@ -687,7 +688,7 @@ int blit_font_load_path(BlitFont *font, const char *path)
     if (blit_font_is_outline(path)) {
         /* An outline font's canonical PSF fallback is the root's Terminus. */
         if (access(path, R_OK) != 0) return -1;
-        snprintf(fallback, sizeof(fallback), "%s", blit_font_root_file("Blit-Terminus16.psf"));
+        snprintf(fallback, sizeof(fallback), "%s", blit_font_root_file(BLIT_FACE_PIXEL_FALLBACK));
         source = fallback;
     }
     if (font_load_file(font, source) != 0) return -1;
@@ -706,7 +707,7 @@ void blit_font_load(BlitFont *font)
     if (font == NULL) return;
     if (configured != NULL && configured[0] != '\0' &&
         blit_font_load_path(font, configured) == 0) return;
-    if (blit_font_load_path(font, blit_font_root_file("Blit-Terminus16.psf")) == 0) return;
+    if (blit_font_load_path(font, blit_font_root_file(BLIT_FACE_PIXEL_FALLBACK)) == 0) return;
     for (i = 0; i < blit_font_profile_count(); ++i)
         if (blit_font_load_path(font, blit_font_profile_path(i)) == 0) return;
     fprintf(stderr, "blit: font unavailable; using built-in fallback\n");

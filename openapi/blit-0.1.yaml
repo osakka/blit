@@ -2440,7 +2440,7 @@ components:
       additionalProperties: false
     FontProfiles:
       type: object
-      required: [revision, active, profiles]
+      required: [revision, active, profiles, registry]
       properties:
         revision: {$ref: '#/components/schemas/Revision'}
         active:
@@ -2517,6 +2517,43 @@ components:
             properties:
               path: {type: string}
               reason: {type: string}
+            additionalProperties: false
+        registry:
+          type: array
+          description: >-
+            ADR 0243: every face Blit ships, from its one font registry
+            (assets/fonts/fonts.source.json), in the registry's order. It is
+            the table the server was built with, not a listing of the disk;
+            profiles and rejected say what the fonts root holds now.
+          items:
+            type: object
+            required: [id, role, draw, file, family]
+            properties:
+              id:
+                type: string
+                description: The face's family name in kebab form; a pixel font's file name.
+              role:
+                type: string
+                enum: [text, icons, nerd, symbols, unifont, colour, text_emoji,
+                       arabic_cells, arabic_words, pixel_fallback, pixel_wide]
+                description: >-
+                  What the face is for. text is a selectable text font (a
+                  font of masters has one entry per master); icons, nerd,
+                  symbols and unifont are the glyph stack, symbols and
+                  unifont several faces in the order they are tried;
+                  arabic_cells is Blit Arabic Modern, arabic_words Noto
+                  Naskh Arabic; pixel_fallback is the boot PSF and every
+                  outline font's PSF fallback, pixel_wide the 16x16 PSF for
+                  wide cells.
+              draw:
+                type: string
+                enum: [cell, fitted, words, colour]
+                description: >-
+                  How it is drawn: in the cell at its size, fitted to the
+                  text font's cap height and the cell, shaped as words (ADR
+                  0241), or as colour bitmaps.
+              file: {type: string, description: Relative to the fonts root.}
+              family: {type: [string, 'null'], description: Its family name; null for a pixel font.}
             additionalProperties: false
       additionalProperties: false
     ServerDetails:

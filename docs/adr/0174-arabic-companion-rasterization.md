@@ -1,6 +1,7 @@
 # ADR 0174: Arabic companion faces and cell-local mark positioning
 
 - Status: accepted
+- Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-10-21
 - Tracking: Blit 119 under 118
 

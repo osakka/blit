@@ -1,6 +1,7 @@
 # ADR 0241: Arabic is shaped as words and drawn as slices
 
 - Status: accepted, released in 0.3.129
+- Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-11-20
 - Scope: `src/blit_raster.c` (a word cache beside the glyph cache, the
   word slice lookup), `src/blit_cell_word.h` (new: the key, the run

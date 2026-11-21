@@ -1184,6 +1184,36 @@ rather than scaled.
 - **Coverage:** what a master lacks (6x12 has no Latin Extended-A, for
   one) comes from the glyph stack, as for any text font.
 
+`registry` (ADR 0243) is every face Blit ships, from its one font
+registry, `assets/fonts/fonts.source.json`, in the registry's order: each
+`{id, role, draw, file, family}`. It is the table the server was built
+with (a generated header), not a listing of the disk; `profiles` and
+`rejected` say what the fonts root holds now. `file` is relative to the
+fonts root; `family` is the face's family name, null for a pixel font.
+`role` is one of `text` (a selectable text font; a font of masters has one
+entry per master), `icons`, `nerd`, `symbols`, `unifont` (the glyph stack,
+the last two several faces in the order they are tried), `colour`,
+`text_emoji`, `arabic_cells` (Blit Arabic Modern), `arabic_words` (Noto
+Naskh Arabic), `pixel_fallback` (`Blit-Terminus16.psf`, the boot font and
+every outline font's PSF fallback) and `pixel_wide` (`Blit-Unifont16.psf`,
+wide cells). `draw` is how the face is drawn: `cell` (in the cell, at its
+size), `fitted` (fitted to the text font's cap height and the cell),
+`words` (shaped as words, ADR 0241) or `colour` (colour bitmaps). For
+example:
+
+```json
+"registry": [
+  {"id": "hack", "role": "text", "draw": "cell",
+   "file": "text/Hack-Regular.ttf", "family": "Hack"},
+  {"id": "blit-icons", "role": "icons", "draw": "fitted",
+   "file": "BlitIcons-Regular.ttf", "family": "Blit Icons"},
+  {"id": "noto-naskh-arabic", "role": "arabic_words", "draw": "words",
+   "file": "NotoNaskhArabic-Regular.ttf", "family": "Noto Naskh Arabic"},
+  {"id": "blit-terminus16", "role": "pixel_fallback", "draw": "cell",
+   "file": "Blit-Terminus16.psf", "family": null}
+]
+```
+
 Discover available profiles through `GET /v1/fonts`, not a version
 comparison. `colour_glyphs: true` does not imply full emoji-sequence
 shaping; see issue 110 and [font scope](../assets/fonts/README.md).

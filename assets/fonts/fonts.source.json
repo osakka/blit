@@ -1,11 +1,39 @@
 {
   "policy": "ADR 0195: text fonts ship unmodified in text/ and are discovered (a directory there is one font of masters, ADR 0227); every glyph they lack comes from the shipped stack, fitted at draw time. Each file here is pinned by SHA-256 to its upstream; package_artifact_gate checks the package against this manifest.",
+  "registry": {
+    "adr": "ADR 0243 step 1: this file is the one registry of every face Blit ships. Each face has an id (its family name in kebab form, a PSF its file name), a role and how it is drawn; tools/fonts/build-font-registry.py writes src/blit_font_registry.h from it, so the code names no face file itself, and GET /v1/fonts reports it.",
+    "header": "src/blit_font_registry.h",
+    "generator": "tools/fonts/build-font-registry.py",
+    "roles": {
+      "text": "a text font in text/, discovered and selectable (ADR 0195, 0227)",
+      "icons": "Blit's own icons (ADR 0195, 0197)",
+      "nerd": "the Nerd Fonts symbols",
+      "symbols": "symbols and maths, in this order",
+      "unifont": "the last resort, in this order",
+      "colour": "colour emoji",
+      "text_emoji": "text-presentation emoji",
+      "arabic_cells": "Arabic drawn cell by cell, the outline fonts' companion (ADR 0174)",
+      "arabic_words": "Arabic shaped as words (ADR 0241)",
+      "pixel_fallback": "the boot pixel font and every outline font's PSF fallback",
+      "pixel_wide": "the 16x16 pixel font for wide cells (ADR 0062)"
+    },
+    "draws": {
+      "cell": "in the cell, at the cell's size",
+      "fitted": "fitted to the text font's cap height and the cell (draw_fitted)",
+      "words": "shaped as words and drawn as slices (ADR 0241)",
+      "colour": "colour bitmaps scaled into the cell"
+    }
+  },
   "build": {
     "fonttools_version": "4.60.1",
     "icons_generator": "tools/fonts/build-blit-icons.py"
   },
   "text": [
     {
+      "id": "hack",
+      "role": "text",
+      "draw": "cell",
+      "family": "Hack",
       "file": "text/Hack-Regular.ttf",
       "source": "Hack 3.003",
       "upstream": "https://github.com/source-foundry/Hack/releases/download/v3.003/Hack-v3.003-ttf.zip",
@@ -18,6 +46,10 @@
       "license_sha256": "1f61bb7c790c59b4b0ecdf304628b94e42ae4c8020094a8c3da73381ab212623"
     },
     {
+      "id": "ibm-3270",
+      "role": "text",
+      "draw": "cell",
+      "family": "IBM 3270",
       "file": "text/3270-Regular.ttf",
       "source": "IBM 3270 3.0.1",
       "upstream": "https://github.com/rbanffy/3270font/releases/download/v3.0.1/3270_fonts_d916271.zip",
@@ -30,6 +62,10 @@
       "license_sha256": "ef855fadca28e91a4123f7299bd79dcd78a7e19dfc364039790bb75bdedd515a"
     },
     {
+      "id": "jetbrains-mono-nl",
+      "role": "text",
+      "draw": "cell",
+      "family": "JetBrains Mono NL",
       "file": "text/JetBrainsMonoNL-Regular.ttf",
       "source": "JetBrains Mono NL 2.304",
       "upstream": "https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip",
@@ -42,6 +78,10 @@
       "license_sha256": "30f0c136e3c88e422d0791acd97238870f9054a9729bc34cf2ff0d4ed8cac4ad"
     },
     {
+      "id": "fira-code",
+      "role": "text",
+      "draw": "cell",
+      "family": "Fira Code",
       "file": "text/FiraCode-Regular.ttf",
       "source": "Fira Code 6.2",
       "upstream": "https://github.com/tonsky/FiraCode/releases/download/6.2/Fira_Code_v6.2.zip",
@@ -54,6 +94,10 @@
       "license_sha256": "1d41e10031ab125302780a05ec4c91d218e47db0c7e37cf315cce5e608cdc25c"
     },
     {
+      "id": "ibm-plex-mono",
+      "role": "text",
+      "draw": "cell",
+      "family": "IBM Plex Mono",
       "file": "text/IBMPlexMono-Regular.ttf",
       "source": "IBM Plex Mono 1.1.0",
       "upstream": "https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%401.1.0/ibm-plex-mono.zip",
@@ -66,6 +110,10 @@
       "license_sha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da"
     },
     {
+      "id": "spleen-6x12",
+      "role": "text",
+      "draw": "cell",
+      "family": "Spleen 6x12",
       "file": "text/spleen/spleen-6x12.otf",
       "source": "Spleen 2.2.0, master 6x12 (ADR 0227)",
       "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
@@ -78,6 +126,10 @@
       "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
     },
     {
+      "id": "spleen-8x16",
+      "role": "text",
+      "draw": "cell",
+      "family": "Spleen 8x16",
       "file": "text/spleen/spleen-8x16.otf",
       "source": "Spleen 2.2.0, master 8x16 (ADR 0227)",
       "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
@@ -90,6 +142,10 @@
       "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
     },
     {
+      "id": "spleen-12x24",
+      "role": "text",
+      "draw": "cell",
+      "family": "Spleen 12x24",
       "file": "text/spleen/spleen-12x24.otf",
       "source": "Spleen 2.2.0, master 12x24 (ADR 0227)",
       "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
@@ -102,6 +158,10 @@
       "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
     },
     {
+      "id": "spleen-16x32",
+      "role": "text",
+      "draw": "cell",
+      "family": "Spleen 16x32",
       "file": "text/spleen/spleen-16x32.otf",
       "source": "Spleen 2.2.0, master 16x32 (ADR 0227)",
       "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
@@ -114,6 +174,10 @@
       "license_sha256": "f33fe8679d5b2abecc4f1313ce6c6bfa58262964de5f7bca146596a7318047af"
     },
     {
+      "id": "spleen-32x64",
+      "role": "text",
+      "draw": "cell",
+      "family": "Spleen 32x64",
       "file": "text/spleen/spleen-32x64.otf",
       "source": "Spleen 2.2.0, master 32x64 (ADR 0227)",
       "upstream": "https://github.com/fcambus/spleen/releases/download/2.2.0/spleen-2.2.0.tar.gz",
@@ -128,12 +192,20 @@
   ],
   "stack": {
     "icons": {
+      "id": "blit-icons",
+      "role": "icons",
+      "draw": "fitted",
+      "family": "Blit Icons",
       "file": "BlitIcons-Regular.ttf",
       "source": "Blit original artwork, built by tools/fonts/build-blit-icons.py from icons/catalogue.json",
       "sha256": "0408b82294f755ecf53e82ef33082886609bef36aac300e70bdfeb1568266304",
       "license_file": "icons/LICENSE.txt"
     },
     "nerd": {
+      "id": "symbols-nerd-font-mono",
+      "role": "nerd",
+      "draw": "fitted",
+      "family": "Symbols Nerd Font Mono",
       "file": "SymbolsNerdFontMono-Regular.ttf",
       "source": "Nerd Fonts v3.4.0 Symbols Only Mono: the full pinned catalogue",
       "upstream": "https://raw.githubusercontent.com/ryanoasis/nerd-fonts/v3.4.0/patched-fonts/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf",
@@ -143,6 +215,10 @@
     },
     "symbols": [
       {
+        "id": "noto-sans-symbols-2",
+        "role": "symbols",
+        "draw": "fitted",
+        "family": "Noto Sans Symbols 2",
         "file": "NotoSansSymbols2-Regular.ttf",
         "upstream": "https://raw.githubusercontent.com/google/fonts/7b6724ac7ececc713e9ba93af309f7520c9a80a3/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
         "license_file": "licenses/NotoSansSymbols2-OFL.txt",
@@ -150,6 +226,10 @@
         "sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
       },
       {
+        "id": "noto-sans-symbols",
+        "role": "symbols",
+        "draw": "fitted",
+        "family": "Noto Sans Symbols",
         "file": "NotoSansSymbols-Regular.ttf",
         "upstream": "https://raw.githubusercontent.com/google/fonts/caa8c83707a5797d62fd02f14301391986f21d75/ofl/notosanssymbols/NotoSansSymbols%5Bwght%5D.ttf",
         "license_file": "licenses/NotoSansSymbols-OFL.txt",
@@ -157,6 +237,10 @@
         "sha256": "f7e7e04b4a24b6c78893d50cbfd2b2f6cae49617ab047bfef668d252adb128f7"
       },
       {
+        "id": "noto-sans-math",
+        "role": "symbols",
+        "draw": "fitted",
+        "family": "Noto Sans Math",
         "file": "NotoSansMath-Regular.ttf",
         "upstream": "https://raw.githubusercontent.com/google/fonts/dbd1ab6e65dc59bcda3ca8de9fd372f58f98e0af/ofl/notosansmath/NotoSansMath-Regular.ttf",
         "license_file": "licenses/NotoSansMath-OFL.txt",
@@ -166,6 +250,10 @@
     ],
     "unifont": [
       {
+        "id": "unifont",
+        "role": "unifont",
+        "draw": "fitted",
+        "family": "Unifont",
         "file": "Unifont-Regular.otf",
         "upstream": "https://unifoundry.com/pub/unifont/unifont-16.0.04/font-builds/unifont-16.0.04.otf",
         "sha256": "0e3981ab552231b5a2a870f2b61741903a4bf25c23ef5aeb05fdced1b3c7af4d",
@@ -174,6 +262,10 @@
         "license_sha256": "1e74cb82bf476843e97c2596297b04219b1a7e51f7238944a8c031cb9401fa87"
       },
       {
+        "id": "unifont-upper",
+        "role": "unifont",
+        "draw": "fitted",
+        "family": "Unifont Upper",
         "file": "UnifontUpper-Regular.otf",
         "upstream": "https://unifoundry.com/pub/unifont/unifont-16.0.04/font-builds/unifont_upper-16.0.04.otf",
         "sha256": "fc8c6e9c4958243cef651c87cfbd916916f3545215d3ebcae92366b6edbb2f05",
@@ -184,6 +276,10 @@
     ]
   },
   "colour": {
+    "id": "noto-color-emoji",
+    "role": "colour",
+    "draw": "colour",
+    "family": "Noto Color Emoji",
     "file": "NotoColorEmoji.ttf",
     "version": "2.057",
     "source": "Unmodified Noto Emoji 2D v2.057, release v2026-09-24-unicode18_0; CBDT/CBLC bitmap colour strikes",
@@ -193,6 +289,10 @@
     "license_sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
   },
   "text_emoji": {
+    "id": "noto-emoji",
+    "role": "text_emoji",
+    "draw": "cell",
+    "family": "Noto Emoji",
     "file": "NotoEmojiText.ttf",
     "version": "3.002",
     "source": "Unmodified Noto Emoji variable monochrome outlines, default weight400; shared text-presentation fallback",
@@ -200,6 +300,82 @@
     "sha256": "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551",
     "license_file": "NotoEmojiText-LICENSE.txt",
     "license_sha256": "500bb1ccf43df7bbb522112f9133a52b16e1c35e809632f5d8609b179152de5b"
+  },
+  "arabic": {
+    "build": {
+      "fonttools_version": "4.60.1",
+      "unicode_decomposition_version": "14.0.0",
+      "harfbuzz_version": "6.0.0"
+    },
+    "modern": {
+      "id": "blit-arabic-modern",
+      "role": "arabic_cells",
+      "draw": "cell",
+      "family": "Blit Arabic Modern",
+      "file": "BlitArabicModern.ttf",
+      "source_family": "GNU FreeMono",
+      "version": "20120503",
+      "upstream": "https://ftp.gnu.org/gnu/freefont/freefont-ttf-20120503.zip",
+      "member": "freefont-20120503/FreeMono.ttf",
+      "upstream_sha256": "0517b67f1e50bbcde4e54834a5fa597be2526cf3cbb69487a9fbdb0de1a83b4c",
+      "sha256": "6c9a2bbeb4811154cac80912e893755ec6a1477921caa5d232608a2ebbc075fe",
+      "license_file": "FreeMono-LICENSE.txt",
+      "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "source_upstream": "https://ftp.gnu.org/gnu/freefont/freefont-src-20120503.tar.gz",
+      "source_file": "sources/freefont-src-20120503.tar.gz",
+      "source_sha256": "0d62e2e22655f841c3ac5fb8c8059a52fe2c09c695d9e8eda9903406e942657a"
+    },
+    "naskh": {
+      "id": "noto-naskh-arabic",
+      "role": "arabic_words",
+      "draw": "words",
+      "family": "Noto Naskh Arabic",
+      "file": "NotoNaskhArabic-Regular.ttf",
+      "version": "2.021",
+      "upstream": "https://github.com/notofonts/arabic/releases/download/NotoNaskhArabic-v2.021/NotoNaskhArabic-v2.021.zip",
+      "upstream_sha256": "6c050ab9bd087d69b733c505a7576e60c528c2f33cd7b91005a5bd7da4514032",
+      "member": "NotoNaskhArabic/unhinted/ttf/NotoNaskhArabic-Regular.ttf",
+      "sha256": "c34fdbd98af4dbc45ca192a23d2eeb77032add83086f5fe32957d23b3f36b221",
+      "license": "OFL-1.1",
+      "license_file": "licenses/NotoNaskhArabic-OFL.txt",
+      "license_sha256": "a7a5a25eb188bf1cd96982030d53e23c33485c69b1044a562254226857ee13af",
+      "use": "ADR 0241: Arabic shaped as words; unhinted, as Blit draws Arabic without hinting"
+    },
+    "status": "ADR 0241: Arabic is shaped as words in Noto Naskh Arabic, unmodified; Blit Arabic Modern stays the per-cell companion (the 'modern' choice). ADR 0195: Blit Arabic Retro (Kawkab Mono) is retired.",
+    "specimens_file": "arabic-specimens.json",
+    "specimens_sha256": "5bb68482db9d96e1797a5372ea20437dade2f53b40a91efc4e733be242719497",
+    "rejected_candidates": {
+      "Cascadia Mono 2407.24": "Contextual alias generation cannot produce the single glyph required for Hibr's one-cell lam-alef presentation forms FEF5..FEFC; do not silently widen or substitute.",
+      "DejaVu Sans Mono 2.37": "Lacks U+0670 superscript alef used in the vocalized religious specimen; not accepted as the Modern companion.",
+      "Vazir Code 1.1.2": "Contextual alias generation does not produce the single glyph required for Hibr's lam-alef presentation forms."
+    },
+    "policy": "Preserve source Arabic outlines and OpenType positioning. Materialize missing presentation-form aliases using the pinned Unicode decomposition and HarfBuzz contextual shaping, never a second handwritten Arabic shaper. No Hibr changes or second bidi pass. Unrepresentable aliases are reported, not claimed complete."
+  },
+  "pixel": {
+    "fallback": {
+      "id": "blit-terminus16",
+      "role": "pixel_fallback",
+      "draw": "cell",
+      "file": "Blit-Terminus16.psf",
+      "source": "Built by tools/build-hibr-font.py from Uni2-Terminus16 (Debian console-setup-linux 1.221), adding the Hibr desktop glyphs rasterized from DejaVu Sans Mono and ordered fallback faces; see README.md",
+      "upstream": "Debian console-setup-linux 1.221: /usr/share/consolefonts/Uni2-Terminus16.psf.gz",
+      "upstream_sha256": "002f331400ea0257f894a6b81fafa7a0ab8ba8b816149b81487043dbf2d37e1a",
+      "sha256": "d0c26aac1b09c461b6d5ec431be2ba47f639679c5679e4a097b3bd8efec910e9",
+      "license": "OFL-1.1 (Terminus); DejaVu fallback glyphs under the DejaVu font licence",
+      "license_file": "licenses/Terminus-OFL.txt",
+      "license_sha256": "c5aecee192f48b9d736f52516dfd4fde776be2fd7b5ae37067fa73cd5843efa2"
+    },
+    "wide": {
+      "id": "blit-unifont16",
+      "role": "pixel_wide",
+      "draw": "cell",
+      "file": "Blit-Unifont16.psf",
+      "source": "GNU Unifont 15.1.05 unifont.bdf, its DWIDTH 16 glyphs, built by tools/fonts/make-wide-psf.py (ADR 0062)",
+      "sha256": "85b96d40602951f70aa3c02c2b1cd0f09012c127b596f854870dbe8feb1ea9d2",
+      "license": "OFL-1.1 (Unifont is dual licensed; this artifact is redistributed under the OFL)",
+      "license_file": "licenses/Unifont-LICENSE.txt",
+      "license_sha256": "1e74cb82bf476843e97c2596297b04219b1a7e51f7238944a8c031cb9401fa87"
+    }
   },
   "catalogue": {
     "file": "nerd-glyphnames-v3.4.0.json",

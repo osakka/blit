@@ -12,7 +12,7 @@ def cells(visual)
 end
 lines = samples.map { |s| cells(s.fetch('visual')).map { |c| c.map { |x| x.to_s(16) }.join(',') }.join(';') }
 lines << 'fe92;fe92;fe92;20;fe8f;fe8f;20;41;42;fe8f,301'
-naskh = "assets/fonts/#{JSON.parse(File.read('assets/fonts/arabic-fonts.source.json')).fetch('naskh').fetch('file')}"
+naskh = "assets/fonts/#{JSON.parse(File.read('assets/fonts/fonts.source.json')).fetch('arabic').fetch('naskh').fetch('file')}"
 font = ARGV[0] || 'assets/fonts/text/Hack-Regular.ttf'
 Dir.mktmpdir('blit-word-view') do |work|
   bin = File.join(work, 'gate')

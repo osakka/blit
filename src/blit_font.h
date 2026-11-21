@@ -6,6 +6,7 @@
 #include "blit_cell_cluster.h"
 
 struct BlitRasterGlyph;
+struct BlitCellWord;            /* blit_cell_word.h (ADR 0241) */
 typedef struct BlitFont {
     unsigned char *data;
     size_t size;
