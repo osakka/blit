@@ -14721,8 +14721,11 @@ static void terminal_apply_csi(BlitSession *session, BlitSurface *surface,
             surface->cursor_x = surface->width - 1;
         session->terminal_wrap_pending = 0;
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
-    } else if (command == 'A' || command == 'B' ||
-               command == 'C' || command == 'D') {
+    } else if (intermediate == 0 && (command == 'A' || command == 'B' ||
+                                     command == 'C' || command == 'D')) {
+        /* Only without an intermediate: `CSI n SP A..D` are ECMA-48's
+           SR, GSM, GSS and FNT, not cursor movements (FNT, font
+           selection, is how a program may one day pick a face). */
         int amount = has_first && first > 0 ? first : 1;
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
         if (command == 'A') surface->cursor_y -= amount;

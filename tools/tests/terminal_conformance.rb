@@ -1461,6 +1461,14 @@ snapshot = run_case(base, 'xtgettcap-unknown-name',
 assert_equal('1b50302b723741374137411b5c', row_text(snapshot),
              'XTGETTCAP refuses a capability it does not own')
 
+# `CSI n SP A..D` (ECMA-48's SR, GSM, GSS, FNT) are not cursor movements:
+# the cursor stays where it was and the next character lands there.
+%w[A B C D].each do |final|
+  snapshot = run_case(base, "space-intermediate-#{final}", "printf '\\033[2;5H\\033[3 #{final}X'")
+  assert_equal('X', cell_map(snapshot).fetch([4, 1], {}).fetch('text', nil),
+               "CSI 3 SP #{final} does not move the cursor")
+end
+
 # SR-7: a session's terminal is its own: with another session open, a new
 # one's process holds no PTY master (no /dev/ptmx among its descriptors).
 holder = request(base, 'POST', '/v1/terminal-sessions', {
