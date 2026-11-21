@@ -1,8 +1,8 @@
 {
   "version": 2,
   "scope": "Hibr wm/glyphs.hibr Unicode literals and escaped scalars; not all applications",
-  "hibr": "v0.99.552",
-  "source_sha256": "e7c5390c38d84cb2bcea49e23336f9e990f5b3326cc8a9bc001719720c40d4fd",
+  "hibr": "v0.99.556",
+  "source_sha256": "23dd26819621f80011d77e6f7d65a1329b4bba7e22bed958e6ea834d4ddad77b",
   "scalars": [
     "00AB",
     "00B7",
@@ -34,6 +34,7 @@
     "2500",
     "2501",
     "2502",
+    "2503",
     "2504",
     "2506",
     "250C",
