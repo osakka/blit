@@ -80,9 +80,11 @@ protocol document under `docs/` that another terminal can implement from:
    is resolved once, at start-up; an unknown name or no answer means the
    program prints its own plain fallback. Names follow Nerd Fonts' where a
    glyph exists there. If upstream declines, the same verbs under a
-   Blit-numbered OSC, same grammar.
+   Blit-numbered OSC, same grammar. The draft is
+   `docs/protocols/glyph-sets.md` (amendment below).
 4. **Per-cell face: ECMA-48 FNT and SGR 10-19.** FNT binds an alternative
-   font to a set id from step 3 (`CSI 2 ; 7 SP D`); SGR 11-19 select per
+   font to a face number from the registry (`CSI 2 ; 7 SP D`; amended
+   below: a set is not a face); SGR 11-19 select per
    cell and SGR 10 returns to the primary. An unaware terminal shows the
    text in its own font. FNT is always sent with both parameters (kitty
    takes a one-parameter `CSI n SP D` as cursor-back; Blit's own
@@ -151,6 +153,63 @@ XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
     an installed copy overlaps no file. hibr-apt should keep the package while it serves a
     `blit` of 0.3.130 or earlier, the GPL source of that release's face.
 
+## Amendment (DRAFT, 2026-11-21): the set level and the standard path
+
+- **A set is a table of names, not a face.** One file declares both:
+  `fonts.source.json` gains `sets` (id, owner, scope, faces, names
+  source, version, retired names). Set ids are derived from the names
+  sources, never listed by hand: `blit` (the catalogue's 830 ids, its
+  three lists, the catalogue itself unchanged), `nerd-<prefix>` (the 17
+  prefixes of Nerd Fonts' `glyphnames.json`, names as Nerd spells them
+  after the prefix), `emoji` (Unicode's `emoji-test.txt`, by a fixed
+  name rule). Codepoint ranges are derived, never declared (a Nerd set
+  is not one range). Retired names live in the registry, because the
+  catalogue's shape is frozen. The server reads the packaged names
+  sources once at start; `/v1/fonts`, a new `/v1/fonts/sets/{id}` and the
+  in-band answers come from the one table, and a gate holds them equal.
+- **Addresses are `set/name`**, lowercase ASCII, no case folding, set ids
+  1-32 and names 1-96 octets, excluding the Glyph Protocol's framing
+  characters, so a reply never escapes anything. In Blit's own set a
+  name is never reused; portable sets follow their owner's releases.
+  Deprecated names resolve with what replaces them; retired, `retired`.
+- **Codepoints are terminal-local, and the record says so.** Portable
+  sets (Nerd, emoji) print the same everywhere at the same version;
+  Blit's set is terminal-local and versioned by its catalogue revision.
+  Recordings, copies and a second tmux client show whatever their
+  terminal draws at the codepoint. A lookup never answers a codepoint
+  in U+100000-U+1003FF, and Blit accepts no registrations until a
+  release has dropped its old icon range.
+- **FNT's second parameter is a number** ("a register which is to be
+  established", ECMA-48 §8.3.53; no such register was found). It cannot
+  carry a set id. Step 4 therefore binds a *face*: each registry face
+  gets a stable number, never reused, reported by `/v1/fonts`; its
+  in-band form is step 4's to define, not the names capability's.
+- **What "standard" means here, and the one path taken.** No body
+  allocates escape sequences or registers terminal extensions in
+  practice: ECMA-48 was last revised in 1991 and its committee is
+  inactive; xterm's control-sequence document describes xterm; the
+  freedesktop terminal-wg repository has accepted nothing since 2019;
+  terminfo user capabilities have no registry; Unicode's private-use
+  registries are for constructed scripts. The extensions other terminals
+  adopted (kitty's keyboard and graphics protocols, the Glyph Protocol)
+  became standards by a published specification, a reference
+  implementation, a detection handshake and adoption. So Blit's path is
+  that one, upstream first: the owner offers the `names` capability, the
+  registered owner tokens and the set table to the Glyph Protocol's
+  specification, whose `cap` list is its extension point (v1.14 added
+  `grapheme`, raised on Contour's tracker by a library author).
+  "Registered" means listed
+  there. Done means: the capability is in that specification, Blit
+  answers it, a conformance probe any terminal can run is published,
+  and at least one other terminal implements it. The known objection --
+  the specification withdrew `cp=auto` (v1.6) because a codepoint
+  learned from a reply does not survive replay -- is answered in the
+  draft: a name's answer is fixed by a published table and version, not
+  by session state, and portable sets give every terminal the same
+  answer. If upstream declines, Blit ships the same verbs under OSC
+  7701 with the same document, and the "standard" is Blit's document,
+  probe and any adopter.
+
 ## Not chosen
 
 - **One merged font file with every glyph:** a font holds at most 65,535
@@ -162,6 +221,14 @@ XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
   not.
 - **A rival multi-cell protocol:** OSC 66 exists and is implemented; the
   missing case is a key, proposed upstream.
+- **A terminal-wg proposal as the registration path:** its process
+  exists on paper (a merge request into `proposals/`), but nothing has
+  been accepted since the repository opened in 2019. An issue there
+  linking to the published capability costs nothing and may be filed by
+  the owner for visibility; it is not where the standard lives.
+- **One `nerd` set holding every Nerd name:** it would hide Nerd Fonts'
+  own 17 sets behind prefixes inside names; the address would no longer
+  say which set.
 - **Discovery over HTTP only** (`/v1/fonts/icons`): not in band, so not over
   ssh and not for other terminals. It stays for Hibr and tools.
 
