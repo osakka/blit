@@ -40,23 +40,23 @@ exercised with real dpkg in the Debian 13 release environment
 | SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token |
 | SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) -- fixed in 0.3.130 |
 | SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
-| SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` -- fixed (release and commit to be filled) |
+| SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` -- fixed in 0.3.132 |
 | SR-7 | High | PTY master descriptors leak into every later session child, including ones run as another user -- fixed in 0.3.130 |
 | SR-8 | High | The root API token is put into the environment of children run as another user |
 | SR-9 | High, accepted exception | The API token is a root shell, sent over plain HTTP on 0.0.0.0, with no default command allowlist |
-| SR-10 | Medium | The helper reads the staged package three times by path, in a group-writable directory |
-| SR-11 | Medium | Both tokens are compared with `strcmp` -- fixed (release and commit to be filled) |
-| SR-12 | Medium | An install blocks the server's main loop with no timeout; the console watchdog kills it at 120 s, mid-install |
-| SR-13 | Medium | dpkg accepts `blit` N-1 alone under `blit-compositor` N; only the helper keeps the pair together |
+| SR-10 | Medium | The helper reads the staged package three times by path, in a group-writable directory -- fixed in 0.3.132 |
+| SR-11 | Medium | Both tokens are compared with `strcmp` -- fixed in 0.3.132 |
+| SR-12 | Medium | An install blocks the server's main loop with no timeout; the console watchdog kills it at 120 s, mid-install -- fixed in 0.3.132 |
+| SR-13 | Medium | dpkg accepts `blit` N-1 alone under `blit-compositor` N; only the helper keeps the pair together -- fixed in 0.3.132, for rollbacks to 0.3.132 or later |
 | SR-14 | Medium | blit-compositor can be killed with SIGBUS through a memfd passed as a dmabuf |
 | SR-15 | Medium | A viewport source rectangle or buffer scale makes the drag-icon scaler read outside the buffer |
-| SR-16 | Medium | One CHT sequence (`CSI 2147483647 I`) stalls the server -- fixed (release and commit to be filled) |
+| SR-16 | Medium | One CHT sequence (`CSI 2147483647 I`) stalls the server -- fixed in 0.3.132 |
 | SR-17 | Medium | Connection slots can be used up before authentication (HTTP and the frame socket) |
-| SR-18 | Low | `png_decode` leaks its compressed buffer on some error paths -- fixed (release and commit to be filled) |
-| SR-19 | Low | HTTP headers are found by `strstr` over the whole request, case-sensitively -- fixed (release and commit to be filled) |
+| SR-18 | Low | `png_decode` leaks its compressed buffer on some error paths -- fixed in 0.3.132 |
+| SR-19 | Low | HTTP headers are found by `strstr` over the whole request, case-sensitively -- fixed in 0.3.132 |
 | SR-20 | Low | The JSON key scanner matches keys at any depth |
-| SR-21 | Low | A failed install reports the head of dpkg's output, not the error |
-| SR-22 | Low | With no token (loopback only), nothing checks `Origin` or `Host` -- fixed (release and commit to be filled) |
+| SR-21 | Low | A failed install reports the head of dpkg's output, not the error -- fixed in 0.3.132 |
+| SR-22 | Low | With no token (loopback only), nothing checks `Origin` or `Host` -- fixed in 0.3.132 |
 | SR-23 | Info | OSC 52 text is stored unchecked; the version is sent before authentication |
 
 ### SR-1 (Critical): a frame-channel edit writes outside the image
@@ -235,7 +235,7 @@ Fix: clamp CSI parameters to the screen size at parse time
 
 ### SR-6 (High, with a precondition): `session_json` can overflow `GET /v1/login`'s stack buffer
 
-**Fixed** (release and commit to be filled): every member of `session_json` is written with `json_appendf`
+**Fixed** in 0.3.132: every member of `session_json` is written with `json_appendf`
 (bounded), whole or left out, with each closer held back from where its
 list or object opens, so the object is always whole JSON within its buffer;
 a program's own text (title, clipboard, notification) is left out first.
@@ -355,6 +355,16 @@ tunnel or a TLS proxy for remote use), with a default allowlist.
 
 ### SR-10 (Medium): the helper reads the staged package three times by path
 
+**Fixed** in 0.3.132 (Gitea #192): the helper opens each staged file once
+(`O_NOFOLLOW`, a regular file of at most 64 MiB) and copies it into
+`/var/lib/blit-update-helper`, a directory it creates 0700 and refuses
+unless it owns it; the hash, the fields and `dpkg --install` all use the
+copy, which it removes after answering. The server stages with
+`mkostemp(O_CLOEXEC)`. update_pair_gate's `swapped` case replaces the
+staged files after the checks (`UPDATE_GATE_AFTER_VERIFY`, a hook only the
+gate's build defines) and the checked bytes are installed; the helper before
+this change installed the replacement.
+
 The helper hashes the file (`sha256sum`), reads its fields (`dpkg-deb
 --field`), and installs it (`dpkg --install`). Each step opens it again by
 path (`src/blit_update_helper.c:218-225`, `261`). The directory is
@@ -381,7 +391,7 @@ The server uses `mkostemp(path, O_CLOEXEC)`.
 
 ### SR-11 (Medium): both tokens are compared with `strcmp`
 
-**Fixed** (release and commit to be filled): `blit_token_equal` (src/blit_token.h) compares the API
+**Fixed** in 0.3.132: `blit_token_equal` (src/blit_token.h) compares the API
 bearer token, the update token, the Hibr owner token, the frame token and
 blit-compositor's activation tokens: every byte of the secret is read, and
 the time depends only on the two lengths. `frame_token_equal`, which stopped
@@ -408,6 +418,20 @@ root.
 
 ### SR-12 (Medium): an install blocks the server with no timeout
 
+**Fixed** in 0.3.132 (Gitea #194): the server sends the helper its request
+and goes on; the main loop reads the answer, so the display, the API and
+the console heartbeat keep going (the 120 s install lease is gone). The
+`PUT` is answered when the helper answers, as before; meanwhile the status
+is `installing`, and another `PUT`, `reset` or `cancel` is refused 409
+`update_installing`. The helper bounds `dpkg --install` at 600 s (each other
+command at 30 s) and reports "dpkg did not finish within 600 s and was
+stopped"; the server stops waiting at 900 s. update_install_live_gate: a
+stub helper that answers after 150 s, `GET /v1/version` within 2 s every
+second and frames presented in every 10 s throughout (the server before
+this change did not answer its status at all); update_pair_gate's `bound`
+case: a postinst that sleeps 60 s under a 5 s bound is stopped and reported.
+The gates' servers own no VT, so no gate shows the watchdog itself.
+
 - The server waits for the helper's answer with a blocking `read` and no
   timeout (`src/blit_server.c:32321-32325`), on its main loop.
 - The helper runs `dpkg --install` with no timeout
@@ -432,6 +456,20 @@ real install, and report it.
 > kill.
 
 ### SR-13 (Medium): dpkg accepts `blit` N-1 alone under `blit-compositor` N
+
+**Fixed** in 0.3.132 (Gitea #195), for rollbacks to 0.3.132 or later:
+`blit` declares `Breaks: blit-compositor (>> <its version>)`, so dpkg
+refuses that `blit` alone under a newer compositor and changes nothing.
+Not the `(<< <its version>)` half proposed below: the helper that installs a
+release is the one already installed, and every helper before 0.3.132
+unpacks `blit` first, so `blit` N would be refused against compositor N-1
+and the compositor left unpacked at N (checked with dpkg 1.22 on scratch
+packages). With only the newer half, every update order works; a rollback
+needs the compositor unpacked first, which the helper now does, and the
+runbook below says so for root's own dpkg. The other half could follow once
+every host's helper orders the pair this way; until then the helper alone
+refuses `blit` N without the compositor. rollback_recovery_gate's
+`local-half` case now fails if dpkg takes such a `blit`.
 
 Rehearsed (`rollback_recovery_gate`, case `local-half`). Root's own `dpkg
 --install blit_<N-1>.deb` with the compositor N installed succeeds. dpkg
@@ -494,7 +532,7 @@ before the buffer.
 
 ### SR-16 (Medium): one CHT sequence stalls the server
 
-**Fixed** (release and commit to be filled): CHT stops once the cursor stops moving (the last
+**Fixed** in 0.3.132: CHT stops once the cursor stops moving (the last
 column), as CBT stops at the first, so its work is bounded by the row. SR-5's
 saturation at 65535 had already removed the 2^31 loop; what was left was
 65535 iterations per sequence, thousands of sequences per write.
@@ -532,7 +570,7 @@ session and the display for seconds.
 
 ### SR-18 (Low): `png_decode` leaks on some error paths
 
-**Fixed** (release and commit to be filled): every refusal in `png_decode` leaves through one exit that
+**Fixed** in 0.3.132: every refusal in `png_decode` leaves through one exit that
 frees the compressed, raw and RGBA buffers. terminal_conformance: 50 PNGs
 (o=z), each 6 MB of IDAT then a 769-byte PLTE, are all refused and the
 server's RSS grows by at most 64 MB (12 MB); the server before this change
@@ -551,7 +589,7 @@ collected, `png_decode` returns without freeing the compressed buffer
 
 ### SR-19 (Low): headers are found by `strstr` over the whole request
 
-**Fixed** (release and commit to be filled): headers are found at the start of a line, between the
+**Fixed** in 0.3.132: headers are found at the start of a line, between the
 request line and the blank line, by name in any case (`request_header_value`);
 `Content-Length` is a decimal number given once (two different values close
 the connection); `Sec-WebSocket-Key` uses the same lookup; a request with
@@ -591,6 +629,16 @@ but every new field inherits it.
 
 ### SR-21 (Low): a failed install reports the head of dpkg's output
 
+**Fixed** in 0.3.132 (Gitea #203): the helper keeps the last 383 bytes of a
+command's output, marked `...` where cut, and runs dpkg with
+`--abort-after=1`, so the end is the first error and not the second
+package's "dependency problems"; the server's detail holds 512 bytes and,
+when the helper's answer does not fit, drops its start.
+rollback_recovery_gate's `failed-configure` case requires "error processing
+package blit" and "post-installation script subprocess returned error exit
+status 1" in the answer; update_install_live_gate requires the end of a 417-byte answer in
+the `PUT`'s problem and the status.
+
 The helper keeps the first 384 bytes of dpkg's output
 (`src/blit_update_helper.c:25`, `COMMAND_DETAIL_CAPACITY`). For a failed
 configure, that is `(Reading database ... N files and directories ...`,
@@ -606,7 +654,7 @@ then of no use to the operator.
 
 ### SR-22 (Low): no `Origin` or `Host` check
 
-**Fixed** (release and commit to be filled): with no token, Blit's own origin is its listener's
+**Fixed** in 0.3.132: with no token, Blit's own origin is its listener's
 (`http://127.0.0.1:PORT`, `http://localhost:PORT`, `http://[::1]:PORT`), since
 it serves no pages. A request with any other `Origin` gets 403
 `cross_origin` (the WebSocket upgrade included), one whose `Host` is not
@@ -735,9 +783,9 @@ downgrade and exits 0, and the helper does not check what was installed).
 | rollback | N | the helper installs the N-1 pair (what `update-live.sh` with N-1 does) | both N-1 |
 | rollback-half | N | the helper is given `blit` N-1 alone | refused, still N |
 | local-rollback | N | root runs `dpkg --install` of the N-1 pair | both N-1 |
-| local-half | N | root runs `dpkg --install` of `blit` N-1 alone | dpkg takes it; `apt-get check` names the broken pin (SR-13); the N-1 pair repairs it |
+| local-half | N | root runs `dpkg --install` of `blit` N-1 alone | dpkg takes it; `apt-get check` names the broken pin (SR-13); the N-1 pair repairs it. From 0.3.132, when N-1 is 0.3.132 or later, dpkg refuses it |
 | interrupted | N-1, N unpacked but not configured | `dpkg --configure -a`; or the helper with N again; or the helper with N-1 | each recovers (N, N, N-1) |
-| failed-configure | N-1 | the helper installs an N whose postinst fails | the helper answers ERROR (SR-21), blit is half-configured, and the helper with N-1 recovers it |
+| failed-configure | N-1 | the helper installs an N whose postinst fails | the helper answers ERROR (SR-21; from 0.3.132 the answer names the failing postinst), blit is half-configured, and the helper with N-1 recovers it |
 | damaged-files | N | `blit-server` deleted, the helper and `blit-compositor` truncated | `dpkg --verify` names all three; `dpkg --install` of the N pair restores them |
 | smoke-fails | N-1 running | `update-live.sh` installs an N that comes up without its display | "smoke failed", exit 1, the API still up |
 | smoke-rollback | that broken N | `update-live.sh` with N-1 | verified, the display back as at N-1 (its own smoke check reports "smoke failed": see Gaps) |
@@ -751,12 +799,16 @@ downgrade and exits 0, and the helper does not check what was installed).
   and `releases/<N-1>.yaml`. The helper installs the older pair; dpkg warns
   that it is downgrading, which is expected.
 - **The API is down** (the new server does not start): from a root shell on
-  the host, `dpkg --install blit_<N-1>-1_amd64.deb
-  blit-compositor_<N-1>-1_amd64.deb`, always both, then `systemctl restart
+  the host, `dpkg --install blit-compositor_<N-1>-1_amd64.deb
+  blit_<N-1>-1_amd64.deb`, always both and the compositor first (from
+  0.3.132 `blit` Breaks every newer compositor, so it cannot be unpacked
+  before the compositor is at its version: SR-13), then `systemctl restart
   blit`. The restart is needed: the postinst does not start blit, and after
   three failed starts in 60 s the unit stays failed (`StartLimitBurst=3`).
 - **dpkg was interrupted**: `dpkg --configure -a` finishes it. Installing
-  either pair through the helper or with dpkg also works.
+  either pair through the helper or with dpkg (the compositor first) also
+  works. From 0.3.132 the helper stops dpkg after 600 s and says so in the
+  status; this is the state it leaves.
 - **A file is missing or damaged**: `dpkg --verify blit blit-compositor`
   lists it (its exit status stays 0, so read the output), and `dpkg
   --install` of the installed pair restores it.

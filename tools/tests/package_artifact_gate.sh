@@ -246,16 +246,23 @@ if [ -e "$stage/usr/lib/blit/docs" ]; then
 fi
 # The frame channel's version 5 is a flag day with Hibr (docs/api.md, "One
 # grammar, version 5"): blit Breaks every Hibr before Hibr's version 5, the
-# version packaging/build-deb.sh names. And the packages retired in 0.3.75
-# with the gamescope path (ADR 0228), so an upgrade removes them.
+# version packaging/build-deb.sh names, and every blit-compositor newer than
+# itself (SR-13, Gitea #195). It Conflicts with and Replaces the packages
+# retired in 0.3.75 with the gamescope path (ADR 0228), steamer before the
+# blit-gamescope it depends on, so dpkg --install -- the update helper's --
+# removes them (Gitea #209; a Breaks made it refuse the update).
 hibr_frame_v5=$(sed -n 's/^HIBR_FRAME_V5=//p' "$root/packaging/build-deb.sh")
 test -n "$hibr_frame_v5"
-breaks="hibr (<< $hibr_frame_v5), blit-gamescope, steamer"
-test "$(dpkg-deb -f "$package" Breaks)" = "$breaks" || {
-    echo "PACKAGE_ARTIFACT_FAIL blit Breaks is '$(dpkg-deb -f "$package" Breaks)'," \
-         "not '$breaks'" >&2
-    exit 1
-}
+breaks="hibr (<< $hibr_frame_v5), blit-compositor (>> $version)"
+retired="steamer, blit-gamescope"
+for field in Breaks Conflicts Replaces; do
+    case $field in Breaks) want=$breaks ;; *) want=$retired ;; esac
+    test "$(dpkg-deb -f "$package" "$field")" = "$want" || {
+        echo "PACKAGE_ARTIFACT_FAIL blit $field is '$(dpkg-deb -f "$package" "$field")'," \
+             "not '$want'" >&2
+        exit 1
+    }
+done
 if dpkg-deb -f "$package" Suggests | grep -F blit-gamescope >/dev/null; then
     echo "PACKAGE_ARTIFACT_FAIL blit still suggests blit-gamescope" >&2
     exit 1
@@ -263,8 +270,8 @@ fi
 # ADR 0243: blit-font-sources carried the retired face's source; blit no
 # longer suggests it, and declares no relation to it: an installed copy is
 # inert and stays until removed (a Breaks would make dpkg --install, the
-# updater's, refuse the update; a Conflicts would hold blit back under
-# apt upgrade).
+# updater's, refuse the update; a Conflicts gains nothing, since an
+# installed copy overlaps no file).
 for field in Suggests Recommends Depends Breaks Conflicts Replaces; do
     if dpkg-deb -f "$package" "$field" | grep -F blit-font-sources >/dev/null; then
         echo "PACKAGE_ARTIFACT_FAIL blit $field names the retired blit-font-sources" >&2
@@ -410,5 +417,5 @@ if [ "${BLIT_GATE_REBUILD:-0}" = 1 ]; then
     rm -rf "$rebuild"
 fi
 
-printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-gamescope,steamer elf=stack-RW,relro\n' \
+printf 'PACKAGE_ARTIFACT_PASS version=%s sha256=%s reproducible=%s compositor=%s breaks=hibr<<%s,blit-compositor>>self conflicts+replaces=steamer,blit-gamescope elf=stack-RW,relro\n' \
     "$version" "$actual_hash" "$reproducible" "$compositor" "$hibr_frame_v5"

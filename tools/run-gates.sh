@@ -679,6 +679,8 @@ suite_lifecycle() {
     run_serial_gate restart_after_update_gate.rb ruby tools/tests/restart_after_update_gate.rb
     run_gate hibr_identity_refresh_gate.rb ruby tools/tests/hibr_identity_refresh_gate.rb
     run_gate update_cancel_gate.sh "$ROOT"/tools/tests/update_cancel_gate.sh
+    # SR-12: a 150 s install with the display and the API live throughout.
+    run_gate update_install_live_gate.sh "$ROOT"/tools/tests/update_install_live_gate.sh
     run_gate update_live_smoke_gate.sh "$ROOT"/tools/tests/update_live_smoke_gate.sh
 }
 

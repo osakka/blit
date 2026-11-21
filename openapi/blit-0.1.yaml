@@ -913,7 +913,10 @@ paths:
         the lengths sum to Content-Length. The root helper installs blit
         together with blit-compositor when the host has blit-compositor
         installed (and refuses an update without it then); it never adds
-        blit-compositor to a host without it.
+        blit-compositor to a host without it. The answer comes when the
+        install has finished; the server keeps serving meanwhile, reports
+        `installing` in the status, and refuses another upload with 409
+        `update_installing`. A failure's detail ends with dpkg's own error.
       parameters:
         - in: header
           name: X-Blit-Update-Token
@@ -3515,8 +3518,8 @@ components:
         evdev_exclusive: {type: boolean, enum: [false]}
         watchdog_timeout_ms:
           type: integer
-          enum: [10000, 120000]
-          description: Normal main-loop timeout, or bounded privileged package-install lease.
+          enum: [10000]
+          description: The main loop's heartbeat timeout; a package install no longer stops the loop, so it has no lease.
       additionalProperties: false
     Diagnostics:
       type: object

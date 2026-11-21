@@ -166,7 +166,6 @@ static void recover_vt(int death, int command)
         if (fds[0].revents) break;
         count = recv(command, commands, sizeof(commands), 0);
         if (count <= 0 || memchr(commands, 'q', (size_t)count)) break;
-        timeout_ms = commands[count - 1] == 'u' ? 120000 : 10000;
     }
     if (restore_vt() < 0) {
         dprintf(2, "blit: console recovery failed: %s\n", strerror(errno));
@@ -395,14 +394,6 @@ int blit_vt_switch(int number)
         return -1;
     }
     return ioctl(vt.fd, VT_ACTIVATE, number);
-}
-
-int blit_vt_update_lease(int enabled)
-{
-    if (vt.fd < 0) return 0;
-    if (send(vt.stop, enabled ? "u" : "h", 1, MSG_NOSIGNAL) != 1) return -1;
-    vt.watchdog_timeout_ms = enabled ? 120000 : 10000;
-    return 0;
 }
 
 void blit_vt_json(char *body, unsigned capacity)

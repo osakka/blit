@@ -27,12 +27,15 @@
 #                     (what tools/deploy/update-live.sh with N-1's
 #                     package does while the API is up)
 #   rollback-half     N; the helper is handed blit N-1 alone          -> refused, still N
-#   local-rollback    N; root's own dpkg --install of the N-1 pair    -> both N-1
-#                     (the path when the API is down)
-#   local-half        N; root's dpkg --install of blit N-1 alone      -> dpkg takes it
+#   local-rollback    N; root's own dpkg --install of the N-1 pair,   -> both N-1
+#                     compositor first (the path when the API is down)
+#   local-half        N; root's dpkg --install of blit N-1 alone      -> refused when
+#                     N-1's blit Breaks every newer blit-compositor
+#                     (SR-13, from 0.3.132; a fabricated N-1 does), and
+#                     nothing changes; with an older N-1, dpkg takes it
 #                     (it does not enforce the compositor's pin on a
-#                     downgrade), apt-get check names the broken pin, and
-#                     the N-1 pair repairs it
+#                     downgrade) and apt-get check names the broken pin;
+#                     either way the N-1 pair repairs it
 #   interrupted       N-1; dpkg --unpack of the N pair (unpacked, not
 #                     configured: the state a power cut or a killed dpkg
 #                     leaves) and then each of
@@ -41,13 +44,17 @@
 #                       the helper given the N-1 pair                 -> both N-1
 #   failed-configure  N-1; the helper installs an N whose postinst
 #                     fails                                          -> the helper
-#                     answers ERROR, dpkg --audit names the half-
+#                     answers ERROR naming the failing postinst (the end
+#                     of dpkg's output, SR-21), dpkg --audit names the half-
 #                     configured package; the helper given the N-1 pair
 #                     -> both N-1, audit and apt-get check clean
 #   damaged-files     N; blit-server deleted, the helper and
 #                     blit-compositor truncated                      -> dpkg --verify
 #                     names all three; root's dpkg --install of the N pair
 #                     restores them and --verify is clean
+# Root's own dpkg --install of a pair always names the compositor first: blit
+# Breaks every newer blit-compositor (SR-13), so on a rollback blit can only
+# be unpacked once the compositor is at its version (the helper orders it so).
 # Then, unless BLIT_ROLLBACK_SMOKE=0, four more with tools/deploy/update-live.sh
 # run for real against the installed blit-server (the gates' mock DRM
 # display, bound to 127.0.0.1) and a stand-in for systemd: see "Smoke
@@ -117,7 +124,8 @@ else
     [ "$old" != "$version" ] || fail "version $version does not end in -1"
     blit_old=$work/blit_${old}_amd64.deb
     comp_old=$work/blit-compositor_${old}_amd64.deb
-    repack "$blit_new" "$blit_old" -e "s/^Version: .*/Version: $old/"
+    repack "$blit_new" "$blit_old" -e "s/^Version: .*/Version: $old/" \
+        -e "s/blit-compositor (>> [^)]*)/blit-compositor (>> $old)/"
     repack "$comp_new" "$comp_old" -e "s/^Version: .*/Version: $old/" \
         -e "s/blit (= [^)]*)/blit (= $old)/"
     previous=fabricated
@@ -216,8 +224,8 @@ dpkg_install() {   # CASE DEB...
     dpkg --install "$@" >"$work/dpkg.log" 2>&1 ||
         { cat "$work/dpkg.log" >&2; fail "$c: dpkg --install $*"; }
 }
-at_old() { dpkg_install "$1" "$blit_old" "$comp_old"; expect_state "$1" "$old" "$old"; }
-at_new() { dpkg_install "$1" "$blit_new" "$comp_new"; expect_state "$1" "$version" "$version"; }
+at_old() { dpkg_install "$1" "$comp_old" "$blit_old"; expect_state "$1" "$old" "$old"; }
+at_new() { dpkg_install "$1" "$comp_new" "$blit_new"; expect_state "$1" "$version" "$version"; }
 
 # --- N-1, and the operator's state on it ---
 dpkg --purge blit-compositor blit >/dev/null 2>&1 || true
@@ -257,14 +265,21 @@ kept rollback-half
 echo "case rollback-half: refused ($answer); still $version"
 
 # --- rollback without the API: root's own dpkg ---
-dpkg_install local-rollback "$blit_old" "$comp_old"
+dpkg_install local-rollback "$comp_old" "$blit_old"
 expect_state local-rollback "$old" "$old"
 apt_clean local-rollback
 kept local-rollback
 echo "case local-rollback: dpkg --install of the $old pair; apt-get check clean; operator files kept"
 
 at_new local-half
+# SR-13: an N-1 whose blit Breaks every newer compositor must be refused.
+case "$(dpkg-deb -f "$blit_old" Breaks)" in
+    *"blit-compositor (>> $old)"*) half_refused=1 ;;
+    *) half_refused=0 ;;
+esac
 if dpkg --install "$blit_old" >"$work/dpkg.log" 2>&1; then
+    [ "$half_refused" = 0 ] ||
+        fail "local-half: blit $old Breaks blit-compositor (>> $old), and dpkg took it under blit-compositor $version"
     expect_state local-half "$old" "$version"
     if apt-get check >"$work/check.log" 2>&1; then
         fail "local-half: blit $old under blit-compositor $version, and apt-get check is clean"
@@ -276,7 +291,7 @@ else
     expect_state local-half "$version" "$version"
     half="dpkg refused blit $old alone"
 fi
-dpkg_install local-half "$blit_old" "$comp_old"
+dpkg_install local-half "$comp_old" "$blit_old"
 expect_state local-half "$old" "$old"
 apt_clean local-half
 kept local-half
@@ -325,8 +340,8 @@ dpkg-deb --build --root-owner-group "$work/x" "$blit_broken" >/dev/null
 at_old failed-configure
 answer=$(ask "$blit_broken" "$(sha "$blit_broken")" "$comp_new" "$(sha "$comp_new")")
 case "$answer" in
-    "ERROR "*) ;;
-    *) fail "failed-configure: expected the helper to report dpkg's failure, got '$answer'" ;;
+    "ERROR "*"error processing package blit"*"post-installation script subprocess returned error exit status 1"*) ;;
+    *) fail "failed-configure: expected the helper to report the failing postinst (SR-21), got '$answer'" ;;
 esac
 case "$(installed blit)" in
     "half-configured $version") ;;
@@ -338,7 +353,7 @@ expect_ok failed-configure "$(ask_pair_old)"
 expect_state failed-configure "$old" "$old"
 apt_clean failed-configure
 kept failed-configure
-echo "case failed-configure: the helper answered '$(echo "$answer" | cut -c1-60)...'; the $old pair recovered it"
+echo "case failed-configure: the helper answered '...$(printf '%s' "$answer" | tail -c 100)'; the $old pair recovered it"
 
 # --- damaged files ---
 at_new damaged-files
@@ -349,7 +364,7 @@ verify=$(dpkg --verify blit blit-compositor 2>&1 || true)
 for f in /usr/lib/blit/bin/blit-server /usr/lib/blit/bin/blit-update-helper /usr/bin/blit-compositor; do
     echo "$verify" | grep -q " $f\$" || fail "damaged-files: dpkg --verify does not name $f: $verify"
 done
-dpkg_install damaged-files "$blit_new" "$comp_new"
+dpkg_install damaged-files "$comp_new" "$blit_new"
 expect_state damaged-files "$version" "$version"
 verify=$(dpkg --verify blit blit-compositor 2>&1 || true)
 [ -z "$verify" ] || fail "damaged-files: dpkg --verify after the reinstall: $verify"
@@ -598,7 +613,7 @@ expect_state server-dead "$version" "$version"
 kept server-dead
 live_status=$(live "$blit_old")
 expect_live server-dead 1 'update refused: could not read'
-dpkg_install server-dead "$blit_old" "$comp_old"
+dpkg_install server-dead "$comp_old" "$blit_old"
 expect_state server-dead "$old" "$old"
 apt_clean server-dead
 systemctl restart blit.service

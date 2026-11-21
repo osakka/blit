@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
+#include <dirent.h>
 #include <sys/select.h>
 
 #ifndef UPDATE_SOCKET
@@ -22,7 +23,23 @@
 #ifndef UPDATE_STAGING_DIR
 #define UPDATE_STAGING_DIR "/var/lib/blit/updates"
 #endif
+/* SR-10: the helper installs its own copy of each staged package, made
+   before any check, in a directory only it can write. Not under
+   /var/lib/blit: under the unprivileged profile that is the server's own
+   (StateDirectory=blit), and the staging directory is group-writable. */
+#ifndef UPDATE_PRIVATE_DIR
+#define UPDATE_PRIVATE_DIR "/var/lib/blit-update-helper"
+#endif
 #define COMMAND_DETAIL_CAPACITY 384
+/* SR-12: every command is bounded. dpkg --install gets ten minutes, far
+   longer than any real install; the rest are quick. The server's own wait
+   (BLIT_UPDATE_INSTALL_TIMEOUT_US) is longer than all of them together. */
+#define UPDATE_COMMAND_SECONDS 30
+#ifndef UPDATE_INSTALL_SECONDS
+#define UPDATE_INSTALL_SECONDS 600
+#endif
+/* The server takes at most 64 MiB for the whole upload. */
+#define UPDATE_MAX_PACKAGE_BYTES (64L * 1024 * 1024)
 
 static void safe_detail(char *detail)
 {
@@ -51,6 +68,7 @@ static int run_command_bounded(const char *command, char *const arguments[],
     ssize_t count;
     struct timespec started, now;
     int reaped = 0;
+    int cut = 0;
 
     if (pipe(pipe_fds) < 0) {
         snprintf(detail, detail_capacity, "cannot create diagnostic pipe");
@@ -64,7 +82,7 @@ static int run_command_bounded(const char *command, char *const arguments[],
         return 0;
     }
     if (child == 0) {
-        if (timeout_seconds) setpgid(0, 0);
+        setpgid(0, 0);
         close(pipe_fds[0]);
         if (dup2(pipe_fds[1], STDOUT_FILENO) < 0 ||
             dup2(pipe_fds[1], STDERR_FILENO) < 0)
@@ -74,41 +92,50 @@ static int run_command_bounded(const char *command, char *const arguments[],
         dprintf(STDERR_FILENO, "exec failed errno=%d", errno);
         _exit(127);
     }
-    if (timeout_seconds) setpgid(child, child);
+    setpgid(child, child);
     close(pipe_fds[1]);
     clock_gettime(CLOCK_MONOTONIC, &started);
     for (;;) {
-        if (timeout_seconds) {
-            fd_set readable;
-            struct timeval delay = {0, 100000};
-            int ready;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            if (now.tv_sec - started.tv_sec >= timeout_seconds) goto timed_out;
-            FD_ZERO(&readable); FD_SET(pipe_fds[0], &readable);
-            ready = select(pipe_fds[0] + 1, &readable, NULL, NULL, &delay);
-            if (ready < 0 && errno == EINTR) continue;
-            if (ready <= 0) { if (ready < 0) break; continue; }
-        }
+        fd_set readable;
+        struct timeval delay = {0, 100000};
+        int ready;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec - started.tv_sec >= timeout_seconds) goto timed_out;
+        FD_ZERO(&readable); FD_SET(pipe_fds[0], &readable);
+        ready = select(pipe_fds[0] + 1, &readable, NULL, NULL, &delay);
+        if (ready < 0 && errno == EINTR) continue;
+        if (ready <= 0) { if (ready < 0) break; continue; }
         count = read(pipe_fds[0], buffer, sizeof(buffer));
         if (count < 0 && errno == EINTR) continue;
         if (count <= 0) break;
-        size_t copy = (size_t)count;
-        if (used + copy >= detail_capacity)
-            copy = detail_capacity - used - 1;
-        if (copy > 0) {
-            memcpy(detail + used, buffer, copy);
+        /* SR-21: keep the last bytes, not the first. dpkg ends with its
+           error ("... post-installation script subprocess returned error
+           exit status 1"); it starts with "(Reading database ...". */
+        {
+            size_t copy = (size_t)count, room = detail_capacity - 1;
+            const char *from = buffer;
+            if (copy >= room) {
+                cut = used > 0 || copy > room;
+                from += copy - room;
+                copy = room;
+                used = 0;
+            } else if (used + copy > room) {
+                size_t drop = used + copy - room;
+                memmove(detail, detail + drop, used - drop);
+                used -= drop;
+                cut = 1;
+            }
+            memcpy(detail + used, from, copy);
             used += copy;
         }
     }
-    if (timeout_seconds) {
-        for (;;) {
-            pid_t result = waitpid(child, &status, WNOHANG);
-            if (result == child) { reaped = 1; break; }
-            if (result < 0 && errno != EINTR) break;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            if (now.tv_sec - started.tv_sec >= timeout_seconds) goto timed_out;
-            usleep(10000);
-        }
+    for (;;) {
+        pid_t result = waitpid(child, &status, WNOHANG);
+        if (result == child) { reaped = 1; break; }
+        if (result < 0 && errno != EINTR) break;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec - started.tv_sec >= timeout_seconds) goto timed_out;
+        usleep(10000);
     }
     close(pipe_fds[0]);
     if ((!reaped && waitpid(child, &status, 0) != child) || !WIFEXITED(status)) {
@@ -117,6 +144,8 @@ static int run_command_bounded(const char *command, char *const arguments[],
     }
     detail[used] = '\0';
     safe_detail(detail);
+    if (cut && used > 3)
+        memcpy(detail, "...", 3);
     while (used > 0 && detail[used - 1] == ' ')
         detail[--used] = '\0';
     if (WEXITSTATUS(status) != 0) {
@@ -135,12 +164,17 @@ timed_out:
         if (result == child || (result < 0 && errno == ECHILD)) break;
         usleep(10000);
     }
-    snprintf(detail, detail_capacity, "command timed out");
+    snprintf(detail, detail_capacity,
+             "%s did not finish within %d s and was stopped", arguments[0],
+             timeout_seconds);
     return 0;
 }
 static int run_command(const char *command, char *const arguments[],
                        char *detail, size_t detail_capacity)
-{ return run_command_bounded(command, arguments, detail, detail_capacity, 0); }
+{
+    return run_command_bounded(command, arguments, detail, detail_capacity,
+                               UPDATE_COMMAND_SECONDS);
+}
 
 /* ADR 0232: an update installs blit together with every installed package
    that pins blit's version -- today blit-compositor, which depends on
@@ -148,7 +182,8 @@ static int run_command(const char *command, char *const arguments[],
 #define UPDATE_MAX_PACKAGES 2
 
 typedef struct {
-    char path[256];
+    char path[256];             /* the staged file, as the server named it */
+    char copy[256];             /* the helper's own copy: what it checks and installs */
     char sha256[65];
     char name[64];
     char version[128];
@@ -191,6 +226,97 @@ static int package_present(const char *name)
         strcmp(detail, "config-files") != 0;
 }
 
+static int installed_version(const char *name, char *out, size_t capacity)
+{
+    char detail[COMMAND_DETAIL_CAPACITY];
+    if (!run_command("/usr/bin/dpkg-query", (char *const[]){
+            (char *)"dpkg-query", (char *)"--show",
+            (char *)"--showformat=${Version}", (char *)name, NULL},
+            detail, sizeof(detail)) ||
+        detail[0] == '\0' || strchr(detail, ' ') != NULL ||
+        strlen(detail) >= capacity)
+        return 0;
+    memcpy(out, detail, strlen(detail) + 1);
+    return 1;
+}
+
+static int version_lower(const char *version, const char *than)
+{
+    char detail[COMMAND_DETAIL_CAPACITY];
+    return run_command("/usr/bin/dpkg", (char *const[]){
+            (char *)"dpkg", (char *)"--compare-versions", (char *)version,
+            (char *)"lt", (char *)than, NULL}, detail, sizeof(detail));
+}
+
+/* The private directory exists, is a directory (not a link), is the
+   helper's, and no one else may enter it. Whatever is in it is a copy an
+   earlier request left behind (requests are served one at a time), so it
+   goes. */
+static int private_directory_ready(void)
+{
+    struct stat status;
+    DIR *directory;
+    struct dirent *entry;
+    if (mkdir(UPDATE_PRIVATE_DIR, 0700) < 0 && errno != EEXIST) return 0;
+    if (lstat(UPDATE_PRIVATE_DIR, &status) < 0 || !S_ISDIR(status.st_mode) ||
+        status.st_uid != geteuid() || (status.st_mode & 077) != 0)
+        return 0;
+    directory = opendir(UPDATE_PRIVATE_DIR);
+    if (directory == NULL) return 0;
+    while ((entry = readdir(directory)) != NULL)
+        if (strncmp(entry->d_name, "update-", 7) == 0)
+            unlinkat(dirfd(directory), entry->d_name, 0);
+    closedir(directory);
+    return 1;
+}
+
+/* SR-10: one open of the staged file, never through a link, copied into
+   the private directory. Every check and the install use the copy, so
+   what is installed is exactly what was checked, whatever happens to the
+   staged file afterwards. */
+static int copy_staged(UpdatePackage *package)
+{
+    struct stat status;
+    char buffer[65536];
+    ssize_t count;
+    long total = 0;
+    int in, out;
+    package->copy[0] = '\0';
+    in = open(package->path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+    if (in < 0) return 0;
+    if (fstat(in, &status) < 0 || !S_ISREG(status.st_mode) ||
+        status.st_size > UPDATE_MAX_PACKAGE_BYTES) {
+        close(in);
+        return 0;
+    }
+    snprintf(package->copy, sizeof(package->copy), "%s/update-XXXXXX",
+             UPDATE_PRIVATE_DIR);
+    out = mkostemp(package->copy, O_CLOEXEC);
+    if (out < 0) {
+        package->copy[0] = '\0';
+        close(in);
+        return 0;
+    }
+    for (;;) {
+        count = read(in, buffer, sizeof(buffer));
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        total += count;
+        if (total > UPDATE_MAX_PACKAGE_BYTES ||
+            write(out, buffer, (size_t)count) != count) {
+            count = -1;
+            break;
+        }
+    }
+    close(in);
+    if (close(out) < 0 || count < 0) {
+        unlink(package->copy);
+        package->copy[0] = '\0';
+        return 0;
+    }
+    return 1;
+}
+
 /* Only a file the server staged: UPDATE_STAGING_DIR/blit-update-<name>,
    no further directories. The helper is root, and it deletes what it was
    handed, so it must never be handed anything else. */
@@ -205,7 +331,8 @@ static int staged_path(const char *path)
 static int request_update(UpdatePackage *packages, int count,
                           char *detail, size_t detail_capacity)
 {
-    char *arguments[3 + UPDATE_MAX_PACKAGES];
+    char *arguments[4 + UPDATE_MAX_PACKAGES];
+    char installed[128];
     int i, blit = -1, compositor = -1, argc = 0;
 
     for (i = 0; i < count; ++i)
@@ -213,15 +340,27 @@ static int request_update(UpdatePackage *packages, int count,
             snprintf(detail, detail_capacity, "not a staged update package");
             return 0;
         }
+    if (!private_directory_ready()) {
+        snprintf(detail, detail_capacity,
+                 "the helper's private directory " UPDATE_PRIVATE_DIR
+                 " is not its own");
+        return 0;
+    }
+    for (i = 0; i < count; ++i)
+        if (!copy_staged(&packages[i])) {
+            snprintf(detail, detail_capacity,
+                     "cannot copy the staged package (not a regular file, or too large)");
+            return 0;
+        }
     for (i = 0; i < count; ++i) {
         UpdatePackage *package = &packages[i];
-        if (!sha256_matches(package->path, package->sha256)) {
+        if (!sha256_matches(package->copy, package->sha256)) {
             snprintf(detail, detail_capacity, "SHA-256 verification failed");
             return 0;
         }
-        if (!package_field(package->path, "Package", package->name,
+        if (!package_field(package->copy, "Package", package->name,
                            sizeof(package->name)) ||
-            !package_field(package->path, "Version", package->version,
+            !package_field(package->copy, "Version", package->version,
                            sizeof(package->version))) {
             snprintf(detail, detail_capacity, "package identity check failed");
             return 0;
@@ -253,12 +392,39 @@ static int request_update(UpdatePackage *packages, int count,
     } else {
         compositor = -1;   /* never add a package the host did not choose */
     }
+#ifdef UPDATE_GATE_AFTER_VERIFY
+    /* update_pair_gate's build only; tools/build-tcc.sh never defines it.
+       The gate's command replaces the staged files here, after every check
+       and before the install: the window SR-10 is about. */
+    if (system(UPDATE_GATE_AFTER_VERIFY) != 0) {
+        snprintf(detail, detail_capacity, "gate hook failed");
+        return 0;
+    }
+#endif
+    /* --abort-after=1: dpkg stops at the first package it refuses, so a
+       refusal of the first leaves the second as it was.
+       Order (SR-13): blit Breaks every blit-compositor newer than itself,
+       checked against the compositor installed when blit is unpacked. When
+       the installed one is not newer (an update), blit goes first, and
+       anything that refuses blit (an old Hibr, a package depending on a
+       retired one) leaves the host untouched. When it is newer (a
+       rollback), the compositor goes first, to blit's version, and then
+       blit's unpack finds it allowed. */
     arguments[argc++] = (char *)"dpkg";
     arguments[argc++] = (char *)"--install";
-    arguments[argc++] = packages[blit].path;
-    if (compositor >= 0) arguments[argc++] = packages[compositor].path;
+    arguments[argc++] = (char *)"--abort-after=1";
+    if (compositor >= 0 && installed_version("blit-compositor", installed,
+                                             sizeof(installed)) &&
+        version_lower(packages[blit].version, installed)) {
+        arguments[argc++] = packages[compositor].copy;
+        arguments[argc++] = packages[blit].copy;
+    } else {
+        arguments[argc++] = packages[blit].copy;
+        if (compositor >= 0) arguments[argc++] = packages[compositor].copy;
+    }
     arguments[argc] = NULL;
-    return run_command("/usr/bin/dpkg", arguments, detail, detail_capacity);
+    return run_command_bounded("/usr/bin/dpkg", arguments, detail,
+                               detail_capacity, UPDATE_INSTALL_SECONDS);
 }
 
 static int read_line(int fd, char *line, size_t capacity)
@@ -332,10 +498,14 @@ int main(int argc, char **argv)
         if (count > 0 && request_update(packages, count, detail, sizeof(detail)))
             updated = 1;
         /* Installed or refused, a staged package has served its purpose;
-           every deployment used to leave one behind (ADR 0232). */
-        for (int i = 0; i < count; ++i)
+           every deployment used to leave one behind (ADR 0232). So has
+           the helper's copy. */
+        for (int i = 0; i < count; ++i) {
             if (staged_path(packages[i].path))
                 unlink(packages[i].path);
+            if (packages[i].copy[0] != '\0')
+                unlink(packages[i].copy);
+        }
         if (!updated) {
             char response[COMMAND_DETAIL_CAPACITY + 8];
             if (detail[0] == '\0')

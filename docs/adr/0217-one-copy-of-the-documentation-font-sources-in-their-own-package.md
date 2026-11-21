@@ -7,8 +7,8 @@
   `blit` no longer suggests the package. `blit` declares no relation to
   it: an installed copy is inert (a source archive under `/usr/share/doc`)
   and stays until removed, because a Breaks would make the updater's
-  `dpkg --install` (ADR 0232) refuse the update and a Conflicts would hold
-  `blit` back under `apt upgrade`. The hibr-apt repository should keep the
+  `dpkg --install` (ADR 0232) refuse the update, and nothing is gained by
+  a Conflicts, since an installed copy overlaps no file. The hibr-apt repository should keep the
   package while it serves a `blit` of 0.3.130 or earlier. The one copy of
   the documentation stands.
 - Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).

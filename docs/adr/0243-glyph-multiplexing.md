@@ -147,8 +147,8 @@ XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
   - `blit` declares no relation to `blit-font-sources`: an installed copy
     is an inert source archive and stays until removed, because a Breaks
     makes the updater's `dpkg --install` refuse the update (checked with
-    dpkg 1.22 on scratch packages) and a Conflicts would hold `blit` back
-    under `apt upgrade`. hibr-apt should keep the package while it serves a
+    dpkg 1.22 on scratch packages); nothing is gained by a Conflicts, since
+    an installed copy overlaps no file. hibr-apt should keep the package while it serves a
     `blit` of 0.3.130 or earlier, the GPL source of that release's face.
 
 ## Not chosen

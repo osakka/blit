@@ -146,14 +146,6 @@ static pid_t owner(int channel[2])
                     _exit(0);
                 }
                 if (command == 'h') raise(SIGSTOP);
-                if (command == 'u') {
-                    CHECK(blit_vt_update_lease(1) == 0);
-                    blit_vt_json(error, sizeof(error));
-                    CHECK(strstr(error, "\"watchdog_timeout_ms\":120000"));
-                    CHECK(write(channel[1], "M", 1) == 1);
-                    raise(SIGSTOP);
-                    CHECK(blit_vt_update_lease(0) == 0);
-                }
             }
         }
     }
@@ -252,16 +244,6 @@ int main(void)
     close(channel[0]); modes_restored();
     key(devices[1]); expect_console(1);
     child = owner(channel);
-    CHECK(write(channel[0], "u", 1) == 1);
-    token(channel[0], 'M');
-    CHECK(waitpid(child, &status, WUNTRACED) == child && WIFSTOPPED(status));
-    sleep(11); /* longer than the normal watchdog; install lease must hold */
-    CHECK(waitpid(child, &status, WNOHANG) == 0);
-    CHECK(kill(child, SIGCONT) == 0);
-    CHECK(write(channel[0], "q", 1) == 1);
-    CHECK(waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
-    close(channel[0]); modes_restored();
-    child = owner(channel);
     CHECK(write(channel[0], "h", 1) == 1);
     CHECK(waitpid(child, &status, WUNTRACED) == child && WIFSTOPPED(status));
     CHECK(waitpid(child, &status, 0) == child && WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
@@ -270,6 +252,6 @@ int main(void)
     CHECK(tcsetattr(tty, TCSANOW, &saved) == 0);
     ioctl(devices[0], UI_DEV_DESTROY); ioctl(devices[1], UI_DEV_DESTROY);
     close(devices[0]); close(devices[1]); close(tty);
-    puts("VT_KERNEL_PASS baseline_leak=observed muted=2_keyboards evdev_delivery=pass hotplug=pass release_acquire=pass normal_restore=pass sigkill_restore=pass inherited_fd=pass competing_owner=refused owned_vhangup=recovered update_lease=pass hung_owner_watchdog=pass");
+    puts("VT_KERNEL_PASS baseline_leak=observed muted=2_keyboards evdev_delivery=pass hotplug=pass release_acquire=pass normal_restore=pass sigkill_restore=pass inherited_fd=pass competing_owner=refused owned_vhangup=recovered hung_owner_watchdog=pass");
     return 0;
 }

@@ -136,3 +136,46 @@ Recorded for 0.3.97 (docs/verification-status.md):
 - on the mini PC, the second deploy upgraded both packages in one dpkg
   run, with `apt-get check` and `dpkg --audit` clean and no staged files
   left.
+
+## Amended in 0.3.132 (security review SR-10, SR-12, SR-13, SR-21; Gitea #209)
+
+- **What the helper installs is its own copy.** It opens each staged file
+  once (`O_NOFOLLOW`, regular, at most 64 MiB), copies it into
+  `/var/lib/blit-update-helper` (0700, refused unless the helper owns it;
+  not under `/var/lib/blit`, which is the server's under the unprivileged
+  profile), and hashes, reads and installs the copy. The server stages
+  with `mkostemp(O_CLOEXEC)`. (SR-10, #192.)
+- **The order and the stop.** `dpkg --install --abort-after=1`, `blit`
+  first unless the installed compositor is newer than the new `blit` (a
+  rollback), then the compositor first: `blit`
+  Breaks every newer `blit-compositor` (SR-13, #195), so on a rollback it
+  can only be unpacked once the compositor is at its version. On an
+  update, anything that refuses `blit` (an old Hibr) leaves the host as it
+  was; before, dpkg went on and left the compositor unpacked at the new
+  version. Only the newer half of the Breaks: helpers before 0.3.132
+  unpack `blit` first and would be refused by an older half.
+- **Retired packages.** `blit` Conflicts with and Replaces `steamer,
+  blit-gamescope` instead of Breaking them (#209): dpkg --install refused
+  the Breaks ("deconfiguration is not permitted"), so a host that still
+  had one could take no update through the API; it now removes them in
+  the same run. Such a host is still on 0.3.74 or earlier (no later `blit`
+  could be installed beside them), so its server takes `blit` alone with
+  `X-Blit-SHA256` and is reached with an `update-live.sh` from before
+  0.3.97, as in the bootstrap above; its helper's plain `dpkg --install`
+  needs no change for it. A package depending on another retired one is listed first. apt
+  treats both relations alike (checked with apt 3.0 against scratch
+  packages): `apt upgrade` keeps `blit` back while they are installed,
+  `apt full-upgrade` removes them.
+- **Bounded, and off the main loop.** The helper stops dpkg after 600 s
+  (each other command after 30 s) and says so; the server asks the helper
+  and reads its answer from the main loop, so an install no longer
+  freezes the display or the API, and the console watchdog's 120 s install
+  lease is gone. While installing, another `PUT`, `reset` or `cancel` is
+  409 `update_installing`; the server stops waiting after 900 s. (SR-12,
+  #194.)
+- **The error, not the preamble.** The helper keeps the end of a command's
+  output and the server's detail its end too (SR-21, #203).
+- Evidence: update_pair_gate gains `retired`, `swapped` and `bound` (nine
+  cases), rollback_recovery_gate's `local-half` requires dpkg's refusal
+  when N-1 carries the Breaks and `failed-configure` the postinst's error,
+  and update_install_live_gate is new.

@@ -9,8 +9,9 @@ resource model and safe ordering of calls without duplicating every schema.
 `GET /v1/diagnostics/console` reports Blit's native VT ownership: the VT
 number, whether it is active, the previous VT, the Linux keyboard mode (and
 the errno if reading it failed), keyboard muting, whether a recovery process
-is registered, and the main-loop watchdog timeout (normally 10 s, 120 s
-during the privileged package-install exchange). `owner: unmanaged` means
+is registered, and the main-loop watchdog timeout (always 10 s: a package
+install no longer stops the loop, so there is no install lease).
+`owner: unmanaged` means
 Blit is not managing a VT. The endpoint is read-only and uses the normal API
 authentication.
 
@@ -3531,6 +3532,15 @@ new one at its path; this also works for a TCC-built development fixture
 without silently switching to another installed binary. Package installation uses the
 separate `/v1/control/update` flow and must be verified through
 `/v1/control/update/status` and `/v1/version`.
+
+The install runs while the display and the API keep going (from 0.3.132,
+security review SR-12): the `PUT` is answered when the root helper has
+installed the packages (`202`, `restarting`) or failed (`500`,
+`update_install_failed`), and meanwhile the status is `installing` and
+another `PUT`, `POST .../reset` or `POST .../cancel` is `409`
+`update_installing`. The helper stops `dpkg` after 600 s and reports it;
+the server stops waiting after 900 s. A failure's `detail` ends with what
+dpkg said last, its error (SR-21); a long one loses its start, marked `...`.
 
 ### Restart after an update
 

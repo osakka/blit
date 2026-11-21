@@ -171,6 +171,10 @@ extern char **environ;
 #define BLIT_MAX_SCROLLBACK_LINES 1000
 #define BLIT_MAX_OVERLAYS 16
 #define BLIT_UPDATE_IDLE_TIMEOUT_US 30000000ULL
+/* SR-12: the server's own bound on the helper's answer. The helper bounds
+   dpkg at 600 s and each of its other commands at 30 s; this is longer than
+   all of them, so a timeout here means the helper itself is stuck. */
+#define BLIT_UPDATE_INSTALL_TIMEOUT_US 900000000ULL
 /* ADR 0232: blit and blit-compositor, back to back in one upload. */
 #define BLIT_UPDATE_MAX_PACKAGES 2
 #define BLIT_LOGIN_RESTART_DELAY_US 1000000ULL
@@ -596,6 +600,9 @@ typedef struct {
     size_t update_lengths[BLIT_UPDATE_MAX_PACKAGES];
     char update_paths[BLIT_UPDATE_MAX_PACKAGES][256];
     char update_sha256[BLIT_UPDATE_MAX_PACKAGES][65];
+    /* SR-12: the upload is complete and the helper is installing it; the
+       client waits for the answer, not read and not timed out as idle. */
+    int update_installing;
     int screenshot_output_index;
     /* ADR 0189: a settings request parked until its save is durable:
        1 PUT /v1/settings, 2 DELETE /v1/settings. */
@@ -1883,7 +1890,15 @@ typedef struct {
     int listen_port;
     char update_token[256];
     char update_state[32];
-    char update_detail[256];
+    char update_detail[512];
+    /* SR-12: the helper exchange runs on the main loop, never blocking it:
+       the socket, the client waiting for its answer, when the server stops
+       waiting, and the answer so far. */
+    int update_helper_fd;
+    int update_helper_client;
+    uint64_t update_helper_deadline_us;
+    char update_helper_answer[512];
+    size_t update_helper_answer_length;
     /* ADR 0205: an update installed under a running Blit. The install root
        (/usr/lib/blit; BLIT_INSTALL_ROOT under test), whether this process
        runs its bin/blit-server and that file as it was at start, what the
@@ -32484,16 +32499,21 @@ static int update_package_valid(const char *path, const char *expected_sha,
     return 1;
 }
 
-static int run_update_helper(const BlitHttpClient *client,
-                             char *output, size_t capacity)
+/* SR-12: ask the helper and return at once; the main loop reads its
+   answer (service_update_helper). The socket is nonblocking, and the one
+   request line fits a fresh socket's buffer. */
+static int start_update_helper(BlitRuntime *runtime, int index,
+                               char *detail, size_t capacity)
 {
+    const BlitHttpClient *client = &runtime->http_clients[index];
     struct sockaddr_un address;
-    int fd;
-    int length;
-    ssize_t received;
-    size_t used = 0;
-    fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (fd < 0) return 0;
+    char line[1024];
+    int fd, part, length;
+    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        snprintf(detail, capacity, "cannot reach the root update helper");
+        return 0;
+    }
     memset(&address, 0, sizeof(address));
     address.sun_family = AF_UNIX;
     /* The helper's socket. Overridable only so a gate can stand a stub
@@ -32503,34 +32523,132 @@ static int run_update_helper(const BlitHttpClient *client,
                  getenv("BLIT_UPDATE_SOCKET") : "/run/blit/update.sock");
     if (connect(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         close(fd);
-        snprintf(output, capacity, "root update helper is unavailable");
+        snprintf(detail, capacity, "root update helper is unavailable");
         return 0;
     }
     /* UPDATE <path> <sha256> [<path> <sha256>]: the helper owns which of
        them it installs (ADR 0232). */
-    {
-        char line[1024];
-        int part;
-        length = snprintf(line, sizeof(line), "UPDATE");
-        for (part = 0; part < client->update_count; ++part)
-            length += snprintf(line + length, sizeof(line) - (size_t)length,
-                               " %s %s", client->update_paths[part],
-                               client->update_sha256[part]);
-        length += snprintf(line + length, sizeof(line) - (size_t)length, "\n");
-        snprintf(output, capacity, "%s", line);
-    }
-    if (write(fd, output, (size_t)length) != length) {
+    length = snprintf(line, sizeof(line), "UPDATE");
+    for (part = 0; part < client->update_count; ++part)
+        length += snprintf(line + length, sizeof(line) - (size_t)length,
+                           " %s %s", client->update_paths[part],
+                           client->update_sha256[part]);
+    length += snprintf(line + length, sizeof(line) - (size_t)length, "\n");
+    if (send(fd, line, (size_t)length, MSG_NOSIGNAL) != length) {
         close(fd);
+        snprintf(detail, capacity, "cannot send the request to the root update helper");
         return 0;
     }
-    while (used + 1 < capacity) {
-        received = read(fd, output + used, capacity - used - 1);
-        if (received <= 0) break;
-        used += (size_t)received;
+    runtime->update_helper_fd = fd;
+    runtime->update_helper_client = index;
+    runtime->update_helper_deadline_us = monotonic_us() +
+        BLIT_UPDATE_INSTALL_TIMEOUT_US;
+    runtime->update_helper_answer_length = 0;
+    runtime->update_helper_answer[0] = '\0';
+    return 1;
+}
+
+static int update_install_running(const BlitRuntime *runtime)
+{
+    return runtime->update_helper_fd >= 0;
+}
+
+/* SR-21: the end of the helper's answer is dpkg's error; when it does not
+   fit, it is the start that goes. */
+static void update_failure_detail(BlitRuntime *runtime, const char *reason)
+{
+    static const char prefix[] = "privileged update failed: ";
+    size_t room = sizeof(runtime->update_detail) - sizeof(prefix);
+    size_t length = strlen(reason);
+    if (length > room)
+        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                 "%s...%s", prefix, reason + length - (room - 3));
+    else
+        snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+                 "%s%s", prefix, reason);
+}
+
+/* The helper answered (or will not): the waiting client is told, and on
+   success the server leaves for systemd to start the new one. */
+static void finish_update_install(BlitRuntime *runtime, int installed,
+                                  const char *reason)
+{
+    int index = runtime->update_helper_client;
+    BlitHttpClient *client = index >= 0 && index < BLIT_MAX_HTTP_CLIENTS &&
+        runtime->http_clients[index].used &&
+        runtime->http_clients[index].update_installing ?
+        &runtime->http_clients[index] : NULL;
+    if (runtime->update_helper_fd >= 0)
+        close(runtime->update_helper_fd);
+    runtime->update_helper_fd = -1;
+    runtime->update_helper_client = -1;
+    if (!installed) {
+        snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
+        update_failure_detail(runtime, reason);
+        if (client != NULL) {
+            update_unlink_staged(client);
+            send_problem(client->fd, 500, "Internal Server Error",
+                         "update_install_failed", runtime->update_detail);
+            remove_http_client(runtime, index);
+        }
+        return;
     }
-    close(fd);
-    output[used] = '\0';
-    return strncmp(output, "OK", 2) == 0;
+    snprintf(runtime->update_state, sizeof(runtime->update_state), "restarting");
+    snprintf(runtime->update_detail, sizeof(runtime->update_detail),
+             "package installed; restarting Blit");
+    if (client != NULL) {
+        send_http(client->fd, 202, "Accepted", "application/json",
+                  "{\"state\":\"restarting\",\"detail\":\"package installed; restarting Blit\"}");
+        remove_http_client(runtime, index);
+    }
+    /* Exit; do not exec. The helper has already asked systemd to restart the
+       unit, which is the only path that can pick up a changed unit file --
+       its own comment says so. Doing both raced, and the race cost the whole
+       cgroup (issue #63). The exit is non-zero so Restart=on-failure remains
+       a safety net if the helper dies before it reaches systemctl: the
+       package must never be installed with the service down. */
+    blit_update_exit_requested = 1;
+    blit_running = 0;
+}
+
+/* The helper writes one line, OK or ERROR <reason>, and closes. */
+static void service_update_helper(BlitRuntime *runtime)
+{
+    size_t room = sizeof(runtime->update_helper_answer) - 1 -
+        runtime->update_helper_answer_length;
+    ssize_t received;
+    char *answer = runtime->update_helper_answer;
+    size_t length;
+    if (room == 0) {
+        received = 0;
+    } else {
+        received = recv(runtime->update_helper_fd,
+                        answer + runtime->update_helper_answer_length, room,
+                        MSG_DONTWAIT);
+        if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK ||
+                             errno == EINTR))
+            return;
+    }
+    if (received > 0) {
+        runtime->update_helper_answer_length += (size_t)received;
+        answer[runtime->update_helper_answer_length] = '\0';
+        if (memchr(answer, '\n', runtime->update_helper_answer_length) == NULL &&
+            runtime->update_helper_answer_length + 1 <
+                sizeof(runtime->update_helper_answer))
+            return;
+    }
+    length = runtime->update_helper_answer_length;
+    answer[length] = '\0';
+    while (length > 0 && (answer[length - 1] == '\n' ||
+                          answer[length - 1] == '\r' ||
+                          answer[length - 1] == ' '))
+        answer[--length] = '\0';
+    if (strncmp(answer, "OK", 2) == 0) {
+        finish_update_install(runtime, 1, "");
+        return;
+    }
+    finish_update_install(runtime, 0, length > 0 ? answer :
+                          "the root update helper closed without answering");
 }
 
 static void update_status_json(const BlitRuntime *runtime, char *body,
@@ -32571,6 +32689,11 @@ static void cancel_update_upload(BlitRuntime *runtime, int fd,
                      "A valid update token is required.");
         return;
     }
+    if (update_install_running(runtime)) {
+        send_problem(fd, 409, "Conflict", "update_installing",
+                     "The packages are being installed; an install cannot be cancelled.");
+        return;
+    }
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
         if (runtime->http_clients[i].used &&
             runtime->http_clients[i].update_fd >= 0) {
@@ -32600,6 +32723,11 @@ static void reset_update_state(BlitRuntime *runtime, int fd,
     if (!update_authorized(runtime, request)) {
         send_problem(fd, 403, "Forbidden", "update_disabled",
                      "A valid update token is required.");
+        return;
+    }
+    if (update_install_running(runtime)) {
+        send_problem(fd, 409, "Conflict", "update_installing",
+                     "The packages are being installed.");
         return;
     }
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
@@ -32682,7 +32810,9 @@ static int update_open_part(BlitHttpClient *client)
     char *path = client->update_paths[client->update_part];
     snprintf(path, sizeof(client->update_paths[0]), "%s/blit-update-XXXXXX",
              update_directory());
-    client->update_fd = mkstemp(path);
+    /* SR-10: close-on-exec, so no session started during an upload
+       inherits a writable descriptor to the package. */
+    client->update_fd = mkostemp(path, O_CLOEXEC);
     if (client->update_fd < 0) {
         path[0] = '\0';
         return 0;
@@ -32739,35 +32869,21 @@ static void finish_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
                      runtime->update_detail);
         return;
     }
-    snprintf(runtime->update_state, sizeof(runtime->update_state), "installing");
-    snprintf(output, sizeof(output), "console recovery lease unavailable");
-    {
-        int installed = blit_vt_update_lease(1) == 0 &&
-            run_update_helper(client, output, sizeof(output));
-        blit_vt_update_lease(0);
-        if (!installed) {
-            snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
-            snprintf(runtime->update_detail, sizeof(runtime->update_detail),
-                     "privileged update failed: %s", output);
-            update_unlink_staged(client);
-            send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
-                         runtime->update_detail);
-            return;
-        }
+    /* SR-12: the install runs while the display and the API keep going;
+       the answer comes back through the main loop. */
+    if (!start_update_helper(runtime, (int)(client - runtime->http_clients),
+                             output, sizeof(output))) {
+        snprintf(runtime->update_state, sizeof(runtime->update_state), "failed");
+        update_failure_detail(runtime, output);
+        update_unlink_staged(client);
+        send_problem(client->fd, 500, "Internal Server Error", "update_install_failed",
+                     runtime->update_detail);
+        return;
     }
-    snprintf(runtime->update_state, sizeof(runtime->update_state), "restarting");
+    client->update_installing = 1;
+    snprintf(runtime->update_state, sizeof(runtime->update_state), "installing");
     snprintf(runtime->update_detail, sizeof(runtime->update_detail),
-             "package installed; restarting Blit");
-    send_http(client->fd, 202, "Accepted", "application/json",
-              "{\"state\":\"restarting\",\"detail\":\"package installed; restarting Blit\"}");
-    /* Exit; do not exec. The helper has already asked systemd to restart the
-       unit, which is the only path that can pick up a changed unit file --
-       its own comment says so. Doing both raced, and the race cost the whole
-       cgroup (issue #63). The exit is non-zero so Restart=on-failure remains
-       a safety net if the helper dies before it reaches systemctl: the
-       package must never be installed with the service down. */
-    blit_update_exit_requested = 1;
-    blit_running = 0;
+             "the root update helper is installing the packages");
 }
 
 static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
@@ -32861,6 +32977,12 @@ static void service_http_client(BlitRuntime *runtime, int index)
             !update_authorized(runtime, client->request)) {
             send_problem(client->fd, 403, "Forbidden", "update_disabled",
                          "A valid update token is required.");
+            remove_http_client(runtime, index);
+            return;
+        }
+        if (update_install_running(runtime)) {
+            send_problem(client->fd, 409, "Conflict", "update_installing",
+                         "An update is being installed.");
             remove_http_client(runtime, index);
             return;
         }
@@ -33183,6 +33305,8 @@ int main(int argc, char **argv)
             }
         }
     }
+    runtime.update_helper_fd = -1;
+    runtime.update_helper_client = -1;
     snprintf(runtime.update_state, sizeof(runtime.update_state),
              runtime.update_token[0] != '\0' ? "ready" : "disabled");
     snprintf(runtime.update_detail, sizeof(runtime.update_detail),
@@ -33548,6 +33672,13 @@ int main(int argc, char **argv)
             BlitHttpClient *client = &runtime.http_clients[i];
             if (!client->used)
                 continue;
+            if (client->update_installing) {
+                if (now > runtime.update_helper_deadline_us)
+                    finish_update_install(&runtime, 0,
+                        "the root update helper did not answer within 900 s; "
+                        "dpkg may still be running (see GET /v1/control/update/status)");
+                continue;
+            }
             if (client->update_fd >= 0) {
                 if (now > client->update_last_progress_us &&
                     now - client->update_last_progress_us >
@@ -33621,8 +33752,16 @@ int main(int argc, char **argv)
                     max_fd = runtime.streams[i].fd;
             }
         }
+        if (runtime.update_helper_fd >= 0) {
+            FD_SET(runtime.update_helper_fd, &readable);
+            if (runtime.update_helper_fd > max_fd)
+                max_fd = runtime.update_helper_fd;
+        }
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
-            if (runtime.http_clients[i].used) {
+            /* A client waiting for its install is not read: its request is
+               done, and its answer comes from the helper. */
+            if (runtime.http_clients[i].used &&
+                !runtime.http_clients[i].update_installing) {
                 FD_SET(runtime.http_clients[i].fd, &readable);
                 if (runtime.http_clients[i].response_body != NULL)
                     FD_SET(runtime.http_clients[i].fd, &writable);
@@ -33845,8 +33984,12 @@ int main(int argc, char **argv)
                     FD_ISSET(runtime.sessions[i].pty_fd, &readable))
                     service_session_output(&runtime, runtime.sessions[i].pty_fd);
             }
+            if (runtime.update_helper_fd >= 0 &&
+                FD_ISSET(runtime.update_helper_fd, &readable))
+                service_update_helper(&runtime);
             for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
                 if (runtime.http_clients[i].used &&
+                    !runtime.http_clients[i].update_installing &&
                     FD_ISSET(runtime.http_clients[i].fd, &readable))
                     service_http_client(&runtime, i);
             }

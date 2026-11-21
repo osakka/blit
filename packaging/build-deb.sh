@@ -19,9 +19,19 @@ HIBR_ROOT=${BLIT_HIBR_ROOT:-}
 # version 5 cannot reach this Blit's channel, so the two never install
 # together. Hibr's packages carry the matching Breaks on Blit.
 HIBR_FRAME_V5=0.99.482
-# Removed in 0.3.75 with the gamescope path (ADR 0228): blit Breaks them, so
-# an upgrade removes them rather than leaving a bridge Blit no longer serves.
-RETIRED_PACKAGES='blit-gamescope, steamer'
+# Removed in 0.3.75 with the gamescope path (ADR 0228): blit Conflicts with
+# and Replaces them, so installing blit removes them rather than leaving a
+# bridge Blit no longer serves. Not Breaks (Gitea #209): dpkg --install, the
+# update helper's, refuses a Breaks on an installed package ("deconfiguration
+# is not permitted"), so a host that still had one could take no update
+# through the API -- it is still on 0.3.74 or earlier, whose server takes
+# blit alone (X-Blit-SHA256: an update-live.sh from before 0.3.97, ADR 0232's
+# bootstrap). With Conflicts and Replaces dpkg removes them in the same run. A package that depends on another retired one comes first: dpkg weighs
+# them in this order, and refuses to remove blit-gamescope while steamer,
+# which depends on it, is still there. apt treats both relations alike:
+# `apt upgrade` keeps blit back while they are installed (blit-gamescope
+# pins blit's version anyway), `apt full-upgrade` removes them.
+RETIRED_PACKAGES='steamer, blit-gamescope'
 
 # Gitea #165: a package's library dependencies, with the floors its binaries
 # actually need. dpkg-shlibdeps reads them from the binaries' versioned
@@ -366,6 +376,13 @@ chmod 0755 "$stage/DEBIAN/postinst"
 blit_depends=$(package_depends "libc6, libdrm2, zlib1g, libfreetype6 (>= 2.12.1), libharfbuzz0b (>= 6.0.0), libxkbcommon0 (>= 1.5.0), xkb-data, libx11-data" \
 	"$stage/usr/lib/blit/bin/blit-server" "$stage/usr/lib/blit/bin/blit-update-helper" \
 	"$stage/usr/lib/blit/hibr/console-blit.so") || exit 1
+# Security review SR-13 (Gitea #195): blit Breaks every blit-compositor newer
+# than itself, so dpkg refuses to roll blit back alone under a compositor
+# that pins the newer blit. Only newer: an older one in the Breaks would make
+# the helper that installs this release -- the one already installed, which
+# unpacks blit first -- leave the compositor unpacked and blit refused. So a
+# rollback unpacks the compositor first (the helper does; the runbook in
+# docs/security-review-2026-11.md says so for root's own dpkg).
 cat > "$stage/DEBIAN/control" <<EOF
 Package: blit
 Version: $pkgver
@@ -376,7 +393,9 @@ Maintainer: ITD Labs <itdlabs@localhost>
 Depends: $blit_depends
 Recommends: hibr-ime-arabizi (>= 0.1.5)
 Suggests: hibr, blit-compositor
-Breaks: hibr (<< $HIBR_FRAME_V5), $RETIRED_PACKAGES
+Breaks: hibr (<< $HIBR_FRAME_V5), blit-compositor (>> $pkgver)
+Conflicts: $RETIRED_PACKAGES
+Replaces: $RETIRED_PACKAGES
 Description: API-driven native KMS text display server
  Blit provides a text-first display server with one terminal surface per
  physical display or pane, HTTP control, streaming, and Hibr integration.

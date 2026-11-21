@@ -32,14 +32,18 @@ refuses any path that is not a
 file directly in
 .IR /var/lib/blit/updates/ ;
 .IP 2. 4
-checks each package's SHA-256 against the one the server sent;
+copies each one, opened once and never through a link, into
+.IR /var/lib/blit-update-helper/ ,
+which only it can enter; every check below and the install use the copy;
 .IP 3. 4
+checks each package's SHA-256 against the one the server sent;
+.IP 4. 4
 checks that the packages are
 .B blit
 and, optionally,
 .BR blit-compositor ,
 at one version;
-.IP 4. 4
+.IP 5. 4
 refuses an update without
 .B blit-compositor
 when the host has it installed, because
@@ -47,13 +51,20 @@ when the host has it installed, because
 depends on
 .B blit
 of exactly its own version; if the host does not have it, it is not added;
-.IP 5. 4
+.IP 6. 4
 installs them with one
 .BR dpkg (1)
-.BR \-\-install ;
-.IP 6. 4
-removes the staged files, whether it installed them or refused;
+.B \-\-install \-\-abort\-after=1
+\(em
+.B blit
+first, or on a rollback
+.B blit-compositor
+first, since
+.B blit
+breaks every newer compositor \(em stopped after 600 seconds;
 .IP 7. 4
+removes the staged files and its copies, whether it installed them or refused;
+.IP 8. 4
 after an install, reloads systemd and restarts
 .BR blit.service .
 .PP
@@ -61,7 +72,8 @@ It replies
 .B OK
 or
 .B ERROR
-with the reason, which the server returns to the client.
+with the reason: the end of the failing command's output, which carries
+dpkg's error. The server returns it to the client.
 .PP
 It takes no arguments and reads no environment.
 .SH PROTOCOL
@@ -89,6 +101,9 @@ The socket.
 .TP
 .I /var/lib/blit/updates/
 Uploaded packages, until the helper has answered.
+.TP
+.I /var/lib/blit-update-helper/
+The helper's copies of them, mode 0700, until it has answered.
 .TP
 .I /etc/blit/update.token
 The token the server requires for an update; see

@@ -18,9 +18,20 @@
 #   4. both at -0; the pair at -1                      -> both -1, apt-get check clean
 #   5. blit -0 only; the pair at -1                    -> blit -1, compositor still absent
 #   6. a path outside the staging directory           -> refused, and the file kept
+#   7. the -0 pair with steamer and blit-gamescope    -> both -1; the retired
+#      installed (as a host from before 0.3.75 has     two removed, apt-get
+#      them); the pair at -1                            check clean (Gitea #209;
+#                                                       dpkg refused it before)
+#   8. both at -0; the pair at -1, and the staged      -> both -1, not the
+#      files replaced by another blit after the         replacement (SR-10,
+#      helper's checks (UPDATE_GATE_AFTER_VERIFY)       Gitea #192)
+#   9. both at -0; a blit -1 whose postinst takes      -> ERROR naming the
+#      60 s, the helper's dpkg bound set to 5 s         bound, answered within
+#                                                       30 s (SR-12, Gitea #194)
 # and with case 4, an operator's BLIT_EXPECT_DESKTOP=0 in /etc/blit/blit.env
 # is still 0, in one line, after the upgrade (Gitea #180).
-# After every answer, installed or refused, the staged files are gone.
+# After every answer, installed or refused, the staged files are gone, and
+# so are the helper's own copies.
 set -eu
 
 fail() { echo "UPDATE_PAIR_GATE_FAIL $*" >&2; exit 1; }
@@ -43,6 +54,7 @@ old=${version%-1}-0
 work=$(mktemp -d "${TMPDIR:-/tmp}/blit-update-pair.XXXXXX")
 socket=$work/update.sock
 helper=$work/blit-update-helper
+private=$work/private
 helper_pid=
 cleanup() {
     [ -n "$helper_pid" ] && kill "$helper_pid" 2>/dev/null || true
@@ -50,12 +62,23 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# The real helper, with only its socket moved into the work directory.
+# The real helper, with only its directories moved into the work directory.
+# Two more builds for cases 8 and 9: one whose gate hook replaces the staged
+# files after the checks, one whose dpkg bound is 5 s.
 staging=$work/staging
 mkdir -p "$staging"
-cc -std=gnu11 -O1 -DUPDATE_SOCKET="\"$socket\"" -DUPDATE_RUNTIME_DIR="\"$work\"" \
-    -DUPDATE_STAGING_DIR="\"$staging\"" \
-    -o "$helper" "$root/src/blit_update_helper.c" || fail "helper did not build"
+swap=$work/swap/blit_swapped.deb
+build_helper() {   # OUT [CC-ARGS...]
+    out=$1
+    shift
+    cc -std=gnu11 -O1 -DUPDATE_SOCKET="\"$socket\"" -DUPDATE_RUNTIME_DIR="\"$work\"" \
+        -DUPDATE_STAGING_DIR="\"$staging\"" -DUPDATE_PRIVATE_DIR="\"$private\"" "$@" \
+        -o "$out" "$root/src/blit_update_helper.c" || fail "helper $out did not build"
+}
+build_helper "$helper"
+build_helper "$work/helper-swap" \
+    "-DUPDATE_GATE_AFTER_VERIFY=\"for f in $staging/blit-update-*; do cp $swap \\\"\$f\\\"; done\""
+build_helper "$work/helper-bound" -DUPDATE_INSTALL_SECONDS=5
 
 # The fabricated previous release.
 repack() {   # IN OUT  (sed program on the control file from stdin args)
@@ -68,7 +91,8 @@ repack() {   # IN OUT  (sed program on the control file from stdin args)
 }
 blit_old=$work/blit_${old}_amd64.deb
 comp_old=$work/blit-compositor_${old}_amd64.deb
-repack "$blit_new" "$blit_old" -e "s/^Version: .*/Version: $old/"
+repack "$blit_new" "$blit_old" -e "s/^Version: .*/Version: $old/" \
+    -e "s/blit-compositor (>> [^)]*)/blit-compositor (>> $old)/"
 repack "$comp_new" "$comp_old" -e "s/^Version: .*/Version: $old/" \
     -e "s/blit (= [^)]*)/blit (= $old)/"
 
@@ -94,14 +118,14 @@ ask() {
         shift 2
     done
     answer=$(ask_raw $request)
-    left=$(ls "$staging")
-    [ -z "$left" ] || fail "staged files left after '$answer': $left"
+    left=$(find "$staging" "$private" -type f 2>/dev/null)
+    [ -z "$left" ] || fail "staged files or copies left after '$answer': $left"
     echo "$answer"
 }
 
 ask_raw() {   # REQUEST-ARGS... -> the helper's one-line answer
     rm -f "$socket"
-    "$helper" >"$work/helper.log" 2>&1 &
+    "${ASK_HELPER:-$helper}" >"$work/helper.log" 2>&1 &
     helper_pid=$!
     i=0
     while [ ! -S "$socket" ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
@@ -184,4 +208,63 @@ esac
 [ -f "$outside" ] || fail "outside: the helper deleted a file it was not given to stage"
 echo "case outside: refused; the file kept"
 
-echo "UPDATE_PAIR_GATE_PASS version=$version cases=6 kept_operator_env=1"
+# 7. Gitea #209. A host from before 0.3.75 can still have the packages retired
+# with the gamescope path: blit-gamescope pinned to its blit, steamer on top
+# of it. The -0 pair here is taken without blit's relations to them, as such
+# a host's blit had none; the helper then gets the -1 pair.
+retired_pkg() {   # NAME DEPENDS -> a minimal package at 0.3.74-1
+    mkdir -p "$work/retired/$1/DEBIAN"
+    printf 'Package: %s\nVersion: 0.3.74-1\nArchitecture: all\nMaintainer: gate <gate@localhost>\nDepends: %s\nDescription: retired with the gamescope path\n' \
+        "$1" "$2" >"$work/retired/$1/DEBIAN/control"
+    dpkg-deb --build --root-owner-group "$work/retired/$1" "$work/retired/$1.deb" >/dev/null
+}
+retired_pkg blit-gamescope "blit (= $old)"
+retired_pkg steamer blit-gamescope
+repack "$blit_old" "$work/blit_${old}_unrelated.deb" -e '/^Conflicts:/d' -e '/^Replaces:/d'
+dpkg --purge blit-compositor blit >/dev/null 2>&1 || true
+dpkg --install "$work/blit_${old}_unrelated.deb" "$comp_old" "$work/retired/blit-gamescope.deb" \
+    "$work/retired/steamer.deb" >"$work/setup.log" 2>&1 ||
+    { cat "$work/setup.log" >&2; fail "could not install the -0 pair with the retired packages"; }
+answer=$(ask "$blit_new" "$(sha "$blit_new")" "$comp_new" "$(sha "$comp_new")")
+[ "$answer" = OK ] || fail "retired: expected OK, got '$answer'"
+[ "$(state)" = "blit=$version blit-compositor=$version" ] || fail "retired: $(state)"
+for p in blit-gamescope steamer; do
+    [ "$(installed "$p")" = absent ] || fail "retired: $p is still $(installed "$p")"
+done
+apt-get check >"$work/check.log" 2>&1 || { cat "$work/check.log" >&2; fail "retired: apt-get check"; }
+echo "case retired: $(state); steamer and blit-gamescope removed; apt-get check clean"
+
+# 8. SR-10. The helper checks and installs its own copy, so replacing the
+# staged files after the checks changes nothing that is installed.
+mkdir -p "$work/swap"
+repack "$blit_new" "$swap" -e "s/^Version: .*/Version: ${version}+swapped/"
+setup_pair_old
+answer=$(ASK_HELPER=$work/helper-swap ask "$blit_new" "$(sha "$blit_new")" "$comp_new" "$(sha "$comp_new")")
+[ "$answer" = OK ] || fail "swapped: expected OK, got '$answer'"
+[ "$(state)" = "blit=$version blit-compositor=$version" ] ||
+    fail "swapped: the replaced staged file was installed: $(state)"
+echo "case swapped: $(state); the staged files replaced after the checks were not installed"
+
+# 9. SR-12. dpkg is bounded: a postinst that never finishes in time is
+# stopped and reported, and the helper answers. Last: it leaves blit
+# half-configured.
+rm -rf "$work/x"
+dpkg-deb -R "$blit_new" "$work/x"
+sed -i '0,/^set -eu$/s//set -eu\nsleep 60/' "$work/x/DEBIAN/postinst"
+grep -q '^sleep 60$' "$work/x/DEBIAN/postinst" || fail "bound: could not slow the postinst"
+mkdir -p "$work/slow"
+dpkg-deb --build --root-owner-group "$work/x" "$work/slow/blit_${version}_amd64.deb" >/dev/null
+setup_pair_old
+started=$(date +%s)
+answer=$(ASK_HELPER=$work/helper-bound ask "$work/slow/blit_${version}_amd64.deb" \
+    "$(sha "$work/slow/blit_${version}_amd64.deb")" "$comp_new" "$(sha "$comp_new")")
+took=$(( $(date +%s) - started ))
+case "$answer" in
+    "ERROR dpkg did not finish within 5 s and was stopped") ;;
+    *) fail "bound: expected the bound to be reported, got '$answer'" ;;
+esac
+[ "$took" -lt 30 ] || fail "bound: the helper answered after $took s"
+echo "case bound: '$answer' after $took s"
+setup_pair_old   # not left half-configured for whoever runs next
+
+echo "UPDATE_PAIR_GATE_PASS version=$version cases=9 kept_operator_env=1"

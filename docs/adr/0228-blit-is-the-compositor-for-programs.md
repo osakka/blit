@@ -797,7 +797,9 @@ as agreed with Hibr, built in blit-compositor; it replaces milestone A's
   input path and their gates are gone; `INPUT sock` is the only input
   route, and `frame_input_gate` covers on it every case the stand-in libei
   covered. `blit` Breaks `blit-gamescope` and `steamer` (retired with it),
-  so an upgrade removes both.
+  so an upgrade removes both. (From 0.3.132 it Conflicts with and Replaces
+  them instead: dpkg --install, the update helper's, refused the Breaks on
+  a host that still had one, Gitea #209; see ADR 0232.)
 - **Phase 0 dropped (2026-11-10).** With gamescope removed there is no
   path left to measure against; the owner dropped phase 0's latency
   condition from the phase 2 criterion.
