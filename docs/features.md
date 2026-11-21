@@ -70,6 +70,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Pointer lock for games and emulators: raw mouse movement, released on focus loss | 0.2.42 | 0198 | Used |
 | Rectangle copy (DECCRA), for solid window moves in Hibr | 0.1.589 | 0175 | Tested |
 | Colour emoji sequences laid out as two-cell clusters (opt-in `text_layout: "emoji"`) | 0.1.578 | 0161–0163 | Tested |
+| The Glyph Protocol (v1.18), adopted as specified, so programs written for Rio, Ghostty and kitty detect Blit and ask before they print: the support check `s` (answered `fmt=` empty: no registrations accepted), the coverage query `q ; cp=` answered from the cell's own drawing path for the current font, pixel or outline (`status=system` or empty; the registration block U+100000-U+1003FF and Blit's old icon range empty), `r` rejected and `c` of an empty glossary as the specification requires, `grapheme` answered `unsupported`; replies in request order before DA1's, never echoing request bytes, 256 lookups a second per session | 0.3.133 | 0243 | Tested (`glyph_protocol_gate`) |
 | Default colours set per session | 0.1 | 0109 | Tested |
 | Raw output capture of a session, for diagnosis | 0.2.31 | — | Tested |
 

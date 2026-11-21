@@ -122,6 +122,13 @@ void blit_raster_cache_counts(const BlitRaster *raster, unsigned long long *hits
                               unsigned long long *misses);
 /* Install an already validated context on the canonical loaded font. */
 void blit_raster_attach(BlitFont *font, BlitRaster *raster);
+/* ADR 0243 step 2: 1 when a cell holding `scalar` alone, `columns` (1 or 2)
+   wide, regular face and colour pen, draws a glyph of its own -- from the
+   wide PSF, the Arabic word face, the raster's stack or the PSF -- and 0
+   when it would draw the PSF's replacement, or nothing (a format character).
+   It asks the attached raster, so it may draw and cache the glyph. */
+int blit_raster_cell_covers(const BlitFont *font, const BlitFont *wide,
+                            uint32_t scalar, int columns);
 /* RGB destination, integer premultiplied source-over. Only coverage masks
    receive foreground tint. The same compositor is usable by every backend. */
 uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,

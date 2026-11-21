@@ -1244,6 +1244,10 @@ typedef struct {
     int terminal_kitty_stage_x;
     int terminal_kitty_stage_y;
     int terminal_kitty_stage_blend;
+    /* ADR 0243 step 2: the Glyph Protocol's coverage queries answered in
+       the current second, against BLIT_GLYPH_QUERY_BUDGET. */
+    uint64_t terminal_glyph_window_us;
+    int terminal_glyph_queries;
     char terminal_title[128];
     char terminal_clipboard[4096];
     char terminal_notification[1024];
@@ -13425,6 +13429,267 @@ static void graphics_payload_header(const char *payload, char *out,
     out[length] = '\0';
 }
 
+/* ADR 0243 step 2: the Glyph Protocol (v1.18, pinned in docs/terminal.md),
+   adopted as its specification defines it: the support check `s` and the
+   coverage query `q`. Blit accepts no registrations: `s` lists no payload
+   format (an empty `fmt=`, §3.3), so every `r` is rejected (§3.3, §6.2) and
+   a `c` clears a glossary that is always empty (§7.2). A message is an APC
+   whose body begins `25a1;` (§3.1), then `;`-separated fields: the verb,
+   `key=value`s, and for `r` a payload last (§3.2). Any other APC is Kitty's,
+   as before.
+
+   Nothing a program sends is copied into a reply (SR-4): a reply is the
+   framing, fixed names, and lowercase hex printed from a parsed number. A
+   message with a byte outside printable ASCII, an unknown verb, or an `s`,
+   `q` or `c` over BLIT_GLYPH_MESSAGE_MAX bytes is dropped with no reply.
+   Replies are written as each request is read, like DA1's and XTGETTCAP's,
+   so they keep request order and precede a later DA1 reply (§3.4, §5.5).
+   A coverage lookup asks the raster, which may draw the glyph; a session
+   gets BLIT_GLYPH_QUERY_BUDGET a second and the rest are answered
+   `reason=unknown` (§5.4), so a flood is bounded work (SR-16). */
+#include "blit_icon_codepoints.h"
+
+#define BLIT_GLYPH_MESSAGE_MAX 1024
+#define BLIT_GLYPH_FIELDS 64
+#define BLIT_GLYPH_GRAPHEME_MAX 32
+#define BLIT_GLYPH_BLOCK_FIRST 0x100000U   /* the registration block, §4 */
+#define BLIT_GLYPH_BLOCK_LAST 0x1003ffU
+#define BLIT_GLYPH_QUERY_BUDGET 256
+
+typedef struct { const char *at; int length; } GlyphField;
+
+/* A codepoint: 1-8 hex digits. §3.2 writes them lowercase; uppercase is
+   read too. 0 when it is not hex. */
+static int glyph_hex(const char *text, int length, uint32_t *value)
+{
+    uint32_t v = 0;
+    int i;
+    if (length < 1 || length > 8) return 0;
+    for (i = 0; i < length; ++i) {
+        char c = text[i];
+        int digit = c >= '0' && c <= '9' ? c - '0' :
+            c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+            c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (digit < 0) return 0;
+        v = v << 4 | (uint32_t)digit;
+    }
+    *value = v;
+    return 1;
+}
+
+static int glyph_scalar(uint32_t v)
+{
+    return v <= 0x10ffffU && !(v >= 0xd800U && v <= 0xdfffU);
+}
+
+/* How many fields are `name=...`; the first one's value. */
+static int glyph_key(const GlyphField *fields, int count, const char *name,
+                     const char **value, int *length)
+{
+    int n = (int)strlen(name), found = 0, i;
+    for (i = 0; i < count; ++i)
+        if (fields[i].length > n && fields[i].at[n] == '=' &&
+            memcmp(fields[i].at, name, (size_t)n) == 0) {
+            if (!found) {
+                *value = fields[i].at + n + 1;
+                *length = fields[i].length - n - 1;
+            }
+            ++found;
+        }
+    return found;
+}
+
+/* `reply=` of `r` and `c` (§6.1, §7.1): 0 nothing, 2 failures only, and
+   1, the default, for anything else. */
+static int glyph_reply_level(const GlyphField *fields, int count)
+{
+    const char *value = NULL;
+    int length = 0;
+    if (glyph_key(fields, count, "reply", &value, &length) && length == 1 &&
+        (value[0] == '0' || value[0] == '2'))
+        return value[0] - '0';
+    return 1;
+}
+
+static void glyph_reply(BlitSession *session, const char *body)
+{
+    char framed[512];
+    const char *p;
+    /* The fixed alphabet, checked again here: a reply can never carry a
+       control, a space or anything a program sent. */
+    for (p = body; *p; ++p)
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+              *p == ';' || *p == '=' || *p == ',' || *p == '_'))
+            return;
+    if (snprintf(framed, sizeof(framed), "\033_25a1;%s\033\\", body) >=
+        (int)sizeof(framed))
+        return;
+    terminal_write_reply(session, framed);
+}
+
+/* `q ; cp=` (§5.2): 1 when the cell would draw a glyph of its own for cp,
+   0 when nothing would, -1 when it is not looked up (the budget). */
+static int glyph_covers(BlitRuntime *runtime, BlitSession *session,
+                        uint32_t cp)
+{
+    uint64_t now;
+    int width;
+    /* The registration block holds no registration in Blit and nothing
+       else draws there (§4). Blit's old icon range, which overlaps it and
+       runs past it, still draws during the transition, as a courtesy to old
+       output, not as coverage a program may use (glyph-sets.md §9). */
+    if (cp >= BLIT_GLYPH_BLOCK_FIRST && cp <= BLIT_GLYPH_BLOCK_LAST) return 0;
+#ifdef BLIT_ICON_OLD_FIRST
+    if (cp >= BLIT_ICON_OLD_FIRST && cp <= BLIT_ICON_OLD_LAST) return 0;
+#endif
+    width = unicode_cell_width(cp);
+    /* A control is acted on, never drawn into a cell. */
+    if (width == 0 && (cp < 0x20 || (cp >= 0x7f && cp < 0xa0))) return 0;
+    if (runtime == NULL) return -1;
+    now = monotonic_us();
+    if (now - session->terminal_glyph_window_us >= 1000000U) {
+        session->terminal_glyph_window_us = now;
+        session->terminal_glyph_queries = 0;
+    }
+    if (session->terminal_glyph_queries >= BLIT_GLYPH_QUERY_BUDGET) return -1;
+    ++session->terminal_glyph_queries;
+    return blit_raster_cell_covers(&runtime->font, &runtime->wide_font, cp,
+                                   width == 2 ? 2 : 1);
+}
+
+static void glyph_query(BlitRuntime *runtime, BlitSession *session,
+                        const GlyphField *fields, int count)
+{
+    char reply[512];
+    const char *value = NULL, *cluster = NULL;
+    int length = 0, cluster_length = 0, covered;
+    int cps = glyph_key(fields, count, "cp", &value, &length);
+    int graphemes = glyph_key(fields, count, "grapheme", &cluster, &cluster_length);
+    uint32_t cp;
+    if (cps + graphemes != 1) {
+        glyph_reply(session, "q;reason=malformed_query");
+        return;
+    }
+    if (graphemes) {
+        /* `grapheme` is not in Blit's `cap`: answered unsupported (§5.4,
+           §11 item 10), echoing the cluster only when it parsed. */
+        char list[BLIT_GLYPH_GRAPHEME_MAX * 7 + 1];
+        int used = 0, items = 0, start = 0, i, parsed = 1;
+        list[0] = '\0';
+        for (i = 0; i <= cluster_length && parsed; ++i) {
+            uint32_t scalar;
+            if (i < cluster_length && cluster[i] != ',') continue;
+            if (items == BLIT_GLYPH_GRAPHEME_MAX ||
+                !glyph_hex(cluster + start, i - start, &scalar) ||
+                !glyph_scalar(scalar)) {
+                parsed = 0;
+                break;
+            }
+            used += snprintf(list + used, sizeof(list) - (size_t)used, "%s%x",
+                             items ? "," : "", (unsigned)scalar);
+            ++items;
+            start = i + 1;
+        }
+        if (parsed)
+            snprintf(reply, sizeof(reply), "q;grapheme=%s;reason=unsupported", list);
+        else
+            snprintf(reply, sizeof(reply), "q;reason=unsupported");
+        glyph_reply(session, reply);
+        return;
+    }
+    if (!glyph_hex(value, length, &cp) || !glyph_scalar(cp)) {
+        /* A surrogate parsed, and is echoed; anything else is not. */
+        if (glyph_hex(value, length, &cp) && cp <= 0x10ffffU)
+            snprintf(reply, sizeof(reply), "q;cp=%x;reason=malformed_query", (unsigned)cp);
+        else
+            snprintf(reply, sizeof(reply), "q;reason=malformed_query");
+        glyph_reply(session, reply);
+        return;
+    }
+    covered = glyph_covers(runtime, session, cp);
+    if (covered < 0)
+        snprintf(reply, sizeof(reply), "q;cp=%x;reason=unknown", (unsigned)cp);
+    else
+        snprintf(reply, sizeof(reply), "q;cp=%x;status=%s", (unsigned)cp,
+                 covered ? "system" : "");
+    glyph_reply(session, reply);
+}
+
+/* `r` (§6) and `c` (§7) with no registration accepted. A `cp` that did not
+   parse is not in the block, and is not echoed. */
+static void glyph_register_or_clear(BlitSession *session, char verb,
+                                    const GlyphField *fields, int count)
+{
+    char reply[128], echo[24] = "";
+    const char *value = NULL;
+    int length = 0, level = glyph_reply_level(fields, count);
+    int has_cp = glyph_key(fields, count, "cp", &value, &length) > 0;
+    uint32_t cp = 0;
+    int parsed = has_cp && glyph_hex(value, length, &cp) && cp <= 0x10ffffU;
+    int in_block = parsed && cp >= BLIT_GLYPH_BLOCK_FIRST && cp <= BLIT_GLYPH_BLOCK_LAST;
+    if (parsed) snprintf(echo, sizeof(echo), "cp=%x;", (unsigned)cp);
+    if (level == 0) return;
+    if (verb == 'r')
+        /* §6.2's order: the codepoint first, then the format, and Blit
+           lists none. */
+        snprintf(reply, sizeof(reply), "r;%sstatus=1;reason=%s", echo,
+                 in_block ? "unsupported_format" : "out_of_namespace");
+    else if (!has_cp || in_block) {
+        /* Clearing an empty slot, or every slot of an empty glossary. */
+        if (level == 2) return;
+        snprintf(reply, sizeof(reply), "c;%sstatus=0", echo);
+    } else
+        snprintf(reply, sizeof(reply), "c;%sstatus=1;reason=out_of_namespace", echo);
+    glyph_reply(session, reply);
+}
+
+/* 1 when the APC in the session's string is a Glyph Protocol message,
+   answered or dropped; 0 for any other APC. */
+static int terminal_apply_glyph_protocol(BlitRuntime *runtime, BlitSession *session)
+{
+    const char *body = session->terminal_string;
+    int length = session->terminal_string_length;
+    /* The APC collector keeps the first bytes of a longer string. */
+    int truncated = length >= (int)sizeof(session->terminal_string) - 2;
+    GlyphField fields[BLIT_GLYPH_FIELDS];
+    int count = 0, start, i;
+    if (length < 5 || memcmp(body, "25a1;", 5) != 0) return 0;
+    for (i = 0; i < length; ++i)
+        if ((unsigned char)body[i] < 0x20 || (unsigned char)body[i] > 0x7e) return 1;
+    for (start = 5, i = 5; i <= length; ++i) {
+        if (i < length && body[i] != ';') continue;
+        if (count == BLIT_GLYPH_FIELDS) return 1;
+        fields[count].at = body + start;
+        fields[count].length = i - start;
+        ++count;
+        start = i + 1;
+    }
+    if (fields[0].length != 1) return 1;
+    if (fields[0].at[0] == 'r') {
+        /* The payload is the last field, by position (§3.2); kept short of
+           its end when the string was longer than the buffer. Only the
+           keys before it decide the rejection. */
+        glyph_register_or_clear(session, 'r', fields + 1, count > 2 ? count - 2 : 0);
+        return 1;
+    }
+    if (truncated || length > BLIT_GLYPH_MESSAGE_MAX) return 1;
+    switch (fields[0].at[0]) {
+    case 's':
+        /* No parameters (§3.3); no format accepted, no capability. */
+        glyph_reply(session, "s;fmt=");
+        break;
+    case 'q':
+        glyph_query(runtime, session, fields + 1, count - 1);
+        break;
+    case 'c':
+        glyph_register_or_clear(session, 'c', fields + 1, count - 1);
+        break;
+    default:
+        break;
+    }
+    return 1;
+}
+
 static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
                                   BlitSurface *surface)
 {
@@ -13450,6 +13715,7 @@ static void terminal_apply_string(BlitRuntime *runtime, BlitSession *session,
         payload_bytes = (int)session->terminal_string_heap_length;
     }
     if (session->terminal_string_type == '_') {
+        if (terminal_apply_glyph_protocol(runtime, session)) return;
         graphics_payload_header(payload, header, sizeof(header));
         terminal_apply_kitty(session, surface);
         trace_graphics_payload(runtime, session, "kitty", header,

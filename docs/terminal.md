@@ -3,7 +3,8 @@
 What Blit's terminal emulator understands, taken from the code
 (`src/blit_server.c`: parser `terminal_consume_chunk`, CSI
 `terminal_apply_csi`, SGR `terminal_apply_sgr`, OSC `terminal_apply_osc`,
-DCS `terminal_apply_string`, Kitty graphics `terminal_apply_kitty`). Where
+DCS `terminal_apply_string`, Kitty graphics `terminal_apply_kitty`, the Glyph
+Protocol `terminal_apply_glyph_protocol`). Where
 this page and the code disagree, the code is right and this page is a bug.
 
 Programs started in a session get `TERM=xterm-kitty` and
@@ -21,7 +22,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Mouse | X10/normal/button/any-motion tracking; legacy, SGR and SGR-pixel encodings; wheel and horizontal wheel |
 | Keyboard | xterm modifier encoding, application cursor and keypad modes, Kitty keyboard protocol flags 1, 2, 4, 8 and 16 |
 | Graphics | Kitty graphics protocol (direct transmission, RGB/RGBA/PNG, zlib, placements, in-place edits); Sixel |
-| Text | Unicode 15.1 widths, combining marks (16 per cell), colour emoji with Emoji 18.0 sequences, Arabic shaping, Nerd Fonts, Blit icons |
+| Text | Unicode 15.1 widths, combining marks (16 per cell), colour emoji with Emoji 18.0 sequences, Arabic shaping, Nerd Fonts, Blit icons; the Glyph Protocol's support check and coverage query (no registrations) |
 | Other | hyperlinks (OSC 8), notifications (OSC 9, 777), clipboard write (OSC 52), pointer shapes (OSC 22), synchronized output (2026), bracketed paste, focus events, pointer lock (7701) |
 
 ## Control characters
@@ -163,6 +164,49 @@ wide as those glyphs' at every cell size: 1 px, and 3 px for 51:3.
 | `DCS $ q` | Request a setting (DECRQSS): margins, cursor style, SGR with its colours, protection, conformance and others |
 | `DCS + q` | Terminal capabilities (XTGETTCAP): name, colours, RGB, size, `Tc`, `bce`, and Blit's `sgr-framed`, `sgr-framed-bar`, `sgr-shadow`, `sgr-icon-pen` (booleans: `DCS 1 + r <hex name> ST` when present, `DCS 0 + r <hex name> ST` otherwise) |
 
+## APC
+
+An APC whose body begins `25a1;` is the Glyph Protocol (below); any other
+APC is Kitty graphics, as it always was.
+
+### Glyph Protocol
+
+The [Glyph Protocol](https://github.com/raphamorim/rio/blob/main/specs/glyph-protocol.md)
+(Rio's; also in Ghostty and kitty), v1.18 of 2026-11-19 (SHA-256
+`68cc90ed…cda37`, as pinned in [glyph sets](protocols/glyph-sets.md#appendix-c-sources)),
+adopted as its specification defines it ([ADR 0243](adr/0243-glyph-multiplexing.md) step 2,
+from 0.3.133): a program asks whether the terminal speaks it, and whether a
+codepoint will draw, before it prints. Blit answers the support check and
+the coverage query; it accepts no glyph registrations. Section numbers are
+the specification's.
+
+| Request | Blit's answer |
+| --- | --- |
+| `ESC _ 25a1;s ESC \` | `ESC _ 25a1;s;fmt= ESC \`: Glyph Protocol, no payload format (§3.3), so no registration is accepted; no `cap` (no `grapheme`). Parameters are ignored. |
+| `ESC _ 25a1;q;cp=<hex> ESC \` | `ESC _ 25a1;q;cp=<hex>;status=system ESC \` when a cell holding that character alone draws a glyph of its own in the regular face, and `status=` (empty) when it would draw the replacement glyph or nothing (§5.2). It is the drawing path's own answer, for the current font: the text font, Blit's icons, Nerd symbols, the symbol and maths faces, emoji, the Arabic word face, Unifont, and the PSF (pixel fonts draw their own glyphs first). |
+| `q` for the registration block, U+100000-U+1003FF | `status=` empty: no program can register a glyph in Blit, and nothing else draws there (§4). |
+| `q` for Blit's old icon range, U+100000-U+100495 | `status=` empty, though those codepoints still draw the icons that moved to U+101000 ([ADR 0243](adr/0243-glyph-multiplexing.md)): that drawing is for text old programs printed, not coverage to rely on ([glyph sets §9](protocols/glyph-sets.md#9-the-registration-block-and-blits-move)). Use U+101000-U+101495. |
+| `q` for a control, a variation selector or a joiner | `status=` empty: no glyph of its own (§5.3). |
+| `ESC _ 25a1;q;grapheme=<hex>,... ESC \` | `ESC _ 25a1;q;grapheme=<hex>,...;reason=unsupported ESC \` (§5.4): Blit does not list `grapheme`; the cluster is echoed only when it parsed (1-32 scalars). |
+| `q` with neither or both of `cp` and `grapheme`, two `cp`, a `cp` that is not hex, a surrogate or past U+10FFFF | `ESC _ 25a1;q;reason=malformed_query ESC \`, with `cp=` echoed only for a surrogate (§5.4). |
+| More than 256 lookups by one session in a second | `ESC _ 25a1;q;cp=<hex>;reason=unknown ESC \` for the rest of that second (§5.4: a lookup may draw the glyph, so the work is bounded). |
+| `ESC _ 25a1;r;cp=<hex>;... ESC \` | Rejected (§6.2), as an empty `fmt=` says: `status=1;reason=unsupported_format` in the block, `reason=out_of_namespace` outside it. `reply=0` sends nothing. |
+| `ESC _ 25a1;c[;cp=<hex>] ESC \` | `status=0`: the glossary is always empty (§7.2); `reason=out_of_namespace` for a `cp` outside the block. `reply=0` sends nothing; `reply=2`, only a failure. |
+
+- **Detection.** Send `s` then DA1 (`CSI c`); replies come in request
+  order, so `s`'s arrives before DA1's (§3.4, §5.5). DA1 and XTGETTCAP are
+  unchanged.
+- **Framing.** `ESC _` or C1 APC, ended by `ESC \` or C1 ST (raw or UTF-8
+  encoded, as every control string); BEL does not end an APC. Replies are
+  7-bit, and `cp` is echoed as lowercase hex with no leading zeros, however
+  it was sent (uppercase hex and leading zeros are read).
+- **Never echoed (SR-4).** A reply holds the framing, the specification's
+  key and reason names and hex printed from a parsed number, nothing a
+  program sent. A message holding any byte outside printable ASCII (CR, LF,
+  NUL, BEL, ...), an unknown verb, or an `s`, `q` or `c` over 1024 bytes is
+  dropped with no reply; an `r` over the 16 KiB APC buffer is rejected from
+  the keys before its payload. Unknown keys are ignored (§11).
+
 ## Mouse, paste, focus and keyboard
 
 - **Mouse:** button presses, releases, motion and the wheel (64/65, and
@@ -247,6 +291,7 @@ background (`P2=1`), display mode (80) and cursor placement (8452).
 | Grid | 512 columns × 160 rows |
 | Scrollback | 1,000 lines, main screen only |
 | OSC, APC (one Kitty chunk) | 16 KiB |
+| A Glyph Protocol `s`, `q` or `c` | 1024 bytes; 256 coverage lookups a second per session |
 | DCS (a sixel image) | 8 MiB; a larger one is refused whole |
 
 ## Known gaps

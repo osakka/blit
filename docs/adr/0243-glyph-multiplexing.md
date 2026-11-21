@@ -6,7 +6,9 @@
   (`assets/fonts/fonts.source.json`, the Arabic manifest folded in), a
   generated header (`src/blit_font_registry.h`), no face file named in
   `src/`, `/v1/fonts` reporting it; every font gate's output byte for byte
-  as before (`font_registry_gate`)
+  as before (`font_registry_gate`). Step 2, the Glyph Protocol's `s` and
+  `q`, built in 0.3.133 (below, "Step 2 as built"; `glyph_protocol_gate`).
+  Step 3 is still a draft
 - Date: 2026-11-21
 - Scope: the font registry (`assets/fonts/`), the raster's stack
   (`src/blit_raster.c`, `src/blit_font.c`), `/v1/fonts`, the terminal
@@ -103,6 +105,41 @@ protocol document under `docs/` that another terminal can implement from:
 The handshake, in one write: the Glyph Protocol's support check, an
 XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
 66, then DA1; anything unanswered when DA1's answer arrives is unsupported.
+
+## Step 2 as built (0.3.133)
+
+The Glyph Protocol v1.18 (pinned in `docs/protocols/glyph-sets.md`,
+Appendix C), as its specification defines it; the sequences and answers are
+in `docs/terminal.md` ("Glyph Protocol").
+
+- **Where.** An APC whose body begins `25a1;` (its §3.1) is answered by
+  `terminal_apply_glyph_protocol` in `src/blit_server.c`; every other APC is
+  Kitty graphics, as before. Replies are written as each request is read,
+  like DA1's and XTGETTCAP's, so `s` then DA1 is answered in that order.
+- **`s`:** `fmt=` empty, no `cap`. Blit accepts no registrations: its old
+  icon range still draws inside the block during the transition, and a
+  registration and an old icon must never compete for a codepoint
+  (glyph sets §9). `grapheme` is not claimed: answering it needs the
+  terminal's own segmentation of the cluster in the current mode (§5.3),
+  which the parser does only by writing cells; `q ; grapheme=` is answered
+  `reason=unsupported`, as §5.4 and §11 item 10 require.
+- **`q ; cp=`:** `blit_raster_cell_covers` (`src/blit_raster.c`) asks the
+  cell's own drawing path for the current font -- the wide PSF, the Arabic
+  word face, the raster's stack, the PSF -- through the calls the renderers
+  make, so the stack's order lives only in `raster_get_drawn`. The block
+  and the old range (`blit_icon_codepoints.h`) answer `status=` empty; a
+  control or a format character (a selector, a joiner) too. A lookup may
+  draw and cache the glyph, so a session gets 256 a second and the rest
+  `reason=unknown` (§5.4; SR-16).
+- **`r` and `c`.** An empty `fmt=` means "every `r` will be rejected"
+  (§3.3), and clearing an empty slot "MUST return `status=0`" (§7.2), so
+  both are answered: `r` with `unsupported_format` in the block and
+  `out_of_namespace` outside it (§6.2's order), `c` with `status=0`, both
+  honouring `reply=`.
+- **Safety (SR-4).** A reply is the framing, the specification's names and
+  hex printed from a parsed number. A message with a byte outside printable
+  ASCII, an unknown verb, or an `s`, `q` or `c` over 1024 bytes gets no
+  reply.
 
 ## Decided (the owner's, 2026-11-21)
 

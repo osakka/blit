@@ -1,8 +1,12 @@
 # Glyph sets: looking a glyph up by set and name
 
 > **Status: DRAFT. Not implemented.** Blit does not answer any of this
-> yet: it has no Glyph Protocol handling at all (no `APC 25a1` in
-> `src/`). This document is the proposal behind step 3 of
+> yet. Step 2 of ADR 0243 is built (0.3.133): Blit answers the Glyph
+> Protocol's own `s` (`fmt=` empty, no `cap`) and `q ; cp=`, following
+> section 9 below and section 8's no-echo and fixed-alphabet rules
+> ([terminal reference](../terminal.md#glyph-protocol));
+> it does not list `names`, and nothing here (`name`, `n`) is answered.
+> This document is the proposal behind step 3 of
 > [ADR 0243](../adr/0243-glyph-multiplexing.md). It is written as an
 > optional capability, `names`, of the Glyph Protocol, to be offered to
 > that protocol's maintainers before anything is built; it has not been

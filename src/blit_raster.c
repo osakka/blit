@@ -2124,6 +2124,41 @@ void blit_raster_attach(BlitFont *font, BlitRaster *raster)
     font->raster_word_get = raster && raster->words ? attached_word_get : NULL;
 }
 
+/* ADR 0243 step 2, the Glyph Protocol's coverage query. The cell is asked
+   the way the renderers draw it (blit_kms.c draw_cell_glyphs, draw_glyph and
+   the Arabic word path), through the same calls, so the stack's order is
+   only ever the one in raster_get_drawn. */
+int blit_raster_cell_covers(const BlitFont *font, const BlitFont *wide,
+                            uint32_t scalar, int columns)
+{
+    BlitRasterGlyph glyph;
+    BlitCellCluster cell;
+    if (!font || columns < 1 || columns > 2) return 0;
+    /* Drawn as nothing, by design: no glyph of its own (Glyph Protocol
+       §5.3 reports an emoji presentation selector asked alone as tofu). */
+    if (invisible_format(scalar)) return 0;
+    /* The wide PSF is chosen only for a glyph it has. */
+    if (blit_font_cell_source(font, columns == 2 ? wide : NULL, scalar) != font) return 1;
+    if (font->raster_word_get && blit_cell_cluster_init(&cell, scalar, NULL, 0, columns)) {
+        int kind = blit_cell_word_kind(&cell);
+        if (kind != BLIT_WORD_NONE) {
+            BlitCellWord word;
+            unsigned long long serial;
+            memset(&word, 0, sizeof(word));
+            word.kind = kind;
+            word.count = 1;
+            word.cells[0] = cell;
+            if (font->raster_word_get(font->raster_state, &word, 0, 0, &glyph, &serial)) return 1;
+        }
+    }
+    /* A glyph the stack lacks is the PSF's: its own when it has one, its
+       replacement otherwise. */
+    if (font->raster_get && font->raster_blend &&
+        font->raster_get(font->raster_state, scalar, columns, 0, 0, &glyph) &&
+        !glyph.fallback) return 1;
+    return blit_font_has_glyph(font, scalar);
+}
+
 /* Exact rounded product/255 for two8-bit operands. Maximum intermediate is
    (65025+128)*257 <2^24; avoid six TCC integer divisions per coverage pixel.
    Macro keeps this bounded arithmetic inline with TCC (ADR0179). */
