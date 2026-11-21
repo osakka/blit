@@ -9,6 +9,37 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-21: 0.3.133 signed releases; the Glyph Protocol
+
+- **Signed releases (security review SR-2, Gitea #184).** The updater
+  installs only a release signed with the Blit release key
+  (blit-release-1, Ed25519 via Monocypher 4.0.3); the signature names each
+  package's version and SHA-256, so it can't be replayed for another set;
+  rollbacks to a signed release down to 0.3.133 still work. With an API
+  token, the update route needs the bearer token too. The mini PC's
+  updater now refuses unsigned updates.
+- **The Glyph Protocol (ADR 0243 step 2).** Blit answers Rio's APC 25a1
+  support check (`s`, no registration formats) and coverage query
+  (`q;cp=`) from its own glyph stack, so programs written for Rio, Ghostty
+  and kitty can ask what it draws.
+- **Also:** Hibr 0.99.556's UI glyphs (one new, U+2503) in the snapshot.
+- **Gates:** `gates_all` 209/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on 6cbfc1ab, the shipped commit, in a quiet window hibr held.
+  The first pass failed three gates: release_signature_gate (committed
+  without its executable bit), hibr_ui_glyphs_gate (Hibr 0.99.556 was
+  installed on the build host during the run, drawing U+2503) and
+  kms_frame_timing_gate once (passed on its retry); fixed, and all three
+  suites were run again whole. New: release_signature_gate,
+  update_bearer_gate, glyph_protocol_gate.
+- **Release environment (Debian 13):** update_pair_gate 16 cases, every
+  request signed (new: unsigned, other key, replayed, below the floor,
+  rotation), and rollback_recovery_gate 12 cases passed; the release was
+  signed on the host after the gates.
+- **Live, the mini PC:** the update (the 0.3.132 helper installing the
+  signed 0.3.133 pair) was verified; the smoke check passed at the login
+  screen (2 displays up, frames advancing 4 -> 74).
+- **Published** to hibr-apt (3c2a308) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-21: 0.3.132 security fixes: the server and the update path
 
 - **Server (security review SR-6, 11, 16, 18, 19, 22; Gitea #188, #193,
