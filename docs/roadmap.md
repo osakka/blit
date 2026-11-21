@@ -74,8 +74,6 @@ already be fixed.
 
 - Emoji sequences end to end in the terminal, not only in the raster
   (#110). `text_layout: "emoji"` already shapes them, opt-in, since 0.1.578.
-- Arabic typography reviewed on screen (#119): words shaped in Noto Naskh
-  Arabic since 0.3.129 (ADR 0241); the owner's look on the mini PC is next.
 - A refined selectable font with explicit coverage (#107).
 
 ### 5. Programs in windows (ADR 0228, ADR 0229)

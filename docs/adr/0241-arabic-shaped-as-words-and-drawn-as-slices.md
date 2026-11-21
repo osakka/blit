@@ -1,7 +1,6 @@
 # ADR 0241: Arabic is shaped as words and drawn as slices
 
-- Status: accepted, landing in steps (the face first; the word path is on
-  only once the renderers and their gates are in)
+- Status: accepted, released in 0.3.129
 - Date: 2026-11-20
 - Scope: `src/blit_raster.c` (a word cache beside the glyph cache, the
   word slice lookup), `src/blit_cell_word.h` (new: the key, the run
@@ -269,4 +268,5 @@ Landed (2026-11-20), each failing on a broken build:
   (fails with a sub-rectangle one pixel off, and without the GPU's
   widening).
 
-Not accepted until the owner has seen the look on the mini PC.
+The owner reviewed it on the mini PC (2026-11-21): "arabic looks perfect"
+(Gitea #119 closed).
