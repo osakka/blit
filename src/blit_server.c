@@ -17776,6 +17776,12 @@ static int create_session(BlitRuntime *runtime, const char *json,
         }
     }
     process_id = forkpty(&master_fd, NULL, NULL, &size);
+    /* The master stays this process's alone: without FD_CLOEXEC every
+       later session's child -- one run as another user too -- inherited
+       every earlier session's terminal, to read and type into (security
+       review SR-7). forkpty's child closes its copy itself. */
+    if (process_id > 0 && master_fd >= 0)
+        (void)fcntl(master_fd, F_SETFD, fcntl(master_fd, F_GETFD) | FD_CLOEXEC);
     if (process_id < 0) {
         fprintf(stderr, "blit: forkpty failed: %s\n", strerror(errno));
         if (hibr_log_dir[0] != '\0') rmdir(hibr_log_dir);

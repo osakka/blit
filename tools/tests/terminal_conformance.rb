@@ -1461,6 +1461,20 @@ snapshot = run_case(base, 'xtgettcap-unknown-name',
 assert_equal('1b50302b723741374137411b5c', row_text(snapshot),
              'XTGETTCAP refuses a capability it does not own')
 
+# SR-7: a session's terminal is its own: with another session open, a new
+# one's process holds no PTY master (no /dev/ptmx among its descriptors).
+holder = request(base, 'POST', '/v1/terminal-sessions', {
+  'command' => '/bin/sh', 'arguments' => ['-c', 'sleep 20'], 'environment' => {},
+  'surface' => { 'width' => 20, 'height' => 4 }
+})
+begin
+  snapshot = run_case(base, 'no-inherited-pty-master',
+                      "n=0; for f in /proc/$$/fd/*; do [ \"$(readlink $f)\" = /dev/ptmx ] && n=$((n+1)); done; printf 'masters=%d' $n")
+  assert_equal('masters=0', row_text(snapshot).strip, 'a new session inherits no other session\'s PTY master')
+ensure
+  request(base, 'DELETE', "/v1/terminal-sessions/#{holder.fetch('id')}") rescue nil
+end
+
 # SR-4: a request that is not hex -- here a line feed and a command, as a
 # file being shown could hold -- is refused with nothing echoed. The reply
 # goes to the program's input; read with a 1 s timeout, so an echo would
