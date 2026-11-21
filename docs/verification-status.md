@@ -23,6 +23,11 @@ read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
   bold window buttons in Hack were D-shaped; a shape that reaches its last
   column is narrowed by a column before the overstrike. Text bold is
   unchanged.
+- **Also shipped: a game's full-screen X window (Gitea #175).** An
+  override-redirect X window covering a display or the root is shown as a
+  full-screen window of its own (decor by the client); smaller parentless
+  ones stay hidden. xwayland_gate covers it; not yet seen live with a game
+  on the mini PC.
 - **Gates:** `gates_all` 202/11, `gates_renderer` 88/1, `gates_renderer-gles`
   68/0, all on 3ef85b6, the shipped commit, in a quiet window hibr held.
   New: arabic_word_text, arabic_word_slice, arabic_word_view, bold_shape;
