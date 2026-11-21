@@ -621,6 +621,14 @@ static void frame_apply(BlitRuntime *runtime, BlitSession *session, int client_f
         frame_refuse(runtime, session, client_fd, f->image_id, "EINVAL", "frame-format");
         return;
     }
+    /* An edit's rectangle was checked against the size its header names;
+       it is written at the image's own stride. The two must be the same
+       image, or a header naming a larger one would write past the pixels
+       (security review SR-1). */
+    if (!whole && (image->width != (int)f->width || image->height != (int)f->height)) {
+        frame_refuse(runtime, session, client_fd, f->image_id, "EINVAL", "frame-size");
+        return;
+    }
     {
         size_t image_stride = (size_t)image->width * bpp;
         unsigned char *at = image->pixels + (whole ? 0 : (size_t)f->y * image_stride + (size_t)f->x * bpp);

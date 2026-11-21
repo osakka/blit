@@ -236,6 +236,11 @@ def main():
         check(client.reply().startswith(b'FRAME error 7 EFBIG\n'), 'an oversized frame was not refused')
         client.send(frame(9, 1, 16, 16, x=0, y=0, w=4, h=4), memfd(yellow))
         check(client.reply().startswith(b'FRAME error 9 ENOENT\n'), 'an edit of an unknown image was not refused')
+        # An edit whose header names a larger image than the one it edits:
+        # its rectangle fits the named size, not the image (SR-1).
+        client.send(frame(7, 13, 4000, 4000, x=3990, y=3990, w=4, h=4), memfd(yellow))
+        check(client.reply().startswith(b'FRAME error 7 EINVAL\n'),
+              'an edit naming another size was not refused')
         check(image(session, 7)[0]['pixel_crc32'] == before, 'a refused frame changed the image')
 
         # 5. A descriptor image takes no pixels from the PTY, and a Kitty
@@ -374,7 +379,7 @@ def main():
         frames = image(session, 7)[1]['frames']
         print('FRAME_DESCRIPTOR_PASS token=random hello=token_checked+v5_only(v1-v4=ERROR_0_EINVAL) '
               'before_placement=kept screen=drawn '
-              'newest=wins stale=dropped edit=rectangle refused=FRAME_error:unsealed+short+efbig+unknown '
+              'newest=wins stale=dropped edit=rectangle refused=FRAME_error:unsealed+short+efbig+unknown+edit-of-another-size '
               'kitty_into_descriptor=refused frame_into_kitty=refused after_delete=enoent '
               'placement_before_frame=held_then_placed expired_placement=refused delete_all=frees_descriptor_images '
               'video_by_descriptor=panel+api hud1=every_client+on+off+after_ok+steady_on_unrelated_write sta1=session+panel+screen '
