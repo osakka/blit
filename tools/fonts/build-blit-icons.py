@@ -130,8 +130,10 @@ def store(name, glyph):
 for icon in catalogue['icons'] + catalogue.get('text_glyphs', []):
     cp = int(icon['codepoint'], 16)
     colour = icon.get('colour', True)
-    if colour and not 0x100000 <= cp <= 0x10fffd:
-        raise SystemExit('a colour icon must sit in private-use plane 16')
+    # ADR 0243: plane 16 from U+101000; U+100000-U+1003FF is the Glyph
+    # Protocol's, for programs' registered glyphs.
+    if colour and not 0x101000 <= cp <= 0x10fffd:
+        raise SystemExit('a colour icon must sit in private-use plane 16, from U+101000')
     svg = ET.parse(fonts / 'icons' / icon['source']).getroot()
     vx, vy, vw, vh = map(float, svg.attrib['viewBox'].split())
     columns, column = icon.get('columns', 1), icon.get('column', 0)

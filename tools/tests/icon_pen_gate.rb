@@ -42,8 +42,8 @@ FG = [255, 200, 0].freeze
 FG2 = [0, 200, 255].freeze
 BG = [100, 120, 140].freeze
 # Colour icons, one column each: wifi-2, battery-2, volume-1, bluetooth.
-ICONS = [0x100003, 0x10000b, 0x100015, 0x100006].freeze
-ICON = 0x10000b
+ICONS = [0x101003, 0x10100b, 0x101015, 0x101006].freeze
+ICON = 0x10100b
 LEFT = 2 # the icons' first column on the flipped row
 ESC = "\e"
 

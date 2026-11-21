@@ -22,7 +22,7 @@
 #   glyphs (every frame piece beside the content, in Chalk and Slate) and
 #   stripe-first/-last are deprecated; each replacement exists and is not
 #   itself deprecated; nothing else carries either field. The one frame set
-#   (`set: frame`, U+1002AE-1002B2, on a `panel`, the window's face) and the
+#   (`set: frame`, U+1012AE-1012B2, on a `panel`, the window's face) and the
 #   title-end cells exist in the vocabulary the schema and the README give.
 # - The catalogue is exactly what the glyph tables generate, structured
 #   fields included: both design scripts' --check pass.
@@ -108,9 +108,9 @@ entries.each do |e|
 end
 check(entries.select { |e| e.key?('deprecated') }.map { |e| e['id'] } == DEPRECATED.sort_by { |id| by_id.fetch(id)['codepoint'] },
       "the deprecated entries are #{entries.select { |e| e.key?('deprecated') }.map { |e| e['id'] }.inspect}, not the old frame glyphs and stripe-first/-last")
-check(NEW_FRAME.each_with_index.all? { |n, i| by_id[n] && by_id[n]['codepoint'].to_i(16) == 0x1002AE + i && by_id[n]['set'] == 'frame' &&
+check(NEW_FRAME.each_with_index.all? { |n, i| by_id[n] && by_id[n]['codepoint'].to_i(16) == 0x1012AE + i && by_id[n]['set'] == 'frame' &&
                                          by_id[n]['part'] == 'frame' && by_id[n]['background'] == 'panel' && by_id[n]['line'] == 'none' },
-      'the one frame set (frame-left ... frame-bottom-right, U+1002AE-1002B2, a frame on a panel) is not in the catalogue')
+      'the one frame set (frame-left ... frame-bottom-right, U+1012AE-1012B2, a frame on a panel) is not in the catalogue')
 check(%w[chalk slate-light].all? { |s| %w[left right].all? { |d| by_id["#{s}-title-end-#{d}"]&.values_at('part', 'background', 'cells') == ['title-bar', 'bar', { 'span' => 1, 'position' => 0 }] } },
       'the title-end cells are not title-bar pieces on the bar')
 check(%w[chalk-frame-left slate-light-frame-right-top].map { |id| by_id[id]['replaced_by'] } ==

@@ -7,8 +7,8 @@
        their pen planes: K (FG), L (LINE), M (MIX), '.' none.
    It also requires, at every size, that a pen-drawn glyph's planes are
    disjoint and together equal its one-colour lookup, that Chalk has no
-   planes, and that the codepoints just beyond the set (U+100314 and on; U+1002AE-1002C4 are the frame's, ADR 0214, and the pressed states', ADR 0219,
-   U+1002C5-1002C6 the hui mark and U+1002C7-1002CC the wiretap icons and U+1002CD-1002D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1002D1-1002D9 the Wi-Fi signal and cellular icons, U+1002DA-1002EB the two-column Wi-Fi and volume icons, U+1002EC-1002F3 the two-column classic phones and U+1002F4-100309 the two-column batteries, colour icons, and U+10030A-100313
+   planes, and that the codepoints just beyond the set (U+101314 and on; U+1012AE-1012C4 are the frame's, ADR 0214, and the pressed states', ADR 0219,
+   U+1012C5-1012C6 the hui mark and U+1012C7-1012CC the wiretap icons and U+1012CD-1012D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1012D1-1012D9 the Wi-Fi signal and cellular icons, U+1012DA-1012EB the two-column Wi-Fi and volume icons, U+1012EC-1012F3 the two-column classic phones and U+1012F4-101309 the two-column batteries, colour icons, and U+10130A-101313
    the full-screen and sticky boxes, ADR 0224, window_glyph_gate)
    draw nothing of their own. */
 #include "../../src/blit_raster.h"
@@ -16,16 +16,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define FIRST 0x10029AU
-#define LAST 0x1002ADU
-/* ADR 0214's outer-edge frame is U+1002AE-1002BA and ADR 0219's pressed states U+1002BB-1002C4; window_glyph_gate holds them.
-   U+1002C5-1002C6 are the hui mark and U+1002C7-1002CC the wiretap icons (on, off; two columns, then one) and
-   U+1002CD-1002D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1002D1-1002D9 the Wi-Fi signal (1-4, off) and cellular (1-4) icons and U+1002DA-1002EB the
-   two-column Wi-Fi (1-4, off) and volume (0-3) icons, U+1002EC-1002F3 the two-column classic phones (off, wait, on, ring) and U+1002F4-100309 the two-column batteries (0-4, charging 0-4, ac), colour icons. U+10030A-100313 are the
-   full-screen and sticky boxes (ADR 0224), which window_glyph_gate holds; U+100314-10037C the player cell glyphs
-   (ADR 0237, player_glyph_gate), U+10037D-1003D0 the transport and now-playing icons and U+1003D1-1003D4
-   the key ends (window_style_gate) and U+1003D5-100494 the big discs. */
-#define NEXT_FREE 0x100495U
+#define FIRST 0x10129AU
+#define LAST 0x1012ADU
+/* ADR 0214's outer-edge frame is U+1012AE-1012BA and ADR 0219's pressed states U+1012BB-1012C4; window_glyph_gate holds them.
+   U+1012C5-1012C6 are the hui mark and U+1012C7-1012CC the wiretap icons (on, off; two columns, then one) and
+   U+1012CD-1012D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1012D1-1012D9 the Wi-Fi signal (1-4, off) and cellular (1-4) icons and U+1012DA-1012EB the
+   two-column Wi-Fi (1-4, off) and volume (0-3) icons, U+1012EC-1012F3 the two-column classic phones (off, wait, on, ring) and U+1012F4-101309 the two-column batteries (0-4, charging 0-4, ac), colour icons. U+10130A-101313 are the
+   full-screen and sticky boxes (ADR 0224), which window_glyph_gate holds; U+101314-10137C the player cell glyphs
+   (ADR 0237, player_glyph_gate), U+10137D-1013D0 the transport and now-playing icons and U+1013D1-1013D4
+   the key ends (window_style_gate) and U+1013D5-101494 the big discs. */
+#define NEXT_FREE 0x101495U
 
 /* Pens are used by Slate's checkbox (the 4th to 6th glyph) and from the
    Slate switch on (the 11th): written out here, not read from the header. */

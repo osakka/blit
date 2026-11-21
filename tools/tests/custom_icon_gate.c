@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     CHECK(!blit_font_load_path(&font, argv[1]));
     for (size = 8; size <= 64; ++size) {
         BlitRaster *r = blit_raster_open(&font, argv[2], argv[3], (size + 1) / 2, size);
-        /* Indexed by codepoint - U+100000: the icons run to U+100494 (cassette-big-7-r1c3, ADR 0237). */
+        /* Indexed by codepoint - U+101000: the icons run to U+101494 (cassette-big-7-r1c3, ADR 0237). */
         unsigned hashes[0x495];
         int partial_icons = 0;
         int seam[2][96], reach[2], tall[2];
@@ -98,8 +98,8 @@ int main(int argc, char **argv)
             ++script_samples;
         }
         /* A retired codepoint draws nothing from the icons; every live one
-           is a colour original. U+100007/8, the bar corners, are cell
-           geometry and in neither list. U+100018/9 are the two columns of
+           is a colour original. U+101007/8, the bar corners, are cell
+           geometry and in neither list. U+101018/9 are the two columns of
            the hui badge (ADR 0197). */
         for (at = 0; at < retired_count; ++at) {
             BlitRasterGlyph g;
@@ -132,20 +132,20 @@ int main(int argc, char **argv)
                land exactly on whole pixels (the USB stick's right half does
                at 20 px). */
             if (group[at]) {
-                CHECK(group[at] - 0x100000 < sizeof(group_ink));
-                group_ink[group[at] - 0x100000] |= ink > 0;
-                group_colour[group[at] - 0x100000] |= colour > 0;
+                CHECK(group[at] - 0x101000 < sizeof(group_ink));
+                group_ink[group[at] - 0x101000] |= ink > 0;
+                group_colour[group[at] - 0x101000] |= colour > 0;
             } else {
                 CHECK(ink && colour);
             }
             partial_icons += partial > 0;
-            CHECK(cp - 0x100000 < sizeof(hashes) / sizeof(hashes[0]));
-            hashes[cp - 0x100000] = hash;
-            if (cp == 0x100018 || cp == 0x100019) {
+            CHECK(cp - 0x101000 < sizeof(hashes) / sizeof(hashes[0]));
+            hashes[cp - 0x101000] = hash;
+            if (cp == 0x101018 || cp == 0x101019) {
                 /* The badge's edge columns where its halves meet. */
-                int column = cp == 0x100018 ? g.width - 1 : 0;
+                int column = cp == 0x101018 ? g.width - 1 : 0;
                 for (y = 0; y < g.height; ++y)
-                    seam[cp - 0x100018][y] = g.pixels[y * g.stride + column * 4 + 3];
+                    seam[cp - 0x101018][y] = g.pixels[y * g.stride + column * 4 + 3];
                 {
                     int first = -1, last = -1;
                     for (y = 0; y < g.height; ++y) for (x = 0; x < g.width; ++x)
@@ -153,14 +153,14 @@ int main(int argc, char **argv)
                             if (first < 0) first = y;
                             last = y;
                         }
-                    tall[cp - 0x100018] = last - first + 1;
+                    tall[cp - 0x101018] = last - first + 1;
                 }
                 /* How far the ring reaches from the seam, on the middle row. */
-                reach[cp - 0x100018] = -1;
+                reach[cp - 0x101018] = -1;
                 for (x = 0; x < g.width; ++x) {
-                    int at = cp == 0x100018 ? x : g.width - 1 - x;
+                    int at = cp == 0x101018 ? x : g.width - 1 - x;
                     if (g.pixels[(g.height / 2) * g.stride + at * 4 + 3]) {
-                        reach[cp - 0x100018] = cp == 0x100018 ? g.width - x : at + 1;
+                        reach[cp - 0x101018] = cp == 0x101018 ? g.width - x : at + 1;
                         break;
                     }
                 }
@@ -207,7 +207,7 @@ int main(int argc, char **argv)
         for (at = 0; at < live_count; ++at)
             if (group[at]) {
                 cp = live[at];
-                CHECK(group_ink[group[at] - 0x100000] && group_colour[group[at] - 0x100000]);
+                CHECK(group_ink[group[at] - 0x101000] && group_colour[group[at] - 0x101000]);
             }
         memset(group_ink, 0, sizeof(group_ink));
         memset(group_colour, 0, sizeof(group_colour));
@@ -219,7 +219,7 @@ int main(int argc, char **argv)
             int a, b;
             for (a = 0; a < distinct_count; ++a)
                 for (b = a + 1; b < distinct_count; ++b) {
-                    int i = (int)distinct[a] - 0x100000, j = (int)distinct[b] - 0x100000;
+                    int i = (int)distinct[a] - 0x101000, j = (int)distinct[b] - 0x101000;
                     CHECK(hashes[i] != hashes[j] || hashes[i + 1] != hashes[j + 1]);
                 }
         }

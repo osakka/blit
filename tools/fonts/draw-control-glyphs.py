@@ -9,7 +9,7 @@ so a gate can compare every glyph Blit rasters with the one drawn here,
 pixel for pixel, at the owner's 11x22 cell and at other sizes
 (control_glyph_gate).
 
-From U+10029A, in this order:
+From U+10129A, in this order:
     checkbox, Chalk then Slate: off, on, mixed (one cell each);
     compact switch, Chalk then Slate: off-left, off-right, on-left,
       on-right (two cells wide);
@@ -39,8 +39,8 @@ _spec = importlib.util.spec_from_file_location('draw_window_glyphs', ROOT / 'too
 wd = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(wd)
 
-FIRST = 0x10029A
-NEXT_FREE = 0x1002AE  # the end of the controls (ADR 0214 follows at U+1002AE)
+FIRST = 0x10129A
+NEXT_FREE = 0x1012AE  # the end of the controls (ADR 0214 follows at U+1012AE)
 
 # id, set, what it is, how many cells it spans and which one this is.
 # Every entry's pens are in part(): part, background, foreground and line.

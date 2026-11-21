@@ -31,7 +31,7 @@ int main(int argc, char **argv)
     unsigned cp = 0, required[512];
     /* Icons and symbols a console font lacks, and the Blit originals. */
     static const unsigned borrowed[] = { 0xf07b, 0xf015, 0xe0b0, 0x23fb, 0x27f6, 0x1f600,
-                                         0x100000, 0x100005, 0x100013, 0x100018, 0x10001a };
+                                         0x101000, 0x101005, 0x101013, 0x101018, 0x10101a };
     FILE *input;
     if (argc != 4) return 2;
     input = fopen(argv[3], "r");
@@ -58,13 +58,13 @@ int main(int argc, char **argv)
             cp = borrowed[i];
             columns = cp == 0x1f600 ? 2 : 1;
             /* A pixel font with its own Powerline arrow keeps it. */
-            if (blit_font_has_glyph(&font, cp) && cp < 0x100000) {
+            if (blit_font_has_glyph(&font, cp) && cp < 0x101000) {
                 CHECK(!blit_raster_get(r, cp, columns, 0, &g));
                 continue;
             }
             CHECK(blit_raster_get(r, cp, columns, 0, &g) && !g.fallback && inked(&g));
             CHECK(g.width == ((size + 1) / 2) * columns && g.height == size);
-            if (cp >= 0x100000 || cp == 0x1f600)
+            if (cp >= 0x101000 || cp == 0x1f600)
                 CHECK(g.format == BLIT_RASTER_RGBA_PREMULTIPLIED);
             ++drawn;
         }
@@ -73,7 +73,7 @@ int main(int argc, char **argv)
             cp = required[i];
             /* Blit's own icons -- plane 16 and the pen at U+270E (ADR 0195) --
                are drawn over whatever the font has there. */
-            if (blit_font_has_glyph(&font, cp) && cp < 0x100000 && cp != 0x270e) {
+            if (blit_font_has_glyph(&font, cp) && cp < 0x101000 && cp != 0x270e) {
                 CHECK(!blit_raster_get(r, cp, 1, 0, &g));
                 if (size == 16) ++ui_kept;
             } else {

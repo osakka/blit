@@ -88,7 +88,7 @@ font including the pixel fonts; `modern` draws it cell by cell in Blit
 Arabic Modern. Set it with `PUT /v1/fonts`; it is stored with the font, and
 `active.arabic` reports it.
 
-**The icon pen** is the pen of Blit's colour icons (U+100000 and up that
+**The icon pen** is the pen of Blit's colour icons (U+101000 and up that
 carry colour), and it is per cell: SGR 68:v (`1` auto, `2` black, `3`
 white), ended by SGR 69 (ADR 0221). Without it an icon is drawn in its own
 colours. The other pens draw its monochrome shape: black, white, or the
@@ -122,7 +122,8 @@ resolving a Nerd symbol; do not infer a scalar from an icon's label.
 ## Special additions: the application contract
 
 The authoritative mapping is [icons/catalogue.json](../assets/fonts/icons/catalogue.json),
-also served unchanged by authenticated `GET /v1/fonts/icons`.
+also served by authenticated `GET /v1/fonts/icons` (its members unchanged,
+with `revision` first and, during the transition below, `deprecated_range`).
 [The generated table](fonts/special.md) gives every ID, codepoint and valid
 JSON escape. Keep application choices semantic: `hibr-pen`, `wifi-signal-1`
 through `wifi-signal-4` and `wifi-off` (Wi-Fi: a dot and three arcs, a cross when
@@ -146,12 +147,12 @@ icons (`file-<kind>-<colour>-left` + `-right`, ADR 0201), `hui-left` +
 instead of maintaining an independently numbered table in every application.
 
 **`wifi-1` through `wifi-4` are deprecated (0.3.55).** The four bars are the
-mobile signal, so they are named `cellular-1` through `cellular-4` (U+1002D6–1002D9,
+mobile signal, so they are named `cellular-1` through `cellular-4` (U+1012D6–1012D9,
 the same drawing at each level); each `wifi-N` entry carries `deprecated: true`
 and `replaced_by: ["cellular-N"]`, and Blit still draws it, unchanged, until a
 release retires it. Deprecated, not retired: a deprecated id never names a
 different picture. Wi-Fi itself is `wifi-signal-1` through `wifi-signal-4`
-(U+1002D1–1002D4) and `wifi-off` (U+1002D5).
+(U+1012D1–1012D4) and `wifi-off` (U+1012D5).
 
 **One icon says the whole state.** The charging bolt and the mains plug are
 drawn inside the battery, so a status bar shows one glyph per state, never a
@@ -167,6 +168,21 @@ without trimming (ADR 0215): a colour icon is fitted by the layers it draws
 spanning icon is drawn unhinted so its halves join, and a glyph that cannot
 be fitted is shown as the fallback, never cut.
 
+**The icons moved to U+101000 (0.3.131, ADR 0243).** Until 0.3.130
+Blit's icons and cell geometry were at U+100000–100495. The Glyph Protocol
+reserved U+100000–1003FF for programs' registered glyphs, so the whole set
+moved up by 0x1000 in the same layout: every glyph is at its old codepoint
++ 0x1000 (`blit` U+100000 is now U+101000, the bar corners U+101007–101008,
+Chalk U+101231), its id, drawing and catalogue entry otherwise unchanged.
+During the transition the old range still draws exactly the glyph of the
+new codepoint it moved to (Blit maps it where a cell's scalar enters the
+glyph lookup; the cell keeps what the program wrote), and
+`GET /v1/fonts/icons` says so with
+`"deprecated_range":{"from":"100000","to":"100495","moved_to":"101000"}`.
+A later release, named in its notes, drops the old range: write the new
+codepoints, or better, resolve ids from the catalogue, and the move is
+invisible.
+
 Every original uses **one terminal column** in every font.
 They are plane 16 private-use scalars, not standard Unicode, ordinary emoji,
 or portable assignments in an unrelated font. In particular:
@@ -179,18 +195,18 @@ or portable assignments in an unrelated font. In particular:
   foreground colours. A truecolour terminal alone does not imply colour-font
   glyph support or these private mappings.
 
-Use normal UTF-8 output. Do not send the visible text `U+100001`, treat a
+Use normal UTF-8 output. Do not send the visible text `U+101001`, treat a
 supplementary character as two terminal cells, or append VS16 to a private
 icon in an attempt to enable colour. JSON uses a surrogate pair for a
 supplementary scalar; the generated table includes valid strings. For example,
-U+100000 is `"\udbc0\udc00"`, not the invalid six-digit escape `"\u100000"`.
+U+101000 is `"\udbc4\udc00"`, not the invalid six-digit escape `"\u101000"`.
 
 ## Window chrome glyph sets: Chalk and Slate
 
-ADR 0210 and 0211. 70 glyphs at U+100231–100276 draw retro Mac-style
+ADR 0210 and 0211. 70 glyphs at U+101231–101276 draw retro Mac-style
 window chrome out of cells. They are two sets of 35 in one order (Chalk,
 Slate), listed in the catalogue's `cell_geometry` section as
-`chalk-<name>` and `slate-light-<name>`. U+100277–100299, once Slate dark,
+`chalk-<name>` and `slate-light-<name>`. U+101277–101299, once Slate dark,
 are retired.
 - **A set per part.** Each part (title bar, frame, dialog border, button
   ends) takes its glyphs from whichever set the application picks for it,
@@ -246,7 +262,7 @@ are retired.
 
 ## Window frame: one frame, its line on the outer edge
 
-ADR 0214. 13 glyphs at U+1002AE–1002BA are the window frame as the owner
+ADR 0214. 13 glyphs at U+1012AE–1012BA are the window frame as the owner
 wants it: **one frame, and its line sits on the outermost edge of each
 frame cell** (the left cell's left edge, the right cell's right edge, the
 bottom row's bottom edge). Nothing else in the cell is drawn, so the cell's
@@ -255,15 +271,15 @@ window's face and the face runs out to the line.
 
 | Glyph | Codepoint | Put it | Pens |
 | --- | --- | --- | --- |
-| `frame-left` | U+1002AE | left of each body row | fg = the line |
-| `frame-right` | U+1002AF | right of each body row | fg = the line |
-| `frame-bottom-left` | U+1002B0 | bottom-left corner (left and bottom lines) | fg = the line |
-| `frame-bottom` | U+1002B1 | the bottom row | fg = the line |
-| `frame-bottom-right` | U+1002B2 | bottom-right corner (right and bottom lines) | fg = the line |
-| `chalk-title-end-left`, `-right` | U+1002B3, U+1002B4 | the title row's end cells | fg = the ink, bg = the bar |
-| `slate-light-title-end-left`, `-right` | U+1002B5, U+1002B6 | the title row's end cells | bg = the bar, fg = the ink, SGR 58 = the highlight |
-| `chalk-title-end-plain-left`, `-right` | U+1002B7, U+1002B8 | the inactive title row's end cells (no stripes) | fg = the ink, bg = the bar |
-| `slate-light-title-end-plain-left`, `-right` | U+1002B9, U+1002BA | the inactive title row's end cells (no stripes) | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `frame-left` | U+1012AE | left of each body row | fg = the line |
+| `frame-right` | U+1012AF | right of each body row | fg = the line |
+| `frame-bottom-left` | U+1012B0 | bottom-left corner (left and bottom lines) | fg = the line |
+| `frame-bottom` | U+1012B1 | the bottom row | fg = the line |
+| `frame-bottom-right` | U+1012B2 | bottom-right corner (right and bottom lines) | fg = the line |
+| `chalk-title-end-left`, `-right` | U+1012B3, U+1012B4 | the title row's end cells | fg = the ink, bg = the bar |
+| `slate-light-title-end-left`, `-right` | U+1012B5, U+1012B6 | the title row's end cells | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `chalk-title-end-plain-left`, `-right` | U+1012B7, U+1012B8 | the inactive title row's end cells (no stripes) | fg = the ink, bg = the bar |
+| `slate-light-title-end-plain-left`, `-right` | U+1012B9, U+1012BA | the inactive title row's end cells (no stripes) | bg = the bar, fg = the ink, SGR 58 = the highlight |
 
 - **One frame set.** Chalk's and Slate's frame glyphs were the same 1 px
   foreground line, so the frame cells are one set (catalogue `set: frame`,
@@ -291,16 +307,16 @@ window's face and the face runs out to the line.
 
 ## Pressed boxes and the grow box
 
-ADR 0219. 10 glyphs at U+1002BB–1002C4, five a set, Chalk's then Slate's:
+ADR 0219. 10 glyphs at U+1012BB–1012C4, five a set, Chalk's then Slate's:
 the title bar's three boxes **pressed**, and the window's **grow box** (the
 resize corner), normal and pressed.
 
 | Glyph | Codepoint | Put it | Pens |
 | --- | --- | --- | --- |
-| `chalk-close-pressed`, `-shade-pressed`, `-zoom-pressed` | U+1002BB–1002BD | in place of `chalk-close`, `-shade`, `-zoom` while the box is pressed or hovered | fg = the ink, bg = the bar |
-| `chalk-grow`, `chalk-grow-pressed` | U+1002BE, U+1002BF | the window's bottom-right cell, in place of `frame-bottom-right` | fg = the ink, bg = the window's face |
-| `slate-light-close-pressed`, `-shade-pressed`, `-zoom-pressed` | U+1002C0–1002C2 | in place of `slate-light-close`, `-shade`, `-zoom` | bg = the bar, fg = the ink, SGR 58 = the highlight |
-| `slate-light-grow`, `slate-light-grow-pressed` | U+1002C3, U+1002C4 | the window's bottom-right cell | bg = the window's face, fg = the ink, SGR 58 = the highlight |
+| `chalk-close-pressed`, `-shade-pressed`, `-zoom-pressed` | U+1012BB–1012BD | in place of `chalk-close`, `-shade`, `-zoom` while the box is pressed or hovered | fg = the ink, bg = the bar |
+| `chalk-grow`, `chalk-grow-pressed` | U+1012BE, U+1012BF | the window's bottom-right cell, in place of `frame-bottom-right` | fg = the ink, bg = the window's face |
+| `slate-light-close-pressed`, `-shade-pressed`, `-zoom-pressed` | U+1012C0–1012C2 | in place of `slate-light-close`, `-shade`, `-zoom` | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `slate-light-grow`, `slate-light-grow-pressed` | U+1012C3, U+1012C4 | the window's bottom-right cell | bg = the window's face, fg = the ink, SGR 58 = the highlight |
 
 - **Hover is pressed.** There is one set of states: draw the pressed glyph
   for a box the pointer is over or holding, the normal one otherwise.
@@ -323,14 +339,14 @@ resize corner), normal and pressed.
 
 ## The minimise box
 
-ADR 0222. 4 glyphs at U+1002CD–1002D0, two a set, Chalk's then Slate's: a
+ADR 0222. 4 glyphs at U+1012CD–1012D0, two a set, Chalk's then Slate's: a
 **minimise** box for the title bar, beside close, shade and zoom, normal and
 pressed.
 
 | Glyph | Codepoint | Put it | Pens |
 | --- | --- | --- | --- |
-| `chalk-minimise`, `chalk-minimise-pressed` | U+1002CD, U+1002CE | in the title bar as a box; the pressed one while it is pressed or hovered | fg = the ink, bg = the bar |
-| `slate-light-minimise`, `slate-light-minimise-pressed` | U+1002CF, U+1002D0 | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `chalk-minimise`, `chalk-minimise-pressed` | U+1012CD, U+1012CE | in the title bar as a box; the pressed one while it is pressed or hovered | fg = the ink, bg = the bar |
+| `slate-light-minimise`, `slate-light-minimise-pressed` | U+1012CF, U+1012D0 | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
 
 - **The mark** is a short 1 px bar along the bottom of the box (the classic
   minimise `_`): 5 px on the box's row 8 at 11 px, centred, one clear row
@@ -344,17 +360,17 @@ pressed.
 
 ## The full-screen and sticky boxes
 
-ADR 0224. 10 glyphs at U+10030A–100313: a **full-screen** box, normal and
-pressed (U+10030A–10030D, two a set), and a **sticky** box, normal, pressed
-and on (U+10030E–100313, three a set), Chalk's then Slate's in each, for the
+ADR 0224. 10 glyphs at U+10130A–101313: a **full-screen** box, normal and
+pressed (U+10130A–10130D, two a set), and a **sticky** box, normal, pressed
+and on (U+10130E–101313, three a set), Chalk's then Slate's in each, for the
 title bar beside close, minimise, shade and zoom.
 
 | Glyph | Codepoint | Put it | Pens |
 | --- | --- | --- | --- |
-| `chalk-fullscreen`, `chalk-fullscreen-pressed` | U+10030A, U+10030B | in the title bar as a box; the pressed one while it is pressed or hovered | fg = the ink, bg = the bar |
-| `slate-light-fullscreen`, `slate-light-fullscreen-pressed` | U+10030C, U+10030D | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
-| `chalk-sticky`, `chalk-sticky-pressed`, `chalk-sticky-on` | U+10030E–100310 | in the title bar as a box; pressed while it is pressed or hovered; on while the window is sticky | fg = the ink, bg = the bar |
-| `slate-light-sticky`, `slate-light-sticky-pressed`, `slate-light-sticky-on` | U+100311–100313 | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `chalk-fullscreen`, `chalk-fullscreen-pressed` | U+10130A, U+10130B | in the title bar as a box; the pressed one while it is pressed or hovered | fg = the ink, bg = the bar |
+| `slate-light-fullscreen`, `slate-light-fullscreen-pressed` | U+10130C, U+10130D | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
+| `chalk-sticky`, `chalk-sticky-pressed`, `chalk-sticky-on` | U+10130E–101310 | in the title bar as a box; pressed while it is pressed or hovered; on while the window is sticky | fg = the ink, bg = the bar |
+| `slate-light-sticky`, `slate-light-sticky-pressed`, `slate-light-sticky-on` | U+101311–101313 | the same, in Slate | bg = the bar, fg = the ink, SGR 58 = the highlight |
 
 - **The box** is the minimise box's: the close box, its mark area the box
   less the border and a 1 px gap (7x7 at 11 px).
@@ -376,20 +392,20 @@ title bar beside close, minimise, shade and zoom.
 
 ## Controls: checkbox, switch and capsule
 
-ADR 0212. 20 glyphs at U+10029A–1002AD draw controls out of cells, in the
+ADR 0212. 20 glyphs at U+10129A–1012AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+100495 (the outer-edge frame, below,
-is U+1002AE–1002BA, the pressed boxes and grow box U+1002BB–1002C4, the
-hui mark, a colour icon, U+1002C5–1002C6, the wiretap icons, on and
-off, U+1002C7–1002CA, their one-column forms U+1002CB–1002CC, and the
-minimise box U+1002CD–1002D0, then the Wi-Fi signal and cellular icons
-U+1002D1–1002D9, the two-column Wi-Fi and volume icons U+1002DA–1002EB,
-the two-column classic phones U+1002EC–1002F3, the two-column batteries
-U+1002F4–100309, the full-screen and sticky boxes U+10030A–100313, and the
-player glyphs of ADR 0237: LCD digits U+100314–10035E, LED meters
-U+10035F–100372, sliders U+100373–100377, faders U+100378–10037C,
-transport U+10037D–1003A0, discs, records and cassettes U+1003A1–1003D0,
-keys U+1003D1–1003D4, and the big discs U+1003D5–100494).
+section. The next free codepoint is U+101495 (the outer-edge frame, below,
+is U+1012AE–1012BA, the pressed boxes and grow box U+1012BB–1012C4, the
+hui mark, a colour icon, U+1012C5–1012C6, the wiretap icons, on and
+off, U+1012C7–1012CA, their one-column forms U+1012CB–1012CC, and the
+minimise box U+1012CD–1012D0, then the Wi-Fi signal and cellular icons
+U+1012D1–1012D9, the two-column Wi-Fi and volume icons U+1012DA–1012EB,
+the two-column classic phones U+1012EC–1012F3, the two-column batteries
+U+1012F4–101309, the full-screen and sticky boxes U+10130A–101313, and the
+player glyphs of ADR 0237: LCD digits U+101314–10135E, LED meters
+U+10135F–101372, sliders U+101373–101377, faders U+101378–10137C,
+transport U+10137D–1013A0, discs, records and cassettes U+1013A1–1013D0,
+keys U+1013D1–1013D4, and the big discs U+1013D5–101494).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,

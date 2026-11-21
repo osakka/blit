@@ -1,4 +1,4 @@
-/* ADR 0237: the player glyphs (U+100314..10037C), at every cell size from
+/* ADR 0237: the player glyphs (U+101314..10137C), at every cell size from
    8 to 64 px tall (and the owner's 12x24), through the actual raster:
    - each big and small digit lights exactly its seven-segment table's
      segments, the rest drawn faint (the ghost), never absent;

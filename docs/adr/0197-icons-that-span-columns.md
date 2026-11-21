@@ -5,6 +5,9 @@
 - Scope: `assets/fonts/icons` (catalogue and artwork), the icon generator,
   `blit_raster.c` (`draw_fitted`), the icon gates
 - Revised by: ADR 0215 (0.3.41), the fitting step of `draw_fitted`: measured after the render, never trimmed, spanning parts unhinted
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by 0x1000
+  (U+100018-U+100019 below are now U+101018-U+101019, and so on), the
+  same layout; the old ones draw the same glyphs during the transition
 
 ## Context
 

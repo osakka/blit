@@ -12,7 +12,7 @@
 #   Slate's roles in the cell's pens -- K the foreground, L the underline
 #   colour (white when unset), M each channel (fg + bg) / 2 -- and the
 #   background wherever nothing is drawn.
-# - The outer-edge frame (ADR 0214, U+1002AE-1002BA): its thirteen glyphs on a
+# - The outer-edge frame (ADR 0214, U+1012AE-1012BA): its thirteen glyphs on a
 #   row, every pixel the design's (the frame cells' background the window's
 #   face, the line the foreground; Chalk's title ends in the foreground,
 #   Slate's in the cell's pens); then two whole windows built from them, a
@@ -65,12 +65,12 @@ RED = [255, 0, 0].freeze
 LINE = [10, 220, 120].freeze
 FACE = [120, 30, 150].freeze
 BTN = [230, 130, 20].freeze
-FIRST = 0x100231
+FIRST = 0x101231
 # ADR 0214: the outer-edge frame, and the windows built from it.
-STATE_FIRST = 0x1002BB # ADR 0219: the pressed boxes and grow cells, ten glyphs
-MIN_FIRST = 0x1002CD # ADR 0222: the minimise box and the box pressed, Chalk's then Slate's
-BOX_FIRST = 0x10030A # ADR 0224: the full-screen and sticky boxes, ten glyphs
-FRAME_FIRST = 0x1002AE
+STATE_FIRST = 0x1012BB # ADR 0219: the pressed boxes and grow cells, ten glyphs
+MIN_FIRST = 0x1012CD # ADR 0222: the minimise box and the box pressed, Chalk's then Slate's
+BOX_FIRST = 0x10130A # ADR 0224: the full-screen and sticky boxes, ten glyphs
+FRAME_FIRST = 0x1012AE
 INK = [0, 0, 0].freeze
 BAR = [214, 214, 214].freeze
 HI = [255, 255, 255].freeze
@@ -136,7 +136,7 @@ Dir.mktmpdir('blit-window-style') do |root|
               "#{sgr('58;2;255;0;0;51')}red#{sgr('59;54')} #{sgr('51')}A#{sgr('54')}B#{sgr('51')}C#{sgr('0')}D"
     # Row 7: a Slate title in the Pewter scheme (bar 214, ink black): the
     # title glyph, text framed 51:2, the glyph, text framed 51:4, the glyph.
-    title = u(0x100254 + 5)
+    title = u(0x101254 + 5)
     titles = "#{sgr('0;38;2;0;0;0;48;2;214;214;214')}#{title}#{sgr('51:2')}Ti#{sgr('54')}#{title}" \
              "#{sgr('51:4')}Ti#{sgr('54')}#{title}"
     # Row 8: each shadow kind and width on a blank, an unshadowed blank
@@ -154,10 +154,10 @@ Dir.mktmpdir('blit-window-style') do |root|
     win_text = lambda do |x0, y0, slate, thick|
       w = WIN_COLS
       bar = bar_pens
-      stripe = u((slate ? 0x100254 : 0x100231))
+      stripe = u((slate ? 0x101254 : 0x101231))
       out = +''
-      title = [FRAME_FIRST + (slate ? 7 : 5)] + [stripe.ord] * 3 + [(slate ? 0x100254 : 0x100231) + 3] +
-              [(slate ? 0x100254 : 0x100231) + 5] * 2 + [(slate ? 0x100254 : 0x100231) + 4] + [stripe.ord] + [FRAME_FIRST + (slate ? 8 : 6)]
+      title = [FRAME_FIRST + (slate ? 7 : 5)] + [stripe.ord] * 3 + [(slate ? 0x101254 : 0x101231) + 3] +
+              [(slate ? 0x101254 : 0x101231) + 5] * 2 + [(slate ? 0x101254 : 0x101231) + 4] + [stripe.ord] + [FRAME_FIRST + (slate ? 8 : 6)]
       out << at.call(x0, y0, bar + title.map { |c| u(c) }.join)
       (1..WIN_BODY).each do |r|
         out << at.call(x0, y0 + r, face_pens + u(FRAME_FIRST) + ' ' * (w - 2) + u(FRAME_FIRST + 1))
@@ -176,7 +176,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     end
     # Inactive windows: plain title ends round plain `title` cells, no stripes.
     inactive_text = lambda do |x0, y0, slate|
-      first = slate ? 0x100254 : 0x100231
+      first = slate ? 0x101254 : 0x101231
       ends = [FRAME_FIRST + (slate ? 11 : 9), FRAME_FIRST + (slate ? 12 : 10)]
       title = [ends[0]] + [first + 5] * (WIN_COLS - 2) + [ends[1]]
       out = at.call(x0, y0, bar_pens + title.map { |c| u(c) }.join)
@@ -198,15 +198,15 @@ Dir.mktmpdir('blit-window-style') do |root|
     # the dark edge LINE (SGR 58). Raised: key-left, H and a blank framed
     # 51:6, key-right; then pressed the same with 51:7.
     key_pens = sgr("0;38;2;#{rgb(FG)};48;2;#{rgb(BG)};58;2;#{rgb(LINE)}")
-    keys = at.call(2, 27, "#{key_pens}#{u(0x1003D1)}#{sgr('51:6')}H #{sgr('54')}#{u(0x1003D2)}#{colours} " \
-                          "#{key_pens}#{u(0x1003D3)}#{sgr('51:7')}H #{sgr('54')}#{u(0x1003D4)}#{sgr('0')}#{colours}")
+    keys = at.call(2, 27, "#{key_pens}#{u(0x1013D1)}#{sgr('51:6')}H #{sgr('54')}#{u(0x1013D2)}#{colours} " \
+                          "#{key_pens}#{u(0x1013D3)}#{sgr('51:7')}H #{sgr('54')}#{u(0x1013D4)}#{sgr('0')}#{colours}")
     shadows = SHADOWS.map { |k, t, i| "#{sgr("66:#{k}:#{t}:#{i}")} #{sgr('67')} " }.join +
               "#{sgr('58;2;255;0;0;66:1:2')} #{sgr('0')}#{colours}#{sgr('66:1:2;0')}#{colours} " \
               "#{sgr('58;2;255;0;0;66:1:2')}#{u(FIRST + 14)}#{sgr('0')}#{colours}"
     # Row 9: a Slate dialog's eight border cells on the wallpaper (the blue),
     # SGR 58 the dialog's face; then the four button caps on that face, SGR 58
     # the button's face.
-    slate = 0x100254
+    slate = 0x101254
     dialog = (23..30).map { |i| u(slate + i) }.join
     caps = (31..34).map { |i| u(slate + i) }.join
     pen_row = "#{sgr("0;38;2;#{rgb(FG)};48;2;#{rgb(BG)};58;2;#{rgb(FACE)}")}#{dialog}" \
@@ -298,7 +298,7 @@ Dir.mktmpdir('blit-window-style') do |root|
     # Inactive windows: every cell the design's; no stripe anywhere in the bar
     # (every pixel off the bevel rows and the outer lines is the bar colour);
     # the body and bottom as the active windows'.
-    [[12, true, 0x100254], [20, false, 0x100231]].each do |y0, slate, first|
+    [[12, true, 0x101254], [20, false, 0x101231]].each do |y0, slate, first|
       w = WIN_COLS
       ends = [FRAME_FIRST + (slate ? 11 : 9), FRAME_FIRST + (slate ? 12 : 10)]
       ([ends[0]] + [first + 5] * (w - 2) + [ends[1]]).each_with_index do |cp, i|
@@ -325,7 +325,7 @@ Dir.mktmpdir('blit-window-style') do |root|
         end
       end
     end
-    [[12, true, 1, 0x100254], [20, false, 2, 0x100231]].each do |y0, slate, t, first|
+    [[12, true, 1, 0x101254], [20, false, 2, 0x101231]].each do |y0, slate, t, first|
       w = WIN_COLS
       # The title row: every cell the design's, the ends from the frame set.
       ends = [FRAME_FIRST + (slate ? 7 : 5), FRAME_FIRST + (slate ? 8 : 6)]

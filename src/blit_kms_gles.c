@@ -534,12 +534,13 @@ static void kms_gles_images(BlitKms *kms, KmsGlesResources *r,
 }
 
 /* ADR 0221: the icon pen a cell's sprite is keyed by. The raster looks at
-   the pen only for a lone Blit icon (plane 16), so only those carry it here:
-   a text cell with pen bits shares the text sprite. */
+   the pen only for a lone Blit icon (plane 16, either range while the
+   transition lasts: blit_icon_codepoint), so only those carry it here: a
+   text cell with pen bits shares the text sprite. */
 static int kms_sprite_pen(const BlitKmsSurfaceView *view, int index)
 {
     uint32_t cp = view->codepoints[index];
-    if (cp < 0x100000U || (view->combining_count && view->combining_count[index])) return 0;
+    if (!blit_icon_codepoint(cp) || (view->combining_count && view->combining_count[index])) return 0;
     return KMS_ICON_PEN(view->attributes[index]);
 }
 

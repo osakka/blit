@@ -19172,18 +19172,29 @@ static int font_icons_json(char *body, size_t capacity)
     return 1;
 }
 
+#include "blit_icon_codepoints.h"
+
 /* ADR 0212: the catalogue as served. Its revision is the SHA-256 of the file
    as packaged -- the hash fonts.source.json pins -- put first in the body as
    "revision" and sent as the ETag, so a client holding a long connection can
    tell the catalogue changed, and a conditional request (If-None-Match) is
    answered 304. no-cache, not no-store: it may be kept, and must be asked
-   about. */
+   about. ADR 0243: while the old icon range still draws, "deprecated_range"
+   follows it: that range, and where it moved (each glyph at old + 0x1000);
+   the file itself, which Hibr reads, keeps its shape. */
 static void font_icons_response(int fd, const char *request, char *body, size_t capacity)
 {
     static const char key[] = "\"revision\":\"";
-    char revision[65], etag[96], extra[128], match[512];
-    size_t length, add = sizeof(key) - 1 + 64 + 2;
+    char revision[65], etag[96], extra[128], match[512], deprecated[96] = "";
+    size_t length, add, more;
     char *brace;
+#ifdef BLIT_ICON_OLD_FIRST
+    snprintf(deprecated, sizeof(deprecated),
+             "\"deprecated_range\":{\"from\":\"%X\",\"to\":\"%X\",\"moved_to\":\"%X\"},",
+             BLIT_ICON_OLD_FIRST, BLIT_ICON_OLD_LAST, BLIT_ICON_FIRST);
+#endif
+    more = strlen(deprecated);
+    add = sizeof(key) - 1 + 64 + 2 + more;
     if (capacity < add + 2 || !font_icons_json(body, capacity - add - 1) ||
         (brace = strchr(body, '{')) == NULL) {
         send_problem(fd, 503, "Service Unavailable", "font_icon_catalogue_unavailable",
@@ -19204,6 +19215,7 @@ static void font_icons_response(int fd, const char *request, char *body, size_t 
     memcpy(brace + 1, key, sizeof(key) - 1);
     memcpy(brace + 1 + sizeof(key) - 1, revision, 64);
     memcpy(brace + 1 + sizeof(key) - 1 + 64, "\",", 2);
+    memcpy(brace + 1 + sizeof(key) - 1 + 64 + 2, deprecated, more);
     send_http_with(fd, 200, "OK", "application/json", "no-cache", extra, body);
 }
 

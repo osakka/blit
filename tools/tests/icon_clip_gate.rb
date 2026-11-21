@@ -70,15 +70,15 @@ end
 { 0x2588 => 31, 0x2500 => 3, 0x2501 => 3, 0x2550 => 3, 0x2502 => 12, 0x2503 => 12, 0x2551 => 12,
   0x250C => 0, 0xE0B0 => 15, 0xE0B2 => 15, 0xE0B1 => 15, 0xE0B3 => 15,
   0x2580 => 7, 0x2584 => 11, 0x258C => 13, 0x2590 => 14 }.each { |cp, mask| spec << ['cell', cp, 1, mask, format('U%X', cp)] }
-(0x10023A..0x10023C).to_a.concat((0x10025D..0x10025F).to_a).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+(0x10123A..0x10123C).to_a.concat((0x10125D..0x10125F).to_a).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
 # ADR 0219: the pressed boxes reach all four edges as the boxes do; a grow cell its right,
 # top and bottom (the frame's lines), and its left only where the box is the cell's width.
-[0x1002BB, 0x1002BC, 0x1002BD, 0x1002C0, 0x1002C1, 0x1002C2].each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
-[0x1002BE, 0x1002BF, 0x1002C3, 0x1002C4].each { |cp| spec << ['cell', cp, 1, 14, format('chrome-%X', cp)] }
+[0x1012BB, 0x1012BC, 0x1012BD, 0x1012C0, 0x1012C1, 0x1012C2].each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+[0x1012BE, 0x1012BF, 0x1012C3, 0x1012C4].each { |cp| spec << ['cell', cp, 1, 14, format('chrome-%X', cp)] }
 # ADR 0222: the minimise boxes, normal and pressed, reach all four edges as the boxes do.
-(0x1002CD..0x1002D0).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+(0x1012CD..0x1012D0).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
 # ADR 0224: the full-screen and sticky boxes, as the minimise boxes.
-(0x10030A..0x100313).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
+(0x10130A..0x101313).each { |cp| spec << ['cell', cp, 1, 15, format('chrome-%X', cp)] }
 cells = ([[11, 22]] + (8..64).flat_map { |s| [[(s + 1) / 2, s], [s / 2, s]] }).uniq
 stride = ENV.fetch('BLIT_ICON_CLIP_STRIDE', '48').to_i
 freetype = BuildFlags.cflags('font')

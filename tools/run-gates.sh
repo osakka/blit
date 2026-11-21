@@ -323,7 +323,7 @@ backend_independent() {
     input_identity_gate.sh|pointer_curve_gate.sh|audio_control_gate.sh|\
     evdev_char_gate.sh|native_vt_kernel_gate.sh|vt_watchdog_report_gate.sh|\
     touchpad_gate.sh|motion_trail_gate.rb|graphics_band_gate.rb|\
-    kms_compose_gate.sh|gles_compose_gate.sh|arabic_screen_gate.sh|pointer_art_gate.sh|\
+    kms_compose_gate.sh|gles_compose_gate.sh|icon_transition_gate.sh|arabic_screen_gate.sh|pointer_art_gate.sh|\
     kms_graphics_clip_gate.sh|kms_hotplug_cycles.rb|kms_pointer_phase_gate.rb|\
     surface_damage_gate.sh|kms_hotplug_gate.rb|display_layout_gate.rb) return 0 ;;
     esac
@@ -590,6 +590,7 @@ suite_renderer() {
     run_gate kms_compose_gate.sh "$ROOT"/tools/tests/kms_compose_gate.sh
     run_gate gles_compositor_gate.rb ruby "$ROOT/tools/tests/gles_compositor_gate.rb"
     run_gate gles_compose_gate.sh sh "$ROOT/tools/tests/gles_compose_gate.sh"
+    run_gate icon_transition_gate.sh sh "$ROOT/tools/tests/icon_transition_gate.sh"
     run_gate arabic_screen_gate.sh sh "$ROOT/tools/tests/arabic_screen_gate.sh"
     run_gate pointer_art_gate.sh sh "$ROOT/tools/tests/pointer_art_gate.sh"
     run_gate pointer_appearance_gate.rb ruby "$ROOT/tools/tests/pointer_appearance_gate.rb"

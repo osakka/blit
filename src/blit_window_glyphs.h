@@ -2,15 +2,15 @@
 #define BLIT_WINDOW_GLYPHS_H
 
 /* ADR 0210: the window-chrome glyph sets, Chalk and Slate, drawn as cell
-   geometry. Two sets of 35 in one order -- Chalk at U+100231, Slate at
-   U+100254 -- listed in the catalogue's cell_geometry section; Slate dark,
-   once at U+100277, is retired (ADR 0211). Chalk is one colour: coverage,
+   geometry. Two sets of 35 in one order -- Chalk at U+101231, Slate at
+   U+101254 -- listed in the catalogue's cell_geometry section; Slate dark,
+   once at U+101277, is retired (ADR 0211). Chalk is one colour: coverage,
    drawn in the cell's foreground. Slate is the same geometry in the cell's
    own pens (ADR 0211): each pixel is a role, resolved when the cell is
    drawn. A pixel no rule sets is transparent in both, so a frame cell shows
    its background (on a held desktop, the wallpaper).
 
-   ADR 0214 adds the outer-edge frame (nine glyphs from U+1002AE, after the
+   ADR 0214 adds the outer-edge frame (nine glyphs from U+1012AE, after the
    controls): ONE frame set whose line sits on the outermost edge of its
    cell, and the title bar's two end cells (Chalk's and Slate's), which
    carry that outer line and run the stripes in. They are below, after the
@@ -29,9 +29,9 @@
 #include <stdint.h>
 #include <string.h>
 
-#define BLIT_WINDOW_FIRST 0x100231U
+#define BLIT_WINDOW_FIRST 0x101231U
 #define BLIT_WINDOW_SET 35U
-/* Chalk, then Slate. The third set, Slate dark (U+100277-100299), is
+/* Chalk, then Slate. The third set, Slate dark (U+101277-101299), is
    retired (ADR 0211): Slate takes its colours from the cell, so one set
    draws light and dark alike. */
 #define BLIT_WINDOW_LAST (BLIT_WINDOW_FIRST + 2U * BLIT_WINDOW_SET - 1U)
@@ -52,22 +52,22 @@
 #define BLIT_WINDOW_BUTTON_INSET 2      /* clear before a button's rounded end */
 #define BLIT_WINDOW_BUTTON_RADIUS_NUM 4 /* that end's radius: 4/11 of the cell */
 #define BLIT_WINDOW_BUTTON_RADIUS_DEN 11 /*   height, within half of it and the cell */
-#define BLIT_FRAME_FIRST 0x1002AEU      /* the outer-edge frame (ADR 0214): */
+#define BLIT_FRAME_FIRST 0x1012AEU      /* the outer-edge frame (ADR 0214): */
 #define BLIT_FRAME_COUNT 13U            /*   five frame cells, four title-end cells, four plain ones */
 #define BLIT_WINDOW_ZOOM_NUM 2          /* the zoom box's inner square: 2/3 of the */
 #define BLIT_WINDOW_ZOOM_DEN 3          /*   box, from its top-left corner */
-#define BLIT_STATE_FIRST 0x1002BBU      /* pressed boxes and the grow box (ADR 0219): */
+#define BLIT_STATE_FIRST 0x1012BBU      /* pressed boxes and the grow box (ADR 0219): */
 #define BLIT_STATE_SET 5U               /*   per set, three pressed boxes and two grow cells */
 #define BLIT_STATE_COUNT (2U * BLIT_STATE_SET) /* Chalk's five, then Slate's */
 #define BLIT_WINDOW_PRESS_GAP 1         /* a pressed box: clear between its border (and Slate's bevel) and the mark */
 #define BLIT_WINDOW_GROW_PERIOD 4       /* the grow box's '/' hatch: one line in every 4 px along a row */
-#define BLIT_MINIMISE_FIRST 0x1002CDU   /* the minimise box (ADR 0222): */
+#define BLIT_MINIMISE_FIRST 0x1012CDU   /* the minimise box (ADR 0222): */
 #define BLIT_MINIMISE_SET 2U            /*   per set, the box and the box pressed */
 #define BLIT_MINIMISE_COUNT (2U * BLIT_MINIMISE_SET) /* Chalk's two, then Slate's */
-#define BLIT_FULLSCREEN_FIRST 0x10030AU /* the full-screen box (ADR 0224): */
+#define BLIT_FULLSCREEN_FIRST 0x10130AU /* the full-screen box (ADR 0224): */
 #define BLIT_FULLSCREEN_SET 2U          /*   per set, the box and the box pressed */
 #define BLIT_FULLSCREEN_COUNT (2U * BLIT_FULLSCREEN_SET) /* Chalk's two, then Slate's */
-#define BLIT_STICKY_FIRST 0x10030EU     /* the sticky box (ADR 0224): */
+#define BLIT_STICKY_FIRST 0x10130EU     /* the sticky box (ADR 0224): */
 #define BLIT_STICKY_SET 3U              /*   per set, the box, the box pressed, the box on */
 #define BLIT_STICKY_COUNT (2U * BLIT_STICKY_SET) /* Chalk's three, then Slate's */
 /* ADR 0224's marks, each one of two drawings chosen when Blit is built:

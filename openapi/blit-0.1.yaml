@@ -2332,6 +2332,20 @@ components:
           type: string
           pattern: '^[0-9a-f]{64}$'
           description: The SHA-256 of the catalogue file as packaged; the ETag carries it too.
+        deprecated_range:
+          type: object
+          description: >-
+            ADR 0243: the icons' old range, U+100000-U+100495, served only
+            while it still draws (from 0.3.131 until a later release drops
+            it). Every codepoint in the catalogue is in the new range; an old
+            one draws the glyph at old + 0x1000, where the range moved. Not
+            in the catalogue file itself.
+          required: [from, to, moved_to]
+          properties:
+            from: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+            to: {type: string, pattern: '^[0-9A-F]{4,6}$'}
+            moved_to: {type: string, pattern: '^[0-9A-F]{4,6}$', description: Where `from` moved; each codepoint keeps its offset.}
+          additionalProperties: false
         version: {type: integer, minimum: 1}
         profiles:
           type: array
@@ -6240,7 +6254,7 @@ components:
           type: string
           enum: [colour, auto, black, white]
           description: >-
-            The pen Blit's colour icons (U+100000 and up that carry colour)
+            The pen Blit's colour icons (U+101000 and up that carry colour)
             are drawn in, SGR 68:v, ended by SGR 69 (ADR 0221). colour (the
             default) draws an icon in its own colours. auto, black and white
             draw its monochrome shape, which the icon font carries (levels

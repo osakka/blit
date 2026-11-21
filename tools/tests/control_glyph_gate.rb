@@ -1,20 +1,20 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# ADR 0212: the controls glyphs, U+10029A-1002AD: a checkbox (Chalk, Slate),
+# ADR 0212: the controls glyphs, U+10129A-1012AD: a checkbox (Chalk, Slate),
 # a compact switch (Chalk, Slate) and a capsule switch.
 #
 # - The catalogue lists all 20 in order with their names, sets and pens, in
 #   `cell_geometry`, clear of the icons and every retired codepoint, and
-#   U+1002AE-1002BA are the outer-edge frame's (ADR 0214, its own gate), and
-#   U+1002BB-1002C4 are the pressed boxes and grow cells (ADR 0219, its own gate), and
-#   U+1002C5-1002C6 are the hui mark and U+1002C7-1002CC the wiretap icons
-#   (on, off; two-column, then one-column colour icons), U+1002CD-1002D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1002D1-1002D9 the Wi-Fi
-#   signal (1-4, off) and cellular (1-4) icons, U+1002DA-1002EB the two-column Wi-Fi
-#   (wifi-signal-wide-1..4, wifi-off-wide) and volume (volume-wide-0..3) icons, U+1002EC-1002F3 the
-#   two-column classic phones (phone-classic-wide-off, -wait, -on, -ring), U+1002F4-100309 the two-column
-#   batteries (battery-wide-0..4, -0..4-charging, -ac), U+10030A-100313 the full-screen and
-#   sticky boxes (ADR 0224, window_glyph_gate), and U+100314 is the next free.
+#   U+1012AE-1012BA are the outer-edge frame's (ADR 0214, its own gate), and
+#   U+1012BB-1012C4 are the pressed boxes and grow cells (ADR 0219, its own gate), and
+#   U+1012C5-1012C6 are the hui mark and U+1012C7-1012CC the wiretap icons
+#   (on, off; two-column, then one-column colour icons), U+1012CD-1012D0 the minimise boxes (ADR 0222, window_glyph_gate), U+1012D1-1012D9 the Wi-Fi
+#   signal (1-4, off) and cellular (1-4) icons, U+1012DA-1012EB the two-column Wi-Fi
+#   (wifi-signal-wide-1..4, wifi-off-wide) and volume (volume-wide-0..3) icons, U+1012EC-1012F3 the
+#   two-column classic phones (phone-classic-wide-off, -wait, -on, -ring), U+1012F4-101309 the two-column
+#   batteries (battery-wide-0..4, -0..4-charging, -ac), U+10130A-101313 the full-screen and
+#   sticky boxes (ADR 0224, window_glyph_gate), and U+101314 is the next free.
 # - Through the production raster, every glyph equals the design
 #   (tools/fonts/draw-control-glyphs.py, which reads the geometry tables in
 #   src/blit_control_glyphs.h and src/blit_window_glyphs.h) pixel for
@@ -38,8 +38,8 @@ require_relative 'build_flags'
 ROOT = File.expand_path('../..', __dir__)
 SIZES = [[11, 22], [4, 8], [5, 10], [6, 12], [8, 16], [9, 18], [10, 20], [12, 24], [14, 28], [16, 32],
          [22, 44], [32, 64]].freeze
-FIRST = 0x10029A
-NEXT_FREE = 0x1002AE
+FIRST = 0x10129A
+NEXT_FREE = 0x1012AE
 IDS = %w[chalk-check-off chalk-check-on chalk-check-mixed
          slate-check-off slate-check-on slate-check-mixed
          chalk-switch-off-left chalk-switch-off-right chalk-switch-on-left chalk-switch-on-right
@@ -66,7 +66,7 @@ check(mine.all? { |e| e['shape'].is_a?(String) && !e['shape'].empty? }, 'a contr
 icon_codes = catalogue.fetch('icons').map { |i| i['codepoint'].to_i(16) }
 retired = catalogue.fetch('retired').flat_map { |r| (r['from'].to_i(16)..r['to'].to_i(16)).to_a }
 check(((FIRST...NEXT_FREE).to_a & (icon_codes + retired)).empty?, 'a control reuses an icon or retired codepoint')
-NEXT_FREE_ALL = 0x100495 # past the big discs (U+1003D5-100494), past the key ends, the player glyphs and icons (ADR 0237), and before them the outer-edge frame (ADR 0214), the pressed states (ADR 0219), the hui mark, wiretap, the minimise boxes (ADR 0222), Wi-Fi signal and cellular, the two-column Wi-Fi and volume, the two-column classic phones, the two-column batteries, and the full-screen and sticky boxes (ADR 0224)
+NEXT_FREE_ALL = 0x101495 # past the big discs (U+1013D5-101494), past the key ends, the player glyphs and icons (ADR 0237), and before them the outer-edge frame (ADR 0214), the pressed states (ADR 0219), the hui mark, wiretap, the minimise boxes (ADR 0222), Wi-Fi signal and cellular, the two-column Wi-Fi and volume, the two-column classic phones, the two-column batteries, and the full-screen and sticky boxes (ADR 0224)
 check((icon_codes + geometry.map { |e| e['codepoint'].to_i(16) }).none? { |c| c >= NEXT_FREE_ALL },
       "something is mapped at or past U+#{NEXT_FREE_ALL.to_s(16).upcase}, the next free codepoint")
 
@@ -247,5 +247,5 @@ SIZES.each do |w, h|
   end
 end
 
-puts "CONTROL_GLYPH_PASS glyphs=20 catalogue=named,next_free=U+100314 sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
+puts "CONTROL_GLYPH_PASS glyphs=20 catalogue=named,next_free=U+101314 sizes=#{SIZES.map { |s| s.join('x') }.join(',')} " \
      'design=pixel-exact chalk=coverage slate,capsule=pen_planes mockup_11x22=held states=distinct seams=joined capsule=3_pens_every_size'

@@ -1277,12 +1277,12 @@ static void draw_powerline(uint32_t scalar, RasterEntry *entry)
 
 /* Blit originals that are cell geometry (blit#140), in the catalogue's
    cell_geometry section: a cell filled except a quarter-circle cut at its
-   top-left (U+100007) or top-right (U+100008), radius the cell's shorter
+   top-left (U+101007) or top-right (U+101008), radius the cell's shorter
    side. A title bar's ends in the bar's colour: rounded top corners only,
    the bottom square where it meets the window. Edge to edge at every size,
    so neighbouring bar cells join without a seam. */
-#define BLIT_BAR_CORNER_LEFT 0x100007
-#define BLIT_BAR_CORNER_RIGHT 0x100008
+#define BLIT_BAR_CORNER_LEFT 0x101007
+#define BLIT_BAR_CORNER_RIGHT 0x101008
 
 static int bar_corner(uint32_t scalar)
 {
@@ -1952,8 +1952,8 @@ static int cache_store(BlitRaster *raster, RasterEntry *made, BlitRasterGlyph *g
 static int raster_get_bold_key(BlitRaster *raster, const BlitCellCluster *lookup,
                                BlitRasterIconPen pen, BlitRasterGlyph *glyph);
 
-static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
-                          BlitRasterIconPen pen, BlitRasterGlyph *glyph)
+static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
+                            BlitRasterIconPen pen, BlitRasterGlyph *glyph)
 {
     RasterEntry next;
     BlitCellCluster pen_key;
@@ -1967,7 +1967,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
     /* ADR 0195: Blit's own icons come first: its colour icons in plane 16
        and the pen at U+270E, whatever the text font has there. */
     int blit_icon = !arabic && key->length == 1 && raster->icons &&
-        (scalar >= 0x100000 || scalar == 0x270e) && !bar_corner(scalar) &&
+        (blit_icon_codepoint(scalar) || scalar == 0x270e) && !bar_corner(scalar) &&
         !blit_chrome_glyph(scalar) &&
         FT_Get_Char_Index(raster->icons, scalar);
     int outline_colour = !arabic && !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
@@ -2082,6 +2082,20 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
     return cache_store(raster, &next, glyph);
 }
 
+/* ADR 0243: every glyph lookup enters here. A cell written in the icons'
+   old range (U+100000-U+100495) is drawn as its new codepoint, old + 0x1000,
+   and shares its cache entry (blit_icon_codepoints.h, the transition). */
+static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
+                          BlitRasterIconPen pen, BlitRasterGlyph *glyph)
+{
+    BlitCellCluster moved;
+    uint32_t scalar = blit_icon_scalar(lookup->scalars[0]);
+    if (scalar == lookup->scalars[0]) return raster_get_drawn(raster, lookup, pen, glyph);
+    moved = *lookup;
+    moved.scalars[0] = scalar;
+    return raster_get_drawn(raster, &moved, pen, glyph);
+}
+
 int blit_raster_get_cluster_styled(BlitRaster *raster, const BlitCellCluster *cluster,
                                    int bold, BlitRasterGlyph *glyph)
 {
@@ -2114,6 +2128,7 @@ int blit_raster_get_window_plane(BlitRaster *raster, uint32_t scalar, int plane,
 {
     unsigned index;
     unsigned char **pixels;
+    scalar = blit_icon_scalar(scalar);    /* ADR 0243: the transition */
     if (!raster || !glyph || !blit_chrome_colour(scalar) || plane < WR_FG || plane > WR_MIX)
         return 0;
     index = (unsigned)blit_chrome_pen_index(scalar);
@@ -2163,7 +2178,7 @@ static int bold_needs_room(const BlitRaster *raster, const BlitCellCluster *key,
         g->ink_offset_y || protected_geometry(scalar) || invisible_format(scalar) ||
         bar_corner(scalar) || blit_chrome_glyph(scalar) ||
         (raster->arabic && arabic_scalar(scalar)) ||
-        scalar >= 0x100000 || scalar == 0x270e) return 0;
+        blit_icon_codepoint(scalar) || scalar == 0x270e) return 0;
     for (y = 0; y < g->height; ++y)
         if (g->pixels[y * g->stride + g->width - 1] >= RASTER_BOLD_EDGE) return 1;
     return 0;

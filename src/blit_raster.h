@@ -40,7 +40,7 @@ typedef enum { BLIT_RASTER_HINTING_FULL = 0, BLIT_RASTER_HINTING_LIGHT, BLIT_RAS
 int blit_raster_set_hinting(BlitRaster *raster, BlitRasterHinting hinting);
 
 /* ADR 0220, 0221: the icon pen of a cell, the pen Blit's colour icons
-   (U+100000 and up that carry colour) are drawn in. It is a per-lookup
+   (U+101000 and up that carry colour) are drawn in. It is a per-lookup
    argument, not a raster setting: the terminal's cells carry it (SGR 68), and
    the values are the cell attribute's field. Colour (zero) draws the icon in
    its own colours. The other three draw its monochrome shape, which the icon

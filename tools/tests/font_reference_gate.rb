@@ -36,7 +36,7 @@ frame_ids = %w[frame-left frame-right frame-bottom-left frame-bottom frame-botto
                chalk-title-end-right slate-light-title-end-left slate-light-title-end-right chalk-title-end-plain-left
                chalk-title-end-plain-right slate-light-title-end-plain-left slate-light-title-end-plain-right]
 raise 'the outer-edge frame is not in the catalogue' unless
-  frame_ids.each_with_index.all? { |id, i| geometry.any? { |g| g['id'] == id && g['codepoint'].to_i(16) == 0x1002AE + i } }
+  frame_ids.each_with_index.all? { |id, i| geometry.any? { |g| g['id'] == id && g['codepoint'].to_i(16) == 0x1012AE + i } }
 deprecated = geometry.select { |g| g['deprecated'] }
 raise "expected 18 deprecated glyphs, found #{deprecated.size}" unless deprecated.size == 18
 deprecated.each do |g|
@@ -51,7 +51,7 @@ end
 reference_text = File.read(File.join(root, 'docs/font-reference.md'))
 raise 'docs/font-reference.md does not document the outer-edge frame' unless
   (frame_ids - %w[chalk-title-end-right slate-light-title-end-right chalk-title-end-plain-right slate-light-title-end-plain-right]).all? { |id| reference_text.include?("`#{id}`") } &&
-  reference_text.include?('U+1002AE–1002BA') && reference_text.include?('U+1002BB') &&
+  reference_text.include?('U+1012AE–1012BA') && reference_text.include?('U+1012BB') &&
   %w[chalk-title-end-plain-left slate-light-title-end-plain-left].all? { |id| reference_text.include?("`#{id}`") || reference_text.include?(id) } && reference_text.include?('Deprecated, not retired')
 coverage = JSON.parse(File.read(File.join(pages, 'coverage.json')))
 # ADR 0195: every shipped text font, the stack, the Arabic and emoji faces.

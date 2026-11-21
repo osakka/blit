@@ -2061,6 +2061,15 @@ title bar's, a panel, the wallpaper, a dialog's face or a button's),
 face, a knob, or `shade`, a key's dark edge). The words are in
 [the icon contract](../assets/fonts/icons/README.md) and typed in OpenAPI.
 
+**The codepoints moved (0.3.131, ADR 0243).** Every codepoint is in
+plane 16 from U+101000; until 0.3.130 the set was at U+100000-U+100495,
+which the Glyph Protocol reserved for programs' registered glyphs, so each
+entry moved up by 0x1000 in the same layout, its id unchanged. During the
+transition the old codepoints still draw the same glyphs, and the response
+(not the file) carries `deprecated_range`, after `revision`:
+`{"from":"100000","to":"100495","moved_to":"101000"}`. A later release,
+named in its notes, drops the old range and the member with it.
+
 **The catalogue has a revision.** The body's first member, `revision`, is
 the SHA-256 of the catalogue file as packaged (the hash `fonts.source.json`
 pins), and the response's `ETag` is the same value, quoted. A client that

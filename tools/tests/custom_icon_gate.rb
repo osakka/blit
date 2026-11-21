@@ -42,13 +42,13 @@ Dir.chdir(root) do
     # ADR 0237: the big discs, four cells by two rows a frame.
     %w[disc vinyl cassette].flat_map { |k| (0..7).flat_map { |f| (0..1).flat_map { |r| (0..3).map { |c| "#{k}-big-#{f}-r#{r}c#{c}" } } } }
   raise 'incomplete original catalogue' unless icons.fetch('icons').map { |i| i.fetch('id') } == expected
-  # ADR 0214: the outer-edge frame is cell geometry at U+1002AE-1002B6, clear
+  # ADR 0214: the outer-edge frame is cell geometry at U+1012AE-1012B6, clear
   # of the icons and every retired range; a deprecated glyph names live,
   # non-deprecated replacements and keeps its place (it is not retired).
   geometry = icons.fetch('cell_geometry')
-  frame = geometry.select { |g| g['codepoint'].to_i(16).between?(0x1002AE, 0x1002BA) }
-  raise 'the outer-edge frame (U+1002AE-1002BA) is not cell geometry in the catalogue' unless
-    frame.size == 13 && frame.map { |g| g["codepoint"].to_i(16) } == (0x1002AE..0x1002BA).to_a
+  frame = geometry.select { |g| g['codepoint'].to_i(16).between?(0x1012AE, 0x1012BA) }
+  raise 'the outer-edge frame (U+1012AE-1012BA) is not cell geometry in the catalogue' unless
+    frame.size == 13 && frame.map { |g| g["codepoint"].to_i(16) } == (0x1012AE..0x1012BA).to_a
   raise 'a cell-geometry glyph reuses an icon or retired codepoint' unless
     (geometry.map { |g| g['codepoint'].to_i(16) } &
      (icons.fetch('icons').map { |i| i['codepoint'].to_i(16) } +
@@ -61,7 +61,7 @@ Dir.chdir(root) do
   raise 'a deprecated glyph was retired early' unless deprecated.none? { |g| icons.fetch('retired').any? { |r| g['codepoint'].to_i(16).between?(r['from'].to_i(16), r['to'].to_i(16)) } }
   codepoints = icons.fetch('icons').map { |i| i.fetch('codepoint').to_i(16) }
   retired = icons.fetch('retired').flat_map { |r| (r.fetch('from').to_i(16)..r.fetch('to').to_i(16)).to_a }
-  raise 'unexpected private mappings' unless codepoints == codepoints.sort.uniq && codepoints.all? { |c| c.between?(0x100000, 0x10fffd) }
+  raise 'unexpected private mappings' unless codepoints == codepoints.sort.uniq && codepoints.all? { |c| c.between?(0x101000, 0x10fffd) }
   raise 'a retired codepoint is mapped again' unless (codepoints & retired).empty?
   Dir.mktmpdir('blit-custom-icons') do |work|
     binary = File.join(work, 'gate')

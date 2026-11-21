@@ -103,13 +103,30 @@ XTGETTCAP boolean for the rows key, kitty's cursor-position probe for OSC
 
 ## Open (the owner's)
 
-- **Blit's icon codepoints.** Blit's icons are at U+100000-U+100495. The
+- **Blit's icon codepoints: decided (the owner, 2026-11-21), built in
+  0.3.131.** Blit's icons and cell geometry were at U+100000-U+100495. The
   Glyph Protocol reserved U+100000-U+1003FF for programs' registered glyphs
-  on 2026-11-15, and Nerd Fonts agreed to stay out. Publishing step 2 with
-  the icons there contradicts it. Proposed: move the icons to U+101000-
-  (unclaimed), with a transition in which both ranges draw, agreed with
-  hibr (Hibr's icon map moves too); step 3's name lookup makes the move
-  invisible to new programs.
+  on 2026-11-15, and Nerd Fonts agreed to stay out; publishing step 2 with
+  the icons there would contradict it. The set moved to U+101000-U+101495
+  (unclaimed), the same layout, every glyph at old + 0x1000: the catalogue's
+  codepoint values only (its keys, ids and format unchanged, because Hibr
+  reads the file and names every glyph by id), the icon font rebuilt from
+  it (only its cmap differs), and every codepoint the code names (the bar
+  corners, the window, frame, control, key and player glyphs). The
+  transition: from 0.3.131 the old range draws exactly the glyph it moved
+  to, mapped by one function (`src/blit_icon_codepoints.h`,
+  `blit_icon_scalar`) asked where a cell's scalar enters the raster's glyph
+  and pen-plane lookups and the renderers' two cell tests
+  (`blit_chrome_colour`, the GLES icon pen); the cell keeps what the
+  program wrote, so the cells API, copy and scrollback read it back
+  unchanged. `GET /v1/fonts/icons` adds `deprecated_range`
+  (`{"from":"100000","to":"100495","moved_to":"101000"}`) to the response,
+  not to the file. `icon_transition_gate` holds every old codepoint, in
+  every pen, bold and Slate plane, and a CPU and a GPU frame, to the new
+  one's pixels, and fails with the mapping compiled out. Hibr switches its
+  map first (to be gated on Blit 0.3.131); a later release, named in its notes,
+  drops the old range (`BLIT_ICON_OLD_RANGE_DROPPED`) and the gate's old
+  half. Step 3's name lookup makes the move invisible to new programs.
 - **One Arabic face.** Noto Naskh Arabic covers every assigned codepoint of
   the six Arabic blocks; Blit Arabic Modern covers part of the base block
   and none of the Supplement or Extended blocks. Proposed: retire Modern

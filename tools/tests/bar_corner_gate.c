@@ -1,5 +1,5 @@
-/* blit#140: a title bar's rounded top corners, U+100007 (left) and
-   U+100008 (right), as cell geometry in the shared raster: filled edge to
+/* blit#140: a title bar's rounded top corners, U+101007 (left) and
+   U+101008 (right), as cell geometry in the shared raster: filled edge to
    edge except a quarter-circle cut at the top corner, radius the cell's
    shorter side, so bar cells join without a seam at every size. */
 #include "../../src/blit_raster.h"
@@ -22,12 +22,12 @@ int main(int argc, char **argv)
         unsigned long count;
         int partial = 0, radius = cw < size ? cw : size;
         CHECK(r);
-        CHECK(blit_raster_get(r, 0x100007, 1, 0, &left));
+        CHECK(blit_raster_get(r, 0x101007, 1, 0, &left));
         CHECK(left.format == BLIT_RASTER_COVERAGE && !left.fallback);
         CHECK(left.width == cw && left.height == size);
         CHECK(left.ink_offset_x == 0 && left.ink_offset_y == 0);
         memcpy(saved, left.pixels, (size_t)left.stride * left.height);
-        CHECK(blit_raster_get(r, 0x100008, 1, 0, &right));
+        CHECK(blit_raster_get(r, 0x101008, 1, 0, &right));
         CHECK(right.format == BLIT_RASTER_COVERAGE && !right.fallback);
         for (y = 0; y < size; ++y)
             for (x = 0; x < cw; ++x) {
@@ -51,14 +51,14 @@ int main(int argc, char **argv)
         /* A narrow cell's arc reaches its far edge only at the top row. */
         CHECK(saved[(radius - 1) * left.stride] > 0);
         count = blit_raster_render_count(r);
-        CHECK(blit_raster_get(r, 0x100007, 1, 0, &again));
+        CHECK(blit_raster_get(r, 0x101007, 1, 0, &again));
         CHECK(blit_raster_render_count(r) == count);
         CHECK(!memcmp(saved, again.pixels, (size_t)again.stride * again.height));
         blit_raster_close(r);
         cases += 2;
     }
     blit_font_free(&font);
-    printf("BAR_CORNER_PASS sizes=57 scalars=U+100007,U+100008 cases=%d below_arc=solid "
+    printf("BAR_CORNER_PASS sizes=57 scalars=U+101007,U+101008 cases=%d below_arc=solid "
            "inner_edge=solid top_edge_min=%d mirror=exact arc=antialiased cache=stable\n",
            cases, min_edge);
     return 0;

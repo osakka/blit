@@ -5,7 +5,7 @@
    capsule switch -- drawn as cell geometry like the window chrome (ADR
    0210, 0211) and from the same roles: Chalk in the foreground, Slate and
    the capsule in the cell's pens (foreground, SGR 58, half foreground and
-   half background). Twenty glyphs from U+10029A, in this order:
+   half background). Twenty glyphs from U+10129A, in this order:
      checkbox, Chalk and Slate: off, on, mixed (one cell each);
      compact switch, Chalk and Slate: off-left, off-right, on-left,
        on-right (two cells wide);
@@ -19,10 +19,11 @@
    boxes' rows and width (blit_window_band), so they scale as those do. The
    capsule scales with the cell's height, in 22nds of it; see its table. */
 
+#include "blit_icon_codepoints.h"
 #include "blit_window_glyphs.h"
 #include "blit_player_glyphs.h"
 
-#define BLIT_CONTROL_FIRST 0x10029AU
+#define BLIT_CONTROL_FIRST 0x10129AU
 #define BLIT_CONTROL_COUNT 20U
 
 /* The geometry table. Checkbox and switch, in pixels: */
@@ -83,8 +84,8 @@ static int blit_control_pen_index(uint32_t scalar)
    (ADR 0224). */
 #define BLIT_STATE_PENS (BLIT_STATE_SET + BLIT_MINIMISE_SET + BLIT_FULLSCREEN_SET + BLIT_STICKY_SET)
 /* ... and the key ends (ADR 0237): raised left and right, pressed left and
-   right, U+1003D1-1003D4. */
-#define BLIT_KEY_FIRST 0x1003D1U
+   right, U+1013D1-1013D4. */
+#define BLIT_KEY_FIRST 0x1013D1U
 #define BLIT_KEY_PENS 4U
 #define BLIT_CHROME_PENS (BLIT_WINDOW_SET + BLIT_CONTROL_PENS + BLIT_FRAME_PENS + BLIT_STATE_PENS + BLIT_KEY_PENS)
 
@@ -144,9 +145,12 @@ static int blit_chrome_pen_index(uint32_t scalar)
     return pen < 0 ? -1 : (int)BLIT_WINDOW_SET + pen;
 }
 
+/* Whether a cell's scalar is a glyph drawn in the cell's pens (Slate, the
+   frame, the pressed boxes, the keys): a renderer asks this of the cell as
+   written, so it maps the transition's old range (blit_icon_codepoints.h). */
 static int blit_chrome_colour(uint32_t scalar)
 {
-    return blit_chrome_pen_index(scalar) >= 0;
+    return blit_chrome_pen_index(blit_icon_scalar(scalar)) >= 0;
 }
 
 /* Is the pixel whose centre is (px, py), in half pixels, inside a stadium

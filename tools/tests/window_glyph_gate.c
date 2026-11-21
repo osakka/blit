@@ -7,35 +7,35 @@
        K (FG), L (LINE), M (MIX), '.' none.
    It also requires, at every size, that a Slate glyph's planes are
    disjoint and together equal its one-colour lookup, and that the retired
-   Slate dark codepoints (U+100277-100299) draw nothing of their own. */
+   Slate dark codepoints (U+101277-101299) draw nothing of their own. */
 #include "../../src/blit_raster.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define FIRST 0x100231U
-#define SLATE 0x100254U
-#define LAST 0x100276U
+#define FIRST 0x101231U
+#define SLATE 0x101254U
+#define LAST 0x101276U
 /* ADR 0214: the outer-edge frame, nine glyphs; the last two (Slate's title
    ends) are drawn in pens, the first seven are coverage. */
-#define FRAME_FIRST 0x1002AEU
-#define FRAME_LAST 0x1002BAU /* 0.3.45: four plain title ends, U+1002B7-1002BA */
-#define FRAME_SLATE 0x1002B5U /* Slate's title ends, U+1002B5-B6, and the plain ones, U+1002B9-BA */
+#define FRAME_FIRST 0x1012AEU
+#define FRAME_LAST 0x1012BAU /* 0.3.45: four plain title ends, U+1012B7-1012BA */
+#define FRAME_SLATE 0x1012B5U /* Slate's title ends, U+1012B5-B6, and the plain ones, U+1012B9-BA */
 /* ADR 0219: the pressed boxes and the grow cells, ten glyphs; Slate's five
-   (U+1002C0-1002C4) are drawn in pens. */
-#define STATE_FIRST 0x1002BBU
-#define STATE_LAST 0x1002C4U
-#define STATE_SLATE 0x1002C0U
+   (U+1012C0-1012C4) are drawn in pens. */
+#define STATE_FIRST 0x1012BBU
+#define STATE_LAST 0x1012C4U
+#define STATE_SLATE 0x1012C0U
 /* ADR 0222: the minimise box, normal and pressed, four glyphs; Slate's two
-   (U+1002CF-1002D0) are drawn in pens. */
-#define MIN_FIRST 0x1002CDU
-#define MIN_LAST 0x1002D0U
-#define MIN_SLATE 0x1002CFU
+   (U+1012CF-1012D0) are drawn in pens. */
+#define MIN_FIRST 0x1012CDU
+#define MIN_LAST 0x1012D0U
+#define MIN_SLATE 0x1012CFU
 /* ADR 0224: the full-screen box (normal, pressed) and the sticky box
    (normal, pressed, on), ten glyphs in a row; Slate's are drawn in pens
-   (U+10030C-10030D and U+100311-100313). */
-#define BOX_FIRST 0x10030AU
-#define BOX_LAST 0x100313U
+   (U+10130C-10130D and U+101311-101313). */
+#define BOX_FIRST 0x10130AU
+#define BOX_LAST 0x101313U
 #define COUNT ((LAST - FIRST + 1) + (FRAME_LAST - FRAME_FIRST + 1) + (STATE_LAST - STATE_FIRST + 1) + \
                (MIN_LAST - MIN_FIRST + 1) + (BOX_LAST - BOX_FIRST + 1))
 
@@ -71,9 +71,9 @@ int main(int argc, char **argv)
             int pen_drawn;
             int p;
             cp = nth(n);
-            pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1002B5U || cp == 0x1002B6U || cp == 0x1002B9U ||
-                cp == 0x1002BAU || (cp >= STATE_SLATE && cp <= STATE_LAST) || (cp >= MIN_SLATE && cp <= MIN_LAST) ||
-                cp == 0x10030CU || cp == 0x10030DU || (cp >= 0x100311U && cp <= BOX_LAST);
+            pen_drawn = (cp >= SLATE && cp <= LAST) || cp == 0x1012B5U || cp == 0x1012B6U || cp == 0x1012B9U ||
+                cp == 0x1012BAU || (cp >= STATE_SLATE && cp <= STATE_LAST) || (cp >= MIN_SLATE && cp <= MIN_LAST) ||
+                cp == 0x10130CU || cp == 0x10130DU || (cp >= 0x101311U && cp <= BOX_LAST);
             if (!blit_raster_get(raster, cp, 1, 0, &glyph)) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL U+%X not drawn at %dx%d\n", cp, w, h);
                 return 1;
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
             printf("\n");
         }
         /* Retired: nothing of the window glyphs' own; at most the fallback. */
-        for (cp = 0x100277U; cp <= 0x100299U; ++cp) {
+        for (cp = 0x101277U; cp <= 0x101299U; ++cp) {
             BlitRasterGlyph glyph;
             if (blit_raster_get(raster, cp, 1, 0, &glyph) && !glyph.fallback) {
                 fprintf(stderr, "WINDOW_GLYPH_FAIL retired U+%X still draws at %dx%d\n", cp, w, h);

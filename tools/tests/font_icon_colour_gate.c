@@ -27,13 +27,13 @@
 #define DEFAULT_ICON_HASH 0xb89e99439992c314ULL
 /* Icons whose outlines are untouched and which have no levels and no knockouts:
    hibr-pen, blit, bluetooth, power, phone-on, volume-3. */
-static const uint32_t kPlain[] = { 0x100001, 0x100000, 0x100006, 0x10001a, 0x10001d, 0x100017 };
+static const uint32_t kPlain[] = { 0x101001, 0x101000, 0x101006, 0x10101a, 0x10101d, 0x101017 };
 /* A monochrome glyph from a disc and knockouts: the hui badge, two columns. */
-static const uint32_t kHui[] = { 0x100018, 0x100019 };
+static const uint32_t kHui[] = { 0x101018, 0x101019 };
 /* Edited or with levels: battery-2, battery-3-charging, battery-ac, wifi-2, volume-1. */
-static const uint32_t kState[] = { 0x10000b, 0x100011, 0x100013, 0x100003, 0x100015 };
+static const uint32_t kState[] = { 0x10100b, 0x101011, 0x101013, 0x101003, 0x101015 };
 /* Chalk's first window glyph, the letters a and W, and a colour emoji. */
-static const uint32_t kOther[] = { 0x100231, 0x100245, 'a', 'W', 0x1f600 };
+static const uint32_t kOther[] = { 0x101231, 0x101245, 'a', 'W', 0x1f600 };
 static const int kSizes[] = { 10, 12, 16, 22, 44 };
 #define NSIZES ((int)(sizeof(kSizes) / sizeof(kSizes[0])))
 #define LEN(a) ((int)(sizeof(a) / sizeof((a)[0])))
@@ -216,8 +216,8 @@ int main(int argc, char **argv)
         BlitRasterGlyph c, b;
         unsigned long long h = 0;
         int x, y, covered_c = 0, covered_b = 0;
-        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_COLOUR, 0x100003, &h, &c));
-        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_BLACK, 0x100003, &h, &b));
+        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_COLOUR, 0x101003, &h, &c));
+        CHECK(render(&font, argv[2], argv[3], 44, BLIT_RASTER_ICON_BLACK, 0x101003, &h, &b));
         for (y = 0; y < c.height; ++y)
             for (x = 0; x < c.width; ++x) {
                 covered_c += alpha(&c, x, y) >= 128;

@@ -11,7 +11,7 @@
    sized from the cell, designed at the owner's 12x24, so the pieces of a
    digit, a meter or a slider meet without a seam at any cell size.
 
-   105 glyphs from U+100314, in this order:
+   105 glyphs from U+101314, in this order:
      big digits, two cells wide and two rows tall: for 0-9, minus, blank,
        the top-left, top-right, bottom-left, bottom-right cells (48);
        the big colon, one cell wide, its top and bottom cells (2);
@@ -27,7 +27,7 @@
 
 #include <stdint.h>
 
-#define BLIT_PLAYER_FIRST 0x100314U
+#define BLIT_PLAYER_FIRST 0x101314U
 #define BLIT_PLAYER_COUNT 105U
 #define BLIT_PLAYER_GHOST 51          /* an unlit segment or LED: 20% */
 #define BLIT_PLAYER_TRACK 96          /* a slider's or fader's track ahead of the knob */

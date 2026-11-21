@@ -49,6 +49,11 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
     raise "catalogue: #{response.code}" unless response.code=='200'
     served=JSON.parse(response.body)
     revision=served.delete('revision')
+    # ADR 0243: while the old icon range still draws, the response (not the
+    # file) names it and where it moved.
+    deprecated=served.delete('deprecated_range')
+    raise "deprecated_range is #{deprecated.inspect}" unless deprecated=={'from'=>'100000','to'=>'100495','moved_to'=>'101000'}
+    raise 'deprecated_range does not follow the revision' unless response.body.include?('","deprecated_range":{')
     raise 'API catalogue differs from generator source' unless served==expected
     raise 'the revision is not the SHA-256 of the catalogue file' unless revision==Digest::SHA256.hexdigest(file)
     raise 'the revision is not the first member' unless response.body.start_with?('{"revision":"'+revision+'",')
@@ -98,7 +103,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
       raise 'capture failed' unless r.code=='200' && r.body.start_with?('BM')
       r.body
     end
-    sequences={icons:((0x100000..0x100006).to_a+(0x100009..0x100022).to_a+[0x100033,0x100034,0x10022f,0x100230]).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
+    sequences={icons:((0x101000..0x101006).to_a+(0x101009..0x101022).to_a+[0x101033,0x101034,0x10122f,0x101230]).pack('U*')+"\u16d2\u21cc\u270e\u2615X",
                arabic:"ﺮﺒْﺣِ ٠١٢٣٤٥٦٧٨٩ ﻻX"}
     %w[hack ibm-3270].each do |profile|
       [16,17,22].each do |size|

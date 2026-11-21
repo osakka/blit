@@ -9,21 +9,21 @@ every glyph Blit rasters with the one drawn here, pixel for pixel, at the
 owner's 11x22 cell and at other sizes (window_glyph_gate).
 
 Two sets of 35, in one order: Chalk (one colour: the cell's foreground
-over its background, so a theme recolours it) at U+100231 and Slate at
-U+100254: the same geometry in the cell's own pens (ADR 0211). Slate dark,
-once at U+100277-100299, is retired. A pixel no rule sets is transparent in
+over its background, so a theme recolours it) at U+101231 and Slate at
+U+101254: the same geometry in the cell's own pens (ADR 0211). Slate dark,
+once at U+101277-101299, is retired. A pixel no rule sets is transparent in
 both: the cell's background shows, which for a frame cell on a held desktop
-is the wallpaper. The controls that follow (U+10029A-1002AD) are
+is the wallpaper. The controls that follow (U+10129A-1012AD) are
 draw-control-glyphs.py's.
 
-The pressed boxes and the grow box (ADR 0219), U+1002BB-1002C4, are here
+The pressed boxes and the grow box (ADR 0219), U+1012BB-1012C4, are here
 too: five glyphs a set (close, shade and zoom pressed, the grow cell and
 the grow cell dragged), Chalk's then Slate's. So is the minimise box
-(ADR 0222), U+1002CD-1002D0: the box and the box pressed, Chalk's then
-Slate's; and the full-screen box (the box, pressed), U+10030A-10030D, and
-the sticky box (the box, pressed, on), U+10030E-100313 (ADR 0224).
+(ADR 0222), U+1012CD-1012D0: the box and the box pressed, Chalk's then
+Slate's; and the full-screen box (the box, pressed), U+10130A-10130D, and
+the sticky box (the box, pressed, on), U+10130E-101313 (ADR 0224).
 
-The outer-edge frame (ADR 0214), U+1002AE-1002B6, is here too: ONE frame
+The outer-edge frame (ADR 0214), U+1012AE-1012B6, is here too: ONE frame
 set (the line on the outermost edge of each frame cell, nothing else
 drawn), and the title bar's four end cells (and, from 0.3.45, the four plain ones of the inactive bar), Chalk's and Slate's, which
 carry that outer line and run the stripes into the cell. The frame glyphs
@@ -86,14 +86,14 @@ NAMES = [
     ('default-button-left', 'default button, left end: rounded 3 px ring; SGR 51:3 draws the label\'s'),
     ('default-button-right', 'default button, right end'),
 ]
-STYLES = [('chalk', 0x100231), ('slate-light', 0x100254)]
-# Slate dark took U+100277-100299 until ADR 0211; retired, never reused.
-RETIRED = (0x100277, 0x100299)
+STYLES = [('chalk', 0x101231), ('slate-light', 0x101254)]
+# Slate dark took U+101277-101299 until ADR 0211; retired, never reused.
+RETIRED = (0x101277, 0x101299)
 
 # ADR 0214: the outer-edge frame, thirteen glyphs in this order. The first five
 # are the one frame set (one colour, coverage in the foreground); the title
 # ends are the bar's end cells in each title-bar style.
-FRAME_FIRST = 0x1002AE
+FRAME_FIRST = 0x1012AE
 FRAMES = [
     ('frame-left', 'frame', 'window frame, left: the line on the cell\'s left edge, nothing else'),
     ('frame-right', 'frame', 'window frame, right: the line on the cell\'s right edge'),
@@ -129,7 +129,7 @@ for _style in ('chalk', 'slate-light'):
 
 # ADR 0219: the pressed boxes and the grow box, five glyphs a set, Chalk's then
 # Slate's, from STATE_FIRST. Hover draws the pressed glyph.
-STATE_FIRST = 0x1002BB
+STATE_FIRST = 0x1012BB
 STATES = [
     ('close-pressed', 'title bar with the close box pressed (also hover): the box filled, an X in it'),
     ('shade-pressed', 'title bar with the window-shade box pressed (also hover): the box filled, bars in it'),
@@ -140,7 +140,7 @@ STATES = [
 
 # ADR 0222: the minimise box, normal and pressed, two glyphs a set, Chalk's
 # then Slate's, from MINIMISE_FIRST; drawn by draw_state.
-MINIMISE_FIRST = 0x1002CD
+MINIMISE_FIRST = 0x1012CD
 MINIMISES = [
     ('minimise', 'title bar with the minimise box: the square with a short bar along its bottom'),
     ('minimise-pressed', 'title bar with the minimise box pressed (also hover): the box filled, a short bar along its bottom'),
@@ -148,12 +148,12 @@ MINIMISES = [
 
 # ADR 0224: the full-screen box (two glyphs a set) and the sticky box (three),
 # Chalk's then Slate's; drawn by draw_state, their marks by box_mark.
-FULLSCREEN_FIRST = 0x10030A
+FULLSCREEN_FIRST = 0x10130A
 FULLSCREENS = [
     ('fullscreen', 'title bar with the full-screen box: the square with a bracket in each corner'),
     ('fullscreen-pressed', 'title bar with the full-screen box pressed (also hover): the box filled, a bracket in each corner'),
 ]
-STICKY_FIRST = 0x10030E
+STICKY_FIRST = 0x10130E
 STICKIES = [
     ('sticky', 'title bar with the sticky box: the square with a pin in it'),
     ('sticky-pressed', 'title bar with the sticky box pressed (also hover): the box filled, a pin in it'),
@@ -612,7 +612,7 @@ def structure(style, name):
             'foreground': 'ink', 'line': line}
 
 
-# The bar corners (U+100007, U+100008) are cell geometry too (blit#140); the
+# The bar corners (U+101007, U+101008) are cell geometry too (blit#140); the
 # raster draws them, and their entries are kept as they were, with these.
 CORNER = {'part': 'bar-corner', 'cells': {'span': 1, 'position': 0}, 'background': 'wallpaper',
           'foreground': 'bar', 'line': 'none'}
@@ -665,9 +665,9 @@ def state_entries():
 
 def owned(entry):
     """Is this catalogue entry one of this script's: a window glyph
-    (U+100231-100276), an outer-edge frame glyph (U+1002AE-1002BA), a
-    pressed-box or grow glyph (U+1002BB-1002C4), a minimise box
-    (U+1002CD-1002D0) or a full-screen or sticky box (U+10030A-100313)?"""
+    (U+101231-101276), an outer-edge frame glyph (U+1012AE-1012BA), a
+    pressed-box or grow glyph (U+1012BB-1012C4), a minimise box
+    (U+1012CD-1012D0) or a full-screen or sticky box (U+10130A-101313)?"""
     cp = int(entry['codepoint'], 16)
     return (STYLES[0][1] <= cp < RETIRED[0] or FRAME_FIRST <= cp < FRAME_FIRST + len(FRAMES) or
             STATE_FIRST <= cp < STATE_FIRST + 2 * len(STATES) or
