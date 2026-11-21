@@ -1461,6 +1461,15 @@ snapshot = run_case(base, 'xtgettcap-unknown-name',
 assert_equal('1b50302b723741374137411b5c', row_text(snapshot),
              'XTGETTCAP refuses a capability it does not own')
 
+# SR-4: a request that is not hex -- here a line feed and a command, as a
+# file being shown could hold -- is refused with nothing echoed. The reply
+# goes to the program's input; read with a 1 s timeout, so an echo would
+# show as more bytes.
+snapshot = run_case(base, 'xtgettcap-not-hex',
+                    "stty -icanon -echo min 0 time 10; printf '\\033P+qZZ\\nid\\n\\033\\\\'; dd if=/dev/tty bs=64 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
+assert_equal('1b50302b721b5c', row_text(snapshot),
+             'XTGETTCAP refuses a name that is not hex with nothing echoed')
+
 snapshot = run_case(base, 'xtgettcap-boolean',
                     "stty -icanon -echo min 0 time 5; printf '\\033P+q5463\\033\\\\'; dd if=/dev/tty bs=1 count=11 2>/dev/null | od -An -tx1 | tr -d ' \\n'", width: 110)
 # ESC P 1 + r 5463 ESC \ -- a boolean capability is reported by its presence,

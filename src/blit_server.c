@@ -13249,10 +13249,12 @@ static void terminal_report_termcap(BlitSession *session,
 
         if (length == 0 || !terminal_hex_decode(cursor, length, name,
                                                 sizeof(name))) {
-            /* A name that is not hex cannot be echoed back as one, so the
-               refusal carries what was asked verbatim. */
-            snprintf(reply, sizeof(reply), "\033P0+r%.*s\033\\", (int)length,
-                     cursor);
+            /* A name that is not hex is refused with nothing echoed: the
+               reply goes to the program's input, so echoing the request
+               verbatim typed whatever it held -- a line feed and a command
+               from a file being shown -- into the shell (security review
+               SR-4). */
+            snprintf(reply, sizeof(reply), "\033P0+r\033\\");
             terminal_write_reply(session, reply);
         } else {
             resolved = terminal_termcap_value(session, surface, name, value,
