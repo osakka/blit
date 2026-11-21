@@ -38,10 +38,10 @@ exercised with real dpkg in the Debian 13 release environment
 | SR-1 | Critical | A frame-channel edit writes outside the image (heap overflow in the root server) -- fixed in 0.3.130 |
 | SR-2 | High | An update needs only the update token, sent in clear, and nothing checks who built the package |
 | SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token |
-| SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) |
-| SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays |
+| SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) -- fixed in 0.3.130 |
+| SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
 | SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` |
-| SR-7 | High | PTY master descriptors leak into every later session child, including ones run as another user |
+| SR-7 | High | PTY master descriptors leak into every later session child, including ones run as another user -- fixed in 0.3.130 |
 | SR-8 | High | The root API token is put into the environment of children run as another user |
 | SR-9 | High, accepted exception | The API token is a root shell, sent over plain HTTP on 0.0.0.0, with no default command allowlist |
 | SR-10 | Medium | The helper reads the staged package three times by path, in a group-writable directory |
@@ -176,6 +176,8 @@ file that only the service can read.
 
 ### SR-4 (High): XTGETTCAP echoes the request back into the terminal's input
 
+**Fixed** in 0.3.130 (24a36e44): an invalid XTGETTCAP name is refused with nothing echoed; terminal_conformance checks the exact reply.
+
 `src/blit_server.c:13243-13248`: when an XTGETTCAP name (`DCS + q ... ST`)
 is not valid hex, the reply is `ESC P 0 + r` followed by the request bytes
 **verbatim**. The reply is written to the PTY, which is the shell's input.
@@ -200,6 +202,8 @@ hex-encode what is echoed, as xterm does.
 > exactly the empty refusal.
 
 ### SR-5 (High): the cursor can go negative
+
+**Fixed** in 0.3.130 (757679ca): CSI parameters saturate at 65535 where they are parsed; terminal_conformance checks huge counts.
 
 - `CSI n a` (HPR) and `CSI n e` (VPR) add `n` (up to `INT_MAX`, from
   `terminal_number`'s `(int)strtol` at `src/blit_server.c:10313`) and clamp
@@ -257,6 +261,8 @@ Fix: make the buffer 64 KB like the others, and build the JSON with
 > /v1/terminal-sessions/{id}` under ASan, and parses both as JSON.
 
 ### SR-7 (High): PTY master descriptors leak into later session children
+
+**Fixed** in 0.3.130 (01f24d3b): PTY masters are close-on-exec; terminal_conformance checks a new session holds no other master.
 
 `forkpty` (`src/blit_server.c:17769`) leaves the master without
 `FD_CLOEXEC`. The parent only sets `O_NONBLOCK` (17928). There is no
