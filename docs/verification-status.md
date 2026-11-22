@@ -9,6 +9,27 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-22: 0.3.136 slider styles
+
+- **Slider styles (ADR 0237, amended).** Two new slider/fader families as
+  cell geometry beside the current one: Circle (a round knob on a thin
+  line) and Groove (a square thumb on a channel, hollow ahead, solid
+  behind), each a base codepoint plus the current style's offsets, the
+  knob cell holding the knob alone, centre lines within half a pixel.
+  Previewed through Blit's raster; the owner approved both. Hibr's Slider
+  Style row picks among them by catalogue id, ungated.
+- **The icon move's old range ends at U+100494** (it said U+100495, where
+  no glyph ever lived); `deprecated_range` says so.
+- **Gates:** `gates_all` 213/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on ce2e4b5b, the shipped commit, first pass, under the shared
+  suite lock. player_glyph_gate covers the 20 new glyphs at every size.
+- **Release environment (Debian 13):** update_pair_gate 16 cases and
+  rollback_recovery_gate 12 cases passed; the release was signed.
+- **Live, the mini PC:** deployed with --rollback-to 0.3.135; verified,
+  the smoke check passed at the login screen (2 displays up, frames
+  advancing 5 -> 19), no rollback needed.
+- **Published** to hibr-apt (142adfe) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-22: 0.3.135 security fixes; update-live rolls back
 
 - **Server (security review SR-8, SR-17, SR-20, SR-23; Gitea #190, #199,
