@@ -794,12 +794,11 @@ hibr's proposal, approved by the owner:
 
 ## Open questions
 
-1. **hibr's:** a remote display's Blit holds its own machine's system
-   sets, not the desktop host's. As written, the display reports them
-   missing and programs print their fallbacks there. Should hold's client
-   instead import the desktop host's system sets into that Blit as the
-   user's (signed, so trusted the same, but spending that uid's quota on
-   that machine)?
+None. The last one was decided (the owner, through the hibr session,
+2026-11-22): **show what's missing.** A remote display's Blit holds its
+own machine's system sets, not the desktop host's; it reports the host's
+system sets missing and programs draw their fallbacks there. Hold's client
+imports nothing under the user's scope for them and spends no quota.
 
 ## Evidence
 
