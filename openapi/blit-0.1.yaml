@@ -15,10 +15,13 @@ info:
     a body that is not application/json (docs/api.md, Endpoint and
     authentication). A connection has 2 s to send its header block; one
     without the bearer token is answered 401 as soon as its header block is
-    whole. One peer holds at most 8 connections whose header block has not
-    arrived, and a full table gives a new connection the slot of the oldest
-    of them, so 503 http_capacity means 32 requests are being served. An
-    answer sent before the request is authorized carries no X-Blit-Version.
+    whole. When all 32 connections are in use, a new one takes the slot of
+    the oldest connection whose header block has not arrived (of the peer
+    holding the most), which is answered 503 http_capacity unless its
+    request had arrived; a new connection is refused 503 http_capacity only
+    when 32 requests are being served. While a connection is free, nothing
+    is closed for a new one. An answer sent before the request is
+    authorized carries no X-Blit-Version.
     A request's fields are the members of its own object: a member of a
     nested object (an environment variable, a surface's width, a cell's
     style) is read only from that object (docs/api.md, Required headers and

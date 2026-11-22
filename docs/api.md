@@ -124,12 +124,17 @@ A connection has 2 s from its accept to send its whole header block, and 5 s
 for the whole request. A request is authorized as soon as its header block
 is whole: when the server has a token, one without it is answered `401`
 then, before its body (with no token, loopback only, every whole header
-block is). Until then the connection is pending. One peer
-address holds at most 8 pending connections (a ninth closes its oldest),
-and when all 32 connections are in use a new one takes the slot of the
-oldest pending connection, of the peer holding the most; a request being
-served is never given up for one. `503` `http_capacity` therefore means 32
-requests are being served at once. Answers sent before a request is
+block is). Until then the connection is pending. While any of the 32
+connections is free, nothing is closed for a new one, however many pending
+connections its address holds: every local client -- Hibr, its panes,
+tools, an SSH tunnel -- connects from 127.0.0.1, and a burst of them must
+not cost one of them its request. When all 32 are in use, a new connection
+takes the slot of the oldest pending connection of the address holding the
+most. That connection is read once first, so a request it has already sent
+is served; one still pending is answered `503` `http_capacity` and closed. A
+request being served is never given up for a new connection, so a new
+connection is answered `503` `http_capacity` only when 32 requests are being
+served at once. Answers sent before a request is
 authorized -- `400` `malformed_request`, `401`, `403` `update_disabled`,
 `501` and `503` `http_capacity` -- carry no `X-Blit-Version` header; every
 other answer does, and `/v1/version` says the same to an authorized client.
@@ -2342,10 +2347,12 @@ It is answered `OK ...` (below); or refused, and the connection closed,
 with `ERROR 0 EACCES` (a wrong token, or a uid that may not send to that
 session) or `ERROR 0 EINVAL` (not a hello, or a hello of any version but
 5). A refused frame is answered `FRAME error <id> <code>`. A connection
-says its hello within 2 s or is closed; one uid holds at most 8 connections
-that have not said it, and when all 32 connections are in use the oldest of
-them (of the uid holding the most) is closed to make room. A client that
-said its hello is never closed for another (security review SR-17).
+says its hello within 2 s or is closed. When all 32 connections are in
+use, the oldest connection that has not said it (of the uid holding the
+most such connections) is read once and, still silent, closed to make room;
+while a connection is free nothing is closed for a new one, since every
+session of one user shares its uid. A client that said its hello is never
+closed for another (security review SR-17).
 
 The channel is local only. A program reached over ssh, or running on another
 machine, has no `BLIT_FRAME_SOCKET` and could not reach it if it had: it

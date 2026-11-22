@@ -193,8 +193,9 @@ def main():
             check(old.hello == b'ERROR 0 EINVAL\n', 'a version %d hello was answered %r' % (version, old.hello))
         # Security review SR-17: connections that never say their hello
         # cannot hold the 32 slots (before, the 33rd connection, the
-        # session's own, was closed unanswered). One uid holds at most 8;
-        # the rest are closed at once, and the 8 at the 2 s deadline.
+        # session's own, was closed unanswered). A full table closes the
+        # oldest of the busiest uid's for a newcomer -- one, the slot the
+        # hello needed -- and the rest go at the 2 s deadline.
         silent = []
         for _ in range(32):
             quiet = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -219,13 +220,36 @@ def main():
             except ConnectionResetError:
                 return True
         at_once = sum(1 for quiet in silent if closed(quiet))
-        check(at_once >= 24, 'only %d of 32 silent connections from one uid were closed at once' % at_once)
+        check(at_once == 1, '%d of 32 silent connections were closed for one hello, wanted 1' % at_once)
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline and not all(closed(quiet) for quiet in silent):
             time.sleep(0.1)
         check(all(closed(quiet) for quiet in silent), 'a silent connection outlived the 2 s hello deadline')
         for quiet in silent:
             quiet.close()
+        # Nothing is closed while a slot is free: every session of one user
+        # shares its uid, so 12 connections accepted before any says its
+        # hello (0.3.135 closed 4 of them, a cap of 8 per uid) are all
+        # answered.
+        token = struct.pack('<II', 5, len(child['BLIT_FRAME_TOKEN'])) + child['BLIT_FRAME_TOKEN'].encode()
+        burst = []
+        for _ in range(12):
+            early = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+            early.connect('\0' + child['BLIT_FRAME_SOCKET'][1:])
+            burst.append(early)
+        time.sleep(0.3)
+        answers = []
+        for early in burst:
+            early.settimeout(2.0)
+            try:
+                early.send(b'BLITFRM1' + token)
+                answers.append(early.recv(64))
+            except OSError as error:
+                answers.append(repr(error).encode())
+            early.close()
+        refused = [answer for answer in answers if not answer.startswith(b'OK dmabuf=')]
+        check(not refused, '%d of 12 early connections from one uid were not answered OK: %r' %
+              (len(refused), refused[:3]))
 
         client = Client(child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN'])
         check(client.hello.startswith(b'OK dmabuf=') and client.hello.endswith(b' window=0\n'),

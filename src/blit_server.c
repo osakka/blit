@@ -98,12 +98,13 @@ extern char **environ;
 #define BLIT_MAX_HTTP_CLIENTS 32
 #define BLIT_HTTP_ACCEPT_BUDGET 8
 /* Security review SR-17: a connection that has not yet sent a whole header
-   block (with the bearer token, when the server has one) is pending. One
-   peer address holds at most this many pending connections, a pending
-   connection is closed when its headers have not arrived within this long,
-   and when the table is full a new connection takes the slot of the oldest
-   pending one -- never that of a request being served. */
-#define BLIT_HTTP_PEER_PENDING 8
+   block (with the bearer token, when the server has one) is pending. A
+   pending connection is closed when its headers have not arrived within
+   this long, and when the table is full a new connection takes the slot of
+   the oldest pending connection of the peer holding the most -- never that
+   of a request being served. While a slot is free nothing is closed for a
+   newcomer: every local client (Hibr, its panes, tools, an SSH tunnel)
+   shares 127.0.0.1, so a cap per peer would close their own bursts. */
 #define BLIT_HTTP_HEADER_DEADLINE_US 2000000ULL
 #define BLIT_REQUEST_SIZE 8192
 /* Most arguments, and most environment entries, one session request carries.
@@ -32919,24 +32920,16 @@ static int http_client_pending(const BlitHttpClient *client)
         client->settings_wait == 0 && client->screenshot_output_index == 0;
 }
 
-/* The oldest pending connection, of `peer` alone when `by_peer` is set,
-   or else of the peer holding the most pending connections, so that a peer
-   that floods gives up its own; -1 when there is none. *peer_count is how
-   many pending connections `peer` holds. */
-static int http_pending_victim(const BlitRuntime *runtime, uint32_t peer,
-                               int by_peer, int *peer_count)
+/* The oldest pending connection of the peer holding the most pending
+   connections, so that a peer that floods gives up its own; -1 when there
+   is none. */
+static int http_pending_victim(const BlitRuntime *runtime)
 {
     int i, j, victim = -1, victim_count = 0;
-    *peer_count = 0;
-    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
-        if (http_client_pending(&runtime->http_clients[i]) &&
-            runtime->http_clients[i].peer == peer)
-            ++*peer_count;
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
         const BlitHttpClient *client = &runtime->http_clients[i];
         int count = 0;
-        if (!http_client_pending(client) ||
-            (by_peer && client->peer != peer))
+        if (!http_client_pending(client))
             continue;
         for (j = 0; j < BLIT_MAX_HTTP_CLIENTS; ++j)
             if (http_client_pending(&runtime->http_clients[j]) &&
@@ -32952,30 +32945,30 @@ static int http_pending_victim(const BlitRuntime *runtime, uint32_t peer,
     return victim;
 }
 
-/* Room for a new connection from `peer` (SR-17): the peer's oldest pending
-   connection goes when it already holds BLIT_HTTP_PEER_PENDING, and the
-   oldest pending connection of the busiest peer when the table is full. A
-   victim is read once first, so one whose request has already arrived is
-   served, not dropped. */
-static void http_make_room(BlitRuntime *runtime, uint32_t peer)
+/* Room for a new connection (SR-17), made only when every slot is in use:
+   the oldest pending connection of the busiest peer gives up its slot. It
+   is read once first, so one whose request has already arrived is served,
+   not dropped; one still pending is answered 503 http_capacity and closed.
+   Nothing is closed while a slot is free, so a burst of local clients that
+   have connected and not yet written loses nothing. */
+static void http_make_room(BlitRuntime *runtime)
 {
     int attempts;
     for (attempts = 0; attempts < BLIT_MAX_HTTP_CLIENTS; ++attempts) {
-        int i, free_slot = 0, peer_count, victim;
+        int i, victim;
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
             if (!runtime->http_clients[i].used)
-                free_slot = 1;
-        victim = http_pending_victim(runtime, peer, 1, &peer_count);
-        if (peer_count < BLIT_HTTP_PEER_PENDING) {
-            if (free_slot)
                 return;
-            victim = http_pending_victim(runtime, peer, 0, &peer_count);
-        }
+        victim = http_pending_victim(runtime);
         if (victim < 0)
             return;
         service_http_client(runtime, victim);
-        if (http_client_pending(&runtime->http_clients[victim]))
+        if (http_client_pending(&runtime->http_clients[victim])) {
+            send_problem_unauthenticated(runtime->http_clients[victim].fd, 503,
+                                         "Service Unavailable", "http_capacity",
+                                         "The HTTP connection limit has been reached.");
             remove_http_client(runtime, victim);
+        }
     }
 }
 
@@ -33006,7 +32999,7 @@ static int accept_http_clients(BlitRuntime *runtime, int server_fd)
         }
         peer = peer_address.sin_family == AF_INET ?
             peer_address.sin_addr.s_addr : 0;
-        http_make_room(runtime, peer);
+        http_make_room(runtime);
         index = add_http_client(runtime, fd, peer);
         if (index < 0) {
             /* Every slot is serving a request. */

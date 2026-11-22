@@ -686,23 +686,53 @@ session and the display for seconds.
 header block is whole and authorized, and a request is authorized (or
 answered 401) as soon as it is, so a declared body never holds a slot for a
 caller without the token. A pending connection has 2 s to send its header
-block (5 s for the whole request, as before); one peer address holds at most
-8 pending connections (a ninth closes its oldest); and when all 32 are in use
-a new connection takes the slot of the oldest pending one of the busiest
-peer, read once first so a request already sent is served. Nothing being
-served -- a request being read after its headers, an upload or install, a
-parked settings write or screenshot, an answer being written -- is given up.
-Frame socket: a connection that has not said a valid hello is closed after
-2 s; one uid holds at most 8 of them; a full table closes the oldest of the
-busiest uid's, never a client that said its hello. http_slots_gate.rb (from
-network_auth_gate.sh): an idle connection is closed after 2.0 s (was 5.0 s);
-with 32 idle connections from one peer, 25 are closed at once (was 0) and an
-authenticated request is answered 200 in 1 ms (was 503 `http_capacity`); a
-header block without the token, its 4000-byte body never sent, is answered
-401 in 1 ms (was no answer, dropped after 5 s). frame_descriptor_gate: with
-32 silent connections the session's hello is answered `OK` (the server
-before this change reset it), at least 24 of the 32 are closed at once and
-the rest by the 2 s deadline.
+block (5 s for the whole request, as before). When all 32 are in use, a new
+connection takes the slot of the oldest pending one of the peer holding the
+most, read once first so a request already sent is served (one still
+pending is answered 503 `http_capacity`); a new connection is refused 503
+only when 32 requests are being served. Nothing being served -- a request
+being read after its headers, an upload or install, a parked settings write
+or screenshot, an answer being written -- is given up. Frame socket: a
+connection that has not said a valid hello is closed after 2 s, and a full
+table closes the oldest of the busiest uid's, never a client that said its
+hello. On both, nothing is closed while a slot is free.
+
+The first version of this fix also capped one peer address at 8 pending
+connections (a ninth closed its oldest, read once) and one uid at 8 silent
+frame connections, whether or not the table was full. It was withdrawn
+before 0.3.135 was released. Every local client -- Hibr's desktop and
+panes, tools, update-live.sh through an SSH tunnel -- is 127.0.0.1 (and
+every session one uid), so the cap closed their own bursts unanswered while
+slots were free: 20 concurrent authorized GETs from 127.0.0.1 lost 29 of
+400 (40 concurrent, 129 of 800; with a 20 ms pause between connect and
+write, as through a tunnel, 60 of 100), where the server before SR-17 and
+the server now lose none (a burst of 40 past the 32 slots loses about as
+many to 503 on both: 179 and 189 of 1200). The cap added no protection the
+full-table rule lacks: a peer that floods is the busiest, so it gives up its
+own connections. Neither guards against idle connections spread over many
+addresses (any local user can bind 127.0.0.2, 127.0.0.3, ...): one each,
+and a local client with two pending connections is the busiest; the 2 s
+header deadline bounds what that costs.
+
+http_slots_gate.rb (from network_auth_gate.sh): an idle connection is closed
+after 2.0 s (was 5.0 s); with 32 idle connections from one peer an
+authenticated request is answered 200 in 1 ms (was 503 `http_capacity`), by
+closing exactly 1 of them, the rest at the 2 s deadline; a header block
+without the token, its 4000-byte body never sent, is answered 401 in 1 ms
+(was no answer, dropped after 5 s); 16 connections from 127.0.0.1 accepted
+before any wrote are all served (the 8-per-peer cap closed 8); with 20 idle
+connections from 127.0.0.2 and 12 pending from 127.0.0.1 filling the table,
+one more request from 127.0.0.1 and all 12 are served and 1 of 127.0.0.2's
+is closed (the cap: 5 of the 12 lost). surface_damage_gate's
+http_accept_budget_gate asserts the same rules on the accept path: a burst
+of 11 from one address is kept whole, the table fills across three
+addresses, newcomers take the busiest peer's oldest pending slots (503 to
+those), a victim whose request has arrived is served, and only a table of
+requests being read refuses a newcomer 503. frame_descriptor_gate: with 32
+silent connections the session's hello is answered `OK` (the server before
+this change reset it), by closing 1 of the 32, and the rest go by the 2 s
+deadline; 12 connections accepted before any says its hello are all
+answered `OK` (the cap closed 4).
 
 - HTTP: 32 slots (`src/blit_server.c:94`). When they are full, a new
   connection gets 503 `http_capacity` (32034-32036). An idle client is

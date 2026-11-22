@@ -111,13 +111,80 @@ static void utf8_large_pty_read_gate(void)
     close(fds[0]); close(fds[1]); free(runtime);
 }
 
+/* A loopback client of `server` from 127.0.0.<host> (all of 127/8 is
+   loopback on Linux), so the table can hold several peers. */
+static int http_gate_client(const struct sockaddr_in *server, socklen_t length, int host)
+{
+    struct sockaddr_in local;
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&local, 0, sizeof(local));
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(0x7f000000U | (unsigned)host);
+    if (fd < 0 || bind(fd, (struct sockaddr *)&local, sizeof(local)) < 0 ||
+        connect(fd, (const struct sockaddr *)server, length) < 0) exit(2);
+    return fd;
+}
+
+/* What a client sees within wait_ms: 1 when the server has closed the
+   connection, 0 while it is open; whatever was answered first is in
+   `answer`. Seen from the client, so the same gate reads any server. */
+static int http_gate_closed(int fd, int wait_ms, char *answer, size_t capacity)
+{
+    size_t got = 0;
+    answer[0] = '\0';
+    for (;;) {
+        struct pollfd ready = {fd, POLLIN, 0};
+        char spill[512];
+        ssize_t received;
+        if (poll(&ready, 1, wait_ms) <= 0) return 0;
+        if (got + 1 < capacity)
+            received = recv(fd, answer + got, capacity - 1 - got, MSG_DONTWAIT);
+        else
+            received = recv(fd, spill, sizeof(spill), MSG_DONTWAIT);
+        if (received == 0) return 1;
+        if (received < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) continue;
+            return 1;
+        }
+        if (got + 1 < capacity) { got += (size_t)received; answer[got] = '\0'; }
+    }
+}
+
+static int http_gate_used(const BlitRuntime *runtime)
+{
+    int i, used = 0;
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (runtime->http_clients[i].used) ++used;
+    return used;
+}
+
+/* HTTP admission (security review SR-17), the client side of each rule:
+   - a turn accepts at most BLIT_HTTP_ACCEPT_BUDGET and leaves the render
+     deadline alone; the rest are taken on the next turns, none lost;
+   - nothing is closed while a slot is free, however many pending
+     connections one address holds (every local client is 127.0.0.1);
+   - the table fills to BLIT_MAX_HTTP_CLIENTS across peers, each accepted
+     descriptor close-on-exec and nonblocking;
+   - a full table gives a newcomer the slot of the busiest peer's oldest
+     pending connection, answered 503 http_capacity, and closes nothing else;
+   - that victim is read once first, so a request it has already sent is
+     served, not dropped;
+   - only when every slot is serving a request is the newcomer refused 503
+     http_capacity. */
 static void http_accept_budget_gate(void)
 {
+    enum { FIRST_WAVE = BLIT_HTTP_ACCEPT_BUDGET + 3, LOCAL = 20, OTHER = 6, NEWCOMERS = 5 };
+    static const char version_request[] =
+        "GET /v1/version HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+    static const char unfinished_request[] =
+        "POST /v1/terminal-sessions HTTP/1.1\r\nHost: localhost\r\n"
+        "Content-Type: application/json\r\nContent-Length: 64\r\n\r\n";
     BlitRuntime *runtime = calloc(1, sizeof(*runtime));
     struct sockaddr_in address;
     socklen_t length = sizeof(address);
-    int listener, clients[BLIT_MAX_HTTP_CLIENTS + 5];
-    int i, used, first_wave = BLIT_HTTP_ACCEPT_BUDGET + 3;
+    int listener, clients[BLIT_MAX_HTTP_CLIENTS], newcomers[NEWCOMERS + 1];
+    int i, used, wrong;
+    char answer[1024];
     if (!runtime) exit(2);
     listener = socket(AF_INET, SOCK_STREAM, 0);
     memset(&address, 0, sizeof(address));
@@ -129,13 +196,12 @@ static void http_accept_budget_gate(void)
         getsockname(listener, (struct sockaddr *)&address, &length) < 0) exit(2);
     runtime->render_pending = 1;
     runtime->render_next_us[0] = 12345;
-    for (i = 0; i < first_wave; ++i) {
-        clients[i] = socket(AF_INET, SOCK_STREAM, 0);
-        if (clients[i] < 0 || connect(clients[i], (struct sockaddr *)&address, length) < 0) exit(2);
-    }
+
+    /* 1. One address connects BUDGET + 3 times and sends nothing yet. */
+    for (i = 0; i < FIRST_WAVE; ++i)
+        clients[i] = http_gate_client(&address, length, 1);
     if (!accept_http_clients(runtime, listener)) exit(2);
-    for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
-        if (runtime->http_clients[i].used) ++used;
+    used = http_gate_used(runtime);
     if (used != BLIT_HTTP_ACCEPT_BUDGET || !runtime->render_pending ||
         runtime->render_next_us[0] != 12345) {
         fprintf(stderr, "HTTP_ACCEPT_LIMIT_FAIL first_turn=%d budget=%d render_deadline=%llu\n",
@@ -143,14 +209,23 @@ static void http_accept_budget_gate(void)
         ++failures;
     }
     if (!accept_http_clients(runtime, listener) || !accept_http_clients(runtime, listener)) exit(2);
-    for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
-        if (runtime->http_clients[i].used) ++used;
-    if (used != first_wave) { fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL finite drain\n"); ++failures; }
-    for (i = first_wave; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) {
-        clients[i] = socket(AF_INET, SOCK_STREAM, 0);
-        if (clients[i] < 0 || connect(clients[i], (struct sockaddr *)&address, length) < 0) exit(2);
+    used = http_gate_used(runtime);
+    for (wrong = i = 0; i < FIRST_WAVE; ++i)
+        if (http_gate_closed(clients[i], 0, answer, sizeof(answer))) ++wrong;
+    if (used != FIRST_WAVE || wrong) {
+        fprintf(stderr, "HTTP_ACCEPT_LIMIT_FAIL finite drain: %d of %d pending connections from one "
+                "address kept, %d closed with free slots\n", used, FIRST_WAVE, wrong);
+        ++failures;
     }
-    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+
+    /* 2. The table fills across three addresses: 127.0.0.1 the busiest. */
+    for (i = FIRST_WAVE; i < LOCAL; ++i)
+        clients[i] = http_gate_client(&address, length, 1);
+    for (i = LOCAL; i < LOCAL + OTHER; ++i)
+        clients[i] = http_gate_client(&address, length, 2);
+    for (i = LOCAL + OTHER; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        clients[i] = http_gate_client(&address, length, 3);
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS / BLIT_HTTP_ACCEPT_BUDGET + 1; ++i)
         if (!accept_http_clients(runtime, listener)) exit(2);
     for (used = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
         if (runtime->http_clients[i].used) {
@@ -164,19 +239,95 @@ static void http_accept_budget_gate(void)
                 fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL accepted descriptor can block\n"); ++failures;
             }
         }
-    if (used != BLIT_MAX_HTTP_CLIENTS) { fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL capacity=%d\n",used); ++failures; }
-    for (i = BLIT_MAX_HTTP_CLIENTS; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) {
-        char response[256];
-        struct timeval timeout = {1,0};
-        ssize_t received;
-        setsockopt(clients[i],SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
-        received = recv(clients[i],response,sizeof(response),0);
-        if (received < 12 || strncmp(response,"HTTP/1.1 503",12) != 0) {
-            fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL overflow not rejected\n"); ++failures;
-        }
+    for (wrong = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (http_gate_closed(clients[i], 0, answer, sizeof(answer))) ++wrong;
+    if (used != BLIT_MAX_HTTP_CLIENTS || wrong) {
+        fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL capacity=%d of %d, %d closed\n",
+                used, BLIT_MAX_HTTP_CLIENTS, wrong);
+        ++failures;
     }
-    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS + 5; ++i) close(clients[i]);
+
+    /* 3. A full table: newcomers from a fourth address each take the slot
+       of 127.0.0.1's oldest pending connection, which is answered 503. */
+    for (i = 0; i < NEWCOMERS; ++i)
+        newcomers[i] = http_gate_client(&address, length, 9);
+    if (!accept_http_clients(runtime, listener) || !accept_http_clients(runtime, listener)) exit(2);
+    for (i = 0; i < NEWCOMERS; ++i)
+        if (http_gate_closed(newcomers[i], 20, answer, sizeof(answer)) || answer[0]) {
+            fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL overflow: newcomer %d refused for a pending "
+                    "connection (%.12s)\n", i, answer);
+            ++failures;
+        }
+    for (i = 0; i < NEWCOMERS; ++i)
+        if (!http_gate_closed(clients[i], 200, answer, sizeof(answer)) ||
+            strncmp(answer, "HTTP/1.1 503", 12) != 0 || !strstr(answer, "http_capacity")) {
+            fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL overflow: the busiest peer's oldest pending "
+                    "connection %d kept its slot or was not answered 503 http_capacity\n", i);
+            ++failures;
+        }
+    for (wrong = 0, i = NEWCOMERS; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (http_gate_closed(clients[i], 0, answer, sizeof(answer))) ++wrong;
+    used = http_gate_used(runtime);
+    if (wrong || used != BLIT_MAX_HTTP_CLIENTS || !runtime->render_pending ||
+        runtime->render_next_us[0] != 12345) {
+        fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL overflow: %d other connections closed, used=%d, "
+                "render_deadline=%llu\n", wrong, used, (unsigned long long)runtime->render_next_us[0]);
+        ++failures;
+    }
+
+    /* 4. The next victim has sent its whole request since its accept: it
+       is read before it is given up, so it is served, and the newcomer
+       still takes its slot. */
+    if (send(clients[NEWCOMERS], version_request, sizeof(version_request) - 1, MSG_NOSIGNAL) !=
+        (ssize_t)sizeof(version_request) - 1) exit(2);
+    newcomers[NEWCOMERS] = http_gate_client(&address, length, 9);
+    if (!accept_http_clients(runtime, listener)) exit(2);
+    if (!http_gate_closed(clients[NEWCOMERS], 200, answer, sizeof(answer)) ||
+        strncmp(answer, "HTTP/1.1 200", 12) != 0) {
+        fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL read-once: a victim's request that had arrived "
+                "was answered %.12s, not served\n", answer[0] ? answer : "nothing");
+        ++failures;
+    }
+    if (http_gate_closed(newcomers[NEWCOMERS], 20, answer, sizeof(answer)) || answer[0] ||
+        http_gate_closed(clients[NEWCOMERS + 1], 0, answer, sizeof(answer)) ||
+        http_gate_used(runtime) != BLIT_MAX_HTTP_CLIENTS) {
+        fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL read-once: the newcomer was refused or another "
+                "connection was given up\n");
+        ++failures;
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) close(clients[i]);
+    for (i = 0; i <= NEWCOMERS; ++i) close(newcomers[i]);
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) remove_http_client(runtime,i);
+
+    /* 5. Every slot holds a request being read (its header block whole,
+       its body to come): nothing is evictable, and the newcomer is refused
+       503 http_capacity. */
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        clients[i] = http_gate_client(&address, length, 1 + i % 3);
+        if (send(clients[i], unfinished_request, sizeof(unfinished_request) - 1, MSG_NOSIGNAL) !=
+            (ssize_t)sizeof(unfinished_request) - 1) exit(2);
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS / BLIT_HTTP_ACCEPT_BUDGET + 1; ++i)
+        if (!accept_http_clients(runtime, listener)) exit(2);
+    newcomers[0] = http_gate_client(&address, length, 9);
+    if (!accept_http_clients(runtime, listener)) exit(2);
+    if (!http_gate_closed(newcomers[0], 200, answer, sizeof(answer)) ||
+        strncmp(answer, "HTTP/1.1 503", 12) != 0 || !strstr(answer, "http_capacity")) {
+        fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL served table: the newcomer was answered %.12s, "
+                "not 503 http_capacity\n", answer[0] ? answer : "nothing");
+        ++failures;
+    }
+    for (wrong = i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (http_gate_closed(clients[i], 0, answer, sizeof(answer))) ++wrong;
+    if (wrong || http_gate_used(runtime) != BLIT_MAX_HTTP_CLIENTS) {
+        fprintf(stderr,"HTTP_ACCEPT_LIMIT_FAIL served table: %d requests being read were given up\n",
+                wrong);
+        ++failures;
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) close(clients[i]);
+    close(newcomers[0]);
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) remove_http_client(runtime,i);
+
     {
         static const char request[] = "GET /v1/version HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
         char response[256];
