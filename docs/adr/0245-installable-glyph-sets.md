@@ -1,17 +1,23 @@
 # ADR 0245: Installable glyph sets -- a root-owned store, a ledger of codepoints, per-user views
 
 - Status: proposed
-- Date: 2026-11-22
+- Date: 2026-11-22; revised the same day with the owner's answers to its
+  three open questions (hibr's proposal, approved by the owner 2026-11-22;
+  "Decided (2026-11-22)" below)
 - Scope: the font registry's set level (`assets/fonts/fonts.source.json`,
   `src/blit_glyph_sets.h`), the raster's glyph stack (`src/blit_raster.c`),
   `/v1/fonts` and `/v1/fonts/sets`, the frame socket (ADR 0202), the Glyph
-  Protocol's `q` answers (`src/blit_server.c`), a new import worker, a new
-  root-owned store under `/var/lib/blit`, packaging (a system user, a
-  pinned catalogue key, a possible `gpgv` dependency), and two clients
-  outside Blit: a "Blit Glyphs" Control Panel pane and a `glyphs` kind in
-  the hibr-apps catalogue. Extends [ADR 0243](0243-glyph-multiplexing.md)
-  (one registry, sets and names); follows [ADR 0232](0232-an-update-installs-blit-and-its-compositor-together.md)'s
-  amendments on how root handles files it is handed (SR-2, SR-10).
+  Protocol's `q` answers (`src/blit_server.c`), the release signature code
+  (`src/blit_release_signature.h`) and its signing tool
+  (`tools/release/blit-sign.c`), a new root-owned store under
+  `/var/lib/blit`, a setting naming root-owned directories of system sets,
+  and clients outside Blit: a "Blit Glyphs" Control Panel pane, a `glyphs`
+  kind in the hibr-apps catalogue, and hold's attaching clients, which
+  import a user's sets into each display's Blit. Extends
+  [ADR 0243](0243-glyph-multiplexing.md) (one registry, sets and names);
+  follows [ADR 0232](0232-an-update-installs-blit-and-its-compositor-together.md)'s
+  amendments on Blit's release key (SR-2) and on how root handles files it
+  is handed (SR-10).
 
 ## Context
 
@@ -44,13 +50,25 @@ What exists (ADR 0243, built through 0.3.134):
   and terminal identity; §9: no set places a glyph in the Glyph Protocol's
   registration block, U+100000-U+1003FF.
 - **The server is root** and parses fonts with FreeType and HarfBuzz in
-  process. An API bearer token is a root shell today (SR-9, the accepted
-  LAN-testing exception); since 0.3.135 a session run as another user gets
-  no API token, only its session's frame-socket credential, which only its
-  own uid can use (SR-8, ADR 0202).
+  process: the faces its package ships and the administrator's own text
+  fonts, both in root-owned directories. An API bearer token is a root
+  shell today (SR-9, the accepted LAN-testing exception); since 0.3.135 a
+  session run as another user gets no API token, only its session's
+  frame-socket credential, which only its own uid can use (SR-8, ADR 0202).
+- **Release signatures** (since 0.3.133, SR-2). The update helper installs
+  only a release whose statement -- `blit-release-signature 1`, then a
+  line per package -- verifies as Ed25519 (RFC 8032, Monocypher, vendored)
+  under one of `/usr/lib/blit/release-keys/*.pub`; the package that ships
+  every face is signed by that key. Removing a key file revokes it.
+  `src/blit_release_signature.h` holds the one statement, key format and
+  verifier.
+- **Displays.** A held Hibr desktop has one Blit session per display, and a
+  display may be another machine's Blit. Hibr's console sends pictures
+  through the frame socket unheld, and through hold to each attaching
+  client held (ADR 0202).
 
 Measured (2026-11-22, from `assets/fonts/nerd-glyphnames-v3.4.0.json` and
-`icons/catalogue.json`):
+`assets/fonts/icons/catalogue.json`):
 
 | Range | Drawn by Blit today |
 | --- | --- |
@@ -73,14 +91,31 @@ stack at its own codepoints".
    sets: `/v1/fonts` re-reads folders on every request, so a user-writable
    live path hands root's FreeType any file a user drops, at a time the
    user chooses, by a path the user can swap; and nothing would allocate
-   codepoints.
+   codepoints. (The system sources of section 2 are not this: root-owned,
+   read only by the import, copied and verified before anything is parsed,
+   never drawn from.)
 2. **Add an installed face to the stack at the font's own codepoints.**
    Refused: the table above. Every popular icon font collides with Nerd.
 3. **Rewrite the font's cmap to Blit's codepoints.** Refused: a modified
    font is a derivative (the OFL's Reserved Font Name rule; other licences
-   differ), and root would still parse the original.
-4. **Blit allocates codepoints, root never parses a font, sets keep their
-   owner's scope.** Taken (below).
+   differ). A remap table outside the font (section 6) reaches the same
+   glyphs with the font unmodified.
+4. **Root never parses an installed font** (this record's first draft):
+   a sandboxed worker (`blit-glyph-worker`, a `blit-glyphs` system user,
+   seccomp, a network namespace) extracts outlines in a new
+   `blit-glyph-outlines` format that root validates and draws, and the
+   catalogue's OpenPGP index signature is checked with `gpgv` under a
+   catalogue key Blit pins. Superseded (the owner, 2026-11-22): Blit's
+   first sandbox, a second binary, a system user in three package formats,
+   an outline format with its own validator and fuzzing, a new dependency
+   and a second key to pin -- all to keep root from parsing fonts that,
+   once signed by Blit's own key, are as trusted as the faces it ships.
+5. **A catalogue Ed25519 key pinned in Blit** (`index.json.sig`).
+   Refused: a second key set to pin, rotate and revoke, and root would
+   parse what the catalogue's publisher vouches for, not Blit's.
+6. **Blit allocates codepoints, sets keep their owner's scope, and root
+   loads a set only when Blit's release key signed it** (or the
+   administrator imported it as their own act). Taken (below).
 
 ## Decision
 
@@ -118,7 +153,8 @@ yourself must not break Hibr's user and system scopes. So:
 | --- | --- | --- | --- |
 | Shipped, `/usr/lib/blit/fonts` | every face in the registry, the names files | the package | fonts (as today) |
 | Local, `/usr/local/lib/blit/fonts` | the administrator's own text fonts, in `text/` (as today) | root, by hand | fonts (as today) |
-| Installed, `/var/lib/blit/glyphs` | installed glyph sets: `system/<set>/` and `users/<uid>/<set>/`, plus `ledger` | **only** Blit's import (section 5) | outlines in Blit's own format (section 6), never a font |
+| Installed, `/var/lib/blit/glyphs` | installed glyph sets: `system/<set>/` and `users/<uid>/<set>/`, each the parts as imported plus Blit's `record.json`; and `ledger` | **only** Blit's import (section 5) | fonts, each loaded only after its signature and hashes verify on the bytes read (sections 6, 7) |
+| System sources, `glyph_system_dirs` (default `/var/lib/hibr/glyphs`) | signed sets for every session, one `<name>/` each | root (the catalogue's system-scope install, or the administrator) | sources only: copied into the store by the import (section 5), never drawn from, never read per request |
 
 - The store is `root:root 0700`, its parts `0600`. The server refuses to
   use it (and says why in the diagnostics log; the shipped sets are still
@@ -128,7 +164,15 @@ yourself must not break Hibr's user and system scopes. So:
   `src/blit_update_helper.c`, extended to every parent. It is a
   sibling of `/var/lib/blit/updates`, which is `root:blit 0770` and must
   never be its parent (SR-3, SR-10).
-- **Local holds no glyph sets.** One way in means one writer of the ledger
+- **System sources.** `glyph_system_dirs` is a list (empty turns it off);
+  Blit's code names no Hibr path, only this default. Each directory and
+  every parent must pass the same ownership check, or it is skipped and
+  the diagnostics log says why. Only signed sets are taken from it (an
+  `own` set comes only over HTTP). It is read at start and on a rescan
+  (section 5), never per request and never at draw time; a set in it is
+  copied into staging and verified before any of it is parsed, so a
+  half-copied set fails its hashes and is taken at the next rescan.
+- **Local holds no glyph sets.** One import means one writer of the ledger
   and one validator; a folder re-read on every request would also see a
   half-copied set. An administrator installs their own set with the
   import, as `system` (section 5, origin `own`).
@@ -202,9 +246,11 @@ yourself must not break Hibr's user and system scopes. So:
 
 - **Owner token `x`**, registered in glyph sets §3.1's table when this is
   built: "a set installed on this terminal; always terminal-local".
-  Installed set ids are `x-<name>`, `<name>` the catalogue entry's name
-  (`glyphs/<name>`) or the importer's choice, 1-30 octets of the set-id
-  grammar (`x-` plus at most 30 is the 32-octet cap). An `x-` id can never
+  Installed set ids are `x-<name>`, 1-30 octets of the set-id grammar (`x-`
+  plus at most 30 is the 32-octet cap): for a signed set, the `<name>` its
+  signed manifest states (section 7), which is the catalogue entry's
+  (`glyphs/<name>`), so a signed set installs under one id only; for an
+  `own` set, the administrator's choice. An `x-` id can never
   equal `blit`, `nerd-*`, `emoji` or any owner registered later, because
   owners are the table's rows and `x` is one. An installed set is always
   `terminal-local`, even when it repackages a portable set: its codepoints
@@ -217,11 +263,12 @@ yourself must not break Hibr's user and system scopes. So:
   sets stay compiled in; installed ones become a run-time array beside
   them (bounded: 64 sets per scope, 1,024 in all), and the table is
   rebuilt -- off the render path, swapped in whole -- at start and after
-  an import or removal. Each installed set's manifest in the store uses
-  the **same schema** as a registry `sets` entry
-  (`{owner: "x", scope: "terminal-local", faces, names: {file, format},
-  version, retired_names}`) plus `install` (section 8), so one reader
-  serves both.
+  an import or removal. Each installed set's record in the store
+  (`record.json`; not the signed manifest of section 7) uses the **same
+  schema** as a registry `sets` entry (`{owner: "x", scope:
+  "terminal-local", faces, names: {file, format}, version,
+  retired_names}`) plus `install` (section 8) and the parts' SHA-256 as
+  imported, so one reader serves both.
 - **The same checks.** The loader's refusals -- a name outside the
   grammar, a duplicate, a codepoint in the registration block, a file over
   `BLIT_GLYPH_FILE_MAX` -- are the import's refusals, by the same function;
@@ -230,11 +277,12 @@ yourself must not break Hibr's user and system scopes. So:
 - **Names file format `blit-glyph-names`** (JSON, at most 4 MiB): the
   publisher's `release`, and `glyphs`, each name mapped to the font's own
   codepoint (`"house": {"code": "f015"}`), with optional `aliases`,
-  `deprecated` (with `replaced_by`). Every glyph is one cell, drawn fitted
-  as Nerd's are. A glyph across several cells is step 5 of ADR 0243 (OSC
-  66 scales any codepoint without spending one per cell), not tiles: tiles
-  would spend a ledger codepoint per cell and need a slicing rule per
-  glyph.
+  `deprecated` (with `replaced_by`). `code` is how the remap table
+  (section 6) reaches the font's glyph; it is never a codepoint Blit
+  draws. Every glyph is one cell, drawn fitted as Nerd's are. A glyph
+  across several cells is step 5 of ADR 0243 (OSC 66 scales any codepoint
+  without spending one per cell), not tiles: tiles would spend a ledger
+  codepoint per cell and need a slicing rule per glyph.
 
 ### 5. Installing is a Blit API; Blit never depends on Hibr
 
@@ -242,164 +290,242 @@ yourself must not break Hibr's user and system scopes. So:
   catalogue URL. ADR 0232 refused a network fetch as root (its option 2),
   Blit has no HTTP client or TLS, and the catalogue already fetched,
   verified and placed the files as their owner. Blit verifies again
-  itself, on its own copy.
-- **Two transports, two identities.**
+  itself, on its own copy, under its own key (section 7).
+- **Three ways in, one import.**
   - **HTTP, the bearer token.** `PUT`/`DELETE /v1/fonts/glyphs/system/{set}`,
     and, as an administrator's act, `/v1/fonts/glyphs/users/{uid}/{set}`.
     The bearer token is root's (SR-9), so it may act for any scope; it
     names no user. A body carries its parts in order, framed by one header
     as `PUT /v1/control/update` frames its packages:
-    `X-Blit-Glyph-Parts: index=<length>:<sha256> signature=... names=...
-    font=... licence=...`, summing to `Content-Length`.
+    `X-Blit-Glyph-Parts: manifest=<length>:<sha256> signature=...
+    names=... font=... licence=...`, summing to `Content-Length`; an `own`
+    set (section 6) has no `manifest` or `signature`. The header's hashes
+    check the transport; the trust check is the signed manifest's.
   - **The frame socket, the session's uid.** A session's own channel
     (ADR 0202; `SO_PEERCRED` and the session's frame credential) gains a
-    `GLYPHS` request: `import <set>` with the parts passed as open
-    descriptors (`SCM_RIGHTS`), `remove <set>`, and the session's own
-    reads (section 8). The uid is the peer's, never a value the request
-    states, and a user-scope import or removal is possible only here (or
-    by the administrator over HTTP). Every program in a session has the
-    channel (`BLIT_FRAME_SOCKET` and `BLIT_FRAME_TOKEN` are in its
-    environment), including sessions run as another user, which hold no
-    API token (SR-8).
-    Blit reads each descriptor once (a regular file, size-capped, never a
-    path) into its own copy.
+    `GLYPHS` request: `import <set>` with the parts passed as memfds
+    (`SCM_RIGHTS`), sealed against shrinking, growing and writing and read
+    with `pread` as ADR 0202's frames are; `remove <set>`; `rescan`; and
+    the session's own reads (section 8). The uid is the peer's, never a
+    value the request states. Here only signed sets, only into the peer's
+    own uid's scope. Any holder of the session's frame credential may ask
+    (including sessions run as another user, which hold no API token,
+    SR-8); that only hold's clients and the console do is Hibr's rule
+    (hibr's ADR 0050), not a check Blit makes, and needs none: a caller
+    can import only what Blit's key signed, only for itself, within its
+    quota.
+  - **System sources, Blit itself.** As root, from `glyph_system_dirs`
+    (section 2), at start and on a rescan: a frame-socket `GLYPHS rescan`
+    from any session, or `POST /v1/fonts/glyphs/rescan`; one at a time,
+    requests during one folded into one more after it. Per `<name>/`: a
+    set whose manifest bytes equal the stored one's is unchanged and
+    skipped; a new or changed one is imported as `system` with
+    `install.via: "dir"`; a `dir` set whose directory is gone from a source
+    that was read is uninstalled (section 9). A source that fails the
+    ownership check, cannot be read or is taken out of the setting
+    uninstalls nothing; its sets stay until the administrator removes them. A set imported over HTTP (`via: "http"`) is
+    never replaced or removed by a rescan; a source with its id is skipped
+    and logged.
 - **Copy, verify, then parse, one object.** Every part is copied into a
   root-owned `0700` staging directory inside the store (same filesystem,
   so the final step is a `rename`), each by one read, never by the
   caller's path (as `copy_staged` in `src/blit_update_helper.c` does since
-  SR-10). The signature and hashes are checked on the copy; the copy is
-  what the worker extracts (section 6); the extracted outlines are what
-  root validates and moves into `system/<set>/` or `users/<uid>/<set>/`.
-  Nothing is visible to any view until the ledger record is durable and
-  the rename is done; a failure removes the staging copy and changes
-  nothing.
+  SR-10). The signature and hashes are checked on the copy (section 7);
+  only then is the names file parsed and the font opened (section 6), from
+  the same bytes; the set is moved into `system/<set>/` or
+  `users/<uid>/<set>/`. Nothing is visible to any view until the ledger
+  record is durable and the rename is done; a failure removes the staging
+  copy and changes nothing.
 - **Origins.**
-  - **(a) `catalogue`, decided:** the upload carries `index.json`,
-    `index.json.asc` and the entry's files. Blit requires the signature to
-    verify under its own pinned copy of the catalogue key (below), finds
-    the entry `glyphs/<name>` in the index, and requires every part's
-    SHA-256 to equal the entry's (`sha256`, and each `parts[].sha256`, as
-    `mkindex` writes them). Works for either scope: system from HTTP, user
-    from the frame socket.
-  - **(b) `own`, a user's own unsigned font: declined by the owner (2026-11-22)** (below).
-  - **`own` as `system`:** the administrator's own font over HTTP (the
-    token is root anyway); extracted by the worker like a catalogue font,
-    with no signature.
+  - **(a) `catalogue`, decided:** a set signed by Blit's release key
+    (section 7), as the hibr-apps catalogue carries them. Either scope:
+    system from HTTP or the system sources, user from the frame socket (or
+    the administrator over HTTP).
+  - **(b) `own`, a user's own unsigned font: declined by the owner (2026-11-22)** (section 6).
+  - **`own` as `system`:** the administrator's own font, unsigned, over
+    HTTP only, `system` only, reported `verified: false` (section 6).
 - **How Hibr's catalogue fits.** A bundle install only places files
-  (verified, then `mkdir`/`rm`/`mv`) and tells running desktops `rescan`;
-  it runs no install step. User scope places
-  `$XDG_DATA_HOME/hibr/glyphs/<name>/`, system scope
-  `$HIBR_SYSDIR/glyphs/<name>/` (`/var/lib/hibr/glyphs`). On `rescan` (and
-  at start) the pane notices a placed set that Blit lacks or has at another
-  release, and imports it: a user-scope set over the frame socket, a
-  system one over HTTP. Blit learns of nothing by itself and reads none of
-  Hibr's paths.
+  (verified under hibr's own OpenPGP index signature, then
+  `mkdir`/`rm`/`mv`) and tells running desktops `rescan`; it runs no
+  install step. User scope places `$XDG_DATA_HOME/hibr/glyphs/<name>/`,
+  system scope `$HIBR_SYSDIR/glyphs/<name>/` (`/var/lib/hibr/glyphs`,
+  `glyph_system_dirs`' default). Blit learns of nothing by itself: system
+  sets reach it from its configured source on a rescan, user sets through
+  each display's connection (below).
+- **Import through each display's connection (decided, 2026-11-22).**
+  - A held desktop has one Blit session per display, and displays may be
+    remote, so a set imported once into one Blit is missing from the
+    others.
+  - Each of hold's attaching clients (one per display, already holding
+    that session's token on its frame connection) imports the user's sets
+    into its own Blit over that frame connection, the files as sealed
+    memfds, the uid from `SO_PEERCRED`: at attach, and when the desktop
+    relays `rescan` ("glyph sets changed") through hold to every client.
+    It imports what that Blit lacks or holds at another release, removes
+    the sets it imported (`via: "frame"`) that the user no longer has --
+    never one the administrator imported over HTTP -- and sends `GLYPHS rescan` so that Blit
+    re-reads its system sources. An unheld desktop's console does the same
+    over its direct connection.
+  - The frame socket is local (ADR 0202), so each client imports into the
+    Blit on its own machine; how a set's files reach a client on another
+    machine is hold's (hibr's). Blit does not rely on that path: it checks
+    the signature itself.
+  - In hibr's ADR 0050 an app's process never talks to Blit; the desktop
+    is the one place platform events go. So no app and no pane imports.
+  - Each Blit reports, per display, which sets the session's view holds
+    with their versions and codepoints (`GLYPHS sets`, section 8; hibr
+    #609, "the display reports what it can draw"), and the desktop maps
+    glyph ids per display, keyed by set id, version and display as glyph
+    sets §5 requires.
 - **The `glyphs` catalogue kind: decided (the owner, 2026-11-22).** The
   14th kind, `glyphs/<name>`, is approved, though it touches the parked
   epic #561. An entry is a bundle of parts: the names file as the entry's
-  bundle, the font and the licence as `parts`, each with its own
-  `sha256`.
+  bundle; the font, the licence, `glyphs.manifest` and `glyphs.sig` as
+  `parts`, each with its own `sha256` (hibr's index check).
+- **Sets travel with what needs them (decided, 2026-11-22; hibr's side).**
+  An app or a lang that needs a set says `# needs: glyphs/<name>`; the
+  catalogue installs the set with it, marks it `auto` in the catalogue's
+  own install ledger (not Blit's codepoint ledger), and `purge` removes it
+  when nothing installed needs it. Hibr builds this with the kind; Blit
+  sees only the imports and removals that follow.
 
-### 6. Root never parses a font
+### 6. Root loads a signed set as it loads a shipped face
 
-FreeType's TrueType bytecode interpreter, CFF charstrings and table parsers
-are its largest attack surface; HarfBuzz is not needed for glyph sets at
-all (glyphs are drawn per codepoint, not shaped). So an installed set is
-**drawn from outlines in Blit's own format**, rasterised by FreeType's
-outline renderer from an `FT_Outline` Blit builds (`FT_Outline_Render`:
-the smooth rasteriser only, no font loaded), fitted to the cell as Nerd
-glyphs are, unhinted.
-
-- **`blit-glyph-outlines` 1**, the only thing root reads of a glyph:
-  a fixed header (magic, version, units per em at most 16,384, glyph
-  count), then per glyph its name index, advance, bounding box and 1-16
-  layers, each layer a colour (the cell's foreground, or one sRGB value:
-  COLR v0's model) and contours of points tagged as `FT_Outline` tags
-  them -- on-curve, quadratic off-curve (TrueType `glyf`) or cubic
-  off-curve (CFF, as Font Awesome's OTF fonts are) -- in signed 16-bit
-  coordinates within twice the em box. FreeType's outline renderer draws
-  both kinds of curve, so nothing is converted.
-  Bounds checked before use: at most 4,096 points and 512 contours a
-  glyph, 16 MiB a file, every count and offset inside the file, every
-  contour closed and at least three points, nothing after the last glyph.
-  A file that fails any check is refused whole, with the first reason.
-  The validator is small, has no allocation driven by an unchecked count,
-  and is fuzzed (section 11).
-- **Extraction runs in a worker, never in root.** `blit-glyph-worker`, a
-  new small binary (FreeType only), started by the server per import with
-  the copy's descriptor and a pipe:
-  - drops to a dedicated system user `blit-glyphs` (no shell, no home;
-    `adduser --system` in the deb, `sysusers.d` for rpm and Arch), with
-    `setgroups(0)`, `PR_SET_NO_NEW_PRIVS`, no other descriptors, an empty
-    root-owned working directory, a new network namespace where
-    `unshare` allows, and limits: 512 MiB address space, 20 s CPU,
-    no files written (`RLIMIT_FSIZE 0`), no processes;
-  - then a seccomp allow-list (read, write, `mmap`, `munmap`, `mremap`,
-    `brk`, `close`, `fstat`, `lseek`, `futex`, `clock_gettime`,
-    `rt_sigreturn`, `exit_group`), installed after the font is read
-    into memory (`FT_New_Memory_Face`);
-  - takes a single TrueType (`glyf`) or CFF font, and refuses what the
-    format cannot carry, with its reason: a collection (TTC), CFF2, WOFF
-    and WOFF2, a variable font, COLR v1, SVG and bitmap
-    strikes (`sbix`, `CBDT`, `EBDT`) -- each would need a second drawing
-    path -- and a font over 16 MiB or 65,535 glyphs; it extracts each
-    named glyph's outline (`FT_LOAD_NO_SCALE | FT_LOAD_NO_HINTING`, COLR
-    v0 layers where present) and writes `blit-glyph-outlines` to the pipe.
-  - Root trusts nothing it says: the output is validated like a user's
-    (above), and a worker that crashes, overruns a limit or writes junk is
-    a refusal (`glyph_font_rejected`) with nothing changed.
-  - **Cost:** this is Blit's first sandbox. It needs a seccomp filter per
-    architecture (x86-64 and AArch64), a system user in three package
-    formats, a gate that shows a forbidden call kills the worker, and a
-    second binary in the package. The seccomp step may ship in the release
-    after the worker if the filter needs its own review; the user, limits
-    and namespace come with the worker.
-- **What this buys, honestly.** A hostile font reaches FreeType only in
-  an unprivileged, resource-capped process that can write nothing but a
-  pipe; the worst it can do is make that process lie, and a lie is
-  bounded outlines that root checks. Root itself parses JSON (the index,
-  the names, with the bounded reader it already has) and the outline
-  format. The original font stays in the store, unmodified, for its
-  licence and provenance; root never opens it again.
+- **Why that is enough (the owner, 2026-11-22).** A set signed by Blit's
+  release key (section 7) is trusted exactly as the faces Blit ships: the
+  package that carries them is signed by the same key (ADR 0232, SR-2),
+  and root already parses those with FreeType. So root loads a verified
+  set's font with FreeType, in process, as a shipped face. There is no
+  worker, no `blit-glyphs` user, no seccomp filter, no network namespace
+  and no `blit-glyph-outlines` format (option 4, superseded).
+- **The bytes hashed are the bytes parsed.** At import, at start and at
+  each rebuild of the table (section 4), Blit reads each part of a stored
+  set once into memory, verifies on those bytes (section 7, or for `own`
+  the hashes in `record.json`), and hands FreeType that buffer
+  (`FT_New_Memory_Face`), kept as long as the face. Nothing is opened
+  again by path. Loaded fonts stay resident, bounded by the store's limits
+  (section 10).
+- **Re-verified at every start.** Removing a key file from
+  `/usr/lib/blit/release-keys` revokes the sets it signed as it revokes
+  releases: such a set is not loaded, stays in the store, and is reported
+  with `install.state: "refused"` and its reason until it is removed or a
+  copy signed by a current key is imported.
+- **Cheap checks first.** Before FreeType sees a byte: every part's size
+  (section 10), the signature, the hashes, and the names file parsed by
+  the bounded reader (at most 8,192 glyphs). At open, before any glyph is
+  loaded: one face (`num_faces` 1), scalable, at most 65,535 glyphs, and
+  every name's `code` mapped by the cmap. Any failure refuses the set
+  whole with its reason (`glyph_font_rejected`).
+- **Drawn as Nerd glyphs are,** by `draw_fitted_glyph`
+  (`src/blit_raster.c`), fitted to the cell, unchanged: an installed set
+  gets exactly what a shipped face gets from that path and no path of its
+  own.
+- **The remap table: ledger codepoint to the font's glyph.** The face never
+  joins the stack at its own codepoints (the Context's table, option 2).
+  Per set and scope, at import and at each rebuild, off the render path,
+  Blit builds one table from the ledger and the names file: each ledger
+  codepoint, its name, the name's `code`, and the glyph index
+  `FT_Get_Char_Index` gives for that code in the set's face; sorted by
+  codepoint. A name whose `code` has no glyph refuses the set (above). The
+  raster, given a codepoint in U+102000-U+10FFFD that the session's view
+  holds (section 1), finds its entry by binary search and draws that face
+  and glyph index; any other codepoint there is uncovered. The font's own
+  cmap is read, never rewritten (option 3), and the font is drawn only
+  through this table.
+- **`own`: the administrator's unsigned font, accepted as their act.**
+  Over HTTP only, into `system` only, never from the system sources or the
+  frame socket; loaded like a local font after the same limits and
+  checks, reported `verified: false` ("unverified, the administrator's" in
+  the pane). Why this and not a signature:
+  - The bearer token is root (SR-9). Whoever holds it can already place a
+    font in `/usr/local/lib/blit/fonts/text`, which root parses unsigned
+    on every `GET /v1/fonts`; refusing an unsigned set over the same
+    token protects nothing.
+  - Having the administrator sign with a key added to
+    `/usr/lib/blit/release-keys` is refused: that directory is the
+    updater's trust set, and a key in it could sign a Blit release, not
+    only a glyph set. The manifest's label separates signatures, not
+    keys. A separate directory of administrators' keys would be another
+    key set to manage that guards nothing the token does not already
+    grant.
+  - At start an `own` set's parts are checked against the hashes Blit
+    recorded at import; only root can write the store, so this notices a
+    hand-edited store, not an attacker.
 - **(b) The user's own unsigned font: declined (the owner, 2026-11-22).**
   A user installs glyph sets only from the catalogue, signed (case a); an
   administrator may import a set of their own into `system` over the
-  authenticated API (origin `own`, phase 2a). No unprivileged path hands
-  Blit glyph data that nobody signed, so there is no `blit-glyph-extract`
-  command and the only non-root glyph input is a catalogue set. (Written up
-  before the decision: the user's session would have extracted the font
-  itself and handed root outlines.)
+  authenticated API (origin `own`, unverified, above). No unprivileged
+  path hands Blit glyph data that Blit's key did not sign, so there is no
+  `blit-glyph-extract` command and the only non-root glyph input is a
+  signed set. (Written up before the decision: the user's session would
+  have extracted the font itself and handed root outlines.)
 
-### 7. Verifying the catalogue's signature
+### 7. The glyph-set signature: Blit's release key (decided, 2026-11-22)
 
-The hibr-apps index is signed with the hibr-apt repository key, fingerprint
-`A1E3CA788A8FB02052DA22B413035BE1B1674431`, an **RSA-4096 OpenPGP** key
-(checked against the keyring Hibr installs). Monocypher, which Blit vendors
-for its release signatures (SR-2), does Ed25519 only, so Blit cannot verify
-this signature natively.
+- **One key set with releases.** Each `glyphs/<name>` bundle carries
+  `glyphs.manifest` and `glyphs.sig`: a raw Ed25519 signature (RFC 8032,
+  Monocypher, `src/blit_release_signature.h`; no OpenPGP) by one
+  of Blit's release keys, the set `/usr/lib/blit/release-keys/*.pub` the
+  updater uses (ADR 0232's amendment for SR-2), over the manifest's exact
+  bytes. No `gpgv`, no new `Depends`, no OpenPGP parser, no catalogue key
+  pinned in Blit.
+- **The manifest**, exactly:
 
-- **As things are: `gpgv`.** Blit packages its own copy of the public key
-  (`/usr/lib/blit/catalogue-keys/hibr-apps.gpg`, root, `0644`; Blit never
-  reads Hibr's keyring) and runs `gpgv --status-fd 1 --keyring <that>
-  index.json.asc index.json` **inside the worker's sandbox** (the same
-  user, limits and namespace; `gpgv` is exec'd after the drop, so no
-  seccomp), on the staging copies passed as descriptors. Root requires
-  exactly one `VALIDSIG` whose primary-key fingerprint is the pinned one,
-  and no `BADSIG`, `ERRSIG`, `EXPKEYSIG` or `REVKEYSIG`; then hashes every
-  part itself. A `gpgv` an attacker's signature exploited can at most
-  claim "valid" for an unsigned font, which then meets the same worker,
-  limits and outline checks. `gpgv` becomes a dependency (deb `gpgv`,
-  which apt already depends on; rpm `gnupg2`; Arch `gnupg`).
-- **Cleaner: a signature Blit verifies natively.** If the catalogue's
-  index also carried a detached raw Ed25519 signature
-  (`index.json.sig`, 64 bytes, over the same bytes) under a key Blit pins,
-  root would verify it with the Monocypher code that already verifies
-  releases: no subprocess, no OpenPGP parser, no new dependency. That is
-  hibr's to add (open question 2); until then, `gpgv` as above.
-- **What the signature buys.** Not privilege -- a bearer token is root
-  anyway (SR-9). It buys provenance (the pane says "verified, catalogue")
-  and, for user scope, that only fonts the catalogue's publisher signed
-  ever reach the worker from an unprivileged caller.
+  ```text
+  blit-glyph-set-signature 1
+  set <name> <version>
+  font <sha256>
+  names <sha256>
+  licence <sha256>
+  ```
+
+  - Five lines in this order, each ending in one LF, nothing before or
+    after; at most 512 bytes.
+  - `<name>`: 1-30 octets of the set-id grammar, the set's id without
+    `x-`. It must be the set being imported: the request's `{set}` or
+    `<set>` without `x-`, or the system source's directory name.
+  - `<version>`: the publisher's release, in the grammar the release
+    statement's versions use (`blit_release_version_valid`: a digit
+    first, then `0-9 A-Z a-z . + ~ - :`, at most 127 characters). It must
+    equal the names file's `release`, checked once that file is parsed
+    (`glyph_names_invalid` otherwise), so `release` follows the same rule:
+    a publisher's tag such as Nerd's `v3.4.0` is written `3.4.0`.
+  - `<sha256>`: 64 lowercase hex digits, the SHA-256 of that part's bytes.
+  - **Domain separation.** The first line is the manifest's own label,
+    distinct from the release statement's `blit-release-signature 1`, and
+    each verifier requires its own label first: a glyph-set signature can
+    never pass as a release signature, nor a release signature as a
+    glyph-set one, though one key makes both.
+  - `glyphs.sig` is the signature's 64 bytes, raw: no hex, no envelope.
+    The release key files and the verifier are the ones releases use; only
+    the release's transport form (128 hex digits) differs.
+- **Order, all on Blit's root-owned copy:**
+  1. the manifest within its 512 bytes, the signature exactly 64 bytes;
+  2. the signature verifies over the manifest's bytes under one of the
+     release keys (`glyph_signature_invalid`; Ed25519 cannot tell a bad
+     signature from another key's, so both are this);
+  3. the manifest's grammar: its label first, its name and version as
+     above (`glyph_manifest_invalid`);
+  4. each part present (`glyph_part_missing`) and its SHA-256 over Blit's
+     copy equal to the manifest's line (`glyph_hash_mismatch`);
+  5. only then is anything parsed: the names file, then the font
+     (section 6).
+- **Signing.** `tools/release/blit-sign` gains a glyph-set mode: it
+  hashes the three files, writes the manifest itself and signs it, so no
+  hand-written manifest is ever signed.
+- **Cost, stated.** Only the holder of Blit's release key -- the owner,
+  through the maintainer -- can publish a glyph set. That is the owner's
+  "signed catalogue only", and it is right for what root parses: a
+  third-party icon font reaches root only after Blit's maintainer chose to
+  sign it.
+- **Two independent checks, each by its consumer's own key.** hibr's
+  OpenPGP index signature (the hibr-apt repository key) still protects
+  the catalogue's install path: the files placed are the ones the
+  catalogue published. Blit's signature decides what root parses. Neither
+  trusts the other's.
+- **Rotation** follows releases: a release adds the next key while the
+  current one signs; sets are re-signed under the new key before an old
+  key file is removed, which revokes what it alone signed (section 6).
 
 ### 8. What the API reports, and to whom
 
@@ -416,17 +542,20 @@ GET  /v1/fonts/glyphs                   installed sets in every scope, the ledge
 GET  /v1/fonts/glyphs/{scope}/{set}/licence     the licence text
 PUT  /v1/fonts/glyphs/system/{set}      import (HTTP: system, or users/{uid}/{set})
 DELETE /v1/fonts/glyphs/system/{set}    uninstall
+POST /v1/fonts/glyphs/rescan            re-read the system sources
 frame socket (the peer's uid and session; no API token needed):
-  GLYPHS sets                     the session's view, as GET /v1/fonts/sets
+  GLYPHS sets                     the session's view with versions and ranges, as GET /v1/fonts/sets
   GLYPHS page <set> [<after>]     a page, as GET /v1/fonts/sets/{set}
   GLYPHS lookup <set>/<name>      a record, as GET /v1/fonts/sets/{set}/{name}
-  GLYPHS import <set> | remove <set>
+  GLYPHS import <set> | remove <set>     the peer's own uid's scope, signed sets only
+  GLYPHS rescan                   re-read the system sources
 ```
 
 The frame-socket answers are the same JSON bodies, from the same function,
 so a program in a user's session -- which has no API token -- resolves
 `x-fontawesome/house` there today, and through the in-band `names`
-capability once it is built.
+capability once it is built; and hold's client reports its display's sets
+from `GLYPHS sets` (section 5).
 
 A set entry in `GET /v1/fonts` and `/v1/fonts/sets` gains `source`
 (`shipped` or `installed`) and, for an installed set, `install`:
@@ -435,54 +564,68 @@ A set entry in `GET /v1/fonts` and `/v1/fonts/sets` gains `source`
 {"id": "x-fontawesome", "owner": "x", "scope": "terminal-local",
  "version": "<sha-256 of its allocation listing>", "count": 2052,
  "faces": ["x-fontawesome"], "source": "installed",
- "install": {"scope": "user", "origin": "catalogue", "verified": true,
+ "install": {"scope": "user", "origin": "catalogue", "via": "frame",
+             "verified": true, "state": "loaded",
              "release": "6.7.2", "licence": "OFL-1.1 AND CC-BY-4.0",
              "glyphs": 2052, "bytes": 1184000}}
 ```
 
-Profiles keep `source: shipped|local`; `registry` faces are shipped.
-A lookup in an installed set answers the same record as a shipped one:
+`via` is `http`, `frame` or `dir`; `state` is `loaded` or `refused` (with
+`reason`, section 6). Profiles keep `source: shipped|local`; `registry`
+faces are shipped. A lookup in an installed set answers the same record as
+a shipped one:
 
 ```text
 GET /v1/fonts/sets/x-fontawesome/house
   -> 200 {"set":"x-fontawesome","scope":"terminal-local","version":"<sha-256>",
           "name":"house","codepoints":["102000"]}
-PUT /v1/fonts/glyphs/system/x-fontawesome      (catalogue, verified)
-  X-Blit-Glyph-Parts: index=48211:<sha> signature=833:<sha> names=91022:<sha>
+PUT /v1/fonts/glyphs/system/x-fontawesome      (signed)
+  X-Blit-Glyph-Parts: manifest=263:<sha> signature=64:<sha> names=91022:<sha>
                       font=406412:<sha> licence=4401:<sha>
   -> 201 {"set":"x-fontawesome","scope":"system","origin":"catalogue",
           "verified":true,"allocated":2052}
+PUT /v1/fonts/glyphs/system/x-myicons          (the administrator's own)
+  X-Blit-Glyph-Parts: names=2210:<sha> font=31840:<sha> licence=1088:<sha>
+  -> 201 {"set":"x-myicons","scope":"system","origin":"own",
+          "verified":false,"allocated":40}
 ```
 
 - **Errors**, each with nothing changed: 400 `malformed_query` (one fixed
   body, as today); 403 `glyph_scope` (a frame-socket caller naming
-  another scope); 409 `glyph_retired_name` (an update bringing back a
-  name the set retired); 413 `glyph_too_large`; 422
-  `glyph_signature_invalid`, `glyph_wrong_key`, `glyph_hash_mismatch`,
-  `glyph_entry_missing`, `glyph_font_rejected` (with the worker's or
-  validator's reason from a fixed list), `glyph_names_invalid`; 507
-  `glyph_ledger_full`, `glyph_quota_exhausted`, `glyph_store_full`.
+  another scope, a `system` import or an `own` set over the frame
+  socket); 409 `glyph_retired_name` (an update bringing back a name the
+  set retired); 413 `glyph_too_large`; 422 `glyph_signature_invalid`,
+  `glyph_manifest_invalid`, `glyph_part_missing`, `glyph_hash_mismatch`,
+  `glyph_font_rejected` (with its reason from a fixed list),
+  `glyph_names_invalid`; 507 `glyph_ledger_full`,
+  `glyph_quota_exhausted`, `glyph_store_full`.
 - **The Glyph Protocol.** `q ; cp=` for a ledger codepoint answers
   `status=system` in a session whose view holds a set drawing it, and
-  `status=` empty otherwise (another user's, uninstalled, or never
+  `status=` empty otherwise (another user's, uninstalled, refused or never
   allocated). The in-band `names` capability, when built (ADR 0243 step
   3), answers from the session's view, so a program in a user's session
   finds that user's sets.
 - `docs/api.md` ("Glyph sets", `/v1/fonts`), glyph sets §3.1 (the `x` row)
-  and §9 (the ledger's block), and `docs/terminal.md` (`q` per view) change
-  in the release that builds each part, not before.
+  and §9 (the ledger's block), `docs/terminal.md` (`q` per view) and the
+  settings (`glyph_system_dirs`, `glyph_user_quota`) change in the release
+  that builds each part, not before.
 
 ### 9. Lifetime: uninstall, updates, retired names
 
 - **Uninstall** removes the scope's copy (the store's directory for that
   set and scope) and nothing else: a user's removal touches only theirs.
-  The ledger keeps every allocation. Afterwards, in that view, the set
-  answers 410 `uninstalled` and its names 410 `uninstalled`; programs print
-  their fallbacks. Cells already showing its codepoints draw the
-  replacement glyph in that view (a view is about what a session may draw,
-  and the set is gone from it); another scope that still has the same
-  glyph keeps drawing it at its own codepoint. Reinstalling restores every
-  name the ledger has for that scope to its codepoint.
+  Who removes: for a user set imported over the frame socket, hold's
+  client or the console when the user no longer has it (`GLYPHS remove`);
+  for one the administrator imported, the administrator over HTTP; for
+  a `dir` set, the rescan that finds its directory gone; for an `http`
+  set, `DELETE`. The ledger keeps every allocation. Afterwards, in that
+  view, the set answers 410 `uninstalled` and its names 410
+  `uninstalled`; programs print their fallbacks. Cells already showing its
+  codepoints draw the replacement glyph in that view (a view is about what
+  a session may draw, and the set is gone from it); another scope that
+  still has the same glyph keeps drawing it at its own codepoint.
+  Reinstalling restores every name the ledger has for that scope to its
+  codepoint.
 - **Updates.** An import of a set id the scope already has is an update,
   applied whole or not at all. Per name: kept, the same codepoint, redrawn
   or not (a redraw drops the old picture from the caches, section 3, and
@@ -502,14 +645,15 @@ PUT /v1/fonts/glyphs/system/x-fontawesome      (catalogue, verified)
 - **Licences.** A catalogue glyph set must carry its licence part; the
   store keeps it beside the set; `install.licence` is the entry's SPDX
   `licence`, the text is served by `/licence`, and the pane shows both.
-  The font is stored unmodified; the outlines are Blit's internal drawing
-  form and are never served.
+  The font is stored and loaded unmodified (its cmap read, never
+  rewritten) and is never served.
 - **Limits** (stated as constants, reported by `GET /v1/fonts/glyphs`):
   64 installed sets per scope, 1,024 in all; 8,192 glyphs and 16,384
-  names a set; font 16 MiB, names 4 MiB, outlines 16 MiB, licence 256 KiB;
-  a store of 512 MiB for `system` and 64 MiB per uid; 8,192 lifetime
-  allocations per uid; the ledger's 57,342. A set over a limit is refused
-  whole.
+  names a set; font 16 MiB, one face of at most 65,535 glyphs; names
+  4 MiB; licence 256 KiB; manifest 512 bytes; signature 64 bytes; a
+  store of 512 MiB for `system` and 64 MiB per uid (which also bounds the
+  fonts held in memory); 8,192 lifetime allocations per uid; the ledger's
+  57,342. A set over a limit is refused whole.
 
 ### 11. What ships, what is optional
 
@@ -543,7 +687,8 @@ Everything else is a candidate for optional. Measured (`assets/fonts`):
   would ride neither, and would triple the deb, rpm and Arch packaging.
 - **Installable sets are additive:** third-party icon sets, and an app's
   own glyph set travelling with that app (the natural first case: a music
-  player's own art; the app prints its fallback when the set is absent).
+  player's own art, pulled in by its `# needs:`, section 5; the app prints
+  its fallback when the set is absent).
 - **Two kinds stay separate.** A Unicode face (a script, symbols) joins the
   stack at the standard codepoints, needs no ledger, and changes what every
   codepoint draws, which is ADR 0195's stack order to decide, not an
@@ -563,83 +708,104 @@ top level, literally:
 command -v cp_pane > /dev/null && cp_pane blit_glyphs "Blit Glyphs" "@blit:▦" hardware
 ```
 
-with `blit_glyphs_rows` built from `cp_choice`, `cp_toggle` and
-`cp_absent` rows; anything that changes the machine goes through a
-request in a background job, as the Blit pane's do.
-
-- **Phase 1, read-only, works today:** one row per text font (id, title,
-  `source`), per face (`registry`: id, role, file) and per set (`id`,
-  `owner`, `scope`, `version`, `count`), from `GET /v1/fonts` and
+- **The icon** is valid as written: the form is `@<blit id>:<fallback>`,
+  and Blit's catalogue has a glyph with id `blit` (U+101000, Blit's logo;
+  `assets/fonts/icons/catalogue.json`), with `▦` printed where Blit is
+  absent. The group `hardware` is hibr's to confirm against its merged
+  tree.
+- **Read-only (decided, 2026-11-22).** `blit_glyphs_rows` is built from
+  `cp_choice`, `cp_toggle` and `cp_absent` rows and changes nothing:
+  installing and removing are the catalogue's, importing is hold's
+  clients', the console's and Blit's own (section 5).
+- **Phase 1, works today:** one row per text font (id, title, `source`),
+  per face (`registry`: id, role, file) and per set (`id`, `owner`,
+  `scope`, `version`, `count`), from `GET /v1/fonts` and
   `GET /v1/fonts/sets`; a set browsed by name, a page at a time
   (`GET /v1/fonts/sets/{set}?after=`), each name drawn by printing its
   codepoint; `cp_absent` when Blit does not answer.
-- **Phase 2:** `source`, `install` (scope, origin, verified, release,
-  licence), the ledger's use, Remove; user-scope removal over the frame
-  socket.
-- **Phase 3:** Install from the catalogue, and the `rescan` import of
-  section 5.
+- **Phase 2:** `source` and `install` (scope, origin, verified, state,
+  release, licence) and the ledger's use, from the pane's own display's
+  Blit, once Blit's phase 2 ships.
+- **Phase 3:** the same per display: which sets are installed (in the
+  catalogue) and imported (in each display's Blit, from the desktop's
+  per-display report).
 
 ## Consequences
 
 - Any icon font can be installed without colliding with Nerd, Blit or
   another install, and named by `x-<set>/<name>` with the same lookup,
   listing, aliases, deprecations and retirements as shipped sets.
-- Root parses no installed font. The cost is a worker binary, a system
-  user, Blit's first seccomp filter, and an outline format with its own
-  validator; installed glyphs are unhinted, monochrome or COLR v0.
+- Root parses an installed font with FreeType, as it parses a shipped
+  face, but only one Blit's release key signed, or the administrator's
+  own over a token that is root anyway. Nothing new to build for it: no
+  worker, system user, seccomp filter, outline format, `gpgv` or
+  catalogue key; one key set and one verifier serve releases and glyph
+  sets, kept apart by their labels.
+- Only the holder of Blit's release key can publish a glyph set; every
+  third-party set waits on the maintainer's signature. Removing a key
+  revokes its sets at the next start.
+- Installed glyphs are drawn by the same fitted path as Nerd's, and get
+  whatever it draws for shipped faces.
 - Codepoints of installed sets are this machine's and this view's; they do
   not survive a recording replayed elsewhere (glyph sets §5, as for
   `blit`). Portable sets remain the choice for output shown elsewhere.
+- Each display's Blit holds its own copy, imported by that display's hold
+  client; a remote display's codepoints differ, so the desktop maps glyph
+  ids per display.
 - The ledger is finite and never reused: 57,342 glyphs over the machine's
   life, spent per scope. A few icon sets installed for the system use a
   few percent; each user installing their own copy spends again, which is
   the price of no leak between users; abuse is bounded per uid.
-- `gpgv` is a new dependency unless hibr adds a natively verifiable
-  signature.
-- Blit stays independent of Hibr: the catalogue and the pane are clients;
-  Blit reads no Hibr path and fetches nothing.
+- Blit stays independent of Hibr: the catalogue, hold's clients and the
+  pane are clients; Blit fetches nothing, and the one Hibr path it reads
+  is a setting's default, a root-owned source it copies from.
 
 ## Release plan
 
 | Phase | Where | Releases |
 | --- | --- | --- |
 | 1. Read-only pane | hibr-apps only | none of Blit's |
-| 2a. Store, ledger, outline format and validator, the raster's outline path, the worker (user, limits, namespace), `PUT`/`DELETE` for `system` with origin `own`, `source`/`install` in `/v1/fonts`, the `x` owner | Blit | 1-2 |
-| 2b. Views: user scope, accepted only from the administrator over HTTP (`users/{uid}/{set}`, origin `own`); the frame socket's `GLYPHS sets`, `page`, `lookup` and `remove`; per-view lookups and `q`; shadowing; seccomp | Blit | 1 |
-| 3. Catalogue origin: the pinned key, `gpgv` (or native Ed25519), the index and parts checks; the frame socket's `GLYPHS import`, for catalogue sets; the `glyphs` kind in `mkindex` and `catalogue.hibr` (hibr's); the pane's Install and `rescan` import | Blit, hibr, hibr-apps | 1 of Blit's |
+| 2a. Store and ledger; the glyph-set manifest, its check in `src/blit_release_signature.h` and `blit-sign`'s glyph-set mode; root loading a verified set and the remap table; `PUT`/`DELETE` over HTTP for `system` (signed, and `own`); `source`/`install` in `/v1/fonts`; the `x` owner | Blit | 1 |
+| 2b. Views: user scope, per-view lookups and `q`, shadowing; `users/{uid}/{set}` over HTTP | Blit | 1 |
+| 2c. The frame socket's `GLYPHS` (`sets` with versions and ranges, `page`, `lookup`, `import` of sealed memfds, `remove`, `rescan`); `glyph_system_dirs`, the rescan and `POST /v1/fonts/glyphs/rescan` | Blit | 1 |
+| 3. The `glyphs` kind and `# needs:` in `mkindex` and `catalogue.hibr` (hibr's); hold's clients' and the console's import at attach and on `rescan`, and the per-display report (hibr's); the pane's per-display rows (hibr-apps) | hibr, hibr-apps | none of Blit's |
 
-Roughly four Blit releases, each with its gates passing on the
-release set before the next starts.
+Probably three Blit releases (2a, 2b, 2c; the first draft had four, one of
+them a worker), each with its gates passing on the release set before the
+next starts.
+
+## Decided (2026-11-22)
+
+hibr's proposal, approved by the owner:
+
+1. **Signature:** Blit's own release key signs each glyph set over a
+   labelled manifest (section 7); no catalogue key, no `gpgv`. A signed
+   set is trusted as shipped faces are and loaded with FreeType by root
+   (section 6); the worker and the outline format are dropped (option 4).
+   This revision's choice within it: the administrator's unsigned `own`
+   set is accepted as their act, `verified: false` (section 6).
+2. **Auto:** `# needs: glyphs/<name>` in the app or lang; the catalogue
+   installs the set, marks it `auto`, `purge` removes it (hibr's;
+   section 5).
+3. **Import:** through each display's connection, by hold's clients (or
+   the unheld console); system sets from `glyph_system_dirs` by Blit
+   itself; each Blit reports per display what it holds; the pane stays
+   read-only (sections 5, 12).
 
 ## Open questions
 
-1. **hibr's:** can the catalogue's index also carry a detached raw Ed25519
-   signature (`index.json.sig`) under a key Blit can pin, so Blit verifies
-   with Monocypher and needs no `gpgv` (section 7)?
-2. **hibr's:** can the catalogue's `auto` field (as in apps entries,
-   `"auto": "apps/video"`) pull a glyph set in with the app or language
-   that needs it?
-3. **hibr's:** can a pane reach its session's frame socket (a desktop call
-   that sends a `GLYPHS` request with descriptors), or should the desktop
-   itself make the user-scope import on `rescan`? Until then a pane holding
-   the bearer token imports over HTTP as the administrator
-   (`users/{uid}/{set}`).
+1. **hibr's:** a remote display's Blit holds its own machine's system
+   sets, not the desktop host's. As written, the display reports them
+   missing and programs print their fallbacks there. Should hold's client
+   instead import the desktop host's system sets into that Blit as the
+   user's (signed, so trusted the same, but spending that uid's quota on
+   that machine)?
 
 ## Evidence
 
 Nothing is built; this record is `proposed`. The gates each phase must
 add, and pass, before the record is accepted:
 
-- `glyph_outline_gate` (C, light): the validator refuses every malformed
-  case (counts, offsets, open contours, coordinates out of range, trailing
-  bytes, too many layers, points or glyphs) and a fuzzed corpus without a
-  crash under ASan; outlines the worker extracts from the shipped Nerd
-  face draw within a stated tolerance of FreeType drawing the face itself.
-- `glyph_worker_gate`: a hostile-font corpus (truncated tables, huge
-  counts, recursive composites, a CFF charstring loop, a TTC, WOFF2, a
-  variable font, COLR v1, `sbix`) is refused with its reason and nothing
-  changed; a worker that opens a file, a socket or forks is killed; the
-  limits hold; the worker runs as `blit-glyphs` with no capabilities.
 - `glyph_ledger_gate`: allocation in name order; a name after an update
   (redrawn or not) and after uninstall and reinstall keeps its codepoint;
   two scopes never share one; a redraw's new pixels drawn without a
@@ -647,24 +813,38 @@ add, and pass, before the record is accepted:
   random imports, updates and removals; a retired name refused on return;
   the per-uid quota and a full ledger answer 507 with nothing changed; the
   ledger survives a restart and a crash between append and rename.
+- `glyph_signature_gate` (was `catalogue_verify_gate`), each refused with
+  nothing changed and nothing parsed (FreeType and the names reader never
+  called): a bad signature; a valid signature by a key not in the release
+  keys; the release statement and its genuine release signature offered
+  as a glyph manifest; a manifest naming another set or another version;
+  the manifest's grammar (a CR, a byte after the last LF, upper-case hex,
+  a missing or reordered line, over 512 bytes); a part whose hash
+  differs; a part swapped between hash and read (a hook replaces the
+  staging file after it is hashed, and the hashed bytes are what
+  FreeType opens, as `update_pair_gate`'s `swapped`); a missing part; a
+  stored set whose key file is removed, not loaded after a restart and
+  reported `refused`. The signed set installs. `release_signature_gate`
+  gains the reverse: a glyph manifest's genuine signature offered to the
+  update helper as a release signature is refused.
 - `glyph_install_gate` (HTTP and the frame socket, scratch store): import
   and remove in both scopes; a frame-socket caller cannot act for another
-  uid; views (a user's set drawn in their session and not another's, in a
-  CPU and a GLES frame, the replacement glyph there, `q` empty there);
-  shadowing; the view checked before the cache; the swapped-file case (a
-  hook replaces the staging copy after the checks, and the checked bytes
-  are what is installed, as `update_pair_gate`'s `swapped`).
-- `catalogue_verify_gate`: a bad signature, a signature by another key
-  (with that key in a scratch keyring beside the pinned one, so the
-  fingerprint check is what refuses), a truncated `.asc`, an entry missing
-  from the index, a part whose hash differs, an index edited after signing
-  -- each refused with nothing changed; the signed set installs.
+  uid, import into `system` or import an `own` set; an unsealed memfd is
+  refused; the system sources (new, changed, unchanged and skipped, gone
+  and uninstalled, an `http` set untouched, a directory failing the
+  ownership check skipped); `own` imported and reported unverified; the
+  font checks (a collection, not scalable, too many glyphs, a `code` the
+  cmap lacks, over size) refused before any glyph loads; each name drawn
+  at its ledger codepoint matches FreeType drawing the font at its own
+  `code` through the same fitted path; views (a user's set drawn in their
+  session and not another's, in a CPU and a GLES frame, the replacement
+  glyph there, `q` empty there); shadowing; the view checked before the
+  cache.
 - `glyph_sets_gate` extended: shipped and installed sets in one listing,
   one table, one grammar; `x-` ids; per-view answers; 410 `uninstalled`
   and `retired`. `glyph_protocol_gate` extended for `q` per view.
   `font_registry_gate` prints the same line as before.
-- `package_artifact_gate`: the pinned catalogue key and its fingerprint,
-  the worker binary, the system user in all three formats, and the store
-  created `root:root 0700`.
+- `package_artifact_gate`: the store created `root:root 0700`; no new
+  binary, system user, key file or `Depends`.
 - `documentation_gate` for this record and every document each phase
   changes.
