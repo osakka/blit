@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-22: 0.3.134 glyph sets by set and name
+
+- **Glyph sets (ADR 0243 step 3, the set level).** The font registry
+  declares each names source and derives the sets: `blit` (Blit's 830
+  catalogue names, terminal-local) and Nerd Fonts 3.4.0's 17 `nerd-*`
+  sets. `GET /v1/fonts/sets/{set}/{name}` answers a glyph by name
+  (`blit/bluetooth` U+101006, `nerd-fa/bluetooth` U+F293, `nerd-md/bluetooth`
+  U+F00AF). Retired names start with the lookup: the 345 ids removed before
+  it answer `unknown_name` (the owner, 2026-11-22).
+- **Gates:** `gates_all` 210/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on 5d09c24b, the shipped commit, in a quiet window. A first
+  run was stopped after 2 minutes to give hibr 10 minutes for a Debian 12
+  rebuild. In the second, `all` failed compositor_gate once (the
+  `--scale-frac-twice` stand-in ended with no output; 3 of 3 alone,
+  Gitea #210), and `all` was run again whole; renderer and renderer-gles
+  passed first time. New: glyph_sets_gate.
+- **Release environment (Debian 13):** update_pair_gate 16 cases and
+  rollback_recovery_gate 12 cases passed; the release was signed.
+- **Live, the mini PC:** the signed update was verified (its 0.3.133 helper
+  checked the signature); the smoke check passed at the login screen
+  (2 displays up, frames advancing 2 -> 66).
+- **Published** to hibr-apt (3bfd1eb) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-21: 0.3.133 signed releases; the Glyph Protocol
 
 - **Signed releases (security review SR-2, Gitea #184).** The updater
