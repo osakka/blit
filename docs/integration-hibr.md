@@ -55,7 +55,11 @@ maintainer meets most:
 - `BLIT_FRAME_SOCKET`, `BLIT_FRAME_TOKEN`: pictures by descriptor (below).
 - `BLIT_VTNR`: the virtual terminal Blit holds, for the login's seat.
 - `BLIT_SESSION_TOKEN` and `BLIT_API_TOKEN`: two different credentials,
-  used only by the optional adapter (below).
+  used only by the optional adapter (below). `BLIT_API_TOKEN` is the
+  server's root credential, set only in children run as the server's own
+  user (ADR 0055, security review SR-8); a desktop run as a person's
+  account has the frame channel (`console rate` for its display's rate)
+  and no API token.
 
 Kitty placement follows the Kitty model: `x y w h` crop, `X Y` offset in
 the cell, numbered placements with `p` (bounded per session by picture
@@ -280,7 +284,11 @@ What it does:
   ([ADR 0055](adr/0055-adapter-api-authentication.md)). Without it the
   handshake gets 401 and the session is retired as `hibr_attach_unresolved`.
   An API `environment` entry overrides either variable; an empty
-  `BLIT_API_TOKEN` keeps the credential from a child.
+  `BLIT_API_TOKEN` keeps the credential from a child. A child run as
+  another user (`user`, or a login's desktop) is never given it (security
+  review SR-8): the adapter there needs the caller to name it in
+  `environment`. The packaged desktop is the terminal provider, which needs
+  no API token.
 - `BLIT_ADAPTER_TRACE=1` logs its WebSocket and pixel-frame transport, for
   one probe session at a time.
 

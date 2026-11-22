@@ -176,7 +176,8 @@ if [ "$command_denied" != 403 ] || [ "$command_allowed" != 201 ] ||
 fi
 # ADR 0055: a configured token also gates the owner handshake and the stream
 # upgrade, so Blit injects BLIT_API_TOKEN into the launched child and the Hibr
-# adapter presents it. Assert the injection here, where a token is already
+# adapter presents it (a child run as the server's own user; one run as
+# another user gets none, SR-8: session_user_secrets_gate). Assert the injection here, where a token is already
 # configured. This needs a child that can report its own environment, so it
 # runs against a second server whose allowlist permits a shell; the allowlist
 # assertions above deliberately keep /bin/sh denied.

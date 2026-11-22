@@ -5882,7 +5882,12 @@ components:
             Optional local account identity for the child process. When Blit
             runs as root, the child is initialized with that account's
             supplementary groups, uid, gid, HOME, USER, and LOGNAME before
-            exec. Omitting this field preserves the service identity.
+            exec. Omitting this field preserves the service identity. A
+            child run as an account other than the service's gets no root
+            secret: BLIT_API_TOKEN is not set, and BLIT_AUTH_TOKEN,
+            BLIT_UPDATE_TOKEN and BLIT_UPDATE_TOKEN_FILE are removed from
+            what it inherits (security review SR-8). Its session's own
+            identity and frame token are kept.
         arguments:
           type: array
           maxItems: 32

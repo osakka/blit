@@ -178,6 +178,13 @@ by the package-update headers.
 The scheme name is matched in any case (`bearer` is `Bearer`), and the token
 is compared in constant time, as the update token is.
 
+A session's child run as the server's own user finds the token in its
+environment as `BLIT_API_TOKEN` (ADR 0055), for Hibr's API adapter. A child
+run as another account -- `user` on `POST /v1/terminal-sessions`, or a
+login's desktop -- gets no root token: `BLIT_API_TOKEN` is not set, and the
+server's own `BLIT_AUTH_TOKEN` and `BLIT_UPDATE_TOKEN` are not passed on
+(security review SR-8). Its session's identity and frame token stay.
+
 With no token, the server listens on loopback only, and answers nothing a
 web page in a browser on the same machine could send. Blit serves no pages,
 so the only origin it calls its own is its listener's:

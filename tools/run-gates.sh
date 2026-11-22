@@ -675,6 +675,8 @@ suite_lifecycle() {
     run_gate login_desktop_observer_gate.rb ruby tools/tests/login_desktop_observer_gate.rb
     run_gate login_identity_gate.rb ruby tools/tests/login_identity_gate.rb
     run_gate login_manager_gate.sh "$ROOT"/tools/tests/login_manager_gate.sh
+    # SR-8: a child run as another user holds no root token (root service).
+    run_gate session_user_secrets_gate.sh "$ROOT"/tools/tests/session_user_secrets_gate.sh
     run_gate login_seat_gate.sh "$ROOT"/tools/tests/login_seat_gate.sh
     run_gate restart_gate.sh "$ROOT"/tools/tests/restart_gate.sh
     run_gate shutdown_gate.sh "$ROOT"/tools/tests/shutdown_gate.sh
@@ -688,6 +690,8 @@ suite_lifecycle() {
     run_gate update_install_live_gate.sh "$ROOT"/tools/tests/update_install_live_gate.sh
     run_gate update_bearer_gate.sh "$ROOT"/tools/tests/update_bearer_gate.sh
     run_gate update_live_smoke_gate.sh "$ROOT"/tools/tests/update_live_smoke_gate.sh
+    # Gitea #206/#207: update-live.sh's rollback, against a fake server.
+    run_gate update_live_rollback_gate.sh "$ROOT"/tools/tests/update_live_rollback_gate.sh
     # SR-2: the release signature's verifier, blit-sign and the helper's
     # refusals (no root, nothing installed).
     run_gate release_signature_gate.sh "$ROOT"/tools/tests/release_signature_gate.sh

@@ -435,12 +435,15 @@ cases=8
 # not modelled), and /usr/bin/systemctl, whose `restart blit.service` stops
 # the server for that loop to start again. The manifests update-live.sh
 # checks are written for these packages into a scratch copy of the tree.
-#   smoke-fails       N-1 up; update-live.sh installs an N whose server
-#                     comes up without its display          -> "smoke failed",
-#                     exit 1, the API still up
-#   smoke-rollback    update-live.sh with N-1               -> verified, the display
-#                     back as it was at N-1 (update-live.sh's own smoke
-#                     compares with the broken box, so it may end 1)
+#   smoke-fails       N-1 up; update-live.sh --rollback-to N-1 installs an N
+#                     whose server comes up without its display -> "smoke
+#                     failed", then N-1 installed again through the API with
+#                     its own signature, the display back as it was at N-1,
+#                     exit 3 (Gitea #206)
+#   smoke-rollback    that broken N again (no --rollback-to: "smoke failed",
+#                     exit 1); update-live.sh with N-1      -> verified, the
+#                     display back as it was at N-1, smoke passed, exit 0
+#                     (Gitea #207: it held the repaired box to the broken one)
 #   smoke-update      update-live.sh with N; a setting saved through
 #                     the API at N                           -> verified, smoke passed
 #   server-dead       update-live.sh installs an N whose server exits at
@@ -528,9 +531,12 @@ eval "$(sed -n '/^smoke_state()/,/^}/p' "$root/tools/deploy/update-live.sh")"
 
 mkdir -p "$work/tree/tools/deploy" "$work/tree/releases"
 cp "$root/tools/deploy/update-live.sh" "$work/tree/tools/deploy/"
-live() {   # BLIT_DEB -> update-live.sh's exit status; its output in $work/live.log
+stage() {   # BLIT_DEB -> the staged copy of it
     # The pair copied to a directory of its own with the gate key's
-    # signature beside it (SR-2), as a release's directory has the real one.
+    # signature beside it (SR-2), as a release's directory has the real one,
+    # and its manifest. Under the whole package version as well: a
+    # fabricated N-1 is N's version at revision 0, and update-live.sh
+    # --rollback-to checks both pairs' manifests.
     pv=$(dpkg-deb -f "$1" Version)
     d=$(mktemp -d "$work/live.XXXXXX")
     cp "$1" "$(dirname "$1")/blit-compositor_${pv}_amd64.deb" "$d/"
@@ -540,9 +546,20 @@ live() {   # BLIT_DEB -> update-live.sh's exit status; its output in $work/live.
     printf 'package: %s\npackage_sha256: %s\ncompositor_package: %s\ncompositor_package_sha256: %s\n' \
         "$(basename "$p")" "$(sha "$p")" "$(basename "$c")" "$(sha "$c")" \
         >"$work/tree/releases/${pv%-*}.yaml"
+    cp "$work/tree/releases/${pv%-*}.yaml" "$work/tree/releases/$pv.yaml"
+    printf '%s\n' "$p"
+}
+live() {   # [--rollback-to BLIT_DEB] BLIT_DEB -> update-live.sh's exit status;
+           # its output in $work/live.log
+    if [ "$1" = --rollback-to ]; then
+        r=$(stage "$2")
+        set -- --rollback-to "$r" 127.0.0.1 "$(stage "$3")"
+    else
+        set -- 127.0.0.1 "$(stage "$1")"
+    fi
     if env BLIT_BASE_URL="$base" BLIT_AUTH_TOKEN="$api_token" \
             BLIT_UPDATE_TOKEN_FILE=/etc/blit/update.token \
-            sh "$work/tree/tools/deploy/update-live.sh" 127.0.0.1 "$p" >"$work/live.log" 2>&1; then
+            sh "$work/tree/tools/deploy/update-live.sh" "$@" >"$work/live.log" 2>&1; then
         echo 0
     else
         echo $?
@@ -592,23 +609,6 @@ while :; do
     sleep 0.5
 done
 
-live_status=$(live "$work/no-display/blit_${version}_amd64.deb")
-expect_live smoke-fails 1 'smoke failed'
-expect_state smoke-fails "$version" "$version"
-api GET /v1/version >/dev/null || fail "smoke-fails: the API is not up after the failed smoke"
-kept smoke-fails
-echo "case smoke-fails: update-live.sh: $(grep -m1 -o 'smoke failed: [^,]*' "$work/live.log")"
-
-live_status=$(live "$blit_old")
-# update-live.sh compares with the box as it found it -- here the broken
-# one, with no display -- so a rollback that brings the display back can
-# end "smoke failed" (the box is not as it was: it is better). Either end
-# is taken; what must hold is the install, and the box as it was at N-1.
-grep -q "update verified: Blit ${old%-*}" "$work/live.log" ||
-    { cat "$work/live.log" >&2; fail "smoke-rollback: update-live.sh did not verify $old"; }
-expect_state smoke-rollback "$old" "$old"
-apt_clean smoke-rollback
-kept smoke-rollback
 back() {   # CASE: the box's displays as they were at N-1, within 30 s
     i=0
     while :; do
@@ -619,12 +619,33 @@ back() {   # CASE: the box's displays as they were at N-1, within 30 s
         sleep 0.5
     done
 }
+
+# Gitea #206: the failed smoke check rolls back, through the API, with
+# N-1's own signature, and holds N-1 to the box as it was before.
+live_status=$(live --rollback-to "$blit_old" "$work/no-display/blit_${version}_amd64.deb")
+expect_live smoke-fails 3 'smoke failed: installed Blit'
+expect_live smoke-fails 3 "rolled back: Blit ${old%-*}"
+expect_state smoke-fails "$old" "$old"
+apt_clean smoke-fails
+kept smoke-fails
+back smoke-fails
+echo "case smoke-fails: update-live.sh: $(grep -m1 -o 'smoke failed: [^,]*' "$work/live.log"); $(grep -m1 'smoke passed' "$work/live.log"); exit 3"
+
+# Gitea #207: the broken N again, left installed, and a rollback by hand:
+# its smoke check must pass the box it repaired.
+live_status=$(live "$work/no-display/blit_${version}_amd64.deb")
+expect_live smoke-rollback 1 'smoke failed'
+expect_state smoke-rollback "$version" "$version"
+api GET /v1/version >/dev/null || fail "smoke-rollback: the API is not up after the failed smoke"
+live_status=$(live "$blit_old")
+expect_live smoke-rollback 0 'smoke passed: .* displays up (none before)'
+grep -q "update verified: Blit ${old%-*}" "$work/live.log" ||
+    { cat "$work/live.log" >&2; fail "smoke-rollback: update-live.sh did not verify $old"; }
+expect_state smoke-rollback "$old" "$old"
+apt_clean smoke-rollback
+kept smoke-rollback
 back smoke-rollback
-if [ "$live_status" = 0 ]; then
-    echo "case smoke-rollback: update-live.sh with $old: $(grep 'smoke passed' "$work/live.log")"
-else
-    echo "case smoke-rollback: update-live.sh with $old verified it and ended $live_status: $(grep -o 'smoke failed: [^,]*' "$work/live.log" | head -1); the display is back ($now)"
-fi
+echo "case smoke-rollback: update-live.sh with $old: $(grep 'smoke passed' "$work/live.log")"
 
 live_status=$(live "$blit_new")
 expect_live smoke-update 0 'smoke passed'

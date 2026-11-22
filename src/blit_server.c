@@ -18403,10 +18403,26 @@ static int create_session(BlitRuntime *runtime, const char *json,
            that the Hibr adapter needs. Supply the credential through the
            environment Blit already owns rather than making a working
            desktop depend on the operator configuring the same value twice.
-           ADR 0055 records the consequence: every launched child sees it.
-           The API's own environment entries are applied after this and
-           overwrite, so a client may set it empty to opt a child out. */
-        if (!(hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager) &&
+           ADR 0055 records the consequence: every child run as the
+           server's own user sees it. The API's own environment entries are
+           applied after this and overwrite, so a client may set it empty to
+           opt a child out.
+           A child run as another user ("user", or a login's desktop) gets
+           no root secret at all (security review SR-8): not BLIT_API_TOKEN,
+           and not the server's own BLIT_AUTH_TOKEN or BLIT_UPDATE_TOKEN,
+           which systemd's EnvironmentFile puts in this process's
+           environment and execve passed on. The token is a root shell
+           (SR-9), so the drop would gain nothing. Unset here, in the child
+           only: the server keeps them for its own re-exec on a restart.
+           The frame token stays: it is this session's own, accepted only
+           from the session's uid. */
+        if (run_as_user && run_uid != geteuid()) {
+            if (unsetenv("BLIT_AUTH_TOKEN") != 0 ||
+                unsetenv("BLIT_UPDATE_TOKEN") != 0 ||
+                unsetenv("BLIT_UPDATE_TOKEN_FILE") != 0 ||
+                unsetenv("BLIT_API_TOKEN") != 0)
+                _exit(126);
+        } else if (!(hibr_desktop_join && hibr_owner != NULL && hibr_owner->login_manager) &&
             runtime->auth_token[0] != '\0' &&
             setenv("BLIT_API_TOKEN", runtime->auth_token, 1) != 0)
                 _exit(126);

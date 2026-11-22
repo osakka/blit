@@ -356,6 +356,20 @@ tools/release/generate-manifest.sh --check $out/blit_X.Y.Z-1_amd64.deb releases/
 tools/deploy/update-live.sh HOST $out/blit_X.Y.Z-1_amd64.deb   # sends $out/blit-release_X.Y.Z-1_amd64.sig
 ```
 
+`update-live.sh --rollback-to <previous OUTDIR>/blit_W-1_amd64.deb HOST
+$out/blit_X.Y.Z-1_amd64.deb` also names the release the box runs now,
+with its compositor, its own `.sig` and its manifest, all checked before
+anything is sent; when the smoke check after the update fails, it installs
+that release again and checks the box against the state before the update
+(exit 3; exit 4 when that fails too). Whether every deploy names it is the
+owner's call. The previous release's `.sig` is beside its packages only
+when each release is built into an OUTDIR of its own (`build-release.sh`
+clears its OUTDIR's `.deb` and `.sig` files first, so a shared
+`build/release` keeps only the newest); `tools/release/sign-release.sh`
+signs a copy of the packages again. Without the option a failed smoke
+check leaves the new release installed and prints the state to roll back
+to (`BLIT_SMOKE_BASELINE`).
+
 `build-release.sh` builds the binaries, runs `compositor_gate` and
 `xwayland_gate`, writes the packages, generates `releases/X.Y.Z.yaml`, runs
 the packaging suite on the package, `update_pair_gate.sh` (a real
@@ -424,10 +438,11 @@ source=<commit>` for each, and refuses a failed run or one whose
 `run-gates: source=` line (printed since 0.3.125) is not the manifest's
 `source_commit`, clean -- so the version is committed before the gates
 run. `--check` refuses a recorded result that is not a pass of that
-source. `update-live.sh` ends with a smoke check: the same displays up, a
-surface in as many panes as before (the desktop came back) or, when the
-restart signed the desktop out, the login screen up waiting for the
-password, and frames advancing. When the manifest is recorded in a later commit than the build,
+source. `update-live.sh` ends with a smoke check: at least as many
+displays up, a surface in as many panes as before (the desktop came back)
+or, when the restart signed the desktop out, the login screen up waiting
+for the password, and frames advancing; a box that had no display passes
+with its displays up and frames advancing. When the manifest is recorded in a later commit than the build,
 `generate-manifest.sh` takes `BLIT_SOURCE_COMMIT=<build-commit>` and
 `BLIT_DOCUMENTATION_COMMIT=<build-commit>`. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
 existing manifest with a package. The artifact gate and `update-live.sh`

@@ -42,7 +42,7 @@ exercised with real dpkg in the Debian 13 release environment
 | SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
 | SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` -- fixed in 0.3.132 |
 | SR-7 | High | PTY master descriptors leak into every later session child, including ones run as another user -- fixed in 0.3.130 |
-| SR-8 | High | The root API token is put into the environment of children run as another user |
+| SR-8 | High | The root API token is put into the environment of children run as another user -- fixed in 0.3.135 |
 | SR-9 | High, accepted exception | The API token is a root shell, sent over plain HTTP on 0.0.0.0, with no default command allowlist |
 | SR-10 | Medium | The helper reads the staged package three times by path, in a group-writable directory -- fixed in 0.3.132 |
 | SR-11 | Medium | Both tokens are compared with `strcmp` -- fixed in 0.3.132 |
@@ -392,6 +392,18 @@ CLOSE_RANGE_CLOEXEC)`). Then clear the flag on `inherited_fd` only.
 > documented inherited descriptor, when one is set) are open.
 
 ### SR-8 (High, documented): the API token is given to children run as another user
+
+**Fixed** in 0.3.135 (Gitea #190): a child whose uid is not the server's
+gets no `BLIT_API_TOKEN`, and `BLIT_AUTH_TOKEN`, `BLIT_UPDATE_TOKEN` and
+`BLIT_UPDATE_TOKEN_FILE` are unset in it before the drop. The second half
+was missed below: the server's own environment (systemd's
+`EnvironmentFile=`) held both tokens, and the child's `execve` passed them
+on under their own names. Children run as the server's own user keep
+`BLIT_API_TOKEN` (ADR 0055); the other user keeps its session's frame
+token, which only its uid can use. Hibr's desktop needs no API token
+(ADR 0055's amendment). session_user_secrets_gate checks it; before the
+fix a `"user":"nobody"` child held all three. Still open: group `blit`
+can read `blit.env` (the group-`blit` ticket).
 
 `src/blit_server.c:17842-17845` sets `BLIT_API_TOKEN` in every child except
 the login manager's desktop join. This happens before the drop to
@@ -993,13 +1005,20 @@ downgrade and exits 0, and the helper does not check what was installed).
 | interrupted | N-1, N unpacked but not configured | `dpkg --configure -a`; or the helper with N again; or the helper with N-1 | each recovers (N, N, N-1) |
 | failed-configure | N-1 | the helper installs an N whose postinst fails | the helper answers ERROR (SR-21; from 0.3.132 the answer names the failing postinst), blit is half-configured, and the helper with N-1 recovers it |
 | damaged-files | N | `blit-server` deleted, the helper and `blit-compositor` truncated | `dpkg --verify` names all three; `dpkg --install` of the N pair restores them |
-| smoke-fails | N-1 running | `update-live.sh` installs an N that comes up without its display | "smoke failed", exit 1, the API still up |
-| smoke-rollback | that broken N | `update-live.sh` with N-1 | verified, the display back as at N-1 (its own smoke check reports "smoke failed": see Gaps) |
+| smoke-fails | N-1 running | `update-live.sh --rollback-to` N-1 installs an N that comes up without its display | "smoke failed", then N-1 again through the API with its own signature, the display back as at N-1, exit 3 (from 0.3.135, Gitea #206; before, exit 1 with N left installed) |
+| smoke-rollback | that broken N | `update-live.sh` with N-1 | verified, the display back as at N-1, "smoke passed" (from 0.3.135, Gitea #207; before, its smoke check failed the repaired box) |
 | smoke-update | N-1 | `update-live.sh` with N, then a setting saved through the API | verified, smoke passed |
 | server-dead | N running | `update-live.sh` installs an N whose server exits at start | it times out; `update-live.sh` with N-1 is refused (no API); `dpkg --install` of the N-1 pair and `systemctl restart blit` bring the display back, with N's setting in effect |
 
 ### Runbook
 
+- **Deploy with the way back named** (from 0.3.135, Gitea #206):
+  `tools/deploy/update-live.sh --rollback-to <N-1 blit .deb> HOST <N blit
+  .deb>`. It checks N-1's pair, `.sig` and manifest, and that the box runs
+  N-1, before it sends anything; when the smoke check after N fails, it
+  installs N-1 again the same way and holds it to the box as it was before
+  N. Exit 3: rolled back, the box as it was; exit 4: the rollback failed
+  too, and the items below are next.
 - **The API is up** (the smoke check failed, or the install failed): run
   `tools/deploy/update-live.sh HOST <N-1 blit .deb>` with N-1's packages,
   its `blit-release_<N-1>-1_amd64.sig` beside them, and
@@ -1007,11 +1026,18 @@ downgrade and exits 0, and the helper does not check what was installed).
   that it is downgrading, which is expected. From 0.3.133 (SR-2) only to
   0.3.133 or later: an older N-1 is unsigned and below the helper's floor,
   so it is the next item's root `dpkg`, whether or not the API is up.
+  A failed run prints the state it found before the update; pass it as
+  `BLIT_SMOKE_BASELINE='<ready> <displays> <panes> <frames> <login-up>'`
+  so the rollback is held to that, not to the broken box (Gitea #207).
+  Without it, the box it found is the floor: more displays up than the
+  broken box had, with frames advancing, passes.
 - **N-1's signature.** `update-live.sh` needs N-1's
-  `blit-release_<N-1>-1_amd64.sig`; the next release build clears its
-  output directory, and hibr-apt carries only the packages. Any copy of
-  N-1's packages can be signed again with `tools/release/sign-release.sh
-  <N-1 blit .deb>` (the same key, or a newer one N-1's hosts know).
+  `blit-release_<N-1>-1_amd64.sig`, and `--rollback-to` refuses to start
+  without it. A release built into its own output directory keeps it there
+  (the build clears only its own directory's `.deb` and `.sig` files);
+  hibr-apt carries only the packages. Any copy of N-1's packages can be
+  signed again with `tools/release/sign-release.sh <N-1 blit .deb>` (the
+  same key, or a newer one N-1's hosts know).
 - **The API is down** (the new server does not start): from a root shell on
   the host, `dpkg --install blit-compositor_<N-1>-1_amd64.deb
   blit_<N-1>-1_amd64.deb`, always both and the compositor first (from
@@ -1038,20 +1064,23 @@ downgrade and exits 0, and the helper does not check what was installed).
   answer (ADR 0232), and nothing else keeps a copy. #112 proposes that the
   helper keep the previous pair and reinstall it when the update fails its
   post-install check. That needs the owner's agreement.
-- **`update-live.sh` does not roll back.** When its smoke check fails, it
-  exits 1 and leaves N installed. Rolling back is a second, manual run with
-  N-1.
-- **The rollback run's own smoke check fails a box it repaired.**
-  `update-live.sh` compares with the box as it found it. After an update
-  that lost the display, "as it was" is no display. So the rollback that
-  brings the display back ends `smoke failed` (the broken box read no
-  display ready; the repaired one reads `1 1 1 351 1`), although the
-  install was verified and the box is as it was at N-1 (rehearsed:
-  `smoke-rollback`). The gate accepts either ending and
-  checks the box against N-1 itself. Wanted: a "recovery" mode in
-  `update-live.sh`, compared with a state recorded before the failed update
-  (or a stated expected display count), that passes when the box is at
-  least as it was then.
+- **`update-live.sh` did not roll back** -- fixed in 0.3.135 (Gitea
+  #206): `--rollback-to <N-1 blit .deb>` reinstalls N-1 when the smoke
+  check fails (the runbook above). It is an option, not the default: the
+  owner's standing deploy command names one package, and N-1's `.sig` is
+  not always at hand. Whether every deploy must name its way back is the
+  owner's decision. It rolls back only after a failed smoke check: when the
+  install itself times out, the API may be down or dpkg still running, and
+  the runbook's root `dpkg` is the path.
+- **The rollback run's own smoke check failed a box it repaired** -- fixed
+  in 0.3.135 (Gitea #207). It compared with the box as it found it: after
+  an update that lost the display, "as it was" was no display, and the
+  rollback that brought it back ended `smoke failed` (the broken box read
+  no display ready; the repaired one `1 1 1 351 1`). The check now holds
+  the box to at least the state it is given: more displays up passes, and
+  a box that had none passes with its displays up and frames advancing;
+  `BLIT_SMOKE_BASELINE` gives it the state recorded before the failed
+  update, and `--rollback-to` uses that state itself.
 - **No written recovery runbook** existed before this document; the one
   above is what the gate rehearses.
 - **Not rehearsed**: a power cut during the install (the `interrupted`

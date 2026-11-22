@@ -244,3 +244,52 @@ Recorded for 0.3.97 (docs/verification-status.md):
   `blit-server` the same refusals are 500 `update_install_failed` with the
   reason, a malformed header 400 with nothing staged, and the signed pair
   202 and installed. The postinst's helper restart is not shown there.
+
+## Amended in 0.3.135 (Gitea #206, #207): update-live.sh rolls back, and judges a repaired box
+
+- **`--rollback-to PREVIOUS_BLIT_DEB`** names the pair the box runs now.
+  Before anything is sent, `update-live.sh` checks it as it checks the
+  update -- the compositor beside it, its own
+  `blit-release_<version>_amd64.sig`, its manifest -- and that it is not
+  the release being installed, not older than the helper's floor
+  (`UPDATE_OLDEST_RELEASE`, read from the checkout's helper source) and the
+  version the box answers with. When the smoke check after the update
+  fails, it installs that pair through the same API, signed by its own
+  `.sig`, and runs the smoke check again against the state it recorded
+  before the update. It is an option: the standing deploy command names
+  one package, and N-1's `.sig` is not always kept (a release's output
+  directory keeps it; `tools/release/sign-release.sh` recreates it from
+  any copy of the packages). Making it the default is the owner's call.
+  It does not roll back after an install that timed out: the API may be
+  down, or dpkg still running under the helper's 600 s bound.
+- **Exit status**: 0 installed and passed; 1 failed (read the message;
+  the update may be installed); 2 refused before anything was sent; 3 the
+  smoke check failed and the previous pair is back and passes it; 4 the
+  rollback failed too.
+- **The smoke check holds the box to at least a state**, not to equality:
+  as many displays up or more, a surface in as many panes or the login
+  screen up, and frames advancing when it has displays. A box that had no
+  display ready passes with displays up and frames advancing, or, after
+  10 s (a restarting display's grace), with none: the rollback that
+  brought a display back used to end "smoke failed" because the broken box
+  it found had none, and could pass "API only" before its display was up.
+  `BLIT_SMOKE_BASELINE` gives it the state a failed run printed, for a
+  rollback by hand; `BLIT_SMOKE_SECONDS` (default 60) bounds it.
+- **A manifest named for the whole package version**
+  (`releases/<version>-<revision>.yaml`) is taken before
+  `releases/<version>.yaml`. Releases have only the latter; the rollback
+  rehearsal's fabricated N-1 is N's version at revision 0, and
+  `--rollback-to` needs both manifests at once.
+- Evidence: `update_live_rollback_gate` (new, light: update-live.sh whole
+  against a fake server on 127.0.0.1 with scratch packages) -- the
+  rollback with N-1's own parts, signature and both tokens, exit 3; a
+  rollback by hand passing the repaired box; a recorded baseline that the
+  repaired box does not meet; a box with no display, passed "API only"
+  after the grace; a failed rollback, exit 4; a good update
+  with one upload; and the refusals (no `.sig`, below the floor, not the
+  version the box runs) with nothing sent. With the update-live.sh before
+  this change it fails at `rollback` (usage, exit 2) and at `recovery`
+  ("smoke failed", exit 1). `rollback_recovery_gate`'s `smoke-fails` now
+  runs `--rollback-to` and ends at N-1 with the display back, exit 3;
+  `smoke-rollback` breaks N again and requires "smoke passed" with the
+  display up (none before), exit 0.

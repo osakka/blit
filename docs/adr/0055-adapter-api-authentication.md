@@ -102,3 +102,51 @@ echoed in a session response.
   in the QEMU fixture, not by a local gate: with `BLIT_AUTH_TOKEN` set, the
   packaged `blit-session.hibr` entrypoint must reach `owner_registered: true`
   and a non-zero printable-cell count. The release manifest records that run.
+
+## Amended in 0.3.135 (security review SR-8, Gitea #190): not for another user
+
+"Every program Blit launches sees the token" stopped being bounded by an
+existing capability once a child could run as another account: `user` on
+`POST /v1/terminal-sessions`, or a login's desktop. That account then held
+a root shell (SR-9), and the drop gained nothing. Measured before the fix,
+a child created with `"user":"nobody"` held the token three times over:
+`BLIT_API_TOKEN`, and `BLIT_AUTH_TOKEN` and `BLIT_UPDATE_TOKEN` inherited
+from the server's own environment (systemd's `EnvironmentFile=` puts them
+there, and the child's `execve` passed them on).
+
+- **A child run as another user gets no root secret.** When the child's
+  uid is not the server's, Blit does not set `BLIT_API_TOKEN`, and unsets
+  `BLIT_AUTH_TOKEN`, `BLIT_UPDATE_TOKEN` and `BLIT_UPDATE_TOKEN_FILE` in the
+  child before the drop. The server keeps them in its own environment: its
+  re-exec on a restart reads the token from there. A login's desktop join
+  already started from an empty environment, and Hibr's `auth run` gives a
+  login's session an empty one as root; neither changes.
+- **Children run as the server's own user are unchanged**, `user` naming
+  that account included: `BLIT_API_TOKEN` as before, for the adapter.
+- **What the other user keeps.** Its session's own binding
+  (`BLIT_SESSION_ID`, `BLIT_SESSION_TOKEN`, `BLIT_SURFACE_ID`,
+  `BLIT_SERVER_PORT`, `BLIT_VERSION`, `BLIT_PANE_ID`) and the frame
+  channel: `BLIT_FRAME_TOKEN` is that session's own, and the frame socket
+  takes it only from the session's uid. Hibr's desktop needs nothing more:
+  its one API use, the display rate in `wm/native.hibr` (`dt_nathz`), asks
+  the frame channel first (`console rate`, Blit 0.3.98) and falls back to
+  60 Hz without a token, as a login's desktop always has.
+- **Not a scoped token.** No per-session credential is built here (the
+  successor design above). What breaks without one: the API-owned adapter
+  (`BLIT_HIBR_PROVIDER=api`, `console-blit.so`) run as another user on a
+  server with a token -- not a packaged path; the packaged desktop is the
+  terminal provider. A caller can still hand a child the token by naming it
+  in `environment` (applied last); that is the caller's own act with a
+  credential it already holds, as writing it to a file would be.
+- **Still open.** A member of group `blit` reads `/etc/blit/blit.env`, and
+  the postinst adds the installing user to it (the review's group-`blit`
+  ticket). Until that is fixed, an account in that group holds the token
+  whatever its children's environment.
+
+Evidence: `tools/tests/session_user_secrets_gate.sh` (lifecycle; root
+service, skipped without `sudo -n`) starts children with no `user`, with
+`user` the server's own account, and with `user` `nobody`, and checks
+which names hold either token's value: `BLIT_API_TOKEN` (and the server's
+two) for the first two, none for `nobody`. Before the fix it fails:
+"nobody: a child run as another user holds a root secret, in
+BLIT_UPDATE_TOKEN,BLIT_API_TOKEN,BLIT_AUTH_TOKEN".

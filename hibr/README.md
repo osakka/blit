@@ -38,6 +38,12 @@ BLIT_SESSION_TOKEN
 BLIT_API_TOKEN
 ```
 
+`BLIT_API_TOKEN` is set only when the session runs as the server's own
+user: a session started with `user` (another account) or a login's desktop
+gets no root token (security review SR-8), so the module there talks to an
+authenticated server only when its creator names the token in the
+session's `environment`.
+
 Build it against the Hibr tree that owns the ABI, the version in
 `packaging/HIBR_VERSION`; the build checks the version and ABI, compiles
 with TCC and links with the system linker (ADR 0238):

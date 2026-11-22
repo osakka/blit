@@ -13,7 +13,8 @@ run an installed server. They are reproducible developer tooling:
   in; `tools/release/` builds a release (`build-release.sh`), writes its
   manifest (`generate-manifest.sh`) and records the gate runs
   (`record-gates.sh`); `tools/deploy/update-live.sh` updates a running Blit
-  through its API and checks the box after.
+  through its API and checks the box after, and with `--rollback-to`
+  reinstalls the previous release when that check fails.
 - `tools/fonts/` builds the icon font and the font reference;
   `tools/build-hibr-font.py` builds Hibr's glyph font.
 - `tools/probes/` contains QEMU init scripts, staging helpers, input emitters,
