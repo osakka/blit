@@ -269,6 +269,7 @@ security policy, or compatibility rule requires a new ADR.
 - [0241 — Arabic is shaped as words and drawn as slices](0241-arabic-shaped-as-words-and-drawn-as-slices.md)
 - [0242 — A program scale per display, pixels on the wire](0242-hidpi-program-scale.md)
 - [0243 — Glyph multiplexing: one registry, adopted protocols, published](0243-glyph-multiplexing.md)
+- [0245 — Installable glyph sets: a root-owned store, a ledger of codepoints, per-user views](0245-installable-glyph-sets.md)
 
 ## Status
 
