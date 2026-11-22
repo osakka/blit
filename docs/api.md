@@ -2634,7 +2634,13 @@ It speaks the frame channel above as a producer, with these additions.
   good, and a tiled program's windows stopped updating). The compositor's
   log says the refusals once when they begin and once when they end. Any
   other refusal gives the buffer back unshown and says so in its log. The feedback's main device
-  is the first DRM render node: the hello does not name Blit's GPU.
+  is the first DRM render node: the hello does not name Blit's GPU. Each
+  plane must be a dmabuf or a file sealed against shrinking (a memfd with
+  `F_SEAL_SHRINK`); any other descriptor is refused at `create` (`failed`)
+  or `create_immed` (the protocol error `invalid_wl_buffer`), so a plane
+  cannot be cut short under the compositor's read. A read that meets a
+  plane's end all the same is the program's protocol error, not the
+  compositor's end (0.3.135, security review SR-14).
 - **Viewports and buffer scale** (0.3.115; shown from 0.3.124, Gitea
   #159): `wp_viewporter` v1 is offered, and `wl_surface.set_buffer_scale`
   is honoured. A buffer at its own pixels (a viewport its buffer's size, as
@@ -2648,7 +2654,10 @@ It speaks the frame channel above as a producer, with these additions.
   The source is rounded to whole buffer pixels (Blit's placements and
   crops are whole pixels). Buffer transforms are not applied: no output is
   announced rotated or flipped, so programs have no reason to send one;
-  one is said in the log. Bad values are the program's protocol errors.
+  one is said in the log. Bad values are the program's protocol errors;
+  so is a buffer scale above 16 (`invalid_scale`, 0.3.135: Blit's scales
+  ask for 4 at most), and a viewport source past its buffer is found in
+  64 bits (security review SR-15).
 - **Pacing.** A program's frame callback is answered when Blit has taken
   the frame -- an `FRM1` when it is sent; an `FRM3` at once when it is the
   only frame of the window Blit holds, else at Blit's `FRAME release` of the

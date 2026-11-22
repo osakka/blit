@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale]]] [--animate n] [--lock] [--sub|--sub-pair] [--csd] [--clip] [--view-script]
+     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale|--drag-icon-shrink|--drag-icon-bad-source|--drag-icon-bad-scale]]] [--animate n] [--lock] [--sub|--sub-pair] [--csd] [--clip] [--view-script]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [--scale-frac [--scale-frac-twice]|--scale-int|--scale-none] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -92,7 +92,25 @@
    the plane is a memfd -- descriptor passing and the wire are what is
    tested; a GPU's dmabuf is the live check. It prints each buffer's plane
    as `STANDIN dmabuf <w>x<h> file <dev>:<inode>`, what the default
-   feedback offered, and each release as `STANDIN release <w>x<h>`.
+   feedback offered, and each release as `STANDIN release <w>x<h>`. The
+   memfd is sealed against shrinking, as blit-compositor asks of a plane
+   that is not a dmabuf (security review SR-14).
+
+   Three drag icons the compositor must refuse, each the program's
+   protocol error (security review SR-14, SR-15): --drag-icon-shrink (with
+   --dmabuf) makes the icon's plane an unsealed memfd and, once the
+   compositor has the buffer (a roundtrip), cuts it to nothing before the
+   commit (`STANDIN dmabuf cut short`, or `STANDIN dmabuf refused`);
+   --drag-icon-bad-source gives the icon a viewport whose source is x
+   2^23-1, w 2^23-1 (x + w past 2^31 in 24.8 fixed point);
+   --drag-icon-bad-scale does that at buffer scale 1024.
+
+   A program that has made a request the compositor must refuse (the
+   modes above, --viewport-bad, --scale-frac-twice) sends nothing after
+   it: it only reads, until the error ends it (Gitea #210, erring()). When
+   the connection ends before a close, the last line says why:
+   `STANDIN the connection ended before close: protocol error
+   <interface>#<id> <code>`, or the socket's error.
 
    With --lock, after its first frame it takes zwp_pointer_constraints_v1
    and locks the pointer to its surface, oneshot; each Space pressed (key
@@ -158,6 +176,7 @@
    `STANDIN done draws=<n> releases=<n> frames=<n>`. */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <signal.h>
 #include <poll.h>
@@ -294,6 +313,9 @@ struct standin {
     int dragout;                      /* --drag-out: a left press starts a drag of a file */
     int32_t icon_w, icon_h;           /* --drag-icon WxH: its drag has an icon that size */
     int icon_scale;                   /* --drag-icon-scale: the icon's buffer scale is 2 (Gitea #159) */
+    int icon_bad;                     /* --drag-icon-shrink 1, -bad-source 2, -bad-scale 3 (SR-14, SR-15) */
+    struct wp_viewport *icon_viewport;
+    int erring;                       /* a request the compositor refuses sent: only read from here */
     struct wl_surface *icon_surface;  /* at -10,-5 from the hot spot (attach's dx, dy) */
     struct wl_data_device_manager *ddm;
     struct zwp_primary_selection_device_manager_v1 *psm;
@@ -359,6 +381,35 @@ static void buffer_release(void *data, struct wl_buffer *buffer)
 static const struct wl_buffer_listener buffer_listener = { buffer_release };
 
 static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_t h);
+
+/* A request the compositor must refuse is made (Gitea #210): it is sent
+   now, with everything before it, and nothing after it. A request sent
+   later -- the wl_buffer.destroy a release asks for -- can reach the
+   compositor after it read the bad one and before it closed the
+   connection: Linux then resets the connection, and libwayland 1.23
+   throws away the protocol error it has already read when its next read
+   meets the reset. From here the program only reads. */
+static void erring(struct standin *s)
+{
+    struct pollfd p = { wl_display_get_fd(s->display), POLLOUT, 0 };
+    while (wl_display_flush(s->display) < 0 && errno == EAGAIN && poll(&p, 1, 1000) >= 0) {}
+    s->erring = 1;
+}
+
+/* wl_display_dispatch without its flush: for a program that has erred. */
+static int dispatch_quiet(struct wl_display *display)
+{
+    struct pollfd p = { wl_display_get_fd(display), POLLIN, 0 };
+    while (wl_display_prepare_read(display) != 0)
+        if (wl_display_dispatch_pending(display) < 0) return -1;
+    while (poll(&p, 1, -1) < 0)
+        if (errno != EINTR) {
+            wl_display_cancel_read(display);
+            return -1;
+        }
+    if (wl_display_read_events(display) < 0) return -1;
+    return wl_display_dispatch_pending(display);
+}
 
 static void frame_done(void *data, struct wl_callback *cb, uint32_t time)
 {
@@ -448,7 +499,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     struct wl_shm_pool *pool;
     struct wl_callback *cb;
     int32_t stride, x, y, lw = w, lh = h;
-    int fd;
+    int fd, shrink;
     if (b == NULL) return -1;
     /* ADR 0242: the buffer for the scale its program kind takes. */
     if (s->scale_mode == 1 && s->frac_n) {
@@ -467,7 +518,10 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     b->w = w;
     b->h = h;
     b->size = (size_t)stride * (size_t)h;
-    fd = memfd_create("wl-standin", MFD_CLOEXEC);
+    /* A dmabuf plane that is a memfd is sealed against shrinking, or
+       blit-compositor refuses it (SR-14); --drag-icon-shrink's is not. */
+    shrink = s->icon_bad == 1 && surface == s->icon_surface;
+    fd = memfd_create("wl-standin", MFD_CLOEXEC | (s->use_dmabuf && !shrink ? MFD_ALLOW_SEALING : 0));
     if (fd < 0 || ftruncate(fd, (off_t)b->size) != 0) {
         perror("STANDIN memfd");
         return -1;
@@ -484,10 +538,31 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
     if (s->use_dmabuf) {
         struct zwp_linux_buffer_params_v1 *params = zwp_linux_dmabuf_v1_create_params(s->dmabuf);
         struct stat st;
+        if (!shrink && fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) != 0) {
+            perror("STANDIN seal");
+            return -1;
+        }
         fstat(fd, &st);
         zwp_linux_buffer_params_v1_add(params, fd, 0, 0, (uint32_t)stride, (uint32_t)(s->modifier >> 32),
                                        (uint32_t)s->modifier);
         b->buffer = zwp_linux_buffer_params_v1_create_immed(params, w, h, FOURCC_XR24, 0);
+        if (shrink) {
+            /* Taken as it is (the size checked), then cut to nothing under
+               the compositor before the commit that shows it. */
+            struct wl_event_queue *q = wl_display_create_queue(s->display);
+            int rc = wl_display_roundtrip_queue(s->display, q);
+            wl_event_queue_destroy(q);
+            if (rc < 0) {
+                printf("STANDIN dmabuf refused\n");
+                s->erring = 1;
+                close(fd);
+                munmap(b->data, b->size);
+                free(b);
+                return -1;
+            }
+            if (ftruncate(fd, 0) != 0) perror("STANDIN ftruncate");
+            printf("STANDIN dmabuf cut short\n");
+        }
         zwp_linux_buffer_params_v1_destroy(params);
         printf("STANDIN dmabuf %dx%d file %lu:%lu\n", w, h, (unsigned long)st.st_dev,
                (unsigned long)st.st_ino);
@@ -518,6 +593,7 @@ static int draw(struct standin *s, struct wl_surface *surface, int32_t w, int32_
                                               &presentation_feedback_listener, s);
     if (s->animated == 0) clock_gettime(CLOCK_MONOTONIC, &s->first_draw);
     wl_surface_commit(surface);
+    if (s->viewport_mode == 3 && surface == s->surface) erring(s);   /* --viewport-bad's destination */
     ++s->draws;
     printf("STANDIN drew %s%dx%d", surface == s->surface ? "" :
            surface == s->child_surface ? "child " : surface == s->sub_surface ? "sub " : surface == s->icon_surface ? "icon " : "popup ", lw, lh);
@@ -973,6 +1049,7 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
         wp_fractional_scale_manager_v1_get_fractional_scale(s->frac_manager, s->surface);
         printf("STANDIN second fractional object\n");
         fflush(stdout);
+        erring(s);
     }
     if (s->lock && s->lock_step == 0) lock_next(s);
     if (s->want_popup) {
@@ -1570,8 +1647,16 @@ static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, ui
         if (s->icon_w > 0) s->icon_surface = wl_compositor_create_surface(s->compositor);
         wl_data_device_start_drag(s->data_device, src, s->surface, s->icon_surface, serial);
         if (s->icon_surface && s->icon_scale) wl_surface_set_buffer_scale(s->icon_surface, 2);
+        if (s->icon_surface && s->icon_bad >= 2 && s->viewporter) {
+            /* SR-15: x and w both 2^23 - 1, whose sum wraps in 32 bits. */
+            s->icon_viewport = wp_viewporter_get_viewport(s->viewporter, s->icon_surface);
+            wp_viewport_set_source(s->icon_viewport, wl_fixed_from_int(8388607), 0, wl_fixed_from_int(8388607),
+                                   wl_fixed_from_int(1));
+            if (s->icon_bad == 3) wl_surface_set_buffer_scale(s->icon_surface, 1024);
+        }
         if (s->icon_surface) draw(s, s->icon_surface, s->icon_w, s->icon_h);
         printf("STANDIN drag started\n");
+        if (s->icon_bad && !s->erring) erring(s);
     }
     /* --cursor: a shape named, the pointer hidden, an image of its own. */
     if (s->cursor && state == WL_POINTER_BUTTON_STATE_PRESSED) {
@@ -2075,6 +2160,9 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--drop-lazy") == 0) s.drop = 3;
         else if (strcmp(argv[i], "--drag-out") == 0) s.dragout = 1;
         else if (strcmp(argv[i], "--drag-icon-scale") == 0) s.icon_scale = 1;
+        else if (strcmp(argv[i], "--drag-icon-shrink") == 0) s.icon_bad = 1;
+        else if (strcmp(argv[i], "--drag-icon-bad-source") == 0) s.icon_bad = 2;
+        else if (strcmp(argv[i], "--drag-icon-bad-scale") == 0) s.icon_bad = 3;
         else if (strcmp(argv[i], "--drag-icon") == 0 && i + 1 < argc &&
                  sscanf(argv[i + 1], "%dx%d", &s.icon_w, &s.icon_h) == 2) ++i;
         else if (strcmp(argv[i], "--modifier") == 0 && i + 1 < argc) s.modifier = strtoull(argv[++i], NULL, 16);
@@ -2205,10 +2293,22 @@ int main(int argc, char **argv)
         printf("STANDIN inhibit on\n");
     }
     fflush(stdout);
-    while (!s.closed && wl_display_dispatch(s.display) >= 0)
+    while (!s.closed && (s.erring ? dispatch_quiet(s.display) : wl_display_dispatch(s.display)) >= 0)
         fflush(stdout);
     if (!s.closed) {
-        fprintf(stderr, "STANDIN the connection ended before close\n");
+        /* Why, as libwayland has it: a protocol error by its object and
+           code, or the socket's errno (Gitea #210). */
+        int err = wl_display_get_error(s.display);
+        const struct wl_interface *iface = NULL;
+        uint32_t id = 0, code = 0;
+        fflush(stdout);
+        if (err == EPROTO) {
+            code = wl_display_get_protocol_error(s.display, &iface, &id);
+            fprintf(stderr, "STANDIN the connection ended before close: protocol error %s#%u %u\n",
+                    iface ? iface->name : "-", id, code);
+        } else {
+            fprintf(stderr, "STANDIN the connection ended before close: %s\n", strerror(err));
+        }
         return 1;
     }
     if (s.popup) popup_done(&s, s.popup);
@@ -2264,6 +2364,7 @@ int main(int argc, char **argv)
     if (s.ti_manager) zwp_text_input_manager_v3_destroy(s.ti_manager);
     if (s.ddm) wl_data_device_manager_destroy(s.ddm);
     if (s.sub_viewport) wp_viewport_destroy(s.sub_viewport);
+    if (s.icon_viewport) wp_viewport_destroy(s.icon_viewport);
     /* ADR 0242's objects. */
     for (i = 0; i < 3; ++i) {
         if (s.pair_sub[i]) wl_subsurface_destroy(s.pair_sub[i]);

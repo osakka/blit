@@ -3,7 +3,9 @@
    desktop's lines (version 5's, docs/api.md "One grammar, version 5"; the
    version 4 forms understood as nothing), the pixel conversion, and one
    FRM1 frame, one WINDOW line and one `INPUT sock <id> <path>` over a
-   socketpair. Prints COMPOSITOR_WIRE_UNIT_OK. */
+   socketpair; a linux-dmabuf plane's descriptor and the guarded read of
+   one cut short under it (security review SR-14). Prints
+   COMPOSITOR_WIRE_UNIT_OK. */
 #include "blit_compositor_wire.h"
 
 static int failures;
@@ -313,6 +315,58 @@ static void convert(void)
     EXPECT(out[0] == 0x80 && out[1] == 0x40 && out[2] == 0x20 && out[3] == 0x80, "ABGR un-premultiplied");
 }
 
+/* SR-14: a plane is a dmabuf or a file sealed against shrinking; a read of
+   one cut short under the compositor meets zeros, not SIGBUS, and says so. */
+static void plane(void)
+{
+    char why[128];
+    long page = sysconf(_SC_PAGESIZE);
+    size_t bytes = (size_t)page * 3, i;
+    unsigned long sum = 0;
+    unsigned char *map;
+    volatile unsigned char *at;
+    struct sigaction before, after;
+    int sealed = memfd_create("unit-sealed", MFD_CLOEXEC | MFD_ALLOW_SEALING);
+    int open_fd = memfd_create("unit-open", MFD_CLOEXEC);
+    int pipe_fds[2], cut;
+    EXPECT(sealed >= 0 && open_fd >= 0 && pipe(pipe_fds) == 0, "memfds and a pipe");
+    EXPECT(ftruncate(sealed, (off_t)bytes) == 0 && fcntl(sealed, F_ADD_SEALS, F_SEAL_SHRINK) == 0, "sealed");
+    EXPECT(bc_plane_fd_check(sealed, why, sizeof(why)) == 0, "a memfd sealed against shrinking was refused: %s", why);
+    EXPECT(bc_plane_fd_check(open_fd, why, sizeof(why)) != 0 && strstr(why, "not sealed"),
+           "a memfd that can shrink was taken (%s)", why);
+    EXPECT(bc_plane_fd_check(pipe_fds[0], why, sizeof(why)) != 0 && strstr(why, "neither"),
+           "a pipe was taken as a plane (%s)", why);
+    /* Three pages of 1s, cut to one under the mapping, read whole. */
+    EXPECT(ftruncate(open_fd, (off_t)bytes) == 0, "size");
+    map = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, open_fd, 0);
+    EXPECT(map != MAP_FAILED, "map");
+    if (map == MAP_FAILED) return;
+    memset(map, 1, bytes);
+    EXPECT(ftruncate(open_fd, (off_t)page) == 0, "cut");
+    sigaction(SIGBUS, NULL, &before);
+    bc_guard_begin(map, bytes);
+    for (at = map, i = 0; i < bytes; ++i) sum += at[i];
+    cut = bc_guard_end();
+    sigaction(SIGBUS, NULL, &after);
+    EXPECT(cut == 1 && sum == (unsigned long)page, "the cut read: cut %d, %lu ones (want 1, %ld)", cut, sum, page);
+    EXPECT(after.sa_handler == before.sa_handler,
+           "SIGBUS not as it was after the read");
+    munmap(map, bytes);
+    /* A whole file read under the guard: not cut. */
+    map = mmap(NULL, bytes, PROT_READ, MAP_SHARED, sealed, 0);
+    EXPECT(map != MAP_FAILED, "map sealed");
+    if (map != MAP_FAILED) {
+        bc_guard_begin(map, bytes);
+        for (at = map, i = 0; i < bytes; ++i) sum += at[i];
+        EXPECT(bc_guard_end() == 0, "a whole file's read was said cut");
+        munmap(map, bytes);
+    }
+    close(sealed);
+    close(open_fd);
+    close(pipe_fds[0]);
+    close(pipe_fds[1]);
+}
+
 static void channel(void)
 {
     BcWire w;
@@ -500,7 +554,8 @@ int main(void)
     convert();
     scale();
     channel();
+    plane();
     if (failures) return 1;
-    printf("COMPOSITOR_WIRE_UNIT_OK hello(inhibit=1) layout(scale%%) scale(configure,echo,edges,limits,in;100-400x8192) text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first)\n");
+    printf("COMPOSITOR_WIRE_UNIT_OK hello(inhibit=1) layout(scale%%) scale(configure,echo,edges,limits,in;100-400x8192) text lines(v5,v4-unknown) input convert channel(INPUT-sock-id-first) plane(dmabuf-or-sealed,cut-read-guarded)\n");
     return 0;
 }

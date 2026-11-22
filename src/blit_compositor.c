@@ -118,6 +118,10 @@
 #define BC_TOKENS 16
 /* The displays one layout names, at most. */
 #define BC_DISPLAYS 16
+/* The largest wl_surface buffer scale taken (security review SR-15): four
+   times the largest Blit asks for (400%, ADR 0242); above it, a protocol
+   error. */
+#define BC_BUFFER_SCALE_MAX 16
 /* A display gone: its wl_output global is removed at once and destroyed
    this long after, so a client binding it meanwhile is no error (as
    wlroots' wlr_global_destroy_safe). */
@@ -201,7 +205,8 @@ struct bc_surface {
     struct wl_list feedback;          /* committed, waiting for Blit to take the frame */
     struct wl_event_source *pace;     /* the refresh timer for `due` */
     uint64_t last_done_us;            /* when frame callbacks were last answered */
-    /* wl_surface.set_buffer_scale, pending and committed (1 unset). */
+    /* wl_surface.set_buffer_scale, pending and committed (1 unset), at
+       most BC_BUFFER_SCALE_MAX. */
     int32_t pending_scale, scale;
     /* ADR 0242: its wp_fractional_scale_v1 (NULL none), and the scale in
        120ths its preferred_buffer_scale and its preferred_scale last said
@@ -1331,26 +1336,45 @@ static void holds_end_id(struct bc_server *s, uint32_t id)
    channel is up, and kept either way, to be sent again on a new channel.
    Returns 0 when sent (or kept, the channel down), -1 with last_error set
    when the copy or its send failed (a copy made is kept all the same). */
-static int window_copy(struct bc_xdg *x, const void *pixels, uint32_t width, uint32_t height,
-                       uint32_t stride, uint32_t format)
+static int window_copied(struct bc_xdg *x, const BcCopy *c)
 {
     struct bc_server *s = x->server;
-    BcCopy c;
     int rc = 0;
-    if (bc_frame_copy(&s->wire, pixels, width, height, stride, format, &c) != 0) return -1;
     if (s->link == BC_LINK_UP) {
-        rc = bc_wire_send_frm1(&s->wire, x->id, &c);
+        rc = bc_wire_send_frm1(&s->wire, x->id, c);
         if (rc == 0) x->last_copy = s->wire.sequence;
     }
-    kept_set(x, &c);
+    kept_set(x, c);
     return rc;
 }
 
+static int window_copy(struct bc_xdg *x, const void *pixels, uint32_t width, uint32_t height,
+                       uint32_t stride, uint32_t format)
+{
+    BcCopy c;
+    if (bc_frame_copy(&x->server->wire, pixels, width, height, stride, format, &c) != 0) return -1;
+    return window_copied(x, &c);
+}
+
+/* A plane read cut short under the compositor (bc_guard_end): the client's
+   error, as libwayland makes a wl_shm buffer's (security review SR-14). */
+static void dmabuf_cut(struct bc_dmabuf *b, char *last_error, size_t cap)
+{
+    snprintf(last_error, cap, "its plane's file was cut short under the compositor");
+    logf_("a dmabuf buffer: its plane's file was cut short while it was read; the program's error");
+    wl_resource_post_error(b->resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
+                           "the dmabuf's plane was cut short under the compositor");
+}
+
 /* Whether dmabuf_copy can read it: one linear plane of an 8-bit RGB
-   format. A GPU's tiled or compressed layout cannot be read by the CPU. */
+   format, rows of whole pixels (a narrower stride would read past the
+   rows' end). A GPU's tiled or compressed layout cannot be read by the
+   CPU. */
 static int dmabuf_copyable(const struct bc_dmabuf *b)
 {
-    if (b->planes != 1 || b->modifier != BC_MODIFIER_LINEAR) return 0;
+    if (b->planes != 1 || b->modifier != BC_MODIFIER_LINEAR ||
+        (uint64_t)b->strides[0] < (uint64_t)b->width * 4)
+        return 0;
     return b->format == BC_FOURCC_XR24 || b->format == BC_FOURCC_AR24 ||
            b->format == BC_FOURCC_XB24 || b->format == BC_FOURCC_AB24;
 }
@@ -1377,7 +1401,8 @@ static int dmabuf_copy(struct bc_xdg *x, struct bc_dmabuf *b)
     size_t bytes;
     unsigned char *map;
     uint32_t shm_format;
-    int rc;
+    BcCopy c;
+    int rc, cut;
     if (b->planes != 1 || b->modifier != BC_MODIFIER_LINEAR) {
         snprintf(s->wire.last_error, sizeof(s->wire.last_error),
                  "a dmabuf of %d planes, modifier %#llx, cannot be copied", b->planes,
@@ -1403,11 +1428,20 @@ static int dmabuf_copy(struct bc_xdg *x, struct bc_dmabuf *b)
     /* A dmabuf is read between the CPU-access fences; a memfd has none. */
     sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
-    rc = window_copy(x, map + b->offsets[0], (uint32_t)b->width, (uint32_t)b->height,
-                     b->strides[0], shm_format);
+    bc_guard_begin(map, bytes);
+    rc = bc_frame_copy(&s->wire, map + b->offsets[0], (uint32_t)b->width, (uint32_t)b->height,
+                       b->strides[0], shm_format, &c);
+    cut = bc_guard_end();
     sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
     munmap(map, bytes);
+    if (cut) {
+        if (rc == 0) close(c.fd);
+        dmabuf_cut(b, s->wire.last_error, sizeof(s->wire.last_error));
+        return -1;
+    }
+    if (rc != 0) return -1;
+    rc = window_copied(x, &c);
     if (rc == 0 && s->link == BC_LINK_UP) ++s->wire.dmabuf_copied;
     return rc;
 }
@@ -1474,10 +1508,17 @@ static int params_check(struct bc_params *p, int32_t width, int32_t height, uint
                  (const char *)&format, (unsigned long long)p->modifier, flags);
         return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT;
     }
-    /* Plane 0 holds its rows (ADR 0223's own check); a descriptor that
-       cannot say its size is left to Blit's import. */
+    /* Each plane a dmabuf, or a file that cannot shrink under a read
+       (security review SR-14). */
+    for (i = 0; i < planes; ++i)
+        if (bc_plane_fd_check(p->fds[i], why, cap) != 0) return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER;
+    /* Plane 0 holds its rows (ADR 0223's own check). */
     size = lseek(p->fds[0], 0, SEEK_END);
-    if (size >= 0 && (uint64_t)p->offsets[0] + (uint64_t)p->strides[0] * (uint64_t)(height - 1) +
+    if (size < 0) {
+        snprintf(why, cap, "plane 0 cannot say its size: %s", strerror(errno));
+        return ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS;
+    }
+    if ((uint64_t)p->offsets[0] + (uint64_t)p->strides[0] * (uint64_t)(height - 1) +
                          4ull * (uint64_t)width > (uint64_t)size) {
         snprintf(why, cap, "plane 0 of %lld bytes cannot hold %dx%d at stride %u",
                  (long long)size, width, height, p->strides[0]);
@@ -2339,6 +2380,20 @@ static void dragicon_begin(struct bc_server *s, struct bc_surface *surface, int3
     surface_scale_tell(surface);      /* the dragging window's scale (ADR 0242) */
 }
 
+/* The view's buffer rectangle (v[0..3]) inside the w x h buffer it is
+   read from, at both ends (security review SR-15). */
+static void dragicon_crop(int32_t *v, uint32_t w, uint32_t h)
+{
+    int64_t lim[2] = {w, h};
+    int i;
+    for (i = 0; i < 2; ++i) {
+        if (v[2 + i] < 1) v[2 + i] = 1;
+        if (v[2 + i] > lim[i]) v[2 + i] = (int32_t)lim[i];
+        if (v[i] < 0) v[i] = 0;
+        if (v[i] > lim[i] - v[2 + i]) v[i] = (int32_t)(lim[i] - v[2 + i]);
+    }
+}
+
 static void dragicon_size(uint32_t w, uint32_t h, uint32_t *nw, uint32_t *nh)
 {
     *nw = w;
@@ -2359,10 +2414,11 @@ static int dragicon_dmabuf_scaled(struct bc_server *s, struct bc_surface *surfac
                                 : b->format == BC_FOURCC_AR24 ? BC_SHM_ARGB8888 : b->format;
     uint32_t *small;
     unsigned char *map;
-    int rc;
+    int rc, cut;
     int32_t v[6];
     /* Its view in desktop pixels (ADR 0242), bounded there. */
     view_wire(s->dragout.icon_pic, v);
+    dragicon_crop(v, (uint32_t)b->width, (uint32_t)b->height);
     dragicon_size((uint32_t)v[4], (uint32_t)v[5], &nw, &nh);
     map = mmap(NULL, bytes, PROT_READ, MAP_SHARED, b->fds[0], 0);
     if (map == MAP_FAILED) return send_dmabuf(s->dragout.icon_pic, b);
@@ -2372,12 +2428,20 @@ static int dragicon_dmabuf_scaled(struct bc_server *s, struct bc_surface *surfac
     }
     sync.flags = DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
-    /* Its viewport's crop and size (Gitea #159), bounded. */
+    /* Its viewport's crop and size (Gitea #159), bounded; the read guarded
+       (SR-14). */
+    bc_guard_begin(map, bytes);
     dragicon_scale(map + b->offsets[0] + (size_t)v[1] * b->strides[0] + (size_t)v[0] * 4, (uint32_t)v[2],
                    (uint32_t)v[3], b->strides[0], small, nw, nh);
+    cut = bc_guard_end();
     sync.flags = DMA_BUF_SYNC_END | DMA_BUF_SYNC_READ;
     ioctl(b->fds[0], DMA_BUF_IOCTL_SYNC, &sync);
     munmap(map, bytes);
+    if (cut) {
+        free(small);
+        dmabuf_cut(b, s->wire.last_error, sizeof(s->wire.last_error));
+        return BC_SENT_NONE;
+    }
     rc = bc_wire_send_shm(&s->wire, s->dragout.icon_id, small, nw, nh, nw * 4, format);
     free(small);
     if (rc != 0) return BC_SENT_NONE;
@@ -2417,6 +2481,10 @@ static int dragicon_apply(struct bc_surface *surface, struct wl_resource *buffer
     h = (uint32_t)wl_shm_buffer_get_height(shm);
     format = wl_shm_buffer_get_format(shm);
     if (format != BC_SHM_ARGB8888 && format != BC_SHM_XRGB8888) return BC_SENT_NONE;
+    /* Rows of whole pixels (libwayland checks less), the view inside them
+       (security review SR-15). */
+    if ((uint64_t)(uint32_t)wl_shm_buffer_get_stride(shm) < (uint64_t)w * 4) return BC_SENT_NONE;
+    dragicon_crop(v, w, h);
     /* Its viewport's crop and size, or the buffer's (Gitea #159), bounded. */
     dragicon_size((uint32_t)v[4], (uint32_t)v[5], &nw, &nh);
     wl_shm_buffer_begin_access(shm);
@@ -2633,9 +2701,11 @@ static int viewport_commit(struct bc_surface *surface, struct wl_resource *buffe
     } else {
         return 1;
     }
+    /* In 64 bits: x + w of two 24.8 values can pass 2^31 (security review
+       SR-15). */
     if (surface->vp_src[2] != wl_fixed_from_int(-1) &&
-        (surface->vp_src[0] + surface->vp_src[2] > wl_fixed_from_int(bw) ||
-         surface->vp_src[1] + surface->vp_src[3] > wl_fixed_from_int(bh))) {
+        ((int64_t)surface->vp_src[0] + surface->vp_src[2] > (int64_t)bw * 256 ||
+         (int64_t)surface->vp_src[1] + surface->vp_src[3] > (int64_t)bh * 256)) {
         wl_resource_post_error(surface->viewport, WP_VIEWPORT_ERROR_OUT_OF_BUFFER,
                                "the source is outside the %dx%d surface", bw, bh);
         return 0;
@@ -2658,14 +2728,20 @@ static void surface_view(struct bc_surface *surface)
         return;
     }
     if (src) {
-        v[0] = (int32_t)((int64_t)surface->vp_src[0] * k / 256);
-        v[1] = (int32_t)((int64_t)surface->vp_src[1] * k / 256);
-        v[2] = (int32_t)(((int64_t)surface->vp_src[2] * k + 128) / 256);
-        v[3] = (int32_t)(((int64_t)surface->vp_src[3] * k + 128) / 256);
-        if (v[2] < 1) v[2] = 1;
-        if (v[3] < 1) v[3] = 1;
-        if (v[0] + v[2] > bw) v[0] = bw - v[2] > 0 ? bw - v[2] : 0, v[2] = bw - v[0];
-        if (v[1] + v[3] > bh) v[1] = bh - v[3] > 0 ? bh - v[3] : 0, v[3] = bh - v[1];
+        /* Worked out in 64 bits and kept inside the buffer at both ends
+           (security review SR-15): a rectangle past its edge is moved in,
+           one larger than it is the whole of it. */
+        int64_t r[4], lim[2] = {bw, bh};
+        int i;
+        for (i = 0; i < 2; ++i) {
+            r[i] = (int64_t)surface->vp_src[i] * k / 256;
+            r[2 + i] = ((int64_t)surface->vp_src[2 + i] * k + 128) / 256;
+            if (r[2 + i] < 1) r[2 + i] = 1;
+            if (r[2 + i] > lim[i]) r[2 + i] = lim[i];
+            if (r[i] < 0) r[i] = 0;
+            if (r[i] > lim[i] - r[2 + i]) r[i] = lim[i] - r[2 + i];
+        }
+        for (i = 0; i < 4; ++i) v[i] = (int32_t)r[i];
     } else {
         v[0] = v[1] = 0;
         v[2] = bw;
@@ -3038,8 +3114,11 @@ static void surface_set_buffer_scale(struct wl_client *client, struct wl_resourc
 {
     struct bc_surface *surface = wl_resource_get_user_data(resource);
     (void)client;
-    if (scale < 1) {
-        wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE, "scale %d", scale);
+    /* At most BC_BUFFER_SCALE_MAX (security review SR-15): Blit's scales
+       ask for 4 at most (ADR 0242). */
+    if (scale < 1 || scale > BC_BUFFER_SCALE_MAX) {
+        wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE, "scale %d (1 to %d)", scale,
+                               BC_BUFFER_SCALE_MAX);
         return;
     }
     surface->pending_scale = scale;

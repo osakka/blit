@@ -99,12 +99,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <poll.h>
+#include <signal.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <sys/vfs.h>
 #include <dirent.h>
 #include <unistd.h>
 
@@ -560,6 +562,81 @@ static int bc_frame_copy(BcWire *w, const void *pixels, uint32_t width, uint32_t
     }
     out->fd = fd;
     return 0;
+}
+
+/* ---- A linux-dmabuf plane's descriptor, and reading it (security review SR-14) ----
+
+   The compositor reads a plane itself when Blit cannot import it (a copy
+   as FRM1) and for a drag icon past its bound. A dmabuf cannot shrink; a
+   memfd can, unless sealed against it, and a read of a mapping past its
+   file's end is SIGBUS, which would end the compositor and every program
+   window in the session. So a plane is a dmabuf (its file system's magic)
+   or a file sealed against shrinking, or the buffer is refused at its
+   create; and each read is guarded as libwayland guards wl_shm's: a SIGBUS
+   inside the mapping being read is answered with zero pages over it, the
+   read goes on, and the reader is told the file was cut short. */
+
+#ifndef DMA_BUF_MAGIC
+#define DMA_BUF_MAGIC 0x444d4142u   /* "DMAB", linux/magic.h */
+#endif
+
+/* 0 when `fd` can be a plane; -1 with why. */
+static int bc_plane_fd_check(int fd, char *why, size_t cap)
+{
+    struct statfs fs;
+    int seals;
+    if (fstatfs(fd, &fs) == 0 && (uint32_t)fs.f_type == DMA_BUF_MAGIC) return 0;
+    seals = fcntl(fd, F_GET_SEALS);
+    if (seals >= 0 && (seals & F_SEAL_SHRINK)) return 0;
+    snprintf(why, cap, seals >= 0 ? "a plane is a memfd not sealed against shrinking"
+                                  : "a plane is neither a dmabuf nor a memfd sealed against shrinking");
+    return -1;
+}
+
+static struct {
+    unsigned char *volatile map;
+    volatile size_t bytes;
+    volatile sig_atomic_t cut;
+    struct sigaction before;
+} bc_guard;
+
+static void bc_guard_sigbus(int signal_number, siginfo_t *info, void *context)
+{
+    unsigned char *at = (unsigned char *)info->si_addr, *map = bc_guard.map;
+    (void)signal_number;
+    (void)context;
+    if (map && info->si_code > 0 && at >= map && at < map + bc_guard.bytes &&
+        mmap(map, bc_guard.bytes, PROT_READ, MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0) != MAP_FAILED) {
+        bc_guard.cut = 1;
+        return;
+    }
+    /* Not this read's: SIGBUS as it was before, the fault met again (or,
+       sent by a process, sent again). */
+    sigaction(SIGBUS, &bc_guard.before, NULL);
+    if (info->si_code <= 0) raise(SIGBUS);
+}
+
+/* The `bytes` mapped at `map` (from mmap) are about to be read. */
+static void bc_guard_begin(void *map, size_t bytes)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = bc_guard_sigbus;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    bc_guard.bytes = bytes;
+    bc_guard.cut = 0;
+    bc_guard.map = (unsigned char *)map;
+    sigaction(SIGBUS, &sa, &bc_guard.before);
+}
+
+/* The read is over: 1 when it met the file's end (zeros read from there
+   on: the result is not the client's), else 0. */
+static int bc_guard_end(void)
+{
+    sigaction(SIGBUS, &bc_guard.before, NULL);
+    bc_guard.map = NULL;
+    return bc_guard.cut;
 }
 
 /* One whole FRM1 frame of picture `id` from a copy (ADR 0202). Returns 0,

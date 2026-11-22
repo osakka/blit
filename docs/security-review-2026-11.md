@@ -48,8 +48,8 @@ exercised with real dpkg in the Debian 13 release environment
 | SR-11 | Medium | Both tokens are compared with `strcmp` -- fixed in 0.3.132 |
 | SR-12 | Medium | An install blocks the server's main loop with no timeout; the console watchdog kills it at 120 s, mid-install -- fixed in 0.3.132 |
 | SR-13 | Medium | dpkg accepts `blit` N-1 alone under `blit-compositor` N; only the helper keeps the pair together -- fixed in 0.3.132, for rollbacks to 0.3.132 or later |
-| SR-14 | Medium | blit-compositor can be killed with SIGBUS through a memfd passed as a dmabuf |
-| SR-15 | Medium | A viewport source rectangle or buffer scale makes the drag-icon scaler read outside the buffer |
+| SR-14 | Medium | blit-compositor can be killed with SIGBUS through a memfd passed as a dmabuf -- fixed in 0.3.135 |
+| SR-15 | Medium | A viewport source rectangle or buffer scale makes the drag-icon scaler read outside the buffer -- fixed in 0.3.135 |
 | SR-16 | Medium | One CHT sequence (`CSI 2147483647 I`) stalls the server -- fixed in 0.3.132 |
 | SR-17 | Medium | Connection slots can be used up before authentication (HTTP and the frame socket) -- fixed in 0.3.135 |
 | SR-18 | Low | `png_decode` leaks its compressed buffer on some error paths -- fixed in 0.3.132 |
@@ -586,6 +586,20 @@ deconfigures the compositor.
 
 ### SR-14 (Medium): blit-compositor can be killed with SIGBUS through linux-dmabuf
 
+**Fixed** in 0.3.135 (Gitea #196): each plane must be a dmabuf (its file
+system's magic) or a file sealed against shrinking, or the buffer is
+refused at `create` (`failed`) or `create_immed` (`invalid_wl_buffer`); a
+descriptor whose size cannot be read is refused too. The two reads
+(`dmabuf_copy`, `dragicon_dmabuf_scaled`) are guarded as libwayland guards
+wl_shm: a SIGBUS inside the mapping being read maps zero pages over it, the
+read finishes, and the buffer is the program's protocol error
+(`out_of_bounds`). compositor_gate's dragout part: a drag icon whose plane
+is an unsealed memfd, cut to nothing once the compositor has it, is the
+program's protocol error and the compositor serves the other programs on;
+the compositor before this change died of SIGBUS there (plain and
+sanitizer runs). compositor_wire_unit: the descriptor check, and a guarded
+read of a memfd cut short under its mapping reads zeros and says so.
+
 `params_check` checks the plane size once, with `lseek`, and skips the
 check if `lseek` fails (`src/blit_compositor.c:1403-1405`). It never checks
 that the descriptor is a dmabuf. `dmabuf_copy` later maps it and reads it
@@ -605,6 +619,17 @@ session, dies.
 > compositor keeps serving another client.
 
 ### SR-15 (Medium): viewport source or buffer scale overflow in the drag-icon scaler
+
+**Fixed** in 0.3.135 (Gitea #197): the source check is done in 64 bits;
+`wl_surface.set_buffer_scale` above 16 is `invalid_scale` (Blit's scales
+ask for 4 at most); the view is worked out in 64 bits and kept inside the
+buffer at both ends; and the drag icon's read crops the view to the buffer
+it reads (and refuses a wl_shm stride narrower than its row).
+compositor_gate's dragout part: a drag icon with a source of x 2^23-1, w
+2^23-1 is the program's `out_of_buffer`, and at buffer scale 1024 its
+`invalid_scale`. The compositor before this change took the first (the
+sanitizer run: signed overflow at the check) and read 4 KB before the
+buffer at the second (SIGSEGV in the plain run).
 
 The source rectangle check adds `wl_fixed_t` values in 32 bits
 (`src/blit_compositor.c:2471`), so `x + w` can wrap past the bound. The

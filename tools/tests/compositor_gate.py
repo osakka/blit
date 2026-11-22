@@ -40,6 +40,7 @@ import fcntl
 import json
 import os
 import re
+import select
 import shutil
 import signal
 import socket
@@ -84,6 +85,14 @@ def fail(why):
 def check(ok, why):
     if not ok:
         fail(why() if callable(why) else why)
+
+
+def protocol_error(text, interface, code):
+    """Whether a stand-in's output ends on the protocol error `code` of
+    `interface`, as libwayland gave it (wl_display_get_protocol_error): the
+    stand-in's last line when its connection ended before a close."""
+    return re.search(r'STANDIN the connection ended before close: protocol error %s#\d+ %d\n' % (interface, code),
+                     text) is not None
 
 
 def wait_for(predicate, why, seconds=8.0):
@@ -173,6 +182,7 @@ class Desktop:
             check(len(data) == 48 and len(fds) == 1, 'FRM1 of %d bytes with %d fds' % (len(data), len(fds)))
             fields = struct.unpack_from('<IQIIIIIIII', data, 4)
             return ('frame', fields, fds[0])
+        check(data, 'the frame channel ended')
         check(data.endswith(b'\n') and data.count(b'\n') == 1, 'not one line: %r' % data)
         if data.startswith(b'CLIP read '):
             # The reader's pipe, passed with the line: the gate writes into it.
@@ -1616,8 +1626,9 @@ def viewport_part(compositor, standin, work):
         bad = start([standin, '--viewport-bad', 'Bad'], cenv, open(bad_path, 'w'))
         clients.append(bad)
         check(bad.wait(5) != 0, 'a bad viewport did not end its program')
-        check('wp_viewport' in open(bad_path).read() and 'error' in open(bad_path).read().lower(),
-              lambda: 'the bad viewport\'s program saw no protocol error:\n' + open(bad_path).read())
+        check(protocol_error(open(bad_path).read(), 'wp_viewport', 0),
+              lambda: 'the bad viewport\'s program saw no bad_value (exit status %s):\n%s'
+              % (bad.returncode, open(bad_path).read()))
         check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
         quit_compositor(desk, comp)
         return ('offered=v1 fits=no-view scale=view crop+scale=view buffer-scale=view back=view- '
@@ -2450,7 +2461,9 @@ def dragout_part(compositor, standin, work):
     `CLIP dragend o<n> move` is the program's performed, finished, move.
     Over another program: `CLIP drag|drop o<n>` there, the target's reads
     written by the dragging program's source, `CLIP hover|dropped o<n>`
-    back. `dragend none` cancels it."""
+    back. `dragend none` cancels it. Its icon: scaled, cropped, or as it
+    is; and refused, the program's protocol error, when it could make the
+    compositor read outside it (security review SR-14, SR-15)."""
     runtime = os.path.join(work, 'run-dragout')
     os.mkdir(runtime, 0o700)
     name = 'blit-compositor-gate-dragout-%d' % os.getpid()
@@ -2618,14 +2631,81 @@ def dragout_part(compositor, standin, work):
             iroute.close()
             icons.append('%s %dx%d%s->%s %dx%d' % ('dmabuf' if '--dmabuf' in extra else 'shm', size[0], size[1],
                                                      '@2' if '--drag-icon-scale' in extra else '', kind, want[0], want[1]))
+
+        def drain(pred, why, wait=6.0):
+            end = time.time() + wait
+            while not pred():
+                ended = (select.select([desk.sock], [], [], 0)[0] and
+                         desk.sock.recv(1, socket.MSG_PEEK) == b'')
+                if ended or comp.poll() is not None:
+                    try:
+                        comp.wait(2)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    fail('the channel ended, blit-compositor\'s status %s' % comp.returncode)
+                if time.time() > end:
+                    fail(why() if callable(why) else why)
+                got = desk.next(0.1)
+                if got is not None and got[0] == 'frame':
+                    os.close(got[2])
+                elif got is not None and got[0] == 'frm3':
+                    for fd in got[2]:
+                        os.close(fd)
+
+        # 9-11. Icons the compositor must refuse (security review SR-14,
+        # SR-15), each its program's protocol error, the compositor and
+        # the others going on: a dmabuf plane that is a memfd that can
+        # shrink, cut to nothing once the compositor has it (before
+        # 0.3.135: taken, and the scaled read was SIGBUS, the compositor
+        # ended); a viewport source of x and w 2^23-1 (their sum wrapped in
+        # 32 bits and passed the check); that at buffer scale 1024 on an icon
+        # 1024 high, so the source's y and h are inside it (the view's x
+        # truncated to -1024: read 4 KB before the buffer).
+        refused = []
+        for extra, interface, code in ((['--drag-icon', '300x200', '--dmabuf', '--drag-icon-shrink'],
+                                        'zwp_linux_buffer_params_v1', 7),
+                                       (['--drag-icon', '64x48', '--drag-icon-bad-source'], 'wp_viewport', 2),
+                                       (['--drag-icon', '64x1024', '--drag-icon-bad-scale'], 'wl_surface', 0)):
+            title = 'Refused%d' % (len(refused) + 1)
+            path = os.path.join(work, 'standin-dragout-%s.out' % title)
+            bad = start([standin, '--drag-out'] + extra + [title], cenv, open(path, 'w'))
+            clients.append(bad)
+            win = int(until('WINDOW new ').split()[2])
+            until('WINDOW decor %d server' % win)
+            drain(lambda: win in desk.input_socks, 'no INPUT sock for %d' % win)
+            iroute = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            iroute.connect(desk.input_socks[win])
+            iroute.sendall(b'INPUT ptr %d 20.00 20.00\nINPUT frame %d 100\nINPUT btn %d 272 press\nINPUT frame %d 101\n'
+                           % (BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE, BLIT_PICTURE))
+            drain(lambda: bad.poll() is not None, lambda: '%s did not end:\n%s' % (title, open(path).read()))
+            iroute.close()
+            check(bad.returncode != 0 and protocol_error(open(path).read(), interface, code),
+                  lambda: '%s (%s) was not refused with %s error %d (exit status %s):\n%s'
+                  % (title, ' '.join(extra), interface, code, bad.returncode, open(path).read()))
+            check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
+            refused.append('%s->%s#%d' % (extra[-1][len('--drag-icon-'):], interface, code))
+        # The compositor serves the first program still: a new size, its frame.
+        desk.send('WINDOW size 1 200 100')
+        seen = []
+
+        def framed():
+            got = desk.next(0.1)
+            if got is not None and got[0] == 'frame':
+                os.close(got[2])
+                seen.append((got[1][0], got[1][2], got[1][3]))
+            elif got is not None and got[0] == 'frm3':
+                for fd in got[2]:
+                    os.close(fd)
+            return (1, 200, 100) in seen
+        wait_for(framed, lambda: 'no 200x100 frame of window 1 after the refused icons: %r' % seen)
         quit_compositor(desk, comp)
         text = settled(log)
         check('drag out o1 from window 1' in text and 'drag out o1: moved' in text and 'drag out o3: cancelled' in text,
               lambda: 'the log does not say the drags:\n' + text)
         return ('dragout=CLIP dragout o<n>(copy,move,types) pointer-left,no-input-meanwhile desktop-read+dragend move->'
                 'action,performed,finished onto-program=hover o2 copy,dropped o2 taken,source-wrote-target '
-                'dragend none->cancelled icons=dragicon(-10,-5),%s,gone; %s'
-                % (','.join(icons), dragout_unsaid_part(compositor, standin, work)))
+                'dragend none->cancelled icons=dragicon(-10,-5),%s,gone refused=%s,others-served; %s'
+                % (','.join(icons), ','.join(refused), dragout_unsaid_part(compositor, standin, work)))
     finally:
         if route:
             route.close()
@@ -2909,8 +2989,11 @@ def scale_part(compositor, standin, work):
         tw = int(next(l for l in lines(since) if l.endswith(' Twice') and l.startswith('WINDOW title ')).split()[2])
         desk.send('WINDOW size %d 400 300' % tw)
         pump(lambda: twice.poll() is not None, 'a second fractional object did not end its program')
-        check(twice.returncode != 0 and 'wp_fractional_scale_manager_v1' in printed(t_out) and
-              'error' in printed(t_out).lower(), lambda: 'no fractional_scale_exists:\n' + printed(t_out))
+        # Its fractional_scale_exists (0), as libwayland gave it; the exit
+        # status said too (Gitea #210: negative is a signal).
+        check(twice.returncode != 0 and protocol_error(printed(t_out), 'wp_fractional_scale_manager_v1', 0),
+              lambda: 'no fractional_scale_exists (the stand-in\'s exit status %s):\n%s'
+              % (twice.returncode, printed(t_out)))
         check(comp.poll() is None and clients[0].poll() is None, 'the compositor or another program ended')
 
         # 8. At 200%: told 240; 1000x600 configured 500x300, drawn 1000x600,
