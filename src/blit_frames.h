@@ -36,6 +36,15 @@
 
 #define BLIT_FRAME_CLIENTS 32
 #define BLIT_FRAME_HELLO_BYTES 16
+/* Security review SR-17: a connection that has not said a valid hello is
+   closed after BLIT_FRAME_HELLO_DEADLINE_US; one uid holds at most
+   BLIT_FRAME_UID_PENDING of them; and when every slot is taken, a new
+   connection takes the slot of the oldest one (of the uid holding the
+   most), never that of a client that said its hello. Any local uid can
+   reach the abstract socket, so before this 32 silent connections shut
+   every session's pictures out. */
+#define BLIT_FRAME_HELLO_DEADLINE_US 2000000ULL
+#define BLIT_FRAME_UID_PENDING 8
 /* The one version a hello may say. */
 #define BLIT_FRAME_VERSION 5
 #define BLIT_FRAME_HEADER_BYTES 48
@@ -1212,6 +1221,75 @@ static void frame_select(const BlitRuntime *runtime, fd_set *readable, int *max_
     frame_input_select(runtime, readable, max_fd);
 }
 
+/* The oldest connection still owing its hello, of `uid` alone when
+   `by_uid` is set, or else of the uid holding the most such connections;
+   -1 when there is none. *uid_count is how many `uid` holds. */
+static int frame_pending_victim(const BlitRuntime *runtime, uid_t uid, int by_uid,
+                                int *uid_count)
+{
+    int i, j, victim = -1, victim_count = 0;
+    *uid_count = 0;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i)
+        if (runtime->frame_clients[i].used && !runtime->frame_clients[i].authenticated &&
+            runtime->frame_clients[i].uid == uid)
+            ++*uid_count;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        const BlitFrameClient *client = &runtime->frame_clients[i];
+        int count = 0;
+        if (!client->used || client->authenticated || (by_uid && client->uid != uid))
+            continue;
+        for (j = 0; j < BLIT_FRAME_CLIENTS; ++j)
+            if (runtime->frame_clients[j].used && !runtime->frame_clients[j].authenticated &&
+                runtime->frame_clients[j].uid == client->uid)
+                ++count;
+        if (victim < 0 || count > victim_count ||
+            (count == victim_count &&
+             client->accepted_us < runtime->frame_clients[victim].accepted_us)) {
+            victim = i;
+            victim_count = count;
+        }
+    }
+    return victim;
+}
+
+/* SR-17: room for a new connection from `uid`. A victim is read once
+   first, so one whose hello has already arrived is answered, not dropped. */
+static void frame_make_room(BlitRuntime *runtime, uid_t uid)
+{
+    int attempts;
+    for (attempts = 0; attempts < BLIT_FRAME_CLIENTS; ++attempts) {
+        int i, free_slot = 0, uid_count, victim;
+        for (i = 0; i < BLIT_FRAME_CLIENTS; ++i)
+            if (!runtime->frame_clients[i].used)
+                free_slot = 1;
+        victim = frame_pending_victim(runtime, uid, 1, &uid_count);
+        if (uid_count < BLIT_FRAME_UID_PENDING) {
+            if (free_slot)
+                return;
+            victim = frame_pending_victim(runtime, uid, 0, &uid_count);
+        }
+        if (victim < 0)
+            return;
+        frame_client_service(runtime, victim);
+        if (runtime->frame_clients[victim].used && !runtime->frame_clients[victim].authenticated)
+            frame_client_close(runtime, victim);
+    }
+}
+
+/* SR-17: a connection that has not said a valid hello within
+   BLIT_FRAME_HELLO_DEADLINE_US is closed. Every turn, whether or not
+   anything was readable. */
+static void frame_expire_hellos(BlitRuntime *runtime, uint64_t now)
+{
+    int i;
+    for (i = 0; i < BLIT_FRAME_CLIENTS; ++i) {
+        BlitFrameClient *client = &runtime->frame_clients[i];
+        if (client->used && !client->authenticated && now > client->accepted_us &&
+            now - client->accepted_us > BLIT_FRAME_HELLO_DEADLINE_US)
+            frame_client_close(runtime, i);
+    }
+}
+
 static void frame_service(BlitRuntime *runtime, const fd_set *readable)
 {
     int i;
@@ -1219,16 +1297,26 @@ static void frame_service(BlitRuntime *runtime, const fd_set *readable)
         return;
     if (FD_ISSET(runtime->frame_fd, readable)) {
         for (;;) {
+            struct ucred peer;
+            socklen_t peer_length = sizeof(peer);
             int fd = accept4(runtime->frame_fd, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
             if (fd < 0)
                 break;
+            if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_length) != 0) {
+                close(fd);
+                continue;
+            }
+            frame_make_room(runtime, peer.uid);
             for (i = 0; i < BLIT_FRAME_CLIENTS && runtime->frame_clients[i].used; ++i) {}
             if (i == BLIT_FRAME_CLIENTS) {
+                /* Every slot holds a client that said its hello. */
                 close(fd);
                 continue;
             }
             runtime->frame_clients[i].used = 1;
             runtime->frame_clients[i].fd = fd;
+            runtime->frame_clients[i].uid = peer.uid;
+            runtime->frame_clients[i].accepted_us = monotonic_us();
         }
     }
     for (i = 0; i < BLIT_FRAME_CLIENTS; ++i)

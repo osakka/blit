@@ -97,6 +97,14 @@ extern char **environ;
 #define BLIT_MAX_STREAMS 16
 #define BLIT_MAX_HTTP_CLIENTS 32
 #define BLIT_HTTP_ACCEPT_BUDGET 8
+/* Security review SR-17: a connection that has not yet sent a whole header
+   block (with the bearer token, when the server has one) is pending. One
+   peer address holds at most this many pending connections, a pending
+   connection is closed when its headers have not arrived within this long,
+   and when the table is full a new connection takes the slot of the oldest
+   pending one -- never that of a request being served. */
+#define BLIT_HTTP_PEER_PENDING 8
+#define BLIT_HTTP_HEADER_DEADLINE_US 2000000ULL
 #define BLIT_REQUEST_SIZE 8192
 /* Most arguments, and most environment entries, one session request carries.
    Their lengths have no cap of their own: the request size bounds them. */
@@ -591,6 +599,11 @@ typedef struct {
     int fd;
     size_t length;
     uint64_t accepted_us;
+    /* SR-17: the peer's IPv4 address (network order), and whether its
+       header block has arrived and was authorized; until then the
+       connection is pending (http_client_pending). */
+    uint32_t peer;
+    int admitted;
     char request[BLIT_REQUEST_SIZE];
     int update_fd;              /* the staged file of the part being written */
     size_t update_expected;     /* the whole body */
@@ -1015,7 +1028,8 @@ typedef struct {
     int fd;
     int authenticated;
     unsigned long long session_id;
-    uid_t uid;  /* the peer's, from SO_PEERCRED at the hello */
+    uid_t uid;  /* the peer's, from SO_PEERCRED at the connect and the hello */
+    uint64_t accepted_us;  /* SR-17: the hello is due within 2 s of this */
     unsigned long long serial;  /* which connection, for a dmabuf's FRAME release */
     int hud_on;   /* the last HUD1 sent */
     /* ADR 0228: this channel's input routes to blit-compositor's input
@@ -3201,6 +3215,11 @@ static int send_bytes_blocking(int fd, const void *data, size_t length)
     return 1;
 }
 
+/* Security review SR-23: set while an answer is sent before its request
+   was authorized (send_problem_unauthenticated), which then does not say
+   which Blit answered. */
+static int http_withhold_version;
+
 /* A response with its own Cache-Control and extra header lines (each ending
    in CRLF, or none): the catalogue's ETag (ADR 0212). */
 static void send_http_with(int fd, int status, const char *reason,
@@ -3208,17 +3227,24 @@ static void send_http_with(int fd, int status, const char *reason,
                            const char *extra_headers, const char *body)
 {
     char header[768];
+    char version_line[96];
     size_t body_length = strlen(body);
-    int header_length = snprintf(
+    int header_length;
+
+    version_line[0] = '\0';
+    if (!http_withhold_version)
+        snprintf(version_line, sizeof(version_line),
+                 "X-Blit-Version: %s\r\n", blit_version);
+    header_length = snprintf(
         header, sizeof(header),
         "HTTP/1.1 %d %s\r\n"
         "Content-Type: %s\r\n"
-        "X-Blit-Version: %s\r\n"
+        "%s"
         "Content-Length: %lu\r\n"
         "Connection: close\r\n"
         "%s"
         "Cache-Control: %s\r\n\r\n",
-        status, reason, content_type, blit_version,
+        status, reason, content_type, version_line,
         (unsigned long)body_length, extra_headers, cache_control);
 
     if (header_length > 0 && (size_t)header_length < sizeof(header)) {
@@ -7354,20 +7380,44 @@ static int request_content_length(const char *request, size_t *length)
     return seen;
 }
 
-/* Find a JSON object key without matching text inside a quoted string.  Blit
-   accepts only small bounded request objects, so this deliberately remains a
-   lightweight key scanner rather than growing a second general JSON parser. */
+/* The member `key` of one JSON object, or NULL: the opening quote of its
+   name. `json` is the object (its first non-blank character `{`), or a
+   cursor inside one, past its `{`; the member is looked for at that
+   object's own level, never in an object or array nested in it, and the
+   look stops where that object ends. It used to match a quoted name
+   followed by `:` at any depth, so `{"environment":{"user":"x"}}` set the
+   run user and a request's field could be supplied from inside any other
+   field (security review SR-20). A member of a nested object is read from
+   that object: json_object_member gives it. Blit accepts only small
+   bounded request objects, so this stays a key scanner rather than a
+   second general JSON parser. */
 static const char *json_key_cursor(const char *json, const char *key)
 {
     const char *cursor = json;
     size_t key_length = strlen(key);
+    int depth = 0, level;
 
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n')
+        ++cursor;
+    level = *cursor == '{' ? 1 : 0;
     while (*cursor != '\0') {
         const char *quoted;
         const char *character;
         size_t index = 0;
         int match = 1;
 
+        if (*cursor == '{' || *cursor == '[') {
+            ++depth;
+            ++cursor;
+            continue;
+        }
+        if (*cursor == '}' || *cursor == ']') {
+            if (--depth < level)
+                return NULL;
+            ++cursor;
+            continue;
+        }
         if (*cursor != '"') {
             ++cursor;
             continue;
@@ -7386,17 +7436,17 @@ static const char *json_key_cursor(const char *json, const char *key)
             ++index;
             ++character;
         }
-        if (*character == '"') {
+        if (*character != '"')
+            return NULL;
+        if (match && index == key_length && depth == level) {
             const char *after = character + 1;
             while (*after == ' ' || *after == '\t' || *after == '\r' ||
                    *after == '\n')
                 ++after;
-            if (match && index == key_length && *after == ':')
+            if (*after == ':')
                 return quoted;
-            cursor = character + 1;
-        } else {
-            return NULL;
         }
+        cursor = character + 1;
     }
     return NULL;
 }
@@ -7599,6 +7649,34 @@ static int json_bool(const char *json, const char *key, int *value)
     return 0;
 }
 
+static int json_object_slice(const char *cursor, char *out, size_t capacity);
+
+/* The member `key` of `json` (at that object's own level, as
+   json_key_cursor finds it) when its value is an object, copied whole into
+   `out`: 1; 0 when there is no such member; -1 when its value is not an
+   object or does not fit. How a field that belongs to a nested object is
+   read (security review SR-20). */
+static int json_object_member(const char *json, const char *key, char *out,
+                              size_t capacity)
+{
+    const char *cursor = json_key_cursor(json, key);
+
+    if (capacity > 0)
+        out[0] = '\0';
+    if (cursor == NULL)
+        return 0;
+    cursor += strlen(key) + 2;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor++ != ':')
+        return -1;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor != '{')
+        return -1;
+    return json_object_slice(cursor, out, capacity) ? 1 : -1;
+}
+
 /* Parse the bounded topology placement array.  Placement is deliberately a
    small, closed object rather than a general JSON decoder: every member is
    required, coordinates are integers, and the caller validates completeness
@@ -7606,7 +7684,7 @@ static int json_bool(const char *json, const char *key, int *value)
 static int json_output_placements(const char *json, char ids[][128],
                                   int *xs, int *ys, int limit)
 {
-    const char *cursor = strstr(json, "\"placements\"");
+    const char *cursor = json_key_cursor(json, "placements");
     int count = 0;
 
     if (cursor == NULL) return 0;
@@ -7679,15 +7757,13 @@ static char *json_pool_decode(JsonStringPool *pool, const char **cursor)
 static int json_string_array(const char *json, const char *key,
                              JsonStringPool *pool, char **values, int limit)
 {
-    char needle[128];
     const char *cursor;
     int count = 0;
 
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
-    cursor = strstr(json, needle);
+    cursor = json_key_cursor(json, key);
     if (cursor == NULL)
         return 0;
-    cursor += strlen(needle);
+    cursor += strlen(key) + 2;
     while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
            *cursor == '\n') ++cursor;
     if (*cursor++ != ':')
@@ -7721,15 +7797,13 @@ static int json_string_object(const char *json, const char *key,
                               JsonStringPool *pool, char **keys,
                               char **values, int limit)
 {
-    char needle[128];
     const char *cursor;
     int count = 0;
 
-    snprintf(needle, sizeof(needle), "\"%s\"", key);
-    cursor = strstr(json, needle);
+    cursor = json_key_cursor(json, key);
     if (cursor == NULL)
         return 0;
-    cursor += strlen(needle);
+    cursor += strlen(key) + 2;
     while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
            *cursor == '\n') ++cursor;
     if (*cursor++ != ':')
@@ -9177,8 +9251,12 @@ static int text_layout_from_json(const char *json, int *emoji_layout)
 static int apply_cell_update(BlitSurface *surface, const char *json,
                              const char **rejected)
 {
-    const char *cursor = strstr(json, "\"cells\"");
-    const char *cursor_state = strstr(json, "\"cursor\"");
+    /* The update's own members, each cell an element of the cells array
+       and its style that cell's own object (security review SR-20). */
+    const char *cursor = json_key_cursor(json, "cells");
+    char cursor_state[512];
+    int cursor_present = json_object_member(json, "cursor", cursor_state,
+                                            sizeof(cursor_state));
     int updated = 0;
     int emoji_layout = 0;
 
@@ -9187,9 +9265,17 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
     if (!text_layout_from_json(json, &emoji_layout)) return -2;
     if (cursor == NULL)
         return 0;
-    cursor = json_key_cursor(cursor, "x");
+    cursor += strlen("\"cells\"");
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor == ':') ++cursor;
+    while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+           *cursor == '\n') ++cursor;
+    if (*cursor == '[') ++cursor;
+    else cursor = NULL;
     while (cursor != NULL) {
         char cell_json[4096];
+        char style_json[4096];
         char text[BLIT_MAX_CELL_COLS];
         char color_text[32];
         uint32_t foreground = 0;
@@ -9200,7 +9286,6 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
         int background_set = 0;
         int underline_color_set = 0;
         const char *next_cell;
-        const char *style_cursor;
         int style_seen;
         int style_valid = 1;
         int flag;
@@ -9210,16 +9295,16 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
         uint32_t decoded_combining[BLIT_MAX_CELL_COLS * BLIT_MAX_COMBINING];
         unsigned char decoded_combining_counts[BLIT_MAX_CELL_COLS];
         size_t decoded_count;
-        size_t cell_length;
         size_t i;
 
-        next_cell = json_key_cursor(cursor + 3, "x");
-        cell_length = (size_t)((next_cell != NULL ? next_cell :
-                                cursor + strlen(cursor)) - cursor);
-        if (cell_length == 0 || cell_length >= sizeof(cell_json))
+        while (*cursor == ' ' || *cursor == '\t' || *cursor == '\r' ||
+               *cursor == '\n' || *cursor == ',') ++cursor;
+        if (*cursor != '{' ||
+            !json_object_slice(cursor, cell_json, sizeof(cell_json)))
             break;
-        memcpy(cell_json, cursor, cell_length);
-        cell_json[cell_length] = '\0';
+        /* The slice is the element's text as sent, so its length is how far
+           the array has been read. */
+        next_cell = cursor + strlen(cell_json);
         {
             const char *misplaced = cell_misplaced_style_key(cell_json);
             if (misplaced != NULL) {
@@ -9228,42 +9313,46 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
                 return -1;
             }
         }
-        style_cursor = json_key_cursor(cell_json, "style");
-        style_seen = style_cursor != NULL;
+        /* A style that is not an object (null) is a style with nothing
+           set, as it always read. */
+        style_seen = json_object_member(cell_json, "style", style_json,
+                                        sizeof(style_json));
+        if (style_seen < 0)
+            snprintf(style_json, sizeof(style_json), "{}");
         if (!json_int(cell_json, "x", &x) ||
             !json_int(cell_json, "y", &y) ||
             !json_string(cell_json, "text", text, sizeof(text)))
             break;
         if (style_seen) {
-            if (json_string(cell_json, "foreground", color_text,
+            if (json_string(style_json, "foreground", color_text,
                             sizeof(color_text))) {
                 foreground_set = 1;
                 if (!parse_color(color_text, &foreground))
                     style_valid = 0;
             }
-            if (json_string(cell_json, "background", color_text,
+            if (json_string(style_json, "background", color_text,
                             sizeof(color_text))) {
                 background_set = 1;
                 if (!parse_color(color_text, &background))
                     style_valid = 0;
             }
-            if (json_bool(cell_json, "bold", &flag) && flag)
+            if (json_bool(style_json, "bold", &flag) && flag)
                 attributes |= BLIT_ATTR_BOLD;
-            if (json_bool(cell_json, "dim", &flag) && flag)
+            if (json_bool(style_json, "dim", &flag) && flag)
                 attributes |= BLIT_ATTR_DIM;
-            if (json_bool(cell_json, "italic", &flag) && flag)
+            if (json_bool(style_json, "italic", &flag) && flag)
                 attributes |= BLIT_ATTR_ITALIC;
-            if (json_bool(cell_json, "underline", &flag) && flag)
+            if (json_bool(style_json, "underline", &flag) && flag)
                 attributes |= BLIT_ATTR_UNDERLINE;
-            if (json_bool(cell_json, "blink", &flag) && flag)
+            if (json_bool(style_json, "blink", &flag) && flag)
                 attributes |= BLIT_ATTR_BLINK;
-            if (json_bool(cell_json, "inverse", &flag) && flag)
+            if (json_bool(style_json, "inverse", &flag) && flag)
                 attributes |= BLIT_ATTR_INVERSE;
-            if (json_bool(cell_json, "strike", &flag) && flag)
+            if (json_bool(style_json, "strike", &flag) && flag)
                 attributes |= BLIT_ATTR_STRIKE;
-            if (json_bool(cell_json, "concealed", &flag) && flag)
+            if (json_bool(style_json, "concealed", &flag) && flag)
                 attributes |= BLIT_ATTR_CONCEAL;
-            if (json_string(cell_json, "framed", color_text, sizeof(color_text))) {
+            if (json_string(style_json, "framed", color_text, sizeof(color_text))) {
                 unsigned kind;
                 for (kind = 0; kind < 7 && strcmp(color_text, blit_framed_names[kind]) != 0; ++kind)
                     ;
@@ -9277,17 +9366,17 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
                 else if (strcmp(color_text, "none") != 0)
                     style_valid = 0;
             }
-            if (json_string(cell_json, "shadow", color_text, sizeof(color_text)) &&
+            if (json_string(style_json, "shadow", color_text, sizeof(color_text)) &&
                 !shadow_parse(color_text, &attributes))
                 style_valid = 0;
-            if (json_string(cell_json, "icon_pen", color_text, sizeof(color_text))) {
+            if (json_string(style_json, "icon_pen", color_text, sizeof(color_text))) {
                 unsigned pen;
                 for (pen = 0; pen < 4 && strcmp(color_text, blit_icon_pen_names[pen]) != 0; ++pen)
                     ;
                 if (pen < 4) attributes |= (uint32_t)pen << BLIT_ATTR_ICON_PEN_SHIFT;
                 else style_valid = 0;
             }
-            if (json_string(cell_json, "underline_color", color_text,
+            if (json_string(style_json, "underline_color", color_text,
                             sizeof(color_text))) {
                 underline_color_set = parse_color(color_text, &underline_color);
                 if (!underline_color_set)
@@ -9350,11 +9439,11 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
             }
             updated += 1;
         }
-        if (next_cell == NULL)
-            break;
         cursor = next_cell;
     }
-    if (cursor_state != NULL) {
+    if (cursor_present < 0)
+        return -1;
+    if (cursor_present) {
         int x;
         int y;
         int visible;
@@ -9365,7 +9454,7 @@ static int apply_cell_update(BlitSurface *surface, const char *json,
             !json_bool(cursor_state, "visible", &visible) ||
             x < 0 || y < 0 || x >= surface->width || y >= surface->height)
             return -1;
-        if (strstr(cursor_state, "\"style\"") != NULL &&
+        if (json_key_cursor(cursor_state, "style") != NULL &&
             (!json_int(cursor_state, "style", &style) || style < 0 || style > 6))
             return -1;
         mark_cursor_damage(surface, surface->cursor_x, surface->cursor_y);
@@ -10897,6 +10986,39 @@ static void terminal_palette_query(BlitSession *session, const char *payload)
     }
 }
 
+/* An OSC 52 set as the API reports it: `<selection>;<data>`, the selection
+   zero or more of c p q s 0-7, the data base64 (A-Z a-z 0-9 + /, at most
+   two `=` at its end, and no length one more than a multiple of four) or
+   empty, which clears. Not a query (`?`), not cut short, and shorter than
+   `capacity`. */
+static int osc52_clipboard_valid(const char *payload, int cut_short,
+                                 size_t capacity)
+{
+    const char *data = strchr(payload, ';');
+    size_t length, padding = 0, i;
+
+    if (cut_short || data == NULL || strlen(payload) >= capacity)
+        return 0;
+    for (i = 0; payload + i < data; ++i)
+        if (strchr("cpqs01234567", payload[i]) == NULL)
+            return 0;
+    ++data;
+    length = strlen(data);
+    while (padding < length && data[length - 1 - padding] == '=')
+        ++padding;
+    if (padding > 2)
+        return 0;
+    for (i = 0; i < length - padding; ++i) {
+        char c = data[i];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '+' || c == '/'))
+            return 0;
+    }
+    if (padding > 0 ? length % 4 != 0 : length % 4 == 1)
+        return 0;
+    return 1;
+}
+
 static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
 {
     char *separator;
@@ -10971,9 +11093,13 @@ static void terminal_apply_osc(BlitSession *session, BlitSurface *surface)
         }
     } else if (command == 52) {
         /* Keep OSC 52 in Hibr's canonical selection;base64 form.  A query
-           (selection;?) is deliberately not answered or treated as a set. */
-        char *query = strchr((char *)payload, ';');
-        if (query != NULL && strcmp(query + 1, "?") != 0)
+           (selection;?) is deliberately not answered or treated as a set.
+           Only that form is kept, whole (security review SR-23): anything
+           else -- a byte outside the selection letters or the base64
+           alphabet, a clipboard cut short, one longer than the API holds --
+           is not stored and the clipboard stays as it was. */
+        if (osc52_clipboard_valid(payload, session->terminal_string_overflow,
+                                  sizeof(session->terminal_clipboard)))
             snprintf(session->terminal_clipboard,
                      sizeof(session->terminal_clipboard), "%s", payload);
     } else if (command == 9) {
@@ -13935,8 +14061,14 @@ static void terminal_string_append(BlitSession *session,
         return;
     }
     if (session->terminal_string_type != 'P') {
-        /* OSC and APC stay bounded by the inline buffer, as before. */
-        if (count > room) count = room;
+        /* OSC and APC stay bounded by the inline buffer, as before. An OSC
+           cut short is marked, so OSC 52 never stores a clipboard cut at a
+           base64 quartet that would look whole (security review SR-23). */
+        if (count > room) {
+            count = room;
+            if (session->terminal_string_type == ']')
+                session->terminal_string_overflow = 1;
+        }
         memcpy(session->terminal_string + session->terminal_string_length,
                bytes, count);
         session->terminal_string_length += (int)count;
@@ -17509,6 +17641,19 @@ static void send_problem(int fd, int status, const char *reason,
     send_http(fd, status, reason, "application/problem+json", body);
 }
 
+/* A refusal sent before the request was authorized: a 401, a request with
+   no valid request line or a Transfer-Encoding, an update upload without
+   its tokens, no slot (SR-17). It does not carry X-Blit-Version, so a
+   caller without the token is not told which Blit, and so which fixes, it
+   reached (security review SR-23). */
+static void send_problem_unauthenticated(int fd, int status, const char *reason,
+                                         const char *code, const char *detail)
+{
+    http_withhold_version = 1;
+    send_problem(fd, status, reason, code, detail);
+    http_withhold_version = 0;
+}
+
 static int command_allowed(const BlitRuntime *runtime, const char *command)
 {
     const char *cursor = runtime->command_allowlist;
@@ -17959,6 +18104,7 @@ static int create_session(BlitRuntime *runtime, const char *json,
     int width = 0;
     int height = 0;
     int surface_present;
+    char surface_object[512];
     char surface_mode[32];
     char run_user[128];
     struct passwd *run_pw = NULL;
@@ -17987,10 +18133,12 @@ static int create_session(BlitRuntime *runtime, const char *json,
     memset(arguments, 0, sizeof(arguments));
     if (!json_string(json, "command", command, sizeof(command)))
         return 0;
-    surface_present = strstr(json, "\"surface\"") != NULL;
-    if (surface_present &&
-        (!json_int(json, "width", &width) ||
-         !json_int(json, "height", &height)))
+    /* The geometry is the surface object's own (SR-20). */
+    surface_present = json_object_member(json, "surface", surface_object,
+                                         sizeof(surface_object));
+    if (surface_present < 0 || (surface_present &&
+        (!json_int(surface_object, "width", &width) ||
+         !json_int(surface_object, "height", &height))))
         return 0;
     arguments[0] = command;
     argument_count = json_string_array(json, "arguments", &strings,
@@ -20753,10 +20901,35 @@ static void send_websocket_control(int fd, unsigned char opcode,
     send_all(fd, payload, length);
 }
 
-static unsigned int subscription_mask(const char *payload)
+/* The streams a subscribe message names: the names in its own
+   `subscriptions` list (the schema's) or `subscribe` list (Hibr's adapter
+   sends `{"subscribe":["input"],...}`), never a word in another member
+   (security review SR-20). A message with neither list is read whole, as
+   it always was. */
+static unsigned int subscription_mask(const char *message)
 {
     unsigned int mask = 0;
+    char list[1025];
+    const char *payload = message;
+    const char *member = json_key_cursor(message, "subscriptions");
+    const char *key = "subscriptions";
 
+    if (member == NULL) {
+        member = json_key_cursor(message, "subscribe");
+        key = "subscribe";
+    }
+    if (member != NULL) {
+        const char *end;
+        member += strlen(key) + 2;
+        while (*member == ' ' || *member == '\t' || *member == '\r' ||
+               *member == '\n' || *member == ':') ++member;
+        end = *member == '[' ? strchr(member, ']') : NULL;
+        if (end != NULL && (size_t)(end - member) < sizeof(list)) {
+            memcpy(list, member, (size_t)(end - member));
+            list[end - member] = '\0';
+            payload = list;
+        }
+    }
     if (strstr(payload, "diagnostics") != NULL) mask |= BLIT_STREAM_DIAGNOSTICS;
     if (strstr(payload, "surfaces") != NULL) mask |= BLIT_STREAM_SURFACES;
     if (strstr(payload, "frames") != NULL) mask |= BLIT_STREAM_FRAMES;
@@ -21089,9 +21262,17 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
     char message[1025];
     if (length >= sizeof(message))
         return;
+    char type[32];
     memcpy(message, payload, length);
     message[length] = '\0';
-    if (strstr(message, "subscribe") != NULL) {
+    /* What a message is, from its own members: `type`, or Hibr's adapter's
+       `subscribe` list. The word anywhere in the message used to do
+       (security review SR-20): an input message whose data said
+       "subscribe" was taken for a subscription. */
+    if (!json_string(message, "type", type, sizeof(type)))
+        type[0] = '\0';
+    if (strcmp(type, "subscribe") == 0 ||
+        json_key_cursor(message, "subscribe") != NULL) {
         int i;
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
@@ -21106,7 +21287,7 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
             "{\"type\":\"diagnostic\",\"severity\":\"info\","
             "\"code\":\"subscription_received\","
             "\"detail\":\"stream subscription accepted\"}");
-    } else if (strstr(message, "\"type\":\"pixel_frame_begin\"") != NULL) {
+    } else if (strcmp(type, "pixel_frame_begin") == 0) {
         int i;
         for (i = 0; i < BLIT_MAX_STREAMS; ++i)
             if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
@@ -21123,7 +21304,7 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
                 }
                 break;
             }
-    } else if (strstr(message, "\"type\":\"pixel_frame_hide\"") != NULL) {
+    } else if (strcmp(type, "pixel_frame_hide") == 0) {
         char session_id[64];
         int image_id;
         unsigned long long numeric_id;
@@ -21140,7 +21321,7 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
                 if (surface != NULL) mark_surface_full_damage(surface);
             }
         }
-    } else if (strstr(message, "\"type\":\"pixel_frame_end\"") != NULL) {
+    } else if (strcmp(type, "pixel_frame_end") == 0) {
         int i;
         for (i = 0; i < BLIT_MAX_STREAMS; ++i) {
             if (runtime->streams[i].used && runtime->streams[i].fd == fd) {
@@ -21155,8 +21336,9 @@ static void service_stream_text(BlitRuntime *runtime, int fd,
                 break;
             }
         }
-    } else if (strstr(message, "\"input\"") != NULL &&
-               strstr(message, "session_id") != NULL) {
+    } else if ((strcmp(type, "input") == 0 ||
+                json_key_cursor(message, "input") != NULL) &&
+               json_key_cursor(message, "session_id") != NULL) {
         char session_id[64];
         char data[768];
         unsigned long long numeric_id;
@@ -25469,23 +25651,23 @@ static void handle_request(int fd, BlitRuntime *runtime,
     const char *payload = request_body(request);
 
     if (sscanf(request, "%15s %255s", method, path) != 2) {
-        send_http(fd, 400, "Bad Request", "application/problem+json",
-                  "{\"type\":\"about:blank\",\"title\":\"Bad Request\","
-                  "\"status\":400,\"code\":\"malformed_request\","
-                  "\"detail\":\"The request line is invalid.\"}");
+        send_problem_unauthenticated(fd, 400, "Bad Request", "malformed_request",
+                                     "The request line is invalid.");
         return;
     }
     if (runtime->auth_token[0] != '\0') {
         char authorization[320];
         if (!request_header(request, "Authorization:", authorization,
                             sizeof(authorization))) {
-            send_problem(fd, 401, "Unauthorized", "authentication_required",
-                         "A bearer token is required.");
+            send_problem_unauthenticated(fd, 401, "Unauthorized",
+                                         "authentication_required",
+                                         "A bearer token is required.");
             return;
         }
         if (!bearer_token_valid(runtime, request)) {
-            send_problem(fd, 401, "Unauthorized", "authentication_failed",
-                         "The bearer token is not valid.");
+            send_problem_unauthenticated(fd, 401, "Unauthorized",
+                                         "authentication_failed",
+                                         "The bearer token is not valid.");
             return;
         }
     } else if (!http_tokenless_request_allowed(fd, runtime, request)) {
@@ -26095,7 +26277,7 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (idempotency_replay(runtime, fd, request, method, path, payload))
             return;
         if (!json_int(payload, "base_revision", &base_revision) ||
-            !strstr(payload, "\"cells\"")) {
+            json_key_cursor(payload, "cells") == NULL) {
             send_problem(fd, 400, "Bad Request", "invalid_cell_update",
                          "A base revision and cells array are required.");
             return;
@@ -26309,8 +26491,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
         if (strcmp(method, "POST") == 0) {
             int seconds = 30, max_bytes = 1024 * 1024;
             if (payload != NULL && payload[0] != '\0') {
-                if (strstr(payload, "\"seconds\"") && !json_int(payload, "seconds", &seconds)) seconds = -1;
-                if (strstr(payload, "\"max_bytes\"") && !json_int(payload, "max_bytes", &max_bytes)) max_bytes = -1;
+                if (json_key_cursor(payload, "seconds") && !json_int(payload, "seconds", &seconds)) seconds = -1;
+                if (json_key_cursor(payload, "max_bytes") && !json_int(payload, "max_bytes", &max_bytes)) max_bytes = -1;
             }
             if (seconds < 1 || seconds > 120 || max_bytes < 1 ||
                 (unsigned)max_bytes > BLIT_CAPTURE_MAX_BYTES) {
@@ -26551,13 +26733,17 @@ static void handle_request(int fd, BlitRuntime *runtime,
             char display_id[128];
             char pane_id[128];
             BlitSurface *surface = find_surface_id(runtime, session->id);
-            int resize_requested = strstr(payload, "\"surface\"") != NULL;
+            /* The request's own members; the geometry is its surface
+               object's (security review SR-20). */
+            char surface_object[512];
+            int resize_requested = json_object_member(payload, "surface",
+                surface_object, sizeof(surface_object)) != 0;
             int width = 0;
             int height = 0;
             int resized = 0;
             int focused = 0;
-            int focused_requested = strstr(payload, "\"focused\"") != NULL;
-            int route_requested = strstr(payload, "\"input_route\"") != NULL;
+            int focused_requested = json_key_cursor(payload, "focused") != NULL;
+            int route_requested = json_key_cursor(payload, "input_route") != NULL;
             char input_route_id[128];
             BlitInputRoute *input_route = NULL;
             if (idempotency_replay(runtime, fd, request, method, path, payload))
@@ -26614,8 +26800,8 @@ static void handle_request(int fd, BlitRuntime *runtime,
                 snprintf(display_id, sizeof(display_id), "%s", pane->display_id);
             }
             if (resize_requested && !pane_requested &&
-                (!json_int(payload, "width", &width) ||
-                 !json_int(payload, "height", &height))) {
+                (!json_int(surface_object, "width", &width) ||
+                 !json_int(surface_object, "height", &height))) {
                 send_problem(fd, 400, "Bad Request", "invalid_surface_resize",
                              "A surface resize requires width and height.");
                 return;
@@ -26957,8 +27143,11 @@ static void handle_request(int fd, BlitRuntime *runtime,
         int columns;
         int rows;
         int requested_revision;
-        int has_requested_revision = strstr(payload, "\"revision\"") != NULL;
-        int placements_present = strstr(payload, "\"placements\"") != NULL;
+        /* The request's own members; columns and rows are its layout
+           object's (security review SR-20). */
+        int has_requested_revision = json_key_cursor(payload, "revision") != NULL;
+        int placements_present = json_key_cursor(payload, "placements") != NULL;
+        char layout_object[256];
         int placements_count = 0;
         char placement_ids[BLIT_MAX_DISPLAYS][128];
         int placement_x[BLIT_MAX_DISPLAYS];
@@ -26984,9 +27173,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
         }
         if (!if_match_revision(fd, request, runtime->topology_revision))
             return;
-        if (!strstr(payload, "\"layout\"") ||
-            !json_int(payload, "columns", &columns) ||
-            !json_int(payload, "rows", &rows) || columns < 1 || columns > 2 ||
+        if (json_object_member(payload, "layout", layout_object,
+                               sizeof(layout_object)) != 1 ||
+            !json_int(layout_object, "columns", &columns) ||
+            !json_int(layout_object, "rows", &rows) || columns < 1 || columns > 2 ||
             rows < 1 || rows > 2) {
             send_problem(fd, 400, "Bad Request", "invalid_topology_layout",
                          "The layout must specify columns and rows from one through two.");
@@ -32683,7 +32873,7 @@ static void remove_http_client(BlitRuntime *runtime, int index)
            sizeof(runtime->http_clients[index]));
 }
 
-static int add_http_client(BlitRuntime *runtime, int fd)
+static int add_http_client(BlitRuntime *runtime, int fd, uint32_t peer)
 {
     int i;
     for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
@@ -32694,6 +32884,7 @@ static int add_http_client(BlitRuntime *runtime, int fd)
             runtime->http_clients[i].fd = fd;
             runtime->http_clients[i].update_fd = -1;
             runtime->http_clients[i].accepted_us = monotonic_us();
+            runtime->http_clients[i].peer = peer;
             return i;
         }
     }
@@ -32702,13 +32893,87 @@ static int add_http_client(BlitRuntime *runtime, int fd)
 
 static void service_http_client(BlitRuntime *runtime, int index);
 
+/* SR-17: a connection whose header block has not arrived, or has not been
+   authorized. Nothing of it is being served: no upload, install, parked
+   settings write or screenshot, and no answer queued. */
+static int http_client_pending(const BlitHttpClient *client)
+{
+    return client->used && !client->admitted && client->update_fd < 0 &&
+        !client->update_installing && client->response_body == NULL &&
+        client->settings_wait == 0 && client->screenshot_output_index == 0;
+}
+
+/* The oldest pending connection, of `peer` alone when `by_peer` is set,
+   or else of the peer holding the most pending connections, so that a peer
+   that floods gives up its own; -1 when there is none. *peer_count is how
+   many pending connections `peer` holds. */
+static int http_pending_victim(const BlitRuntime *runtime, uint32_t peer,
+                               int by_peer, int *peer_count)
+{
+    int i, j, victim = -1, victim_count = 0;
+    *peer_count = 0;
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (http_client_pending(&runtime->http_clients[i]) &&
+            runtime->http_clients[i].peer == peer)
+            ++*peer_count;
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
+        const BlitHttpClient *client = &runtime->http_clients[i];
+        int count = 0;
+        if (!http_client_pending(client) ||
+            (by_peer && client->peer != peer))
+            continue;
+        for (j = 0; j < BLIT_MAX_HTTP_CLIENTS; ++j)
+            if (http_client_pending(&runtime->http_clients[j]) &&
+                runtime->http_clients[j].peer == client->peer)
+                ++count;
+        if (victim < 0 || count > victim_count ||
+            (count == victim_count &&
+             client->accepted_us < runtime->http_clients[victim].accepted_us)) {
+            victim = i;
+            victim_count = count;
+        }
+    }
+    return victim;
+}
+
+/* Room for a new connection from `peer` (SR-17): the peer's oldest pending
+   connection goes when it already holds BLIT_HTTP_PEER_PENDING, and the
+   oldest pending connection of the busiest peer when the table is full. A
+   victim is read once first, so one whose request has already arrived is
+   served, not dropped. */
+static void http_make_room(BlitRuntime *runtime, uint32_t peer)
+{
+    int attempts;
+    for (attempts = 0; attempts < BLIT_MAX_HTTP_CLIENTS; ++attempts) {
+        int i, free_slot = 0, peer_count, victim;
+        for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+            if (!runtime->http_clients[i].used)
+                free_slot = 1;
+        victim = http_pending_victim(runtime, peer, 1, &peer_count);
+        if (peer_count < BLIT_HTTP_PEER_PENDING) {
+            if (free_slot)
+                return;
+            victim = http_pending_victim(runtime, peer, 0, &peer_count);
+        }
+        if (victim < 0)
+            return;
+        service_http_client(runtime, victim);
+        if (http_client_pending(&runtime->http_clients[victim]))
+            remove_http_client(runtime, victim);
+    }
+}
+
 /* Admit a bounded burst and give new clients one nonblocking request slice.
    Incomplete requests retain their ordinary readiness-loop ownership. */
 static int accept_http_clients(BlitRuntime *runtime, int server_fd)
 {
     int attempt;
     for (attempt = 0; attempt < BLIT_HTTP_ACCEPT_BUDGET; ++attempt) {
-        int fd = accept(server_fd, NULL, NULL);
+        struct sockaddr_in peer_address;
+        socklen_t peer_length = sizeof(peer_address);
+        int fd = accept(server_fd, (struct sockaddr *)&peer_address,
+                        &peer_length);
+        uint32_t peer;
         int index;
         if (fd < 0) {
             if (errno == EINTR)
@@ -32723,10 +32988,15 @@ static int accept_http_clients(BlitRuntime *runtime, int server_fd)
             close(fd);
             continue;
         }
-        index = add_http_client(runtime, fd);
+        peer = peer_address.sin_family == AF_INET ?
+            peer_address.sin_addr.s_addr : 0;
+        http_make_room(runtime, peer);
+        index = add_http_client(runtime, fd, peer);
         if (index < 0) {
-            send_problem(fd, 503, "Service Unavailable", "http_capacity",
-                         "The HTTP connection limit has been reached.");
+            /* Every slot is serving a request. */
+            send_problem_unauthenticated(fd, 503, "Service Unavailable",
+                                         "http_capacity",
+                                         "The HTTP connection limit has been reached.");
             close(fd);
         } else {
             /* New descriptors were not in this turn's select snapshot.
@@ -33452,7 +33722,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
        review SR-19). Refused before anything reads the body. */
     if (headers_end != NULL &&
         request_header_value(client->request, "Transfer-Encoding:", NULL) != NULL) {
-        send_problem(client->fd, 501, "Not Implemented",
+        send_problem_unauthenticated(client->fd, 501, "Not Implemented",
                      "transfer_encoding_unsupported",
                      "Transfer-Encoding is not supported; send the body with Content-Length.");
         remove_http_client(runtime, index);
@@ -33468,11 +33738,12 @@ static void service_http_client(BlitRuntime *runtime, int index)
         char signature[160];
         if (runtime->update_token[0] == '\0' ||
             !update_authorized(runtime, client->request)) {
-            send_problem(client->fd, 403, "Forbidden", "update_disabled",
+            send_problem_unauthenticated(client->fd, 403, "Forbidden", "update_disabled",
                          "A valid update token, and the API bearer token when the server has one, is required.");
             remove_http_client(runtime, index);
             return;
         }
+        client->admitted = 1;
         if (update_install_running(runtime)) {
             send_problem(client->fd, 409, "Conflict", "update_installing",
                          "An update is being installed.");
@@ -33538,6 +33809,18 @@ static void service_http_client(BlitRuntime *runtime, int index)
         if (client->update_received == client->update_expected)
             finish_update_upload(runtime, client);
         return;
+    }
+    /* SR-17: a request is authorized as soon as its header block is whole,
+       so one without the token is answered (401) then, and never holds a
+       slot while it sends, or does not send, its body. */
+    if (headers_end != NULL && !client->admitted) {
+        if (runtime->auth_token[0] != '\0' &&
+            !bearer_token_valid(runtime, client->request)) {
+            handle_request(client->fd, runtime, client, client->request);
+            remove_http_client(runtime, index);
+            return;
+        }
+        client->admitted = 1;
     }
     complete = http_request_complete(client, &required);
     if (complete < 0 || (complete == 0 &&
@@ -34234,8 +34517,11 @@ int main(int argc, char **argv)
                 }
                 continue;
             }
+            /* SR-17: a header block has BLIT_HTTP_HEADER_DEADLINE_US to
+               arrive; a request being read, 5 s. */
             if (now > client->accepted_us &&
-                now - client->accepted_us > 5000000ULL)
+                now - client->accepted_us >
+                    (client->admitted ? 5000000ULL : BLIT_HTTP_HEADER_DEADLINE_US))
                 remove_http_client(&runtime, i);
         }
         FD_ZERO(&readable);
@@ -34478,6 +34764,7 @@ int main(int argc, char **argv)
         }
         if (ready > 0)
             frame_service(&runtime, &readable);
+        frame_expire_hellos(&runtime, monotonic_us());
         frame_expire_placements(&runtime, monotonic_us());
         frame_dmabuf_reconcile(&runtime);
         frame_input_reconcile(&runtime);

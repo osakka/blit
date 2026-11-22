@@ -191,6 +191,42 @@ def main():
         for version in (1, 2, 3, 4):
             old = Client(child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN'], version)
             check(old.hello == b'ERROR 0 EINVAL\n', 'a version %d hello was answered %r' % (version, old.hello))
+        # Security review SR-17: connections that never say their hello
+        # cannot hold the 32 slots (before, the 33rd connection, the
+        # session's own, was closed unanswered). One uid holds at most 8;
+        # the rest are closed at once, and the 8 at the 2 s deadline.
+        silent = []
+        for _ in range(32):
+            quiet = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+            quiet.connect('\0' + child['BLIT_FRAME_SOCKET'][1:])
+            silent.append(quiet)
+        time.sleep(0.3)
+        started = time.monotonic()
+        try:
+            served = Client(child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN'])
+        except OSError as error:
+            fail('with 32 silent connections the hello was refused: %s' % error)
+        check(served.hello.startswith(b'OK dmabuf=') and time.monotonic() - started < 1.0,
+              'with 32 silent connections the hello was answered %r' % served.hello)
+        served.socket.close()
+
+        def closed(quiet):
+            quiet.setblocking(False)
+            try:
+                return quiet.recv(64) == b''
+            except BlockingIOError:
+                return False
+            except ConnectionResetError:
+                return True
+        at_once = sum(1 for quiet in silent if closed(quiet))
+        check(at_once >= 24, 'only %d of 32 silent connections from one uid were closed at once' % at_once)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not all(closed(quiet) for quiet in silent):
+            time.sleep(0.1)
+        check(all(closed(quiet) for quiet in silent), 'a silent connection outlived the 2 s hello deadline')
+        for quiet in silent:
+            quiet.close()
+
         client = Client(child['BLIT_FRAME_SOCKET'][1:], child['BLIT_FRAME_TOKEN'])
         check(client.hello.startswith(b'OK dmabuf=') and client.hello.endswith(b' window=0\n'),
               'hello answered %r' % client.hello)

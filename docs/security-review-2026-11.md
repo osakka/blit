@@ -51,13 +51,13 @@ exercised with real dpkg in the Debian 13 release environment
 | SR-14 | Medium | blit-compositor can be killed with SIGBUS through a memfd passed as a dmabuf |
 | SR-15 | Medium | A viewport source rectangle or buffer scale makes the drag-icon scaler read outside the buffer |
 | SR-16 | Medium | One CHT sequence (`CSI 2147483647 I`) stalls the server -- fixed in 0.3.132 |
-| SR-17 | Medium | Connection slots can be used up before authentication (HTTP and the frame socket) |
+| SR-17 | Medium | Connection slots can be used up before authentication (HTTP and the frame socket) -- fixed in 0.3.135 |
 | SR-18 | Low | `png_decode` leaks its compressed buffer on some error paths -- fixed in 0.3.132 |
 | SR-19 | Low | HTTP headers are found by `strstr` over the whole request, case-sensitively -- fixed in 0.3.132 |
-| SR-20 | Low | The JSON key scanner matches keys at any depth |
+| SR-20 | Low | The JSON key scanner matches keys at any depth -- fixed in 0.3.135 |
 | SR-21 | Low | A failed install reports the head of dpkg's output, not the error -- fixed in 0.3.132 |
 | SR-22 | Low | With no token (loopback only), nothing checks `Origin` or `Host` -- fixed in 0.3.132 |
-| SR-23 | Info | OSC 52 text is stored unchecked; the version is sent before authentication |
+| SR-23 | Info | OSC 52 text is stored unchecked; the version is sent before authentication -- fixed in 0.3.135 |
 
 ### SR-1 (Critical): a frame-channel edit writes outside the image
 
@@ -335,7 +335,9 @@ login_manager_gate: a login program sets a 127-quote title, a 4093-quote
 clipboard and a 1023-quote notification, and `GET /v1/login` and `GET
 /v1/terminal-sessions/{id}` are whole JSON carrying all three; the server
 before this change answered `GET /v1/login` with 8741 bytes that were not
-JSON. (No ASan build of the server exists; the bound was also checked with
+JSON. (Since 0.3.135, SR-23, the clipboard keeps only base64, so the gate
+sets the longest one Blit keeps, 4092 base64 characters, before the
+4093-quote one, which is not stored.) (No ASan build of the server exists; the bound was also checked with
 the login buffer cut to 600, 2000 and 8192 bytes: whole JSON each time.)
 
 - `session_json` appends with `used += snprintf(body + used, capacity - used, ...)`
@@ -643,6 +645,28 @@ session and the display for seconds.
 
 ### SR-17 (Medium): connection slots can be used up before authentication
 
+**Fixed** in 0.3.135 (Gitea #199). HTTP: a connection is pending until its
+header block is whole and authorized, and a request is authorized (or
+answered 401) as soon as it is, so a declared body never holds a slot for a
+caller without the token. A pending connection has 2 s to send its header
+block (5 s for the whole request, as before); one peer address holds at most
+8 pending connections (a ninth closes its oldest); and when all 32 are in use
+a new connection takes the slot of the oldest pending one of the busiest
+peer, read once first so a request already sent is served. Nothing being
+served -- a request being read after its headers, an upload or install, a
+parked settings write or screenshot, an answer being written -- is given up.
+Frame socket: a connection that has not said a valid hello is closed after
+2 s; one uid holds at most 8 of them; a full table closes the oldest of the
+busiest uid's, never a client that said its hello. http_slots_gate.rb (from
+network_auth_gate.sh): an idle connection is closed after 2.0 s (was 5.0 s);
+with 32 idle connections from one peer, 25 are closed at once (was 0) and an
+authenticated request is answered 200 in 1 ms (was 503 `http_capacity`); a
+header block without the token, its 4000-byte body never sent, is answered
+401 in 1 ms (was no answer, dropped after 5 s). frame_descriptor_gate: with
+32 silent connections the session's hello is answered `OK` (the server
+before this change reset it), at least 24 of the 32 are closed at once and
+the rest by the 2 s deadline.
+
 - HTTP: 32 slots (`src/blit_server.c:94`). When they are full, a new
   connection gets 503 `http_capacity` (32034-32036). An idle client is
   dropped after 5 s. A client that keeps reconnecting holds the API, and
@@ -705,6 +729,43 @@ can disagree on where a request ends.
 > request (refused).
 
 ### SR-20 (Low): the JSON key scanner matches keys at any depth
+
+**Fixed** in 0.3.135 (Gitea #202): `json_key_cursor` finds a member at the
+own level of the object it is given (or of the object a cursor is inside),
+and stops where that object ends; every reader built on it (`json_string`,
+`json_int`, `json_bool`, `json_whole_number`, `json_int_array`) inherits
+that. The finders that were `strstr` of a quoted name (`json_string_array`,
+`json_string_object`, `json_output_placements`, and the `surface`,
+`focused`, `input_route`, `cells`, `cursor`, `layout`, `revision`,
+`placements`, `seconds` and `max_bytes` probes) use it too. The fields that
+belong to a nested object are read from that object (`json_object_member`):
+a session's and a PATCH's `surface` width and height, the topology's
+`layout`, each element of `cells` and its `style`, the update's `cursor`.
+On the stream, a message is what its own `type` says (or, for Hibr's
+adapter, its own `subscribe` list), and a subscription's names are read from
+its list alone; the word anywhere in the message used to do. Three scans of
+text are not field reads and stay: the `"cells":[]` spelling that lets a
+defaults-only update through, the settings loader's refusal of a document
+that names `auxiliary_displays` anywhere it cannot read it (it fails
+closed), and a frame plan's `"surface-N"` ids, which are values.
+json_member_depth_gate.rb: `user` only inside `environment` runs the child
+as the server's user with `user` in its environment (the server before this
+change refused it 400 as non-root; as root, by the code, it ran the child as
+that account -- the gate picks `nobody` then, and was run as non-root); `command` only inside `environment` is refused 400 (was 201); an
+environment variable `width` no longer stands in for the surface's (was
+400); a cell whose text is `cursor` is a cell, and the cursor goes where the
+update's own `cursor` says (it went to the next cell's 0,1); a stream input
+message whose data says `subscribe` reaches its session (it was taken for a
+subscription, and the session read nothing). Request bodies that worked
+before still do. A build that ran the old and new scanners side by side on
+every call logged no difference across 109 API gates other than
+emoji_pty_api_gate's deliberate `text_layout` inside `environment`, which
+both read as absent. That cannot see the reads that were replaced (the
+surface, layout, cells, cursor and stream ones), so the clients were read
+for those: console-blit.c, tools/probes and tools/diagnostics, the Blit
+control panel and gates in hibr-apps, Hibr's own scripts (GETs only) and
+update-live.sh put every field at the level the schema gives it, and send
+stream messages of the two shapes above.
 
 `json_key_cursor` (`src/blit_server.c:7275`) matches any quoted string
 followed by `:`. `{"environment":{"user":"x"}}` sets the run user. The
@@ -771,6 +832,34 @@ Low, because the packaged install always has a token.
 > sends a session POST with `Origin: http://example.com` and gets a 403.
 
 ### SR-23 (Info)
+
+**Fixed** in 0.3.135 (no ticket was filed for this one). Decided as follows.
+
+- OSC 52 is validated where it is stored: the selection zero or more of
+  `c p q s 0-7`, the data base64 (with at most two `=` at its end) or empty,
+  the whole at most 4095 bytes, and not cut short by the 16 KB OSC buffer.
+  Anything else is not stored and the clipboard keeps its previous value.
+  Why: the API documents the field as `selection;base64`, and a consumer
+  that passes it on as an OSC 52 of its own (as Hibr's hold does with
+  Hibr's) would otherwise pass on whatever bytes a program wrote; and a
+  clipboard longer than 4095 bytes used to be cut there and stored as
+  broken base64. terminal_conformance: `c;not base64!` and a 4402-byte set
+  after `c;SGVsbG8=` leave `c;SGVsbG8=` (the server before this change
+  stored the first as sent and the second cut); `ps0;` and an empty
+  selection with unpadded data are kept. login_manager_gate's SR-6 case now
+  sets the longest clipboard Blit keeps, then the 4093-quote one, which is
+  not stored.
+- `X-Blit-Version` is left off every answer sent before the request is
+  authorized: `400 malformed_request`, the `401`s, `403 update_disabled`,
+  `501` and `503 http_capacity`. An authorized answer still carries it.
+  Why: a caller without the token should not learn which release, and so
+  which fixes, it reached; nothing reads the header before authenticating
+  -- `GET /v1/version` is behind the bearer check, update-live.sh sends the
+  bearer (`curl_auth`), and Hibr reads no version from the API (a session's
+  child is told `BLIT_VERSION` in its environment, ADR 0196). With no token
+  (a loopback listener) nothing changes. http_header_gate.rb: a 401 has no
+  `X-Blit-Version` (the server before this change sent `0.3.135`), an
+  authorized 200 has it.
 
 - OSC 52 text is stored without checking its `selection;base64` form
   (`src/blit_server.c:10883-10886`). It is never answered, so a program

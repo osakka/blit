@@ -120,6 +120,30 @@ or any other) is refused `501` `transfer_encoding_unsupported` before its
 body is read, and one with two different `Content-Length` values is closed
 unanswered.
 
+A connection has 2 s from its accept to send its whole header block, and 5 s
+for the whole request. A request is authorized as soon as its header block
+is whole: when the server has a token, one without it is answered `401`
+then, before its body (with no token, loopback only, every whole header
+block is). Until then the connection is pending. One peer
+address holds at most 8 pending connections (a ninth closes its oldest),
+and when all 32 connections are in use a new one takes the slot of the
+oldest pending connection, of the peer holding the most; a request being
+served is never given up for one. `503` `http_capacity` therefore means 32
+requests are being served at once. Answers sent before a request is
+authorized -- `400` `malformed_request`, `401`, `403` `update_disabled`,
+`501` and `503` `http_capacity` -- carry no `X-Blit-Version` header; every
+other answer does, and `/v1/version` says the same to an authorized client.
+(Security review SR-17 and SR-23.)
+
+A request's fields are the members of its own JSON object. A member of a
+nested object -- a variable of `environment`, a surface's `width`, a cell's
+`style` -- is read only from that object, and a field given only inside
+another object is not given: `{"environment":{"user":"x"}}` sets the
+variable `user`, never the account the child runs as. A stream message is
+what its own `type` member says (`subscribe` may also be given as the
+message's own `subscribe` list), and a subscription's names are read from
+its `subscriptions` (or `subscribe`) list alone (security review SR-20).
+
 | Outcome | Meaning | Correct action |
 | --- | --- | --- |
 | `2xx` | Accepted or completed according to that operation | Persist IDs/revisions; observe asynchronous work. |
@@ -2310,7 +2334,11 @@ hello, written `v5 <token>` here, is the ADR's binary hello with version 5.
 It is answered `OK ...` (below); or refused, and the connection closed,
 with `ERROR 0 EACCES` (a wrong token, or a uid that may not send to that
 session) or `ERROR 0 EINVAL` (not a hello, or a hello of any version but
-5). A refused frame is answered `FRAME error <id> <code>`.
+5). A refused frame is answered `FRAME error <id> <code>`. A connection
+says its hello within 2 s or is closed; one uid holds at most 8 connections
+that have not said it, and when all 32 connections are in use the oldest of
+them (of the uid holding the most) is closed to make room. A client that
+said its hello is never closed for another (security review SR-17).
 
 The channel is local only. A program reached over ssh, or running on another
 machine, has no `BLIT_FRAME_SOCKET` and could not reach it if it had: it

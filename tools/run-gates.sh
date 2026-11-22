@@ -421,7 +421,8 @@ suite_schema() {
     run_gate diagnostic_auth_gate.sh "$ROOT"/tools/tests/diagnostic_auth_gate.sh
     run_gate token_compare_gate.sh "$ROOT"/tools/tests/token_compare_gate.sh
     # network_auth_gate.sh invokes http_fragmentation_gate.rb,
-    # http_backpressure_gate.rb, http_header_gate.rb and http_origin_gate.rb
+    # http_backpressure_gate.rb, http_header_gate.rb, http_slots_gate.rb and
+    # http_origin_gate.rb
     # itself, passing them its port. They are sub-gates: running one
     # standalone connects to nothing and raises.
     if [ -x "$BINARY" ]; then
@@ -442,6 +443,8 @@ suite_terminal() {
     run_gate layout_reassert_gate.rb ruby tools/tests/layout_reassert_gate.rb
     run_gate terminal_ingest_gate.rb ruby tools/tests/terminal_ingest_gate.rb
     run_gate child_environment_gate.rb ruby tools/tests/child_environment_gate.rb
+    # Security review SR-20: request fields are the request's own members.
+    run_gate json_member_depth_gate.rb ruby tools/tests/json_member_depth_gate.rb
     run_gate glyph_protocol_gate.rb ruby tools/tests/glyph_protocol_gate.rb
 }
 

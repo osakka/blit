@@ -31,8 +31,10 @@ stream_types = schema.dig('paths','/v1/stream','get','x-blit-stream','messages')
   ref = message['$ref'] or next
   schema.dig('components','schemas',ref.split('/').last,'properties','type','const')
 end
+# The dispatcher reads the message's own `type` member (security review
+# SR-20) and compares it by name.
 parsed_types = File.read(File.join(__dir__,'../../src/blit_server.c'))
-  .scan(/strstr\(message, "\\"type\\":\\"([a-z_]+)\\""\)/).flatten.uniq
+  .scan(/strcmp\(type, "([a-z_]+)"\) == 0/).flatten.uniq
 raise 'the stream dispatcher parses no typed message: this check is stale' if parsed_types.empty?
 missing_types = parsed_types - stream_types
 raise "stream messages without a schema in x-blit-stream: #{missing_types.join(', ')}" unless missing_types.empty?

@@ -2037,6 +2037,19 @@ run_session_field_case(base, 'osc-title-split-st',
 run_session_field_case(base, 'osc-clipboard-set',
                        "printf '\\033]52;c;SGVsbG8=\\007'",
                        'clipboard', 'c;SGVsbG8=')
+# Security review SR-23: only OSC 52's selection;base64 form is kept, whole.
+# A set that is not base64, or longer than the API holds, is not stored and
+# the clipboard stays as it was (before, the first was stored as sent and
+# the second cut to 4095 bytes).
+run_session_field_case(base, 'osc-clipboard-selections',
+                       "printf '\\033]52;ps0;SGk=\\007'; printf '\\033]52;;SGk\\007'",
+                       'clipboard', ';SGk')
+run_session_field_case(base, 'osc-clipboard-not-base64',
+                       "printf '\\033]52;c;SGVsbG8=\\007'; printf '\\033]52;c;not base64!\\007'",
+                       'clipboard', 'c;SGVsbG8=')
+run_session_field_case(base, 'osc-clipboard-too-long',
+                       "printf '\\033]52;c;SGVsbG8=\\007'; printf '\\033]52;c;#{'QUFB' * 1100}\\007'",
+                       'clipboard', 'c;SGVsbG8=')
 run_session_field_case(base, 'osc-notification-9',
                        "printf '\\033]9;hello notice\\007'",
                        'notification', 'hello notice')

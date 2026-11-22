@@ -67,6 +67,10 @@ BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
 # Transfer-Encoding refused.
 BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
     ruby "$ROOT/tools/tests/http_header_gate.rb" "$PORT"
+# Security review SR-17: connections that have not sent an authorized header
+# block cannot hold the slots; the owner's request is still served.
+BLIT_GATE_PORT="$PORT" BLIT_GATE_TOKEN="$TOKEN" \
+    ruby "$ROOT/tools/tests/http_slots_gate.rb" "$PORT"
 
 unauth=$(curl -sS -o "$UNAUTH" -w '%{http_code}' \
     "http://127.0.0.1:$PORT/v1/server")

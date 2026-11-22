@@ -89,12 +89,16 @@ pid=
 # 2046 bytes) took the object past 8 KB, and the rest of it was written past
 # the end of the buffer, on the stack of the root server. Both answers must
 # be whole JSON carrying the three texts whole, and the server still serving.
+# Since SR-23 the clipboard keeps only OSC 52's selection;base64 form: the
+# longest one Blit holds (4092 base64 characters) is set first, and the
+# clipboard of quotes after it is not stored.
 osc_dir=$(mktemp -d "${TMPDIR:-/tmp}/blit-login-osc.XXXXXX")
 chmod 755 "$osc_dir"
 cat >"$osc_dir/login" <<'EOF_LOGIN'
 #!/bin/sh
 quotes() { printf "%${1}s" '' | tr ' ' '"'; }
 printf '\033]2;%s\007' "$(quotes 127)"
+printf '\033]52;c;%s\007' "$(printf "%1023s" '' | sed 's/ /QUFB/g')"
 printf '\033]52;c;%s\007' "$(quotes 4093)"
 printf '\033]9;%s\007' "$(quotes 1023)"
 exec sleep 60
@@ -134,12 +138,12 @@ if ! printf '%s' "$osc_login" | ruby -rjson -e '
   login = (JSON.parse(STDIN.read) rescue abort("GET /v1/login is not JSON")).fetch("session")
   q = "\""
   abort "title" unless login.fetch("title") == q * 127
-  abort "clipboard" unless login.fetch("clipboard") == "c;" + q * 4093
+  abort "clipboard" unless login.fetch("clipboard") == "c;" + "QUFB" * 1023
   abort "notification" unless login.fetch("notification") == q * 1023
   abort "status" unless login.key?("status") && login.key?("frames")
 ' || ! printf '%s' "$osc_session" | ruby -rjson -e '
   session = JSON.parse(STDIN.read) rescue abort("GET /v1/terminal-sessions/{id} is not JSON")
-  abort "clipboard" unless session.fetch("clipboard") == "c;" + "\"" * 4093
+  abort "clipboard" unless session.fetch("clipboard") == "c;" + "QUFB" * 1023
 ' || ! curl --fail --silent --max-time 5 -o /dev/null \
         -H "Authorization: Bearer $token" "http://127.0.0.1:$port/v1/version"; then
     printf 'LOGIN_MANAGER_GATE_FAIL session_json: GET /v1/login with a long title, clipboard and notification is not whole JSON, or the server stopped (login %s bytes, session %s bytes)\n' \

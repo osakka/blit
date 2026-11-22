@@ -306,7 +306,10 @@ What Blit does not do, and why:
   could only affect new text, and doing it properly means keeping palette
   indices per cell.
 - **OSC 52 writes the clipboard but never reads it**, so a program cannot
-  read what another one copied.
+  read what another one copied. Only the `selection;base64` form is kept
+  (the selection zero or more of `c p q s 0-7`, the data base64, at most
+  4095 bytes in all): a set that is not, or is cut short, is not stored and
+  the clipboard stays as it was (security review SR-23).
 - **Kitty:** only direct transmission (`t=d`). File, temporary-file and
   shared-memory transmission would let a program make Blit, which runs as
   root, read a path of its choosing; frames by descriptor (above) are the

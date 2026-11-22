@@ -94,6 +94,36 @@ check.call('conflicting-content-length', [nil, 400],
                           "Content-Length: #{session_body.bytesize}\r\n" \
                           "Content-Length: 2\r\n\r\n", session_body))
 
+# 5. Security review SR-23: a refusal sent before the request is authorized
+#    does not say which Blit answered; an authorized answer does. (The server
+#    before this change sent X-Blit-Version on the 401 too.)
+version_header = lambda do |request|
+  socket = TCPSocket.new('127.0.0.1', port)
+  socket.write(request)
+  response = +''
+  begin
+    Timeout.timeout(5) { loop { response << socket.readpartial(65_536) } }
+  rescue EOFError, Errno::ECONNRESET, Timeout::Error
+    nil
+  end
+  socket.close
+  head = response.split("\r\n\r\n", 2)[0].to_s
+  [head[%r{\AHTTP/1\.1 (\d{3})}, 1], head[/^X-Blit-Version: *(.*)$/i, 1]]
+end
+status, version = version_header.call("GET /v1/server HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+if status == '401' && version.nil?
+  puts 'PASS http-header unauthenticated-no-version 401'
+else
+  failures << "unauthenticated-no-version: #{status.inspect} with X-Blit-Version #{version.inspect}"
+end
+status, version = version_header.call("GET /v1/server HTTP/1.1\r\nHost: 127.0.0.1\r\n" \
+                                      "Authorization: Bearer #{token}\r\nConnection: close\r\n\r\n")
+if status == '200' && version.to_s.strip =~ /\A\d+\.\d+\.\d+/
+  puts "PASS http-header authenticated-version 200 #{version.strip}"
+else
+  failures << "authenticated-version: #{status.inspect} with X-Blit-Version #{version.inspect}"
+end
+
 unless failures.empty?
   failures.each { |failure| warn "HTTP_HEADER_FAIL #{failure}" }
   exit 1
