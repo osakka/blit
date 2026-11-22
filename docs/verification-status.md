@@ -9,6 +9,37 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-22: 0.3.135 security fixes; update-live rolls back
+
+- **Server (security review SR-8, SR-17, SR-20, SR-23; Gitea #190, #199,
+  #202):** a session child run as another user holds no root secret; HTTP
+  and frame-socket admission bound unauthenticated connections without
+  ever dropping a legitimate local request while a slot is free (the first
+  SR-17 cap did, caught by surface_damage_gate in this release's first
+  gate run, never shipped); JSON fields are read only at their own level;
+  OSC 52 is stored only as valid base64; the version is withheld before
+  authorization.
+- **Compositor (SR-14, SR-15; #196, #197):** a shrunk memfd passed as a
+  dmabuf no longer kills it (planes checked, reads guarded); the drag-icon
+  viewport and buffer scale are bounded. #210: the stand-in's lost
+  protocol error (libwayland discards it on ECONNRESET) fixed in the gate.
+- **Deploy (#206, #207):** update-live.sh --rollback-to reinstalls the
+  previous signed pair when the smoke check fails, and judges a repaired
+  box by "at least as it was".
+- **Gates:** `gates_all` 213/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on 3f0b123a, the shipped commit, under the shared suite lock.
+  The first full run (on b85cd2c5) failed surface_damage_gate in all and
+  renderer: the SR-17 per-peer cap closed legitimate local requests (129 of
+  800 in bursts of 40); fixed, and all three suites run again whole.
+- **Release environment (Debian 13):** update_pair_gate 16 cases and
+  rollback_recovery_gate 12 cases (its smoke-fails and smoke-rollback
+  cases with the new rollback) passed; the release was signed.
+- **Live, the mini PC:** deployed with --rollback-to 0.3.134; the signed
+  update was verified, the smoke check passed at the login screen (2
+  displays up, frames advancing 5 -> 19), no rollback needed. Real dmabuf
+  planes through SR-14's check: to confirm with a GPU program.
+- **Published** to hibr-apt (66058e0) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-22: 0.3.134 glyph sets by set and name
 
 - **Glyph sets (ADR 0243 step 3, the set level).** The font registry
