@@ -173,7 +173,7 @@ are not, and nothing in band changed.
   alternative: it would duplicate the packaged catalogue the blit set's
   version must hash (the same file `GET /v1/fonts/icons` serves and Hibr
   reads), and every catalogue edit would need the header regenerated. The
-  cost, measured: 11,939 names (830 live and 345 retired in `blit`, 10,764 in the Nerd sets) in a table of 474 KB (24-byte records, a names pool, the replacements and ranges); about 16 ms once at start in the tcc build (13 ms read outside the server, 7-8 ms built with gcc -O2; 3 ms of it the catalogue's SHA-256), and about 0.6 MB more resident (24.4 against 23.9 MB at idle beside 0.3.133); a lookup is a binary search. A source that cannot be read is not
+  cost, measured: 11,594 names (830 in `blit`, 10,764 in the Nerd sets) in a table of about 460 KB (24-byte records, a names pool, the replacements and ranges); about 16 ms once at start in the tcc build (13 ms read outside the server, 7-8 ms built with gcc -O2; 3 ms of it the catalogue's SHA-256), and about 0.6 MB more resident (24.4 against 23.9 MB at idle beside 0.3.133); a lookup is a binary search. A source that cannot be read is not
   served and the diagnostics log says why; the server starts.
 - **HTTP.** `GET /v1/fonts` gains `sets` (`{id, owner, scope, version,
   count, faces}`); `GET /v1/fonts/sets` lists them; `GET
@@ -184,18 +184,15 @@ are not, and nothing in band changed.
   The grammar is checked before any lookup: outside it, a 400
   `malformed_query` with one fixed body (nothing echoed); `unknown_set` and
   `unknown_name` are 404s. Authenticated like every route; read-only.
-- **Where the data changed the draft.** The draft's registry example had
-  `"retired_names": []`, assuming the catalogue's `retired` list held the
-  names. It holds codepoint ranges only (43 ranges, 345 codepoints), and
-  the catalogue's history shows 345 ids published and since removed --
-  exactly one at each of those codepoints: the 16 large phone icons
-  (0.3.5), the 288 colourways of non-folder file kinds (0.3.8) and the 35
-  Slate dark glyphs (0.3.39, ADR 0211). Section 6 says a terminal-local
-  set's retired names are answered retired for good, never unknown, so
-  the registry carries all 345, each with the codepoint it had; a
-  colourway is `replaced_by` its kind's one look (`file-<kind>-classic-<side>`,
-  as 0.3.8's notes say every colour slot drew it), a Slate dark glyph its
-  Slate light one (which draws both since ADR 0211), the phones nothing.
+- **Retired names start with the lookup (the owner, 2026-11-22).** The
+  catalogue's history has 345 ids removed before 0.3.134 (the 16 large
+  phone icons in 0.3.5, the 288 file colourways in 0.3.8, the 35 Slate
+  dark glyphs in 0.3.39). They were never addressable by name, so nothing
+  can depend on them: they are not carried and answer `unknown_name`.
+  From 0.3.134, a name the lookup published and the catalogue later drops
+  is carried as retired (410 for good, never reused), with a replacement
+  only when the owner names one; `glyph_sets_gate` holds the catalogue's
+  ids since the lookup to live-or-retired.
   The scope is spelled `terminal-local` everywhere (the draft's JSON
   example said `terminal`). The registry's version rule for the catalogue
   is `sha256`; the retired names are in the registry, not the file, so a

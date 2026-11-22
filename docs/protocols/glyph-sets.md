@@ -96,12 +96,11 @@ have 830 distinct codepoints, so the set has no aliases. One icon,
 a lookup answers its own codepoint, U+101001, and this version of the
 protocol does not report the text form.
 
-The catalogue's `retired` list keeps codepoints, not names (43 ranges,
-345 codepoints). The ids that held them -- the 16 large phone icons, the
-288 colourways of non-folder file kinds and the 35 Slate dark glyphs --
-are in the catalogue's history, one at each retired codepoint, and are the
-set's retired names (section 6): Blit's registry carries them, since the
-catalogue's shape is frozen.
+The catalogue's `retired` list keeps codepoints, not names. The set's
+retired names (section 6) begin with the name lookup itself: a name the
+set published and later dropped is carried in Blit's registry, since the
+catalogue's shape is frozen. Ids removed before the lookup existed (Blit
+0.3.134) were never addressable by name and are not retired names.
 
 Nerd Fonts' sets are taken as the file spells them, including its two
 indent prefixes (`indent` and `indentation`): a terminal implementing
@@ -144,12 +143,7 @@ As built in 0.3.134 (shortened):
     "names": {"file": "icons/catalogue.json", "format": "blit-catalogue",
               "lists": ["icons", "text_glyphs", "cell_geometry"]},
     "version": "sha256",
-    "retired_names": {
-      "file-asm-amber-left": {"codepoint": "1011B9", "replaced_by": ["file-asm-classic-left"]},
-      "phone-off-large-left": {"codepoint": "101023"},
-      "slate-dark-close": {"codepoint": "101280", "replaced_by": ["slate-light-close"]},
-      ...
-    }
+    "retired_names": {}
   },
   "nerd": {
     "owner": "nerd",

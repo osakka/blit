@@ -2184,8 +2184,7 @@ GET /v1/fonts/sets/blit/wifi-1
 GET /v1/fonts/sets/blit/hui-right
   -> 200 {..., "codepoints":["101019"],"tile":{"column":1,"row":0,"columns":2,"rows":1}}
 GET /v1/fonts/sets/blit/file-asm-amber-left
-  -> 410 {"code":"retired", ..., "name":"file-asm-amber-left","retired":true,
-          "replaced_by":["file-asm-classic-left"]}
+  -> 404 {"code":"unknown_name", ...}   (removed in 0.3.8, before the lookup)
 ```
 
 - **Names are exact.** No case folding, and `-` and `_` are different
@@ -2201,10 +2200,11 @@ GET /v1/fonts/sets/blit/file-asm-amber-left
   each other.
 - **Deprecated** names resolve, with `deprecated: true` and `replaced_by`.
   **Retired** names no longer resolve and are never reused: a 410
-  `retired`, with `replaced_by` when something replaced them. Blit's
-  retired names are the 345 ids its catalogue once had at the codepoints
-  its `retired` list keeps (the large phones, the file colourways, Slate
-  dark); the registry carries them, since the catalogue's shape is frozen.
+  `retired`, with `replaced_by` when the owner names a replacement. A
+  name is retired only once the lookup has published it (from 0.3.134);
+  ids removed from the catalogue before that were never addressable by
+  name and answer `unknown_name`. None is retired yet; the registry
+  carries them, since the catalogue's shape is frozen.
 - **Tiles.** A name that is one cell of a picture drawn across several
   (the two-cell icons, the 4x2 discs, cell geometry that spans cells) says
   which with `tile`: its `column` and `row` from 0 and the picture's

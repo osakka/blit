@@ -92,9 +92,14 @@ end
 retired_ranges = catalogue.fetch('retired').map { |r| (r['from'].to_i(16)..r['to'].to_i(16)) }
 retired = blit.fetch('retired_names')
 retired_points = retired.values.map { |r| r['codepoint'].to_i(16) }
+# Retired names start with the name lookup (0.3.134): a name the lookup
+# published and the catalogue later drops is carried here, at a codepoint
+# the catalogue's retired list keeps. Ids removed before the lookup existed
+# were never addressable by name and are not carried (the owner,
+# 2026-11-22).
 check(retired_points.uniq.size == retired_points.size &&
-      retired_points.sort == retired_ranges.flat_map(&:to_a).sort,
-      "the registry's #{retired.size} retired names are the catalogue's #{retired_ranges.sum(&:size)} retired codepoints, one each")
+      retired_points.all? { |p| retired_ranges.any? { |r| r.cover?(p) } },
+      "the registry's #{retired.size} retired names each hold a codepoint the catalogue's retired list keeps")
 check((retired.keys & blit_names.keys).empty?, 'no retired name is live')
 check(retired.all? { |_, r| (r['replaced_by'] || []).all? { |b| blit_names.key?(b) } },
       'every retired name is replaced only by live names')
@@ -108,15 +113,19 @@ end
 # The catalogue's history, where this tree has it: a full clone with more
 # than one revision of the file. An export, a shallow clone or no git at all
 # is a NOTE, not a failure.
-revisions = git_lines('rev-parse', '--is-shallow-repository') == ['false'] ?
-  git_lines('log', '--format=%H', '--follow', '--', 'assets/fonts/icons/catalogue.json') : []
-if revisions.size > 1
+# Only the revisions from the name lookup on (89abd838, 0.3.134): what it
+# published must stay live or be retired.
+SETS_SINCE = '89abd838'
+revisions = git_lines('rev-parse', '--is-shallow-repository') == ['false'] &&
+            git_lines('cat-file', '-t', SETS_SINCE) == ['commit'] ?
+  [SETS_SINCE] + git_lines('log', '--format=%H', "#{SETS_SINCE}..HEAD", '--', 'assets/fonts/icons/catalogue.json') : []
+if revisions.size >= 1
   ever = revisions.flat_map do |rev|
     text, = Open3.capture2('git', '-C', ROOT, 'show', "#{rev}:assets/fonts/icons/catalogue.json")
     JSON.parse(text).values.grep(Array).flatten.grep(Hash).filter_map { |e| e['id'] }
   end.uniq
   check((ever - blit_names.keys).empty?,
-        "every id the catalogue published in #{revisions.size} revisions is live or retired " \
+        "every id the catalogue published since the name lookup (#{revisions.size} revisions) is live or retired " \
         "(#{(ever - blit_names.keys).first(5)})")
 else
   puts 'NOTE the catalogue history is not here (an export, a shallow clone or no git): ' \
@@ -352,12 +361,19 @@ Dir.mktmpdir('blit-glyph-sets') do |root|
       code, problem = get(path)
       check(code == 404 && problem&.fetch('code', nil) == why, "#{path} -> #{code} #{why}")
     end
-    code, problem = get('/v1/fonts/sets/blit/phone-off-large-left')
-    check(code == 410 && problem&.fetch('code', nil) == 'retired' && !problem.key?('replaced_by') && !problem.key?('codepoints'),
-          'blit/phone-off-large-left -> 410 retired, no codepoint, no replacement')
-    code, problem = get('/v1/fonts/sets/blit/file-asm-amber-left')
-    check(code == 410 && problem&.fetch('replaced_by', nil) == ['file-asm-classic-left'],
-          'blit/file-asm-amber-left -> 410 retired, replaced_by file-asm-classic-left')
+    # Ids removed before the name lookup existed are unknown, not retired.
+    %w[phone-off-large-left file-asm-amber-left slate-dark-close].each do |old|
+      code, problem = get("/v1/fonts/sets/blit/#{old}")
+      check(code == 404 && problem&.fetch('code', nil) == 'unknown_name', "blit/#{old} (removed before 0.3.134) -> 404 unknown_name")
+    end
+    # A retired name answers 410 with its replacement, when the registry has one.
+    if (name, r = retired.first)
+      code, problem = get("/v1/fonts/sets/blit/#{name}")
+      check(code == 410 && problem&.fetch('code', nil) == 'retired' && !problem.key?('codepoints') &&
+            problem['replaced_by'] == r['replaced_by'], "blit/#{name} -> 410 retired")
+    else
+      puts 'NOTE no name is retired yet: the 410 path waits for the first name the lookup publishes and later drops'
+    end
     _, record = get('/v1/fonts/sets/blit/wifi-1')
     check(record&.fetch('deprecated', nil) == true && record['replaced_by'] == ['cellular-1'] && record['codepoints'] == ['101002'],
           'blit/wifi-1 resolves, deprecated, replaced_by cellular-1')

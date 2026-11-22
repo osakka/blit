@@ -610,6 +610,7 @@ static const struct {
 #define GLYPH_RETIRED_ROW(set_, name_, replaced_by_) {set_, name_, replaced_by_},
     BLIT_GLYPH_RETIRED(GLYPH_RETIRED_ROW)
 #undef GLYPH_RETIRED_ROW
+    {NULL, NULL, NULL}   /* the end: the list may be empty (C99 has no empty initializer) */
 };
 
 /* One names source into the table; on failure, nothing of it stays. */
@@ -651,7 +652,7 @@ static int glyph_load_source(BlitGlyphSets *g, int index)
     free(text);
     /* The names the registry carries as retired: never reused, never
        unknown. */
-    for (i = 0; ok && i < sizeof(glyph_retired) / sizeof(glyph_retired[0]); ++i)
+    for (i = 0; ok && glyph_retired[i].set; ++i)
         for (s = 0; ok && s < BLIT_GLYPH_SET_COUNT; ++s)
             if (g->sets[s].source == index && strcmp(g->sets[s].id, glyph_retired[i].set) == 0) {
                 const char *name = glyph_retired[i].name, *list = glyph_retired[i].replaced_by;
