@@ -12,7 +12,7 @@ renderer. An application still has to write these private-use characters
 itself.
 
 The set starts at U+101000 (0.3.131, ADR 0243): until 0.3.130 it was at
-U+100000-U+100495, which the Glyph Protocol reserved for programs'
+U+100000-U+100494, which the Glyph Protocol reserved for programs'
 registered glyphs, so every entry moved up by 0x1000 in the same layout,
 ids unchanged. During the transition an old codepoint still draws the glyph
 it moved to; a later release, named in its notes, drops the old range.
@@ -162,8 +162,11 @@ U+101314–10137C (LCD digits, LED meters, sliders, faders), the transport
 text glyphs U+10137D–1013A0, the disc, record and cassette icons
 U+1013A1–1013D0 (two columns, frames 0-7), the key ends U+1013D1–1013D4
 (cell geometry, set `key`) and the big discs U+1013D5–101494, four columns
-by two rows (`<kind>-big-<f>-r<row>c<col>`). U+101495 is the next free
-codepoint.
+by two rows (`<kind>-big-<f>-r<row>c<col>`). The slider styles follow, cell
+geometry as the sliders: the circle U+101495–10149E and the groove
+U+10149F–1014A8, each a slider's five pieces and a fader's in the
+`slider-*`/`fader-*` order (`slider-circle-*`, `fader-groove-*`).
+U+1014A9 is the next free codepoint.
 
 An icon wider than a cell carries `columns` and its `column`; one taller
 than a row (the big discs) also carries `rows` and its `row`, which the
@@ -195,7 +198,7 @@ file as packaged (the hash `fonts.source.json` pins), and sends it as the
 `ETag`. A client that keeps the catalogue compares the revision, or sends it
 in `If-None-Match` and is answered 304 while it is current. During the
 transition it also returns `deprecated_range`,
-`{"from":"100000","to":"100495","moved_to":"101000"}`: the old range that
+`{"from":"100000","to":"100494","moved_to":"101000"}`: the old range that
 still draws, and where it moved. The file itself does not carry it.
 
 These explicitly selected colour glyphs occupy one terminal cell. Plane16

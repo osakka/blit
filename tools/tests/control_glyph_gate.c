@@ -25,7 +25,7 @@
    full-screen and sticky boxes (ADR 0224), which window_glyph_gate holds; U+101314-10137C the player cell glyphs
    (ADR 0237, player_glyph_gate), U+10137D-1013D0 the transport and now-playing icons and U+1013D1-1013D4
    the key ends (window_style_gate) and U+1013D5-101494 the big discs. */
-#define NEXT_FREE 0x101495U
+#define NEXT_FREE 0x1014A9U
 
 /* Pens are used by Slate's checkbox (the 4th to 6th glyph) and from the
    Slate switch on (the 11th): written out here, not read from the header. */

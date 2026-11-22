@@ -2103,7 +2103,8 @@ Blit draws as cell geometry: the bar corners, the 70 window-chrome glyphs
 (ADR 0214), the 10 pressed-box and grow glyphs (ADR 0219), the 4
 minimise boxes (ADR 0222) and the 10 full-screen and sticky boxes
 (ADR 0224), the 105 player glyphs (LCD digits, LED meters, sliders and
-faders) and the 4 key ends (ADR 0237). Each has `colour`; the window and
+faders), the 4 key ends and the 20 pieces of the circle and groove
+slider styles (0.3.136) (ADR 0237). Each has `colour`; the window and
 control glyphs and the keys also carry `set` (`chalk`, `slate-light`,
 `slate`, `capsule`, `frame` or `key`) and `pens` (`foreground`, or `cell`
 for Slate, the capsule and the keys, ADR 0211); the bar corners and the
@@ -2126,12 +2127,14 @@ face, a knob, or `shade`, a key's dark edge). The words are in
 [the icon contract](../assets/fonts/icons/README.md) and typed in OpenAPI.
 
 **The codepoints moved (0.3.131, ADR 0243).** Every codepoint is in
-plane 16 from U+101000; until 0.3.130 the set was at U+100000-U+100495,
+plane 16 from U+101000; until 0.3.130 the set was at U+100000-U+100494,
 which the Glyph Protocol reserved for programs' registered glyphs, so each
 entry moved up by 0x1000 in the same layout, its id unchanged. During the
 transition the old codepoints still draw the same glyphs, and the response
 (not the file) carries `deprecated_range`, after `revision`:
-`{"from":"100000","to":"100495","moved_to":"101000"}`. A later release,
+`{"from":"100000","to":"100494","moved_to":"101000"}` (`to` was `100495`,
+one past the last glyph that moved, through 0.3.135; 0.3.136 placed the
+slider styles from U+101495, ADR 0243). A later release,
 named in its notes, drops the old range and the member with it.
 
 **The catalogue has a revision.** The body's first member, `revision`, is
@@ -2170,7 +2173,7 @@ GET /v1/fonts/sets/{set}/{name}          one name's record
 ```
 
 **The sets.** `blit` is Blit's own icon catalogue (its `icons`,
-`text_glyphs` and `cell_geometry` ids, one namespace; 830 ids, 808 listed:
+`text_glyphs` and `cell_geometry` ids, one namespace; 850 ids, 828 listed:
 the 22 deprecated ones are not), scope `terminal-local` (its codepoints are
 Blit's, and another terminal may draw something else there), version the
 SHA-256 of the catalogue as packaged -- `GET /v1/fonts/icons`' `revision`.
@@ -2187,7 +2190,7 @@ table they come from is not in the package.
 ```json
 {"sets": [
   {"id": "blit", "owner": "blit", "scope": "terminal-local",
-   "version": "<sha-256 of icons/catalogue.json>", "count": 808, "faces": ["blit-icons"]},
+   "version": "<sha-256 of icons/catalogue.json>", "count": 828, "faces": ["blit-icons"]},
   {"id": "nerd-cod", "owner": "nerd", "scope": "portable", "version": "3.4.0",
    "count": 438, "faces": ["symbols-nerd-font-mono"]},
   ...

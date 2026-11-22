@@ -1,5 +1,5 @@
 #!/bin/sh
-# ADR 0243: the icons moved from U+100000-U+100495 to U+101000-U+101495, and
+# ADR 0243: the icons moved from U+100000-U+100494 to U+101000-U+101494, and
 # while the transition lasts the old range draws exactly the new one's
 # glyphs, in the raster and on both compositors (icon_transition_gate.c).
 # Built once as shipped, where it must pass, and once with the mapping
@@ -11,11 +11,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 bin=${TMPDIR:-/tmp}/blit-icon-transition-$$
 trap 'rm -f "$bin" "$bin.dropped" "$bin.out"' EXIT
 cd "$ROOT"
-# The catalogue's plane-16 glyphs, each of which must draw at its new codepoint.
+# The catalogue's glyphs that moved (U+101000-U+101494), each of which must
+# draw at its new codepoint; those placed later (from U+101495) have no old
+# codepoint.
 glyphs=$(python3 -c '
 import json, sys
 c = json.load(open(sys.argv[1]))
-print(sum(int(e["codepoint"], 16) >= 0x101000 for k in ("icons", "text_glyphs", "cell_geometry") for e in c.get(k, [])))
+print(sum(0x101000 <= int(e["codepoint"], 16) <= 0x101494 for k in ("icons", "text_glyphs", "cell_geometry") for e in c.get(k, [])))
 ' assets/fonts/icons/catalogue.json)
 cflags=$(tools/build-flags.sh --cflags drm font zlib)
 libs=$(tools/build-flags.sh --libs drm font zlib)

@@ -38,7 +38,7 @@ SCOPES = ['portable', 'terminal-local']
 FORMATS = ['blit-catalogue', 'nerd-glyphnames']
 # The Glyph Protocol's registration block and, above it, the rest of Blit's
 # old icon range (glyph sets section 9): no set may place a glyph there.
-NO_GLYPHS = range(0x100000, 0x100495 + 1)
+NO_GLYPHS = range(0x100000, 0x100494 + 1)
 
 
 def faces(node):

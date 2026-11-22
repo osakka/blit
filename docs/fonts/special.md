@@ -853,5 +853,25 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `key-right` | `U+1013D2` | `"\udbc4\udfd2"` | cell pens | Key, right end, raised: the light edge along the top, the dark edge along the bottom and right side |
 | `key-pressed-left` | `U+1013D3` | `"\udbc4\udfd3"` | cell pens | Key, left end, pressed: the dark edge along the top and left side, the light edge along the bottom |
 | `key-pressed-right` | `U+1013D4` | `"\udbc4\udfd4"` | cell pens | Key, right end, pressed: the dark edge along the top, the light edge along the bottom and right side |
+| `slider-circle-cap-left` | `U+101495` | `"\udbc5\udc95"` | foreground | Slider, round knob: the left end: the filled line from the middle, rounded |
+| `slider-circle-track` | `U+101496` | `"\udbc5\udc96"` | foreground | Slider, round knob: the thin line ahead of the knob, light |
+| `slider-circle-track-filled` | `U+101497` | `"\udbc5\udc97"` | foreground | Slider, round knob: the thin line behind the knob, full |
+| `slider-circle-knob` | `U+101498` | `"\udbc5\udc98"` | foreground | Slider, round knob: the knob, a disc the cell's width on the line |
+| `slider-circle-cap-right` | `U+101499` | `"\udbc5\udc99"` | foreground | Slider, round knob: the right end: the light line to the middle, rounded |
+| `fader-circle-cap-top` | `U+10149A` | `"\udbc5\udc9a"` | foreground | Fader, round knob: the top end: the light line down from the middle, rounded |
+| `fader-circle-track` | `U+10149B` | `"\udbc5\udc9b"` | foreground | Fader, round knob: the thin line above the knob, light |
+| `fader-circle-track-filled` | `U+10149C` | `"\udbc5\udc9c"` | foreground | Fader, round knob: the thin line below the knob, full |
+| `fader-circle-knob` | `U+10149D` | `"\udbc5\udc9d"` | foreground | Fader, round knob: the knob, a disc the cell's width on the line |
+| `fader-circle-cap-bottom` | `U+10149E` | `"\udbc5\udc9e"` | foreground | Fader, round knob: the bottom end: the filled line up to the middle, rounded |
+| `slider-groove-cap-left` | `U+10149F` | `"\udbc5\udc9f"` | foreground | Slider, groove: the left end: the channel solid from the thumb's left edge |
+| `slider-groove-track` | `U+1014A0` | `"\udbc5\udca0"` | foreground | Slider, groove: the channel ahead of the thumb, hollow |
+| `slider-groove-track-filled` | `U+1014A1` | `"\udbc5\udca1"` | foreground | Slider, groove: the channel behind the thumb, solid |
+| `slider-groove-knob` | `U+1014A2` | `"\udbc5\udca2"` | foreground | Slider, groove: the thumb, a square standing proud of the channel |
+| `slider-groove-cap-right` | `U+1014A3` | `"\udbc5\udca3"` | foreground | Slider, groove: the right end: the hollow channel, closed at the thumb's right edge |
+| `fader-groove-cap-top` | `U+1014A4` | `"\udbc5\udca4"` | foreground | Fader, groove: the top end: the hollow channel, closed at the thumb's top edge |
+| `fader-groove-track` | `U+1014A5` | `"\udbc5\udca5"` | foreground | Fader, groove: the channel above the thumb, hollow |
+| `fader-groove-track-filled` | `U+1014A6` | `"\udbc5\udca6"` | foreground | Fader, groove: the channel below the thumb, solid |
+| `fader-groove-knob` | `U+1014A7` | `"\udbc5\udca7"` | foreground | Fader, groove: the thumb, a square standing proud of the channel |
+| `fader-groove-cap-bottom` | `U+1014A8` | `"\udbc5\udca8"` | foreground | Fader, groove: the bottom end: the channel solid down to the thumb's bottom edge |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

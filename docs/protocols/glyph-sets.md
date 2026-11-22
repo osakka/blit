@@ -87,11 +87,12 @@ reports. Registering a new owner token is a change to this table.
 | `emoji` | `emoji` | Unicode's `emoji-test.txt`, entries marked `fully-qualified` or `component` | section 3.3 | portable | the Emoji version, `18.0` |
 | `blit` | `blit` | Blit's icon catalogue, its `icons`, `text_glyphs` and `cell_geometry` entries, and the retired names Blit's registry carries | the entry's `id`, unchanged | terminal-local | the catalogue's revision (SHA-256 of the packaged file) |
 
-Blit's catalogue has 830 ids: 554 icons, 38 text glyphs and 238 cell
-geometry pieces (window chrome). They share one namespace (every id is
-unique across the three lists), Hibr already names all of them by id,
-and all of them are drawn, so all 830 are in the one set `blit`. They
-have 830 distinct codepoints, so the set has no aliases. One icon,
+Blit's catalogue has 850 ids: 554 icons, 38 text glyphs and 258 cell
+geometry pieces (window chrome, controls, keys and the player's glyphs).
+They share one namespace (every id is unique across the three lists),
+Hibr already names all of them by id, and all of them are drawn, so all
+850 are in the one set `blit`. They have 850 distinct codepoints, so the
+set has no aliases. One icon,
 `hibr-pen`, also has a monochrome text form at U+270E (its `text_alias`);
 a lookup answers its own codepoint, U+101001, and this version of the
 protocol does not report the text form.
@@ -309,8 +310,8 @@ everywhere, and it cannot. What holds:
   codepoints MUST report a new set version, SHOULD keep drawing the old
   codepoints as the glyphs they moved to for a transition, and MUST NOT
   later give an old codepoint to a different glyph of its own. Blit did
-  exactly this in 0.3.131: its icons moved from U+100000-U+100495 to
-  U+101000-U+101495, and the old range still draws the same glyphs until
+  exactly this in 0.3.131: its icons moved from U+100000-U+100494 to
+  U+101000-U+101494, and the old range still draws the same glyphs until
   a later release named in its notes (section 9).
 
 ## 6. Name lifetime
@@ -472,8 +473,8 @@ ESC _ 25a1 ; n ; list=sets ; sets=<entry>[,<entry>]* ; more=<0|1> ESC \
 
 `entry = set-id ":" scope ":" count ":" version`, where scope is `p`
 (portable) or `t` (terminal-local) and count is the number of names
-listed for the set (deprecated names are not counted: Blit's 830 ids
-list as 808). Sets are in bytewise order of id; `after` starts
+listed for the set (deprecated names are not counted: Blit's 850 ids
+list as 828). Sets are in bytewise order of id; `after` starts
 the page after that id.
 
 **Names in a set:**
@@ -497,7 +498,7 @@ Example, the first page of the sets on Blit:
 
 ```
 ESC _ 25a1 ; n ; list=sets ESC \
-ESC _ 25a1 ; n ; list=sets ; sets=blit:t:808:<catalogue revision>,emoji:p:3972:18.0,nerd-cod:p:438:3.4.0,... ; more=0 ESC \
+ESC _ 25a1 ; n ; list=sets ; sets=blit:t:828:<catalogue revision>,emoji:p:3972:18.0,nerd-cod:p:438:3.4.0,... ; more=0 ESC \
 ```
 
 ### 7.5 Errors
@@ -576,8 +577,8 @@ register (its §4), and says nothing else puts glyphs there.
 - A lookup MUST NOT answer a codepoint in the registration block. No
   set may place a glyph there.
 - **Blit's transition.** Until 0.3.130 Blit's icons were at
-  U+100000-U+100495, overlapping the block. From 0.3.131 they are at
-  U+101000-U+101495 (every glyph at old + 0x1000), and the old
+  U+100000-U+100494, overlapping the block. From 0.3.131 they are at
+  U+101000-U+101494 (every glyph at old + 0x1000), and the old
   codepoints still draw the same glyphs, for text printed by old
   programs. During that transition:
   - lookups answer only the new codepoints, never the old ones;
@@ -589,7 +590,7 @@ register (its §4), and says nothing else puts glyphs there.
     until a release has dropped the old range, so a registered glyph and
     an old icon never compete for a codepoint. If Blit ever accepts
     registrations first, a registration MUST win over the old drawing.
-- U+100400-U+100495 (the old range above the block) is retired with the
+- U+100400-U+100494 (the old range above the block) is retired with the
   rest of the old range: never answered by a lookup, never reused, and
   `q ; cp=` for it answers `status=` empty during the transition too,
   for the same reason.

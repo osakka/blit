@@ -33,7 +33,7 @@ What exists (ADR 0243, built through 0.3.134):
   `src/blit_font_registry.h`. Its `sets` level declares two names sources
   (`blit`, the icon catalogue; `nerd`, Nerd Fonts' `glyphnames.json` split
   into 17 `nerd-*` sets). `src/blit_glyph_sets.h` reads the names files
-  once at start into one sorted table (18 sets, 11,594 names); the set
+  once at start into one sorted table (18 sets, 11,614 names); the set
   count is compiled in (`BLIT_GLYPH_SET_COUNT 18`,
   `BLIT_GLYPH_SOURCE_COUNT 2`). `GET /v1/fonts/sets/{set}/{name}` answers
   a name's codepoints; a name the lookup published and that later goes is
@@ -77,7 +77,7 @@ Measured (2026-11-22, from `assets/fonts/nerd-glyphnames-v3.4.0.json` and
 | Codicons, U+EA60-U+EC1E | 438 of 447 |
 | IcoMoon and Fontello's default start, U+E000-U+E0FF | 51 of 256 |
 | Plane 15, Nerd's Material Design, U+F0001-U+F1AF0 | 6,880 of 6,896 |
-| Plane 16 | 830 Blit ids in U+101000-U+101494 (and the old range, U+100000-U+100495, during the transition) |
+| Plane 16 | 850 Blit ids in U+101000-U+1014A8 (and the old range, U+100000-U+100494, during the transition) |
 
 So an icon font as its author ships it lands on codepoints Blit already
 draws: Font Awesome on Font Awesome, an IcoMoon export on Nerd's Seti and
@@ -183,7 +183,7 @@ yourself must not break Hibr's user and system scopes. So:
 
 - **The block.** Installed glyphs take codepoints from
   **U+102000-U+10FFFD** (57,342 codepoints). U+101000-U+101FFF stays
-  Blit's own set's room to grow (its 830 ids span U+101000-U+101494).
+  Blit's own set's room to grow (its 850 ids span U+101000-U+1014A8).
   - Not the Glyph Protocol's registration block, U+100000-U+1003FF: it is
     reserved for glyphs programs register at run time, and Blit's old icon
     range still draws over it during the transition (glyph sets §9); a

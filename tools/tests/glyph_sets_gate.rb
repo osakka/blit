@@ -158,9 +158,9 @@ expected.each_value do |set|
   set['count'] = set[:listed].size
 end
 check(expected.values.sum { |s| s[:names].count { |_, n| n[:alias_of] } } == 366, 'the Nerd sets have 366 aliases')
-check(expected['blit']['count'] == 808 && expected['blit'][:names].size == 830 + retired.size,
-      "blit: 830 ids, 808 listed (#{expected['blit']['count']}), #{retired.size} retired")
-check(expected.values.flat_map { |s| s[:names].values }.none? { |n| n[:cp] && n[:cp].between?(0x100000, 0x100495) },
+check(expected['blit']['count'] == 828 && expected['blit'][:names].size == 850 + retired.size,
+      "blit: 850 ids, 828 listed (#{expected['blit']['count']}), #{retired.size} retired")
+check(expected.values.flat_map { |s| s[:names].values }.none? { |n| n[:cp] && n[:cp].between?(0x100000, 0x100494) },
       'no name is in the registration block or the old icon range')
 expected_sets = expected.keys.sort.map do |id|
   { 'id' => id, 'owner' => expected[id]['owner'], 'scope' => expected[id]['scope'],

@@ -2495,7 +2495,7 @@ components:
         deprecated_range:
           type: object
           description: >-
-            ADR 0243: the icons' old range, U+100000-U+100495, served only
+            ADR 0243: the icons' old range, U+100000-U+100494, served only
             while it still draws (from 0.3.131 until a later release drops
             it). Every codepoint in the catalogue is in the new range; an old
             one draws the glyph at old + 0x1000, where the range moved. Not
@@ -2785,7 +2785,7 @@ components:
           minimum: 0
           description: >-
             The names the set lists: aliases included, deprecated and
-            retired names not (blit lists 808 of its 830 ids).
+            retired names not (blit lists 828 of its 850 ids).
         faces:
           type: array
           description: The registry faces that draw the set (registry ids).

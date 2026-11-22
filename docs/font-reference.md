@@ -175,7 +175,7 @@ spanning icon is drawn unhinted so its halves join, and a glyph that cannot
 be fitted is shown as the fallback, never cut.
 
 **The icons moved to U+101000 (0.3.131, ADR 0243).** Until 0.3.130
-Blit's icons and cell geometry were at U+100000–100495. The Glyph Protocol
+Blit's icons and cell geometry were at U+100000–100494. The Glyph Protocol
 reserved U+100000–1003FF for programs' registered glyphs, so the whole set
 moved up by 0x1000 in the same layout: every glyph is at its old codepoint
 + 0x1000 (`blit` U+100000 is now U+101000, the bar corners U+101007–101008,
@@ -184,7 +184,7 @@ During the transition the old range still draws exactly the glyph of the
 new codepoint it moved to (Blit maps it where a cell's scalar enters the
 glyph lookup; the cell keeps what the program wrote), and
 `GET /v1/fonts/icons` says so with
-`"deprecated_range":{"from":"100000","to":"100495","moved_to":"101000"}`.
+`"deprecated_range":{"from":"100000","to":"100494","moved_to":"101000"}`.
 A later release, named in its notes, drops the old range: write the new
 codepoints, or better, resolve ids from the catalogue, and the move is
 invisible.
@@ -400,7 +400,7 @@ title bar beside close, minimise, shade and zoom.
 
 ADR 0212. 20 glyphs at U+10129A–1012AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+101495 (the outer-edge frame, below,
+section. The next free codepoint is U+1014A9 (the outer-edge frame, below,
 is U+1012AE–1012BA, the pressed boxes and grow box U+1012BB–1012C4, the
 hui mark, a colour icon, U+1012C5–1012C6, the wiretap icons, on and
 off, U+1012C7–1012CA, their one-column forms U+1012CB–1012CC, and the
@@ -411,7 +411,8 @@ U+1012F4–101309, the full-screen and sticky boxes U+10130A–101313, and the
 player glyphs of ADR 0237: LCD digits U+101314–10135E, LED meters
 U+10135F–101372, sliders U+101373–101377, faders U+101378–10137C,
 transport U+10137D–1013A0, discs, records and cassettes U+1013A1–1013D0,
-keys U+1013D1–1013D4, and the big discs U+1013D5–101494).
+keys U+1013D1–1013D4, the big discs U+1013D5–101494, and the slider
+styles U+101495–1014A8).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,
@@ -457,7 +458,10 @@ the catalogue (`GET /v1/fonts/icons`) and [special additions](fonts/special.md).
   a peak.
 - **Sliders and faders**: `slider-cap-left`, then `slider-track-filled`
   up to the knob, `slider-knob`, `slider-track` after it, `slider-cap-right`;
-  faders the same top to bottom with `fader-*`.
+  faders the same top to bottom with `fader-*`. Two more styles, the same
+  pieces in the same order: a round knob on a thin line
+  (`slider-circle-*`, `fader-circle-*`) and a hollow groove with a square
+  thumb (`slider-groove-*`, `fader-groove-*`).
 - **Transport**: `transport-<name>` in one cell, `transport-wide-<name>-left`
   and `-right` in two; in the text colour.
 - **Keys** (0.3.127): `key-left`, the icon cells, `key-right`, on one row.

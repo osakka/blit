@@ -160,7 +160,7 @@ are not, and nothing in band changed.
 - **Derived, not listed.** `tools/fonts/build-font-registry.py` derives the
   set ids from the sources (`blit`, and one `nerd-<prefix>` per prefix the
   Nerd file has: 17), checks every name against the draft's grammar (one
-  name per glyph per set, no codepoint in U+100000-U+100495, the Nerd
+  name per glyph per set, no codepoint in U+100000-U+100494, the Nerd
   file's own METADATA version equal to the registry's), and writes the
   sources, the 18 sets and the retired names to `src/blit_font_registry.h`.
   Codepoint ranges are derived from the names at start and reported with
@@ -218,10 +218,10 @@ are not, and nothing in band changed.
 ## Decided (the owner's, 2026-11-21)
 
 - **Blit's icon codepoints: decided (the owner, 2026-11-21), built in
-  0.3.131.** Blit's icons and cell geometry were at U+100000-U+100495. The
+  0.3.131.** Blit's icons and cell geometry were at U+100000-U+100494. The
   Glyph Protocol reserved U+100000-U+1003FF for programs' registered glyphs
   on 2026-11-15, and Nerd Fonts agreed to stay out; publishing step 2 with
-  the icons there would contradict it. The set moved to U+101000-U+101495
+  the icons there would contradict it. The set moved to U+101000-U+101494
   (unclaimed), the same layout, every glyph at old + 0x1000: the catalogue's
   codepoint values only (its keys, ids and format unchanged, because Hibr
   reads the file and names every glyph by id), the icon font rebuilt from
@@ -234,13 +234,24 @@ are not, and nothing in band changed.
   (`blit_chrome_colour`, the GLES icon pen); the cell keeps what the
   program wrote, so the cells API, copy and scrollback read it back
   unchanged. `GET /v1/fonts/icons` adds `deprecated_range`
-  (`{"from":"100000","to":"100495","moved_to":"101000"}`) to the response,
+  (`{"from":"100000","to":"100494","moved_to":"101000"}`) to the response,
   not to the file. `icon_transition_gate` holds every old codepoint, in
   every pen, bold and Slate plane, and a CPU and a GPU frame, to the new
   one's pixels, and fails with the mapping compiled out. Hibr switches its
   map first (to be gated on Blit 0.3.131); a later release, named in its notes,
   drops the old range (`BLIT_ICON_OLD_RANGE_DROPPED`) and the gate's old
   half. Step 3's name lookup makes the move invisible to new programs.
+  - **The range's end, corrected in 0.3.136.** The last glyph that moved
+    was U+100494 (now U+101494); U+100495 was the next free codepoint and
+    never held a glyph. The transition range was written to U+100495, one
+    past, which drew nothing while U+101495 was empty. 0.3.136 places the
+    slider styles from U+101495 (ADR 0237), so the range now ends at the
+    last glyph that moved: `BLIT_ICON_OLD_LAST` is U+100494,
+    `deprecated_range` says `{"from":"100000","to":"100494","moved_to":"101000"}`,
+    and the set-address grammar and the registry keep names out of
+    U+100000-U+100494. Glyphs placed after the move (U+101495 on) have
+    no old codepoint; `icon_transition_gate` checks that nothing from
+    U+100495 to U+100FFF maps or draws.
 - **One Arabic face** (2026-11-21). Noto Naskh Arabic covers every
   assigned codepoint of the six Arabic blocks; Blit Arabic Modern covered
   part of the base block and none of the Supplement or Extended blocks.
@@ -269,7 +280,7 @@ are not, and nothing in band changed.
 - **A set is a table of names, not a face.** One file declares both:
   `fonts.source.json` gains `sets` (id, owner, scope, faces, names
   source, version, retired names). Set ids are derived from the names
-  sources, never listed by hand: `blit` (the catalogue's 830 ids, its
+  sources, never listed by hand: `blit` (the catalogue's 850 ids, its
   three lists, the catalogue itself unchanged), `nerd-<prefix>` (the 17
   prefixes of Nerd Fonts' `glyphnames.json`, names as Nerd spells them
   after the prefix), `emoji` (Unicode's `emoji-test.txt`, by a fixed

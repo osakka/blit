@@ -336,7 +336,7 @@ static uint32_t glyph_codepoint(const char *text)
         else return 0;
     }
     if (value > 0x10FFFFu || (value >= 0xD800u && value <= 0xDFFFu) ||
-        (value >= 0x100000u && value <= 0x100495u))
+        (value >= 0x100000u && value <= 0x100494u))
         return 0;
     return value;
 }

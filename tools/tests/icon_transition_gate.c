@@ -1,5 +1,5 @@
-/* ADR 0243: Blit's icons and cell geometry moved from U+100000-U+100495 to
-   U+101000-U+101495 (old + 0x1000, the same layout), and during the
+/* ADR 0243: Blit's icons and cell geometry moved from U+100000-U+100494 to
+   U+101000-U+101494 (old + 0x1000, the same layout), and during the
    transition the old range draws exactly what the new one does. Checked
    where it is mapped (src/blit_icon_codepoints.h) and where it shows:
    - the raster: every old codepoint, in each icon pen, regular and bold,
@@ -14,14 +14,19 @@
      (kms_gles_compose on Mesa's surfaceless platform): the old frame is
      the new one pixel for pixel on each. (GPU against CPU is
      gles_compose_gate's.)
-   argv[1] is the number of the catalogue's plane-16 glyphs; each must
-   draw at its new codepoint. Built with BLIT_ICON_OLD_RANGE_DROPPED (no
+   - past the range: nothing after U+100494 maps, so U+100495 on draws
+     nothing of Blit's, never the slider styles placed from U+101495 on
+     (ADR 0237, 0.3.136); the range once ran to U+100495, one past the
+     last glyph that moved.
+   argv[1] is the number of the catalogue's glyphs that moved (U+101000-
+   U+101494); each must draw at its new codepoint. Built with BLIT_ICON_OLD_RANGE_DROPPED (no
    mapping) it must fail: icon_transition_gate.sh checks that it does. */
 #include "../../src/blit_kms.c"
 #include "../../src/blit_raster.h"
 
 #define OLD_FIRST 0x100000U
-#define OLD_LAST 0x100495U
+#define OLD_LAST 0x100494U   /* the last glyph that moved */
+#define PAST_LAST 0x100FFFU  /* the last codepoint below the new range */
 #define MOVE 0x1000U
 #define CW 11
 #define CH 22
@@ -96,6 +101,30 @@ static int raster_check(int *planes)
     blit_raster_close(now);
     blit_raster_close(then);
     return drawn;
+}
+
+/* Past the old range: no codepoint maps, none is Blit's in the cell tests,
+   and none draws a glyph of Blit's, though some of their old + 0x1000 do
+   (the slider styles at U+101495-1014A8). Returns how many were checked
+   through the raster. */
+static int past_check(void)
+{
+    BlitRaster *r = open_raster();
+    uint32_t old;
+    int checked = 0;
+    for (old = OLD_LAST + 1; old <= PAST_LAST; ++old) {
+        BlitRasterGlyph g;
+        if (blit_icon_scalar(old) != old || blit_icon_codepoint(old) || blit_chrome_colour(old) ||
+            blit_chrome_glyph(old))
+            FAIL("U+%04X, past the old range, is taken for Blit's\n", old);
+        if (old > OLD_LAST + 0x40) continue;
+        memset(&g, 0, sizeof(g));
+        if (blit_raster_get(r, old, 1, BLIT_RASTER_ICON_COLOUR, &g) && !g.fallback)
+            FAIL("U+%04X, past the old range, draws a glyph of its own\n", old);
+        ++checked;
+    }
+    blit_raster_close(r);
+    return checked;
 }
 
 static uint32_t codepoints[COLS * ROWS], foreground[COLS * ROWS], background[COLS * ROWS],
@@ -203,7 +232,7 @@ int main(int argc, char **argv)
     KmsOutput *out;
     BlitKmsSurfaceView view;
     char error[160];
-    int expected = argc > 1 ? atoi(argv[1]) : 0, drawn, planes = 0, bad, ink = 0, i;
+    int expected = argc > 1 ? atoi(argv[1]) : 0, drawn, planes = 0, bad, ink = 0, i, past;
     if (blit_font_load_path(&font, "assets/fonts/Blit-Terminus16.psf") < 0 ||
         blit_font_load_wide(&wide) < 0) {
         fprintf(stderr, "ICON_TRANSITION_FAIL fonts do not load\n");
@@ -212,6 +241,7 @@ int main(int argc, char **argv)
     drawn = raster_check(&planes);
     if (expected <= 0 || drawn != expected)
         FAIL("%d new codepoints draw a glyph of their own; the catalogue has %d\n", drawn, expected);
+    past = past_check();
 
     blit_raster_attach(&font, open_raster());
     memset(&kms, 0, sizeof(kms));
@@ -250,7 +280,8 @@ int main(int argc, char **argv)
         FAIL("GPU: the old-range frame differs from the new one in %d pixels\n", bad);
     if (failures) return 1;
     printf("ICON_TRANSITION_PASS old=U+%04X-U+%04X new=U+%04X-U+%04X glyphs=%d "
-           "pens=4 bold=2 planes=%d cpu=identical gpu=identical\n",
-           OLD_FIRST, OLD_LAST, OLD_FIRST + MOVE, OLD_LAST + MOVE, drawn, planes);
+           "pens=4 bold=2 planes=%d cpu=identical gpu=identical past=U+%04X-U+%04X,unmapped,%d_drawn_none\n",
+           OLD_FIRST, OLD_LAST, OLD_FIRST + MOVE, OLD_LAST + MOVE, drawn, planes,
+           OLD_LAST + 1, PAST_LAST, past);
     return 0;
 }

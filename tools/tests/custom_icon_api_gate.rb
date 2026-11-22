@@ -52,7 +52,7 @@ Dir.mktmpdir('blit-custom-icon-api') do |work|
     # ADR 0243: while the old icon range still draws, the response (not the
     # file) names it and where it moved.
     deprecated=served.delete('deprecated_range')
-    raise "deprecated_range is #{deprecated.inspect}" unless deprecated=={'from'=>'100000','to'=>'100495','moved_to'=>'101000'}
+    raise "deprecated_range is #{deprecated.inspect}" unless deprecated=={'from'=>'100000','to'=>'100494','moved_to'=>'101000'}
     raise 'deprecated_range does not follow the revision' unless response.body.include?('","deprecated_range":{')
     raise 'API catalogue differs from generator source' unless served==expected
     raise 'the revision is not the SHA-256 of the catalogue file' unless revision==Digest::SHA256.hexdigest(file)

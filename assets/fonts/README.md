@@ -37,7 +37,7 @@ word face cannot shape, takes the first of these that has it (the same order as 
 2. **`BlitIcons-Regular.ttf`, the colour icons:** Blit's originals (Wi-Fi,
    battery, volume, telephones, file-manager icons, discs and the rest).
    Built by `tools/fonts/build-blit-icons.py` from `icons/catalogue.json`,
-   in plane 16 from U+101000 (ADR 0243; the old U+100000-U+100495 still
+   in plane 16 from U+101000 (ADR 0243; the old U+100000-U+100494 still
    draws the same glyphs during the transition).
 3. **`NotoColorEmoji.ttf`,** for emoji presentation.
 4. **`SymbolsNerdFontMono-Regular.ttf`,** for a private-use codepoint,

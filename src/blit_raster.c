@@ -1917,7 +1917,7 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
 }
 
 /* ADR 0243: every glyph lookup enters here. A cell written in the icons'
-   old range (U+100000-U+100495) is drawn as its new codepoint, old + 0x1000,
+   old range (U+100000-U+100494) is drawn as its new codepoint, old + 0x1000,
    and shares its cache entry (blit_icon_codepoints.h, the transition). */
 static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
                           BlitRasterIconPen pen, BlitRasterGlyph *glyph)

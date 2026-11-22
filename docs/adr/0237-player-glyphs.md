@@ -113,3 +113,66 @@ bottom edge being its neighbour row's, as an inner side is its neighbour
 column's. custom_icon_gate checks a multi-row icon's ink and colour whole (a
 corner part may be empty at a small cell); icon_clip_gate allows ink toward a
 neighbour row. Rendered at 12 x 24, the parts join without a seam.
+
+## Amended 2026-11-22 (0.3.136): slider styles
+
+The owner approved two more looks for the slider and the fader (2026-11-22,
+from a preview drawn as Blit draws them at the owner's 12x24 cell), for a
+Slider Style choice in Hibr's Control Panel. They are cell geometry like the
+grooved knob's (`slider-*`, `fader-*`): coverage in the cell's foreground,
+sized from the cell, no pens (`src/blit_slider_glyphs.h`, drawn through
+`blit_chrome_glyph`/`blit_chrome_draw`).
+
+- **Circle** (U+101495-10149E): a round knob on a thin line. The line is
+  2 px at 24 (1 at 16, 3 at 40), the track ahead of the knob lighter
+  (38%, as the current style's); the caps end the line round at the
+  cell's middle; the knob is a disc the cell's width, at most half the
+  row, antialiased.
+- **Groove** (U+10149F-1014A8): a channel a quarter of the row tall,
+  hollow ahead of the knob (its two edges) and solid behind it, and a
+  square thumb standing over it; every piece is full coverage on whole
+  pixels. The channel's ends line up with the thumb's edges at either end
+  of its travel.
+
+A style is a base codepoint and the current style's offsets, so a program
+swaps the base and the cells line up one for one:
+
+| | slider base | fader base |
+| --- | --- | --- |
+| current (grooved knob) | U+101373 | U+101378 |
+| circle | U+101495 | U+10149A |
+| groove | U+10149F | U+1014A4 |
+
+| offset | slider | fader |
+| --- | --- | --- |
+| +0 | `cap-left` | `cap-top` |
+| +1 | `track` (ahead of the knob) | `track` (above the knob) |
+| +2 | `track-filled` (behind the knob) | `track-filled` (below the knob) |
+| +3 | `knob` | `knob` |
+| +4 | `cap-right` | `cap-bottom` |
+
+The ids are `slider-<style>-<piece>` and `fader-<style>-<piece>` (for
+example `slider-circle-knob`, `fader-groove-cap-bottom`), part `slider` or
+`fader`, `background` panel, `foreground` ink, `line` none. A slider is the
+left cap, the filled track up to the knob, the knob, the track after it and
+the right cap, on the row's centre line; a fader the same top to bottom,
+filled from the bottom. **The knob's cell holds the knob alone**, never a
+piece of track: a program pens the knob in a colour of its own, and at 0%
+and 100% the knob takes an end's cell. Every piece's centre line is within
+half a pixel of the current style's, so switching styles never moves the
+line.
+
+The two styles take the next free codepoints after the big discs; the next
+free is U+1014A9. U+101495 was one past the last glyph that moved in ADR
+0243's transition, whose old range was written to U+100495 and so would
+have drawn `slider-circle-cap-left` there; that range now ends at the last
+glyph that moved, U+100494 (ADR 0243). The icon font does not change: cell
+geometry is drawn by the raster, not the font.
+
+- `player_glyph_gate` holds the 20 at every cell size from 8 to 64 px tall
+  and 12x24, through the raster: coverage, never a fallback, with ink; a
+  slider's cap, filled track and track and a fader's join edge to edge
+  across cells with the same profile; the circle's knob is exactly its
+  disc and the groove's one solid square over the channel; each piece's
+  centre line within half a pixel of the current style's; U+1014A9 draws
+  nothing. Built without the styles' hook it fails.

@@ -4,7 +4,7 @@
 - Date: 2026-10-21
 - Scope: fonts, colour raster, API discovery
 - Revised by: ADR 0243 (0.3.131): the catalogue's codepoints moved from
-  U+100000-U+100495 to U+101000-U+101495, old + 0x1000, its shape
+  U+100000-U+100494 to U+101000-U+101494, old + 0x1000, its shape
   unchanged; the old range draws the same glyphs until a later release
   drops it, and `GET /v1/fonts/icons` reports it as `deprecated_range`.
   Codepoints below are as they were when this was written.

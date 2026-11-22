@@ -3,7 +3,7 @@
 
 /* ADR 0243: where Blit's icons and cell geometry live. They are private use
    in plane 16 from U+101000, in the icon catalogue's layout
-   (BLIT_FONT_ICON_CATALOGUE). They were at U+100000-U+100495 until
+   (BLIT_FONT_ICON_CATALOGUE). They were at U+100000-U+100494 until
    0.3.131: the Glyph Protocol reserved U+100000-U+1003FF for programs'
    registered glyphs (2026-11-15), so the whole set moved up by 0x1000, the
    same layout, every glyph at old + 0x1000.
@@ -20,7 +20,12 @@
    unchanged). A later release, named in its notes once Hibr's map has
    moved (Hibr is to gate its own on Blit 0.3.131), drops the old range by
    defining BLIT_ICON_OLD_RANGE_DROPPED -- or deleting the block below --
-   and icon_transition_gate's old-range check goes with it. */
+   and icon_transition_gate's old-range check goes with it.
+
+   The range ends at the last glyph that moved, U+100494. Until 0.3.136 it
+   ran one further, to U+100495, which never held a glyph (it was the next
+   free codepoint when the set moved); from 0.3.136 U+101495 is a slider
+   style's (ADR 0237), which the old range must not draw. */
 
 #include <stdint.h>
 
@@ -29,7 +34,7 @@
 
 #ifndef BLIT_ICON_OLD_RANGE_DROPPED
 #define BLIT_ICON_OLD_FIRST 0x100000U
-#define BLIT_ICON_OLD_LAST 0x100495U
+#define BLIT_ICON_OLD_LAST 0x100494U   /* the last glyph that moved */
 #endif
 
 /* The codepoint a cell's scalar draws as: an old-range one is its new
