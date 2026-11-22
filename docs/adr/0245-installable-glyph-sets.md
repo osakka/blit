@@ -281,7 +281,7 @@ yourself must not break Hibr's user and system scopes. So:
     SHA-256 to equal the entry's (`sha256`, and each `parts[].sha256`, as
     `mkindex` writes them). Works for either scope: system from HTTP, user
     from the frame socket.
-  - **(b) `own`, a user's own unsigned font: awaiting the owner** (below).
+  - **(b) `own`, a user's own unsigned font: declined by the owner (2026-11-22)** (below).
   - **`own` as `system`:** the administrator's own font over HTTP (the
     token is root anyway); extracted by the worker like a catalogue font,
     with no signature.
@@ -361,28 +361,14 @@ glyphs are, unhinted.
   the names, with the bounded reader it already has) and the outline
   format. The original font stays in the store, unmodified, for its
   licence and provenance; root never opens it again.
-- **(b) The user's own unsigned font: awaiting the owner.** Proposed (the
-  owner's suggestion, written up): the user's own session extracts it --
-  Blit ships `blit-glyph-extract`, the worker's extraction as a plain
-  command a user runs as themself, with no sandbox, since a hostile font
-  then compromises only the user's own process, on the user's own file --
-  and passes Blit the `blit-glyph-outlines` and names files over the frame
-  socket, which root validates exactly as it validates the worker's output
-  (as the Glyph Protocol's registration accepts glyph data, not fonts).
-  The set is user scope only, origin `own`, shown unverified, licence the
-  user's text or "the user's own".
-  - **Why not the worker for (b):** then every local user could hand any
-    font to FreeType in Blit's sandbox at will; with (a) only fonts the
-    catalogue signed reach it from a non-root caller. With (b) as
-    proposed, the only glyph data an unprivileged user can ever hand root
-    is the outline format. This holds fully with the native signature of
-    section 7; with `gpgv`, any user can still hand `gpgv` (not FreeType)
-    arbitrary signature bytes inside the same sandbox.
-  - **Cost:** one more installed command and its gate; the font file is
-    not stored (Blit cannot vouch for it), so the pane shows only what the
-    user declared about it; colour is COLR v0 layers at most, as for (a);
-    and the per-uid quota (section 3) is the only bound on how much of the
-    ledger a user spends on their own glyphs.
+- **(b) The user's own unsigned font: declined (the owner, 2026-11-22).**
+  A user installs glyph sets only from the catalogue, signed (case a); an
+  administrator may import a set of their own into `system` over the
+  authenticated API (origin `own`, phase 2a). No unprivileged path hands
+  Blit glyph data that nobody signed, so there is no `blit-glyph-extract`
+  command and the only non-root glyph input is a catalogue set. (Written up
+  before the decision: the user's session would have extracted the font
+  itself and handed root outlines.)
 
 ### 7. Verifying the catalogue's signature
 
@@ -621,23 +607,19 @@ request in a background job, as the Blit pane's do.
 | 2a. Store, ledger, outline format and validator, the raster's outline path, the worker (user, limits, namespace), `PUT`/`DELETE` for `system` with origin `own`, `source`/`install` in `/v1/fonts`, the `x` owner | Blit | 1-2 |
 | 2b. Views: user scope, accepted only from the administrator over HTTP (`users/{uid}/{set}`, origin `own`); the frame socket's `GLYPHS sets`, `page`, `lookup` and `remove`; per-view lookups and `q`; shadowing; seccomp | Blit | 1 |
 | 3. Catalogue origin: the pinned key, `gpgv` (or native Ed25519), the index and parts checks; the frame socket's `GLYPHS import`, for catalogue sets; the `glyphs` kind in `mkindex` and `catalogue.hibr` (hibr's); the pane's Install and `rescan` import | Blit, hibr, hibr-apps | 1 of Blit's |
-| (b), if the owner says yes | Blit (`blit-glyph-extract`, the frame-socket upload of outlines) | 1 |
 
-Roughly four or five Blit releases, each with its gates passing on the
+Roughly four Blit releases, each with its gates passing on the
 release set before the next starts.
 
 ## Open questions
 
-1. **The owner's:** case (b), a user's own unsigned font, extracted in the
-   user's session and handed to Blit as outlines (section 6). Until they
-   answer, user scope accepts catalogue sets only.
-2. **hibr's:** can the catalogue's index also carry a detached raw Ed25519
+1. **hibr's:** can the catalogue's index also carry a detached raw Ed25519
    signature (`index.json.sig`) under a key Blit can pin, so Blit verifies
    with Monocypher and needs no `gpgv` (section 7)?
-3. **hibr's:** can the catalogue's `auto` field (as in apps entries,
+2. **hibr's:** can the catalogue's `auto` field (as in apps entries,
    `"auto": "apps/video"`) pull a glyph set in with the app or language
    that needs it?
-4. **hibr's:** can a pane reach its session's frame socket (a desktop call
+3. **hibr's:** can a pane reach its session's frame socket (a desktop call
    that sends a `GLYPHS` request with descriptors), or should the desktop
    itself make the user-scope import on `rescan`? Until then a pane holding
    the bearer token imports over HTTP as the administrator
