@@ -15,7 +15,8 @@ info:
     a body that is not application/json (docs/api.md, Endpoint and
     authentication). A connection has 2 s to send its header block; one
     without the bearer token is answered 401 as soon as its header block is
-    whole. When all 32 connections are in use, a new one takes the slot of
+    whole (with a token, every route needs it, /v1/version included).
+    When all 32 connections are in use, a new one takes the slot of
     the oldest connection whose header block has not arrived (of the peer
     holding the most), which is answered 503 http_capacity unless its
     request had arrived; a new connection is refused 503 http_capacity only
@@ -26,6 +27,9 @@ info:
     nested object (an environment variable, a surface's width, a cell's
     style) is read only from that object (docs/api.md, Required headers and
     response handling).
+security:
+  - bearerAuth: []
+  - {}
 servers:
   - url: http://localhost:8080
     description: Development HTTP over TCP
@@ -176,7 +180,8 @@ paths:
         Return the packaged canonical catalogue shared by both outline profiles.
         Private-use icons occupy one cell and carry intrinsic colour. Text
         glyphs and the U+270E alias remain foreground-coloured. Cell geometry
-        (the bar corners, the window chrome and the controls, ADR 0210-0212)
+        (the bar corners, the window chrome and the controls, ADR 0210-0212;
+        the player glyphs, keys, slider styles and scroll bars, ADR 0237)
         is drawn by Blit in the cell's own pens, and each entry says which
         pens an application sets for it. This is not an assertion that the
         active font is an outline profile or that every application selects
@@ -860,6 +865,31 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [uid, owner, blit_pid, processes]
+                properties:
+                  uid: {type: integer, minimum: 0, description: The account whose processes are listed.}
+                  owner:
+                    type: boolean
+                    description: >-
+                      true when uid is the signed-in desktop user's; false
+                      before login, when it is Blit's own.
+                  blit_pid: {type: integer, minimum: 1}
+                  processes:
+                    type: array
+                    maxItems: 16
+                    description: Busiest first by cumulative CPU time.
+                    items:
+                      type: object
+                      required: [pid, ppid, comm, cpu_ms, threads, rss_kib]
+                      properties:
+                        pid: {type: integer, minimum: 1}
+                        ppid: {type: integer, minimum: 0}
+                        comm: {type: string}
+                        cpu_ms: {type: integer, minimum: 0, description: User and system CPU time since the process started.}
+                        threads: {type: integer, minimum: 0}
+                        rss_kib: {type: integer, minimum: 0}
+                      additionalProperties: false
+                additionalProperties: false
         default:
           $ref: '#/components/responses/Problem'
   /v1/diagnostics/runtime:
@@ -945,10 +975,16 @@ paths:
             is one entry per Kitty or sixel payload that reached the terminal
             parser, written after the decode so it records both what arrived
             and what became of it -- which is the only way to tell a producer
-            that sent no image from an image Blit discarded (issue #19).
+            that sent no image from an image Blit discarded (issue #19). A
+            kind no event has matches nothing.
           schema:
             type: string
-            enum: [pointer_button, pointer_motion, keyboard_key, surface_update, render_path, graphics_payload]
+            enum: [pointer_button, pointer_motion, pointer_wheel, keyboard_key,
+                   surface_update, render_path, graphics_payload, graphics_reset,
+                   graphics_trace_dropped, kitty_delete, image_freed,
+                   hibr_frame_barrier, hibr_frame_barrier_release,
+                   hibr_frame_barrier_timeout, kms_frame_retry, kms_vblank,
+                   pointer_lock_engaged, pointer_lock_released]
         - in: query
           name: limit
           required: false
@@ -1030,7 +1066,11 @@ paths:
         ADR 0232. The body is blit's package, optionally followed by
         blit-compositor's of the same version, back to back.
         X-Blit-Packages gives each one's length and SHA-256 in body order;
-        the lengths sum to Content-Length. The root helper installs blit
+        the lengths sum to Content-Length, at most 64 MiB; a body or
+        X-Blit-Packages outside that is a 413 `update_invalid` before any byte
+        is staged. Without a valid X-Blit-Update-Token (and the bearer token
+        when the server has one) it is a 403 `update_disabled`, answered with
+        no X-Blit-Version. The root helper installs blit
         together with blit-compositor when the host has blit-compositor
         installed (and refuses an update without it then); it never adds
         blit-compositor to a host without it. The answer comes when the
@@ -1109,6 +1149,12 @@ paths:
       tags: [control]
       operationId: cancelUpdateUpload
       summary: Cancel an in-progress package upload
+      description: >-
+        Needs the bearer token as well as X-Blit-Update-Token when the server
+        has an API token (SR-2): without the bearer it is a 401, without a
+        valid update token a 403 `update_disabled`. While the packages are
+        being installed it is a 409 `update_installing` (an install cannot be
+        cancelled); with no upload in progress, a 409 `update_not_active`.
       parameters:
         - in: header
           name: X-Blit-Update-Token
@@ -1132,6 +1178,12 @@ paths:
       tags: [control]
       operationId: resetUpdateState
       summary: Clear a failed update state when no upload is active
+      description: >-
+        Needs the bearer token as well as X-Blit-Update-Token when the server
+        has an API token (SR-2): without the bearer it is a 401, without a
+        valid update token a 403 `update_disabled`. While the packages are
+        being installed it is a 409 `update_installing`; while an upload is
+        still arriving, a 409 `update_active`.
       parameters:
         - in: header
           name: X-Blit-Update-Token
@@ -2420,8 +2472,9 @@ components:
         an application sets for it, so a client maps it from this data.
         `pens` says how it is drawn: `foreground` in the one colour (Chalk),
         `cell` in the foreground, SGR 58 and a mix of foreground and
-        background (Slate, the capsule); the bar corners and the player
-        glyphs (LCD, LED, slider, fader) have neither field.
+        background (Slate, the capsule, the keys); the bar corners, the
+        player glyphs (LCD, LED, slider, fader, the circle and groove styles
+        included) and the scroll bars have neither field.
       required: [id, codepoint, colour, shape, part, cells, background, foreground, line]
       properties:
         id: {type: string}
@@ -2881,8 +2934,9 @@ components:
           type: array
           description: >-
             Runtime facts a client switches on instead of a version. Among
-            them: `sgr-framed` (SGR 51 framed, with Blit's 51:3 thick and 51:5
-            rule, and 54 to end it), `sgr-framed-bar` (51:2, a Slate title
+            them: `sgr-framed` (SGR 51 framed, with Blit's 51:3 thick, 51:5
+            rule and 51:6/51:7 a key's raised and pressed bevel, and 54 to end
+            it), `sgr-framed-bar` (51:2, a Slate title
             bar's rows in the cell's pens; 51:4 is its alias), `sgr-shadow`
             (SGR 66, 67: a drop shadow drawn under the cell's glyph) and
             `sgr-icon-pen` (SGR 68:v, 69: the pen Blit's colour icons are drawn
@@ -2900,15 +2954,16 @@ components:
         resources:
           type: object
           required: [graphics, displays, audio, audio_cards, input_devices,
-                     input_keymap, input_routes, topology, fonts, login, auxiliary_displays,
-                     settings, diagnostics, runtime_diagnostics, observation,
-                     effects, overlays]
+                     input_keymap, input_keyboards, input_routes, topology, fonts, login,
+                     auxiliary_displays, settings, diagnostics, runtime_diagnostics,
+                     observation, effects, overlays]
           properties:
             graphics: {type: string}
             displays: {type: string}
             audio: {type: string}
             input_devices: {type: string}
             input_keymap: {type: string}
+            input_keyboards: {type: string}
             input_routes: {type: string}
             topology: {type: string}
             fonts: {type: string}
@@ -3764,13 +3819,19 @@ components:
                 The pointer drawn now. A program may ask for another shape by
                 OSC 22; `hidden` is true while the program under the pointer
                 asked for `none`.
-              required: [shape, hidden]
+              required: [shape, hidden, size_px, shake_scale, shake_sizes,
+                         spin_phase, spin_frames]
               properties:
                 shape:
                   type: string
                   enum: [arrow, hand, precision, text, wait, move, ew-resize,
                          ns-resize, nwse-resize, nesw-resize, not-allowed]
                 hidden: {type: boolean}
+                size_px: {type: integer, minimum: 1, description: The size drawn now (shake to find grows it).}
+                shake_scale: {type: number, minimum: 1, description: The shake-to-find growth drawn now; 1 at rest.}
+                shake_sizes: {type: integer, minimum: 0, description: How many times the drawn size has changed.}
+                spin_phase: {type: integer, minimum: -1, description: The busy pointer's step; -1 while it is not shown.}
+                spin_frames: {type: integer, minimum: 0, description: Busy-pointer steps drawn.}
               additionalProperties: false
             hud:
               allOf: [{$ref: '#/components/schemas/HudSettings'}]
@@ -4821,7 +4882,7 @@ components:
           additionalProperties: false
         input_devices:
           type: object
-          required: [revision, devices, count, dropped]
+          required: [revision, devices, count, dropped, pending]
           properties:
             revision: {$ref: '#/components/schemas/Revision'}
             devices:
@@ -4829,6 +4890,7 @@ components:
               items: {$ref: '#/components/schemas/InputDevice'}
             count: {type: integer, minimum: 0}
             dropped: {type: integer, minimum: 0}
+            pending: {type: integer, minimum: 0}
           additionalProperties: false
         input_routes:
           type: object
@@ -6151,8 +6213,8 @@ components:
             input:
               type: object
               description: >-
-                Present when the session has input routes to a producer
-                (ADR 0228): events sent and dropped, the last error, and each
+                Always present, `routes` empty when the session has no
+                input route to a producer (ADR 0228): events sent and dropped, the last error, and each
                 route with its picture, state, hold mode, members and where
                 the pointer is (docs/api.md, "Program windows").
               required: [events, dropped, last_error, routes]
@@ -6695,6 +6757,12 @@ components:
           items:
             type: string
             enum: [input, terminals, surfaces, frames, hardware, diagnostics]
+        owner_session_id:
+          allOf: [{$ref: '#/components/schemas/ResourceId'}]
+          description: >-
+            The session this stream belongs to (Hibr's adapter sends its own):
+            the stream is closed when that session is deleted, or when its
+            program ends (a primary Hibr desktop's excepted).
       additionalProperties: false
     StreamPixelFrameBegin:
       type: object

@@ -46,7 +46,8 @@ cells are shaped as words in Noto Naskh Arabic ([below](#arabic-and-arabic-indic
 Every other character, and an Arabic cell the word face cannot shape,
 takes the first of these that has it:
 1. Blit's cell geometry: box drawing, blocks, Braille, Powerline, bar
-   corners and the window-chrome glyph sets.
+   corners, the window-chrome glyph sets and controls, the player glyphs
+   and the scroll bars.
 2. Blit's own colour icons.
 3. Colour emoji, for emoji presentation.
 4. Nerd Fonts Symbols, for a private-use codepoint, whatever the text font
@@ -107,7 +108,7 @@ while the desktop beside it keeps them in colour.
 | App actions, files, development, devices, weather, brands | [17 Nerd categories](fonts/README.md) | 10,764 names/aliases, 10,386 distinct scalars, under every font; uses terminal foreground colour |
 | Branded Blit/Hibr menu icons, Wi-Fi 1–4, Bluetooth | [Original colour additions](fonts/special.md) | Explicit semantic ID/private scalar, one cell, intrinsic palette |
 | Themed Hibr pen, runic text, wired indicator | [Themed text additions](fonts/special.md#themed-text-additions) | U+270E, U+16D2, U+21CC retain documented text meanings |
-| Window chrome: title bars, frames, dialogs, buttons (Chalk, Slate light, Slate dark) | [Cell geometry](fonts/special.md#cell-geometry), [below](#window-chrome-glyph-sets-chalk-and-slate) | Pixel-exact cell geometry; Chalk in the foreground, Slate in its own colours; label buttons with SGR 51 |
+| Window chrome: title bars, frames, dialogs, buttons (Chalk, Slate) | [Cell geometry](fonts/special.md#cell-geometry), [below](#window-chrome-glyph-sets-chalk-and-slate) | Pixel-exact cell geometry; Chalk in the foreground, Slate in the cell's pens; label buttons with SGR 51 |
 | Powerline separators and box/block UI geometry | [Powerline](fonts/pl.md), [Extras](fonts/ple.md) | Core U+E0B0..E0B3 use cell-fitted geometry; do not extend that guarantee to every Extra; box/half-block geometry is protected |
 | Arabic and Arabic-Indic digits | [Arabic section below](#arabic-and-arabic-indic-numerals) | Shaped as words in Noto Naskh Arabic, shared baseline, existing Hibr visual ordering |
 | Faces, people, nature, food, objects, symbols, flags | [Emoji categories](fonts/emoji.md) | Colour/text presentation and multi-scalar layout are distinct from Nerd icons |

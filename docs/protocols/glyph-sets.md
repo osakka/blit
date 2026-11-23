@@ -5,12 +5,18 @@
 > and serves its sets, names, aliases, deprecations and retirements over
 > HTTP (`GET /v1/fonts/sets`, [API guide](../api.md#glyph-sets);
 > ADR 0243, "Step 3's set level as built"), by section 4's grammar and
-> section 6's lifetime rules. Nothing in band is answered: Blit does not
-> list `names`, and `q ; name=` and `n` are not implemented. Step 2 of
-> ADR 0243 is built (0.3.133): Blit answers the Glyph Protocol's own `s`
-> (`fmt=` empty, no `cap`) and `q ; cp=`, following section 9 below and
-> section 8's no-echo and fixed-alphabet rules
-> ([terminal reference](../terminal.md#glyph-protocol)).
+> section 6's lifetime rules. Nothing of this capability is answered in
+> band: Blit does not list `names`, a `q ; name=` is answered
+> `reason=malformed_query` (a `q` with neither `cp` nor `grapheme`), and an
+> `n` is dropped with no reply. Step 2 of ADR 0243 is built (0.3.133):
+> Blit answers the Glyph Protocol's own `s` (`fmt=` empty, no `cap`) and
+> `q ; cp=`, following section 9 below and section 8's no-echo and
+> fixed-alphabet rules, answers `q ; grapheme=` `reason=unsupported`,
+> rejects every `r` (no payload format) and answers `c` from a glossary
+> that is always empty ([terminal reference](../terminal.md#glyph-protocol)).
+> The rate budget and the 256-byte request bound below are this draft's;
+> the built `q ; cp=` has its own (256 lookups a second per session,
+> 1024 bytes a message).
 > This document is the proposal behind step 3 of
 > [ADR 0243](../adr/0243-glyph-multiplexing.md). It is written as an
 > optional capability, `names`, of the Glyph Protocol, to be offered to

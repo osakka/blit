@@ -56,7 +56,7 @@ Programs started in a session get `TERM=xterm-kitty` and
 | Sequence | Name |
 | --- | --- |
 | `CSI n @`, `CSI n P` | Insert / delete characters (within left/right margins) |
-| `CSI n A` `B` `C` `D` | Cursor up / down / forward / back |
+| `CSI n A` `B` `C` `D` | Cursor up / down / forward / back (`CSI n SP A` .. `D`, ECMA-48's SR, GSM, GSS and FNT, are not: they are ignored) |
 | `CSI n E`, `CSI n F` | Cursor next / previous line |
 | `CSI n G`, `` CSI n ` `` | Column absolute |
 | `CSI r;c H`, `CSI r;c f` | Cursor position (origin-relative under DECOM) |

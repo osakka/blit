@@ -33,7 +33,7 @@ word face cannot shape, takes the first of these that has it (the same order as 
 [font reference](../../docs/font-reference.md)):
 1. **Cell geometry,** drawn by the raster: box drawing, block elements,
    Braille, core Powerline, Blit's bar corners, the window-chrome and
-   control glyphs, and the player glyphs.
+   control glyphs, the player glyphs and the scroll bars.
 2. **`BlitIcons-Regular.ttf`, the colour icons:** Blit's originals (Wi-Fi,
    battery, volume, telephones, file-manager icons, discs and the rest).
    Built by `tools/fonts/build-blit-icons.py` from `icons/catalogue.json`,
@@ -78,7 +78,13 @@ it, the only place the code takes a face's file name from, and
 `GET /v1/fonts` reports the same table as `registry`.
 `font_registry_gate.rb` checks the committed header is the generator's
 output, every face is pinned, no face's file name is written in `src/`, and
-the server lists every role. After changing a face:
+the server lists every role. Its `sets` section (ADR 0243 step 3, 0.3.134)
+declares the names sources -- the icon catalogue and the Nerd names file --
+from which the generator derives the glyph sets (`blit` and the 17
+`nerd-*`); the server reads those files once at start and answers
+`GET /v1/fonts` `sets` and `GET /v1/fonts/sets` from them
+([glyph sets](../../docs/protocols/glyph-sets.md); `glyph_sets_gate.rb`).
+After changing a face:
 
 ```sh
 python3 tools/fonts/build-font-registry.py src/blit_font_registry.h
@@ -168,11 +174,11 @@ masters divide and scaled smoothly between them (ADR 0227).
 preserve the upstream icon notices, including Fonticons attribution and Font
 Awesome licensing. Hack doubles as the emoji audit's negative fixture: a text
 font that lacks emoji. Noto remains
-unmodified, from upstream release `v2026-09-24-unicode18_0`, its2D CBDT/CBLC
+unmodified, from upstream release `v2026-09-24-unicode18_0`, its 2D CBDT/CBLC
 font rather than an unsupported COLRv1 face. It replaced the older Debian
 Noto 2.042 asset.
 
-The complete Unicode Emoji18.0 test corpus and licence are pinned in
+The complete Unicode Emoji 18.0 test corpus and licence are pinned in
 `assets/unicode/emoji-18.0`. The independent offline font-shaping audit is:
 
 ```sh
@@ -181,8 +187,8 @@ python3 tools/fonts/audit-emoji.py --require-complete > build/emoji-font-audit.j
 ```
 
 The audit reports its HarfBuzz library version/hash and exact font hash.
-All5,244 entries shape to one nonzero glyph in Noto2.057 with HarfBuzz6.0.0;
-Noto2.042 fails174 RGI entries and10 minimally-qualified variants. These are
+All 5,244 entries shape to one nonzero glyph in Noto 2.057 with HarfBuzz 6.0.0;
+Noto 2.042 fails 174 RGI entries and 10 minimally-qualified variants. These are
 **font-shaping** results, not a production renderer implementation, colour
 bitmap validation or permission to claim complete emoji support. The audit
 runs offline and does not install HarfBuzz. See ADR 0157.
@@ -196,13 +202,13 @@ separate mechanism.
 Since 0.1.567, colour artwork is bounded by the fitted text em rather than
 the full cell height (which includes line spacing). Its aspect ratio and
 one/two-cell allocation remain unchanged. This is a shared raster policy,
-not a bell-specific substitution or another font-size setting; see ADR0151.
+not a bell-specific substitution or another font-size setting; see ADR 0151.
 
 Box drawing and block elements are cell geometry. A codepoint no face in the
 stack has falls back to the PSF's `?`. Wide BMP characters keep the separate
 wide PSF where no outline face draws them. This is not universal Unicode, script shaping,
 ligature or emoji-sequence support. Explicit variation-selector/ZWJ shaping
-is not added by these font files. See ADR0147 for the renderer boundary.
+is not added by these font files. See ADR 0147 for the renderer boundary.
 
 ## Default: Blit Hibr Terminus16
 
@@ -213,8 +219,8 @@ licensed under the permissive DejaVu font license; see the system font package
 for the complete license text.
 
 Fallback outlines are rendered completely, then the largest native raster
-size fitting8x16 is selected. Negative bearings and overwide glyphs must not
-be cropped by an8px canvas. Control diamonds use deterministic symmetric
+size fitting 8x16 is selected. Negative bearings and overwide glyphs must not
+be cropped by an 8 px canvas. Control diamonds use deterministic symmetric
 geometry with space for bold. `tools/tests/font_fit_gate.py` checks complete
 fallback masks and diamond symmetry; the manifest gate checks coverage.
 
@@ -293,7 +299,7 @@ below, never a column sideways. A run the face cannot shape (a scalar it
 lacks) is drawn cell by cell from the glyph stack. `GET /v1/fonts` reports
 the attached face as `active.arabic`.
 
-`arabic-specimens.json` records actual read-only Hibr0.99.277/ABI16 visual
+`arabic-specimens.json` records actual read-only Hibr 0.99.277/ABI 16 visual
 output, including `حِبْر`, vocalized Bismillah, lam-alef variants and
 Arabic-Indic/Hindi digits `٠١٢٣٤٥٦٧٨٩` (U+0660..0669), alongside ASCII digits.
 It is a finite corpus, not exhaustive Quranic/Unicode coverage.

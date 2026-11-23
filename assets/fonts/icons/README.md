@@ -188,13 +188,13 @@ schema (`CellGeometryGlyph`):
 
 | Field | Values and meaning |
 | --- | --- |
-| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners, the player's LCD, LED, slider and fader glyphs and the scroll bars have neither this nor `set`. |
-| `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`, `frame` (the one frame set, drawn in the foreground alone like Chalk, ADR 0214)., `key` (a key's ends, ADR 0237). |
+| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule, the keys). The bar corners, the player's LCD, LED, slider and fader glyphs (the circle and groove styles included) and the scroll bars have neither this nor `set`. |
+| `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`, `frame` (the one frame set, drawn in the foreground alone like Chalk, ADR 0214), `key` (a key's ends, ADR 0237). |
 | `part` | What the glyph is a piece of: `bar-corner`, `title-bar` (stripes, title, close, shade, zoom), `note-close`, `frame`, `dialog-border`, `button-cap`, `checkbox`, `switch`, `capsule`; the player glyphs (ADR 0237): `lcd-big-top` and `lcd-big-bottom` (a big LCD digit's two rows, two cells each), `lcd-digit` (a small LCD digit, two cells), `lcd-colon`, `led` (a level meter's LEDs), `slider`, `fader`, `key` (a key's ends); `scrollbar` (a scroll bar's track, caps and thumb, 0.3.137). |
 | `cells` | `{span, position}`: how many cells the whole piece spans (1 to 3), written side by side, and this glyph's place in it from 0. |
 | `background` | What the cell's background should be: `bar` (the title bar's colour), `panel` (what a control or a note sits on, and the window's face, which a frame cell's background is), `wallpaper` (the default background), `dialog-face`, `button-face`. |
 | `foreground` | `ink` (lines and outlines), `track` (the capsule's track, in the colour the application chooses), `bar` (the corners' fill: the bar's colour). |
-| `line` | What SGR 58 is: `none` (Chalk, frames, corners), `highlight` (the bar's highlight, and a window box's face), `box-face` (a note's close box or a checkbox), `dialog-face`, `button-face`, `knob` (a switch's or the capsule's knob, and a switch track's highlight). Unset, it is white.; `shade` (a key's dark edge, ADR 0237). |
+| `line` | What SGR 58 is: `none` (Chalk, frames, corners), `highlight` (the bar's highlight, and a window box's face), `box-face` (a note's close box or a checkbox), `dialog-face`, `button-face`, `knob` (a switch's or the capsule's knob, and a switch track's highlight), `shade` (a key's dark edge, ADR 0237). Unset, it is white. |
 | `deprecated` | `true`, present only on a glyph that a later one replaces (ADR 0214): Blit still draws it, unchanged, until a release retires it. An application moves to `replaced_by`. |
 | `replaced_by` | With `deprecated`: the ids that replace it, each an entry in this section that is not itself deprecated. The old frame glyphs (`chalk-` and `slate-light-` `frame-left`, `frame-right-top`, `frame-right`, `frame-bottom-left`, `frame-bottom-first`, `frame-bottom`, `frame-bottom-right`) and `stripe-first`/`stripe-last` are deprecated: the one frame set takes the body and bottom rows, the style's `title-end` glyphs the title row. |
 
@@ -247,7 +247,7 @@ granted by the drawing's licence.
 
 Tests: `ruby tools/tests/custom_icon_gate.rb` covers all 57 supported heights
 in every shipped text font, premultiplied colour, partial-alpha edges,
-distinct rasters for every Wi-Fi, battery and volume level, themed pen, bounded cache, and the 150-scalar versioned Hibr GL
+distinct rasters for every Wi-Fi, battery and volume level, themed pen, bounded cache, and the 151-scalar versioned Hibr GL
 snapshot in both one/two-cell allocations. Snapshot coverage is not coverage
 of every Hibr application. `custom_icon_api_gate.rb` checks real local PTY
 UTF-8 writes (whole and bytewise), one-cell private advances, the canonical

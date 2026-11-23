@@ -147,7 +147,8 @@ another object is not given: `{"environment":{"user":"x"}}` sets the
 variable `user`, never the account the child runs as. A stream message is
 what its own `type` member says (`subscribe` may also be given as the
 message's own `subscribe` list), and a subscription's names are read from
-its `subscriptions` (or `subscribe`) list alone (security review SR-20).
+its `subscriptions` (or `subscribe`) list alone (security review SR-20); a
+subscription with neither list is read whole, as before.
 
 | Outcome | Meaning | Correct action |
 | --- | --- | --- |
@@ -219,6 +220,10 @@ running server and the API contract:
 ```json
 {"server_version":"0.3.127","api_version":"0.1"}
 ```
+
+With a token it is authenticated like every other route: a request
+without the token is answered `401` with no `X-Blit-Version`, so nothing
+says which Blit it reached before it is authorized (SR-23).
 
 `server_version` answers “which binary is serving this request?”;
 `api_version` answers “which schema family may I use?”. A client must reject
@@ -490,7 +495,7 @@ status codes.
 | Control | `POST /v1/control/shutdown`, `/restart`, `GET/PUT /v1/control/shutdown-key` | Stop or restart the server; program the keyboard chord that stops it |
 | Updates | `PUT /v1/control/update`, `GET .../status`, `POST .../cancel`, `POST .../reset` | Upload and supervise a verified package update |
 
-The schema contains 54 path templates (`api_schema_gate.rb` checks the
+The schema contains 57 path templates (`api_schema_gate.rb` checks the
 count). Keep this table synchronized when a path is added, removed, or
 renamed; the schema remains the authoritative count.
 
@@ -2108,12 +2113,13 @@ slider styles (0.3.136) and the 48 pieces of the classic, modern and
 simple scroll bar styles (0.3.137) (ADR 0237). Each has `colour`; the window and
 control glyphs and the keys also carry `set` (`chalk`, `slate-light`,
 `slate`, `capsule`, `frame` or `key`) and `pens` (`foreground`, or `cell`
-for Slate, the capsule and the keys, ADR 0211); the bar corners and the
-player glyphs have neither. Slate dark's codepoints are under `retired`. An entry a
-later glyph replaces carries `deprecated: true` and `replaced_by` (the ids
-that replace it): Blit still draws it, unchanged, until a release retires
-it, so a client moves at its own pace (ADR 0214). An `icons` entry can carry
-the same two fields: since 0.3.55 `wifi-1`..`wifi-4` (the bars, the mobile
+for Slate, the capsule and the keys, ADR 0211); the bar corners, the
+player glyphs, the slider styles and the scroll bars have neither. Slate
+dark's codepoints are under `retired`. An entry a later glyph replaces
+carries `deprecated: true` and `replaced_by` (the ids that replace it):
+Blit still draws it, unchanged, until a release retires it, so a client
+moves at its own pace (ADR 0214). An `icons` entry can carry the same two
+fields: since 0.3.55 `wifi-1`..`wifi-4` (the bars, the mobile
 signal) are deprecated, `replaced_by` `cellular-1`..`cellular-4`; Wi-Fi is
 `wifi-signal-1`..`wifi-signal-4` and `wifi-off`.
 
@@ -2144,7 +2150,7 @@ pins), and the response's `ETag` is the same value, quoted. A client that
 keeps the catalogue compares it, or sends it back as `If-None-Match` and is
 answered 304 with no body while it is current; the response is
 `Cache-Control: no-cache`, so it may be kept and must be asked about. The
-catalogue is about 140 KB; the endpoint's limit is 256 KiB. Authentication
+catalogue is about 160 KB; the endpoint's limit is 256 KiB. Authentication
 is the same as other read endpoints. A missing, unreadable or oversized catalogue returns 503
 `font_icon_catalogue_unavailable`; this request never changes the selected
 font or the screen. See [the icon contract](../assets/fonts/icons/README.md)
@@ -2350,7 +2356,9 @@ hello, written `v5 <token>` here, is the ADR's binary hello with version 5.
 It is answered `OK ...` (below); or refused, and the connection closed,
 with `ERROR 0 EACCES` (a wrong token, or a uid that may not send to that
 session) or `ERROR 0 EINVAL` (not a hello, or a hello of any version but
-5). A refused frame is answered `FRAME error <id> <code>`. A connection
+5). A refused frame is answered `FRAME error <id> <code>`. An edit (`w`
+and `h` not 0) must name its image's own width, height and format, or it is
+`EINVAL` (security review SR-1). A connection
 says its hello within 2 s or is closed. When all 32 connections are in
 use, the oldest connection that has not said it (of the uid holding the
 most such connections) is read once and, still silent, closed to make room;
@@ -2397,7 +2405,8 @@ never maps them, and answers `FRAME release <id> <sequence>` when it no longer
 needs a frame's buffer: once a newer frame of the image has been drawn, or
 at once for a frame superseded, stale or never shown, and when the image
 is deleted. A frame it cannot import is refused `FRAME error <id> ENOTSUP` and
-should be sent again by memfd; a malformed one is `EINVAL`. Each session's
+should be sent again by memfd; a malformed one is `EINVAL`, one past 4096
+either way `EFBIG`. Each session's
 `frames.dmabuf` counts frames accepted, released and refused by reason
 (`unavailable`, `format`, `import`, `invalid`), and an image says
 `"dmabuf": true` while it shows one and `frame_us` when its newest frame
@@ -2476,7 +2485,8 @@ trailing newline is optional.
     the pointer stays where it was, inside the picture.
 - While live, Blit sends evdev key codes as they happen, press and release
   (the compositor makes its own repeats); buttons and scroll; the pointer
-  as an absolute position, in the pixels of the image's latest frame,
+  as an absolute position, in the pixels of the image's latest frame (its
+  surface pixels when it has an `INPUT view`),
   while it is over the image's drawn rectangle, wherever and however large
   the picture is placed; and, while the session holds pointer lock
   (`?7701`), relative motion instead, or under `INPUT hold ... confine` the
@@ -2488,8 +2498,8 @@ trailing newline is optional.
   connection closed) Blit first releases every key and button it pressed
   there. Each session reports `frames.input`: `events` (keys, buttons,
   scroll notches and motions sent, all routes of the session), `dropped`
-  (lines a route's socket could not take), `last_error` (an INPUT code, or
-  `sock-disconnected`/`sock-full`), and `routes`, one per route: its
+  (lines a route's socket could not take), `last_error` (an INPUT code,
+  `sock-disconnected`, `sock-full` or `superseded`), and `routes`, one per route: its
   `image`, `state` (`off`, `on` while on but not live, or `live`: the
   keys'), `hold` (`relative` or `confine`), and `pointer`, the last absolute pointer for diagnosing its
   mapping: `here` (whether the pointer is the route's now: on, in the
@@ -2804,9 +2814,9 @@ It speaks the frame channel above as a producer, with these additions.
     when off, its own shape again (`default` when it named none). Hibr
     shows "(not responding)" and offers Force Quit. X programs answer no
     xdg ping and are never busy here.
-  - `WINDOW inhibit <id> on|off` (Gitea #171): the window's program holds
-    an idle inhibitor (`zwp_idle_inhibit_manager_v1`, on any of its
-    surfaces) -- a video asking that the screen not blank -- or has let
+  - `WINDOW inhibit <id> on|off` (Gitea #171): the window holds an idle
+    inhibitor (`zwp_idle_inhibit_manager_v1`, on its surface, a popup's or
+    a subsurface's) -- a video asking that the screen not blank -- or has let
     the last one go. Sent only to a desktop whose hello answer says
     `inhibit=1`, on each change and again when a window is announced again
     (a new channel); `WINDOW gone` implies off. Blit judges nothing: the
@@ -2907,7 +2917,8 @@ It speaks the frame channel above as a producer, with these additions.
     and a display not named since the last `end` is gone -- its windows
     go to the primary display. Each display is one `wl_output` named
     `<name>`, its geometry at `<x>,<y>`, and `zxdg_output_v1` (version 3)
-    gives the same place, size and name; Xwayland makes X's RandR outputs
+    gives the same place and name, and the logical size above (X is
+    given real pixels); Xwayland makes X's RandR outputs
     and monitors of them. A set naming no display is refused, and the
     layout stands. The first set replaces the outputs of before it, for the
     compositor's life. A desktop that sends no layout -- the desktop sends
@@ -2961,12 +2972,14 @@ It speaks the frame channel above as a producer, with these additions.
 - **Sizes are the program's to honour.** A Wayland client is told a size
   and commits the buffer it draws; most draw exactly that size, but a
   client with a fixed size, or one mid-resize, commits another. The
-  compositor never scales or crops: it sends what was committed, and
+  compositor never scales or crops a window's frames (a drag icon aside):
+  it sends what was committed, and
   `WINDOW limits` says in advance what a client will not go below or above.
   The desktop shows a mismatch as it shows any picture, scaled to fit with
   its shape kept.
-- **Pixels, scale 1.** The desktop computes a window's size from its cells
-  and the cell size of the display it is on; a window moved to a display
+- **Desktop pixels.** The desktop computes a window's size from its cells
+  and the cell size of the display it is on (the compositor converts with
+  the display's program scale, `WINDOW layout`); a window moved to a display
   with a different cell size gets a new `WINDOW size`.
 - **Programs survive a desktop restart** (agreed with Hibr 2026-11-10;
   in blit-compositor from 0.3.73). The desktop
@@ -3309,9 +3322,9 @@ It speaks the frame channel above as a producer, with these additions.
   the last button is up. A popup that took a grab (`xdg_popup.grab`, as a
   menu does) has the keyboard while it is mapped, the deepest of them, so
   a menu's arrows and Enter are its own (from 0.3.92). Clients are told the
-  key repeat Blit's keymap answer carries (`X-Blit-Repeat-Rate`,
-  `X-Blit-Repeat-Delay`: the active keyboard's), and again when it
-  changes; none (rate 0) without Blit's answer.
+  key repeat the route's `INPUT keymap` carries (`<rate> <delay>`: the
+  active keyboard's), and again when it changes; none (rate 0) before the
+  first keymap.
 - **Relative pointer.** `zwp_relative_pointer_manager_v1` is offered: the
   `INPUT rel` lines of a route under Blit's relative hold (the desktop's
   `?7701` with `INPUT hold <id> relative`) go to the relative pointers of
