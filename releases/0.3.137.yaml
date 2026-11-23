@@ -1,0 +1,15 @@
+release: 0.3.137
+package: blit_0.3.137-1_amd64.deb
+package_sha256: 95d54108e957674adf2a14d4db42090f338a77e5838b281fdaaeaac378a9b071
+compositor_package: blit-compositor_0.3.137-1_amd64.deb
+compositor_package_sha256: e1560167b975d9a9d3429e5f7d032cacea8634d231be4bf0080e0685ea917d66
+source_commit: 8ff12e0046eefe57dc92d9c1e76afc42b8651c40
+package_documentation_commit: 8ff12e0046eefe57dc92d9c1e76afc42b8651c40
+server_binary_sha256: dcbddc1b580186340d90581823a51fc29abb882b651d5a36d1bf73a9770fef1c
+update_helper_sha256: a827a62020c538fde4ee0af4a1210d6b23a3df0482a828dc131e7005dca03671
+hibr_adapter_sha256: d2d8ffbabb240fe18e9ed6f0973ff5ad5345a09931bc19b4f16424a91a6f1187
+hibr_version: 0.99.430
+hibr_abi: 17
+gates_all: pass=214 skip=11 fail=0 source=8ff12e0046eefe57dc92d9c1e76afc42b8651c40
+gates_renderer: pass=90 skip=1 fail=0 source=8ff12e0046eefe57dc92d9c1e76afc42b8651c40
+gates_renderer-gles: pass=68 skip=0 fail=0 source=8ff12e0046eefe57dc92d9c1e76afc42b8651c40
