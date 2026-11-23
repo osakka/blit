@@ -923,6 +923,19 @@ static int window_is_popup(const struct bc_xdg *x)
     return x && (x->popup != NULL || x->xpopup);
 }
 
+/* A popup's surface origin in its parent's surface pixels (logical): its
+   positioner's place is its window geometry's, relative to the parent's
+   window geometry (xdg-shell), so the parent's geometry plus its offset,
+   less its own geometry -- a menu with a shadow (GTK, Qt) has its surface
+   reach out past that place by the shadow. An X popup's geometry is 0, 0.
+   What `WINDOW popup` says and what the compositor hit-tests by
+   (xdg_origin): one place for both (Gitea #215). */
+static void popup_offset(const struct bc_xdg *x, int32_t *ox, int32_t *oy)
+{
+    *ox = x->parent->gx + x->px - x->gx;
+    *oy = x->parent->gy + x->py - x->gy;
+}
+
 static int xdg_parent_id(struct bc_xdg *x)
 {
     return x->parent && x->parent->id ? (int)x->parent->id : 0;
@@ -1101,14 +1114,17 @@ static void announce_toplevel(struct bc_xdg *x)
     if (x->surface) constraint_ask_surface(x->surface);
 }
 
-/* `WINDOW popup <id> <parent> <x> <y>`: its offset in the parent's surface
-   pixels, one rounding of the logical offset in desktop pixels (ADR 0242). */
+/* `WINDOW popup <id> <parent> <x> <y>`: its surface's offset in the
+   parent's surface pixels (popup_offset), one rounding of the logical
+   offset in desktop pixels (ADR 0242). */
 static void popup_say(struct bc_xdg *x)
 {
     struct bc_xdg *p = x->parent;
     uint32_t n = pic_scale_n(x);
-    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, bc_scale_edge(p->gx + x->px, n),
-                 bc_scale_edge(p->gy + x->py, n));
+    int32_t ox, oy;
+    popup_offset(x, &ox, &oy);
+    bc_wire_line(&x->server->wire, "WINDOW popup %u %u %d %d", x->id, p->id, bc_scale_edge(ox, n),
+                 bc_scale_edge(oy, n));
 }
 
 /* A popup's appearance, at its initial commit once its parent has an id:
@@ -1116,10 +1132,12 @@ static void popup_say(struct bc_xdg *x)
 static void announce_popup(struct bc_xdg *x)
 {
     struct bc_xdg *p = x->parent;
+    int32_t ox, oy;
     if (p == NULL || p->id == 0) return;
     x->id = bc_wire_new_id(&x->server->wire);
     popup_say(x);
-    logf_("popup %u: parent %u at %d,%d%s", x->id, p->id, p->gx + x->px, p->gy + x->py,
+    popup_offset(x, &ox, &oy);
+    logf_("popup %u: parent %u at %d,%d%s", x->id, p->id, ox, oy,
           x->xpopup ? " (an X override-redirect window)" : "");
     window_set_output(x, p->output);
     /* Its subsurfaces, which may have drawn before it was announced. */
@@ -1243,18 +1261,44 @@ static void popup_close(struct bc_xdg *x)
     }
 }
 
+static void view_say(struct bc_xdg *x);
+
+/* `WINDOW popup` again for `x` when it is a shown popup, and for every
+   shown popup under it (a submenu, at any depth), parents first: the
+   desktop keeps a submenu's place summed from its parent's (docs/api.md),
+   so a moved popup's own are said again after it. Each one's view with
+   it, whose rounding is from its place (view_wire). For a popup moved, or
+   a window whose geometry changed (popup_offset). */
+static void popups_resay(struct bc_xdg *x)
+{
+    struct bc_xdg *e;
+    wl_list_for_each_reverse(e, &x->server->windows, link) {
+        const struct bc_xdg *a = e;
+        if (!window_is_popup(e) || e->id == 0) continue;
+        while (a != x && window_is_popup(a) && a->parent) a = a->parent;
+        if (a != x) continue;
+        for (a = e; window_is_popup(a) && a->parent && a->parent->id; a = a->parent) {}
+        if (window_is_popup(a)) continue;   /* an ancestor not shown */
+        popup_say(e);
+        view_say(e);
+    }
+}
+
 /* A popup its program moved after it was shown (xdg_popup.reposition, or
    an X menu moved by its program): its new offset, and `WINDOW popup`
-   again with it, which the desktop takes as a move of the popup it has
-   (docs/api.md). The move shows with the popup's next frame. Either kind. */
+   again with it (and its submenus', popups_resay), which the desktop
+   takes as a move of the popup it has (docs/api.md). The move shows with
+   the popup's next frame. Either kind. */
 static void popup_moved(struct bc_xdg *x, int32_t px, int32_t py)
 {
     struct bc_xdg *p = x->parent;
+    int32_t ox, oy;
     x->px = px;
     x->py = py;
     if (x->id == 0 || p == NULL || p->id == 0) return;
-    popup_say(x);
-    logf_("popup %u: moved by its program to %d,%d", x->id, p->gx + px, p->gy + py);
+    popups_resay(x);
+    popup_offset(x, &ox, &oy);
+    logf_("popup %u: moved by its program to %d,%d", x->id, ox, oy);
 }
 
 /* ---- zwp_linux_dmabuf_v1: FRM3, zero copy ---- */
@@ -2582,6 +2626,9 @@ static void surface_apply(struct bc_surface *surface, struct wl_resource *buffer
             x->pending_geometry = 0;
             /* The window inside its buffer (ADR 0229): its shadows outside. */
             if ((changed || resay) && x->toplevel && x->id) send_geometry(x);
+            /* Its popups' surfaces are placed by it, and a popup's own by
+               its own (popup_offset): said again where it moved. */
+            if (changed && x->id) popups_resay(x);
         } else if (resay && x->gw > 0 && x->gh > 0) {
             send_geometry(x);
         }
@@ -2776,7 +2823,7 @@ static int view_wire(struct bc_xdg *x, int32_t *out)
     memcpy(out, v, 6 * sizeof(*out));
     if (n == BC_SCALE_ONE || bw <= 0 || bh <= 0) return surface->view_on;
     if (x->subsurface) sub_root(x, &ox, &oy);
-    else if (window_is_popup(x) && x->parent) ox = x->parent->gx + x->px, oy = x->parent->gy + x->py;
+    else if (window_is_popup(x) && x->parent) popup_offset(x, &ox, &oy);
     k = bc_scale_int(n);
     dw = bc_scale_span(ox, v[4], n);
     dh = bc_scale_span(oy, v[5], n);
@@ -7178,15 +7225,19 @@ static void keyboard_focus(struct bc_server *s, struct bc_surface *surface)
    parent with an empty one) -- else the toplevel. */
 /* A window's surface origin in its top-level's surface pixels: 0, 0 for the
    top-level; a popup's, down its chain of parents (a submenu's parent is a
-   popup), each at its parent's geometry plus its offset less its own
-   geometry. Returns its depth: 0 the top-level, 1 a popup of it, ... */
+   popup), the sum of each one's popup_offset -- the sum of its `WINDOW
+   popup` offsets, which is where the desktop draws it and the offset it
+   gives its `INPUT member`. Returns its depth: 0 the top-level, 1 a popup
+   of it, ... */
 static int xdg_origin(const struct bc_xdg *x, double *ox, double *oy)
 {
     int depth = 0;
     *ox = *oy = 0;
     while (window_is_popup(x) && x->parent) {
-        *ox += x->parent->gx + x->px - x->gx;
-        *oy += x->parent->gy + x->py - x->gy;
+        int32_t px, py;
+        popup_offset(x, &px, &py);
+        *ox += px;
+        *oy += py;
         x = x->parent;
         ++depth;
     }
@@ -10338,10 +10389,15 @@ static int xdnd_request(struct bc_server *s, const xcb_selection_request_event_t
    - `CLIP dragend o<n> copy|move`: XdndStatus accepting that action, then
      the held release; it sends XdndDrop, answered XdndFinished.
      `none`: XdndStatus refusing, the release; it leaves.
-   - Onto another X window: refused (drop_begin). Its selection or window
-     gone, or Xwayland: `CLIP clear o<n>`.
-   - Nothing seen from it in 2 s after arming, or its button up first: the
-     drop window goes again (its drag stays X's own). */
+   - Onto another X window: relayed (drop_begin, xdnd_begin) -- that window
+     is told the drop window is the source and reads the program's own
+     XdndSelection. Its selection or window gone (XFixes), its XdndLeave
+     before the desktop's end, or Xwayland gone: `CLIP clear o<n>`.
+   - Not announced (no XdndPosition that names a type) within 2 s of
+     arming (BC_XDRAG_ARM_MS): the drop window goes again (its drag stays
+     X's own); so it does when no XdndDrop or XdndLeave comes within 2 s of
+     the `CLIP dragend`. The timer is all: a button let up is not watched
+     for. */
 
 #define BC_XDRAG_ARM_MS 2000
 

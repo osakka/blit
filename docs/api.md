@@ -2714,10 +2714,21 @@ It speaks the frame channel above as a producer, with these additions.
     top-level, or a popup for a popup of a popup (a submenu), at an offset
     in that popup's surface pixels, drawn over it. A popup's size is its
     frames': no line says it, so a desktop sizes the popup from its newest
-    frame (Firefox's permission panel grows after it first shows). Sent again for
-    the same id when the program moves the popup (`xdg_popup.reposition`,
-    or an X menu moved by its program; from 0.3.82): the desktop moves the
-    popup it has, from its next frame.
+    frame (Firefox's permission panel grows after it first shows). The
+    offset is that of the popup's whole picture, drawn as it is (no `WINDOW
+    geometry` is sent for a popup): the place xdg-shell gives its window
+    geometry -- the positioner's, from the corner of the parent's window
+    geometry -- less its own window geometry's corner, so a menu that
+    draws a shadow around itself (GTK, Qt) has its picture reach up and
+    left of that place, and the offset can be negative. It is where the
+    compositor hit-tests the popup (Gitea #215: before, such a popup was
+    said at its window geometry's place and its input landed off by its
+    geometry). Sent again for the same id when the program moves the popup
+    (`xdg_popup.reposition`, or an X menu moved by its program; from
+    0.3.82), and when the popup's window geometry or its parent's changes
+    (#215): the desktop moves the popup it has, from its next frame. A
+    popup's popups (a submenu) are said again after it, so a sum kept down
+    the chain stays current.
   - `WINDOW sub <id> <parent> <x> <y> <w> <h> above|below`: a subsurface
     (`wl_subsurface`), its own picture, as a popup's is, with no `WINDOW
     new`: owned, moved, hidden and closed with its window, never in the

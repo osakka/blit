@@ -1158,6 +1158,104 @@ def popup_tree_part(compositor, standin, work):
     return 'popup-contents=sub-of-popup(WINDOW sub 3 2) submenu=popup-of-popup(WINDOW popup 4 2) pointer=popsub,popup2 keys=grab'
 
 
+def popup_geometry_part(compositor, standin, work):
+    """A popup with a window geometry of its own (Gitea #215), as GTK and Qt
+    draw a menu with a shadow, with `--popup-geometry 10`: its surface
+    100x80, its window geometry the 80x60 at 10,10 of it that the
+    positioner places at 12,63 of the top-level, set with its first buffer
+    (after the popup was announced). `WINDOW popup` says where the popup's
+    picture -- its whole surface, no `WINDOW geometry` or view for it -- is
+    in the parent's surface pixels: 2,53, the shadow reaching out past
+    12,63. The desktop draws it there and gives its `INPUT member` that
+    offset, so a point of the drawn picture comes back as the line's offset
+    plus the point: the compositor must hit-test it at that same point of
+    the popup's surface -- in the shadow, at the window geometry's corner
+    and at the surface's far corner. Before the fix the line said 12,63 and
+    the pointer reached the popup 10 pixels down and right of the point
+    drawn there."""
+    m = 10
+    runtime = os.path.join(work, 'run-popgeom')
+    os.mkdir(runtime, 0o700)
+    name = 'blit-compositor-gate-popgeom-%d' % os.getpid()
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind('\0' + name)
+    listener.listen(2)
+    comp = client = route = None
+    log = os.path.join(work, 'compositor-popgeom.log')
+    out_path = os.path.join(work, 'standin-popgeom.out')
+    printed = lambda: open(out_path).read()
+    try:
+        cenv = compositor_env(BLIT_FRAME_SOCKET='@' + name, BLIT_FRAME_TOKEN=TOKEN, XDG_RUNTIME_DIR=runtime)
+        for k in ('WAYLAND_DISPLAY', 'BLIT_SERVER_PORT', 'BLIT_API_TOKEN'):
+            cenv.pop(k, None)
+        comp = start([compositor, '--x11', 'off', '--log', log], cenv,
+                     open(os.path.join(work, 'compositor-popgeom.out'), 'w'))
+        desk = Desktop(listener)
+        desk.line('WINDOW display blit-0 -')
+        client = start([standin, '--popup-geometry', str(m), 'Shadow'], dict(cenv, WAYLAND_DISPLAY='blit-0'),
+                       open(out_path, 'w'))
+        for want in ('WINDOW new 1 0', 'WINDOW title 1 Shadow', 'WINDOW appid 1 blit.standin',
+                     'WINDOW limits 1 64 48 0 0', 'WINDOW decor 1 server'):
+            desk.line(want)
+        desk.frame(256, 160)
+        desk.send('WINDOW size 1 200 100 activated')
+        desk.frame(200, 100)
+        # The popup's lines up to its first frame: the last `WINDOW popup`
+        # before the frame is where the desktop draws that frame.
+        lines, frame = [], None
+        deadline = time.time() + 8
+        while time.time() < deadline and frame is None:
+            got = desk.next(0.5)
+            if got is None:
+                continue
+            if got[0] == 'line':
+                lines.append(got[1])
+            elif got[0] == 'frame':
+                (image, _seq, w, h) = got[1][:4]
+                os.close(got[2])
+                if image == 2:
+                    frame = (w, h)
+        said = [l for l in lines if l.startswith('WINDOW popup 2 1 ')]
+        check(frame == (80 + 2 * m, 60 + 2 * m) and said,
+              lambda: 'the popup: frame %s, lines %s\n%s' % (frame, lines, settled(log)))
+        check(not [l for l in lines if l.startswith(('WINDOW geometry 2 ', 'WINDOW view 2 '))],
+              'the popup was given a geometry or view: %s' % lines)
+        ox, oy = (int(v) for v in said[-1].split()[4:6])
+        route = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        route.connect(desk.input_socks[1])
+        sent = [0]
+
+        def pointer(sx, sy, wanted):
+            """The desktop's pointer over point sx,sy of the popup's drawn
+            picture: its member offset (the line's) plus the point."""
+            sent[0] += 1
+            route.sendall(b'INPUT ptr %d %.2f %.2f\nINPUT frame %d %d\n'
+                          % (BLIT_PICTURE, ox + sx, oy + sy, BLIT_PICTURE, sent[0]))
+            want = 'STANDIN ' + wanted
+            wait_for(lambda: want in printed().splitlines(),
+                     lambda: 'the popup drawn at %d,%d (%r): its point %d,%d did not reach it as %r:\n%s'
+                     % (ox, oy, said[-1], sx, sy, want, printed()))
+
+        # Its window geometry's corner, in the shadow, and the far corner.
+        pointer(m + 8, m + 7, 'pointer enter popup %.2f %.2f' % (m + 8, m + 7))
+        pointer(3, 4, 'pointer motion 3.00 4.00')
+        pointer(80 + 2 * m - 1, 60 + 2 * m - 1, 'pointer motion %.2f %.2f' % (80 + 2 * m - 1, 60 + 2 * m - 1))
+        # Where xdg-shell puts it: its window geometry at 12,63 of the
+        # top-level's (which has none), its surface m pixels up and left.
+        check((ox, oy) == (12 - m, 63 - m),
+              'the popup\'s picture was said at %d,%d, not %d,%d: %s' % (ox, oy, 12 - m, 63 - m, said))
+        desk.send('WINDOW close 1')
+    finally:
+        if route: route.close()
+        for p in (client, comp):
+            if p and p.poll() is None:
+                p.kill()
+                p.wait()
+        listener.close()
+    return 'popup=%s(geometry %d,%d+80x60 of 100x80) said=%s pointer=agrees' % (
+        '%d,%d' % (ox, oy), m, m, '|'.join(l.split(' ', 4)[4] for l in said))
+
+
 def lock_part(compositor, standin, work):
     """zwp_pointer_constraints_v1 asked of the desktop (docs/api.md, "Pointer
     lock"), with `--lock`: a oneshot lock pending until `WINDOW lock 1 on`
@@ -4180,6 +4278,7 @@ def main():
         print('COMPOSITOR_VIEWPORT_OK %s' % viewport_part(compositor, standin, work))
         print('COMPOSITOR_INHIBIT_OK %s' % inhibit_part(compositor, standin, work))
         print('COMPOSITOR_POPUP_TREE_OK %s' % popup_tree_part(compositor, standin, work))
+        print('COMPOSITOR_POPUP_GEOMETRY_OK %s' % popup_geometry_part(compositor, standin, work))
         print('COMPOSITOR_RESTART_OK %s' % restart_part(compositor, standin, work))
         print('COMPOSITOR_SUB_RESTART_OK %s' % sub_restart_part(compositor, standin, work))
         if server:

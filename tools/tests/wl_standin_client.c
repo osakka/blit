@@ -2,7 +2,7 @@
    on libwayland-client (the frame_dmabuf_producer.c pattern: a stand-in
    for the real programs the gate cannot run).
 
-     wl_standin_client [--popup|--popup-move] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale|--drag-icon-shrink|--drag-icon-bad-source|--drag-icon-bad-scale]]] [--animate n] [--lock] [--sub|--sub-pair] [--csd] [--clip] [--view-script]
+     wl_standin_client [--popup|--popup-move|--popup-geometry M] [--gone-on-ctrl-d] [--states] [--dmabuf [--modifier hex]] [--drop|--drop-refuse|--drop-lazy] [--drag-out [--drag-icon WxH [--drag-icon-scale|--drag-icon-shrink|--drag-icon-bad-source|--drag-icon-bad-scale]]] [--animate n] [--lock] [--sub|--sub-pair] [--csd] [--clip] [--view-script]
                        [--cursor] [--appmenu] [--activate] [--xdg-output] [--scale-frac [--scale-frac-twice]|--scale-int|--scale-none] [title]
 
    It binds wl_compositor, wl_shm, xdg_wm_base, wl_seat (taking a keyboard
@@ -78,6 +78,10 @@
    With --popup-move, after
    the popup's first frame it repositions it (xdg_popup.reposition, offset
    12,13: at 22,73) and prints `STANDIN popup repositioned <token>`.
+   With --popup-geometry M, the popup is drawn as GTK and Qt draw a menu
+   with a shadow: its surface (80+2M)x(60+2M), its window geometry the
+   80x60 the positioner placed at M,M of it, set at its configure (after
+   the initial commit, with the first buffer, as GTK sets it).
 
    With --states, after its first frame it asks to be maximized, minimized
    and unmaximized, then opens a second toplevel, "Child", gives it this
@@ -266,6 +270,7 @@ struct standin {
     int want_popup;
     int gone_on_ctrl_d, gone;     /* --gone-on-ctrl-d: Ctrl+D destroys the window, as a shell's exit takes an X terminal's */
     uint32_t mods_dep;            /* the depressed modifiers, as last told */
+    int popup_geometry;           /* --popup-geometry M: its shadow margin */
     int popup_move, popup_moved;  /* --popup-move: reposition it once, after its first frame */
     /* --popup-tree: as Firefox draws a menu -- the popup's contents in a
        subsurface of it, and a popup of the popup (a submenu) that grabs. */
@@ -667,7 +672,13 @@ static void popup_surface_configure(void *data, struct xdg_surface *xs, uint32_t
 {
     struct standin *s = data;
     xdg_surface_ack_configure(xs, serial);
-    draw(s, s->popup_surface, 80, 60);
+    if (s->popup_geometry > 0) {
+        int m = s->popup_geometry;
+        xdg_surface_set_window_geometry(xs, m, m, 80, 60);
+        draw(s, s->popup_surface, 80 + 2 * m, 60 + 2 * m);
+    } else {
+        draw(s, s->popup_surface, 80, 60);
+    }
     if (s->popup_tree && !s->tree_made && s->popup) popup_tree(s);
     if (s->popup_move && !s->popup_moved && s->popup) {
         /* The same positioner with offset 12,13: at 22,73 of the toplevel. */
@@ -2126,6 +2137,10 @@ int main(int argc, char **argv)
         if (strcmp(argv[i], "--popup") == 0) s.want_popup = 1;
         else if (strcmp(argv[i], "--popup-move") == 0) s.want_popup = s.popup_move = 1;
         else if (strcmp(argv[i], "--popup-tree") == 0) s.want_popup = s.popup_tree = 1;
+        else if (strcmp(argv[i], "--popup-geometry") == 0 && i + 1 < argc) {
+            s.want_popup = 1;
+            s.popup_geometry = atoi(argv[++i]);
+        }
         else if (strcmp(argv[i], "--gone-on-ctrl-d") == 0) s.gone_on_ctrl_d = 1;
         else if (strcmp(argv[i], "--sub") == 0) s.sub_script = 1;
         else if (strcmp(argv[i], "--sub-pair") == 0) s.sub_pair = 1;
