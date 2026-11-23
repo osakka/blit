@@ -9,6 +9,29 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-23: 0.3.137 scroll bar styles
+
+- **Scroll bar styles (ADR 0237, amended).** Three scroll bar families as
+  cell geometry, each horizontal and vertical: Classic (a checker track
+  between edge lines, caps, a hollow boxed thumb with grip lines;
+  whole-pixel, the checker's phase turning over at every cell seam),
+  Modern (a slim capsule on a faint band) and Simple (Blit's light
+  box-drawing line with a slim solid thumb). Each is a base plus fixed
+  offsets (caps, track, a one-cell thumb, long-thumb pieces), the thumb
+  cell holding the thumb alone. Previewed through Blit's raster; the owner
+  approved all three. Hibr's Scroll Bar Style row picks among them.
+- **Gates:** `gates_all` 214/11, `gates_renderer` 90/1, `gates_renderer-gles`
+  68/0, all on 8ff12e00, the shipped commit, first pass, the suite lock
+  held for the suites only (about 37 min). New: scrollbar_glyph_gate (48
+  glyphs at 58 cell sizes, the checker's phase across seams).
+- **Release environment (Debian 13):** built outside the lock;
+  update_pair_gate 16 cases and rollback_recovery_gate 12 cases passed;
+  the release was signed.
+- **Live, the mini PC:** deployed with --rollback-to 0.3.136; verified,
+  the smoke check passed with the desktop signed in (2 displays up, 1 pane
+  showing a surface, frames advancing 7 -> 22), no rollback needed.
+- **Published** to hibr-apt (cd18f41) under HOLD/done with my-vpn-ea.
+
 ## 2026-11-22: 0.3.136 slider styles
 
 - **Slider styles (ADR 0237, amended).** Two new slider/fader families as
