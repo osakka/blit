@@ -2562,12 +2562,15 @@ It speaks the frame channel above as a producer, with these additions.
   `window=1` in its `OK` line does not speak `WINDOW`; the compositor then
   shows nothing and says so in its log. Blit itself, reached directly with
   no desktop between, answers `window=0`: placing windows is the desktop's.
+  Blit answers every `WINDOW` line sent to it `WINDOW error <id> ENOTSUP`,
+  `<id>` the line's third word (0 when it has no readable one, as for
+  `WINDOW display`).
   The compositor's first line after `OK` is `WINDOW display <name>
   <x-display>`, on every connection (a reconnect too: "Programs survive a
   desktop restart"): `<name>` the Wayland display, `<x-display>` the X
   display of its Xwayland, `:<n>`, or `-` when X is off (no Xwayland 23.1
   or later on `PATH`, no free X display, or Xwayland given up after dying
-  at once three times: "X programs" below). The desktop exports both:
+  within 5 s of its start three times in a row: "X programs" below). The desktop exports both:
   `WAYLAND_DISPLAY=<name>`, and `DISPLAY=:<n>` unless it is `-`.
 - **One grammar, version 5** (Blit 0.3.74 and Hibr 0.99.482, which ship
   together: the `blit` package Breaks `hibr (<< 0.99.482)` and Hibr's
@@ -2589,13 +2592,17 @@ It speaks the frame channel above as a producer, with these additions.
     producer's `KEYBOARD list` and `KEYBOARD current <n>`, and Blit's
     `KEYBOARD item <n> <layout> <variant|-> <name...>`, `KEYBOARD reserved
     <chord>...`, `KEYBOARD current <n>` and `KEYBOARD error EINVAL`
-    ("Keyboards (layouts)").
+    ("Keyboards (layouts)");
+  - the display's refresh (from Blit 0.3.98), concerning no picture: a
+    producer's `DISPLAY rate`, and Blit's `DISPLAY rate <mHz>` and
+    `DISPLAY error EINVAL` ("Picture frames by descriptor").
   - **`INPUT imekeys [cycle=<chord>] [back=<chord>] [teach=<chord>]`**
     (0.3.109, ADR 0233): the input method's keys, from the desktop's
     Shortcuts. It replaces the session's set (an empty one clears it) and
     is not answered; a word that is not one of the three actions with a
     chord in keep's grammar refuses the line, `INPUT error 0 EINVAL`, and
-    keeps the set. A key pressed with exactly that chord's modifiers goes to
+    keeps the set; so does a button chord (`button<N>`), `super` alone
+    (the tap, which keep accepts) or a line over 511 bytes. A key pressed with exactly that chord's modifiers goes to
     the focused route as `INPUT ime <id> <action> <code>`, in key order,
     instead of the key (and its release goes nowhere); the desktop still
     sees it, as it sees every key.
@@ -2872,7 +2879,9 @@ It speaks the frame channel above as a producer, with these additions.
     on (its mode, from `/v1/displays`, and from 0.3.88 its name from
     `WINDOW layout`), sent when the window opens and whenever it moves to
     another display; the window's surface enters that display's `wl_output`
-    (and leaves the one before). With a display layout (below) the name
+    (and leaves the one before). `<w>` and `<h>` are 1 to 32767 and
+    `<mHz>` 1 to 1000000 (never 0, unlike `WINDOW layout`'s); a line
+    outside that is logged and ignored. With a display layout (below) the name
     says which display; without one -- a desktop that sends none, or a name
     not in the layout -- the line names the layout's display of that size,
     the refresh telling two apart, and when two displays have one mode the
@@ -2920,7 +2929,9 @@ It speaks the frame channel above as a producer, with these additions.
     gives the same place and name, and the logical size above (X is
     given real pixels); Xwayland makes X's RandR outputs
     and monitors of them. A set naming no display is refused, and the
-    layout stands. The first set replaces the outputs of before it, for the
+    layout stands. A set holds at most 16 displays: a 17th name and later
+    are ignored (logged once) and the set is applied without them; a name
+    said twice in one set is its last line. The first set replaces the outputs of before it, for the
     compositor's life. A desktop that sends no layout -- the desktop sends
     none to a compositor older than 0.3.88 (`blit-compositor --version`) --
     gets the outputs of before.
@@ -2942,8 +2953,10 @@ It speaks the frame channel above as a producer, with these additions.
     another: the desktop sends each `off` itself.
   - **One input route per top-level.** A popup's picture joins its
     top-level's route with `INPUT member <popup-id> <toplevel-id> <x> <y>`
-    (the popup's offset in the top-level's surface pixels, the same numbers
-    as `WINDOW popup`), sent to Blit by the desktop. Blit maps the pointer
+    (the popup's offset in the top-level's surface pixels: the numbers of
+    its `WINDOW popup`, and for a submenu, whose `WINDOW popup` is in its
+    parent popup's pixels, the sum of the offsets down its chain to the
+    top-level), sent to Blit by the desktop. Blit maps the pointer
     over a member picture into the top-level's surface coordinates, so the
     compositor sees one coordinate space per top-level and hit-tests its
     own popups; keyboard focus stays the top-level's. The member ends with
@@ -3017,12 +3030,16 @@ It speaks the frame channel above as a producer, with these additions.
     display`, and announces every window again with its id and its last
     state: each top-level, in the order they were created, `WINDOW new <id>
     <parent>` (`0`, and `WINDOW parent` after every top-level, for a parent
-    created after it), `title`, `appid`, `limits`, `decor`, `fullscreen
-    on`, `maximize on` and `INPUT sock`, and `WINDOW hide` for one its
+    created after it), `title`, `appid`, `limits`, `decor`, `geometry`,
+    `fullscreen on`, `maximize on`, `busy on`, `cursor` (its shape, when
+    it has one), `inhibit on` (to a desktop whose answer says
+    `inhibit=1`), `appmenu` and `INPUT sock`, each only when it holds,
+    and `WINDOW hide` for one its
     program had unmapped (`minimize` is a request, not a state, and is not
-    repeated); then each popup, `WINDOW popup` with its offset; then each
-    top-level's subsurfaces, `WINDOW sub` bottom to top with their ids
-    kept; then each shown window's, popup's and subsurface's newest frame (`FRM3` of the kept buffer, or `FRM1`);
+    repeated); then each popup, `WINDOW popup` with its offset, and
+    `WINDOW hide` for a hidden one; then each top-level's and popup's
+    subsurfaces, `WINDOW sub` bottom to top with their ids
+    kept; then each shown window's, popup's and subsurface's newest frame (`FRM3` of the kept buffer, or `FRM1`), after its `WINDOW view`;
     then `WINDOW lock` for each pointer lock or confinement a program still
     holds. Popups' `INPUT member` lines are the desktop's to send again, as
     for new windows. The desktop answers as for new windows (`WINDOW
@@ -3111,8 +3128,10 @@ It speaks the frame channel above as a producer, with these additions.
     else `default`; `none` while X hides it.
   - An override-redirect window that covers a display exactly, or the
     whole X screen -- a game's full-screen window -- is a window of its
-    own (0.3.129, Gitea #175): `WINDOW new <id> 0`, `decor client` and
-    `WINDOW fullscreen <id> on`, whatever X window is under it; the
+    own (0.3.129, Gitea #175): `WINDOW new <id> <parent>`, `decor client`
+    and `WINDOW fullscreen <id> on`, whatever X window is under it; its
+    parent is the window its `WM_TRANSIENT_FOR` names (that menu's
+    top-level, when it names a menu), else 0; the
     desktop grants or refuses full screen as for any program. Any other
     override-redirect window that belongs to no shown X window (a
     toolkit's hidden helper, a notification) is not shown.
@@ -3167,11 +3186,16 @@ It speaks the frame channel above as a producer, with these additions.
     clipboard's (logged; X keeps it until the selection next changes).
     The desktop's offer or a Wayland program's selection is owned in X by
     the window manager, which answers only while an X window has X's
-    focus: `TARGETS`, `UTF8_STRING`, `text/plain;charset=utf-8`,
-    `TEXT`, `STRING` (Latin-1, `?` for what it has not), the hint, and a
+    focus: `TARGETS`, `TIMESTAMP` (the time it took the selection),
+    `UTF8_STRING`, `text/plain;charset=utf-8`,
+    `TEXT` (as `UTF8_STRING`), `STRING` (Latin-1, `?` for what it has not), the hint, and a
     Wayland program's other types, read from the owner as a Wayland
-    paste is (`CLIP read` with a pipe, for the desktop's). From 64 KiB a
-    transfer goes INCR, both ways. A transfer that makes no progress for
+    paste is (`CLIP read` with a pipe, for the desktop's); anything else
+    (`MULTIPLE`, a type nobody offers) is answered None. These answers go
+    INCR from 64 KiB, in 64 KiB chunks, each after the requestor deleted
+    the last. An X owner's answer is read as its owner sends it, whole or
+    INCR, each chunk passed to the reader's pipe before the next is asked
+    for. A transfer that makes no progress for
     3 s ends: an X paste not yet answered gets nothing (property None),
     one under way ends short with what came; the reader's pipe closes.
     When the desktop clears a selection (`CLIP clear`), X's owner goes at
@@ -3180,8 +3204,13 @@ It speaks the frame channel above as a producer, with these additions.
   marks a drag's icon (the rest is noted once in the compositor's log).
   When Xwayland dies,
   its windows are `WINDOW gone`, an X program's selection is `CLIP clear`,
-  and it is started again on the same display; its X programs end with
-  it.
+  and it is started again on the same display, 100 ms later; its X
+  programs end with it. A death within 5 s of its start counts as quick:
+  after one it is started again in 1 s, after two in a row in 2 s, and
+  after three in a row X stops until the compositor restarts -- no
+  Xwayland is started, the X display's sockets are closed, and a desktop
+  that connects from then on is told `WINDOW display <name> -`. The
+  desktop connected at the time is told nothing new.
   `blit-compositor --x11 off` runs no Xwayland (Wayland programs only,
   `WINDOW display <name> -`, the log saying why); the desktop starts it so
   from its X11 Programs setting (`blit-compositor --version` 0.3.81 or
@@ -3407,7 +3436,10 @@ It speaks the frame channel above as a producer, with these additions.
   finish (or, below version 3, its offer let go) when it read the drop;
   `refused` when it accepted nothing within 1 s (it is then left), took no
   reading within 5 s of the drop, the window is not there, or its client
-  has no data device. One drop at a time: a new one ends the last,
+  has no data device. A drop on a popup or a subsurface (no top-level), or
+  on a window of Xwayland's own Wayland connection that is not an X
+  window, is refused at once; a `CLIP drag` over one gets no `CLIP
+  hover`. One drop at a time: a new one ends the last,
   refused. A `CLIP drop` naming no type is no line.
   An X program's window (since 0.3.117) takes the drop by XDND, the
   compositor the drag's source: the window must be XdndAware (version 3
@@ -3461,6 +3493,17 @@ It speaks the frame channel above as a producer, with these additions.
   is read. Its button release is held to the end: `CLIP dragend o<n>
   copy|move` is XdndStatus accepting that action, then the release, and
   its XdndDrop is answered XdndFinished; `none` refuses it and it leaves.
+  The drop window is put up only when the desktop's hello answer says
+  `drag=1`, the channel is up, a button the compositor delivered is down,
+  the pointer is on an X window and no drag out is under way; else the
+  ownership is logged and the drag stays X's own. Put up, it waits 2 s
+  for the program's first XdndPosition, else it goes, nothing said, and
+  the drag stays X's own; a drag whose types have no usable names is not
+  carried. Once its `CLIP dragout` is said, the program letting
+  XdndSelection go, another X
+  client taking it, its XdndLeave before the desktop's end, or Xwayland
+  ending is `CLIP clear o<n>`. After `CLIP dragend` the drop window goes
+  at the program's XdndDrop or XdndLeave, or 2 s later without either.
   Over or onto an X window (since 0.3.122) it is relayed: the window is
   told the drop window is the source (XdndEnter, XdndPosition and XdndDrop
   from it, the program's types and time), answers it -- `CLIP hover` and

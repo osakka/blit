@@ -5,6 +5,8 @@
 - Note: Its 16 images per session were superseded by
   [ADR 0226](0226-pictures-bounded-by-memory-not-count.md) (0.3.65):
   pictures are bounded by memory; one frame in flight per image stays.
+- Note (2026-11-23): version 5 spells replies `FRAME error <id> <code>`;
+  SR-1 (0.3.130) requires an edit to name its image's own size and format.
 - Scope: moving large or frequent pictures (video, a game, a browser page)
   from a program in a Blit session to Blit without encoding them into the
   terminal stream
