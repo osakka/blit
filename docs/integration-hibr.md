@@ -216,7 +216,29 @@ Programs' windows use the same socket. Hibr starts `blit-compositor` with
 program's frames over it and speaks the `WINDOW`, `CLIP` and `KEYBOARD`
 lines with the desktop through Blit
 ([programs in windows](programs-in-windows.md), and the API reference's
-[Program windows](api.md#program-windows-adr-0228)).
+[Program windows](api.md#program-windows-adr-0228)). Hibr's Program Scale
+row gives each display its scale on `WINDOW layout` (from 0.3.130,
+[ADR 0242](adr/0242-hidpi-program-scale.md)), and a desktop that offers
+`inhibit=1` is told which windows keep the screen awake (`WINDOW
+inhibit`), for its saver.
+
+## Glyphs Hibr draws with
+
+Hibr's window chrome, controls, status icons and player glyphs are Blit's
+own glyphs, which Hibr looks up by id in Blit's installed catalogue
+(`/usr/lib/blit/fonts/icons/catalogue.json`, the one `GET /v1/fonts/icons`
+serves), so a codepoint is never written into Hibr. Since 0.3.131 the
+glyphs are at U+101000 and up, ids and the catalogue's shape unchanged,
+and the old range U+100000-U+100494 draws the same glyphs until a later
+release drops it
+([ADR 0243](adr/0243-glyph-multiplexing.md)). Hibr's Slider Style and
+Scroll Bar Style rows choose among the slider (0.3.136) and scroll bar
+(0.3.137) styles, each a base codepoint plus fixed offsets. The characters Hibr's own UI draws are kept
+in a snapshot, `assets/fonts/hibr-ui-glyphs.json`, which the font gates
+cover and `hibr_ui_glyphs_gate` holds to the newest Hibr release (Gitea
+#118). Hibr's **Blit
+Glyphs** pane shows the fonts and glyph sets Blit reports, read-only
+(`/v1/fonts`, `/v1/fonts/sets`; Blit 0.3.134 or later).
 
 ## Pointer lock
 

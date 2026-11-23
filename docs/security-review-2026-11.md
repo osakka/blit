@@ -37,13 +37,13 @@ exercised with real dpkg in the Debian 13 release environment
 | --- | --- | --- |
 | SR-1 | Critical | A frame-channel edit writes outside the image (heap overflow in the root server) -- fixed in 0.3.130 |
 | SR-2 | High | An update needs only the update token, sent in clear, and nothing checks who built the package -- fixed in 0.3.133 |
-| SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token |
+| SR-3 | High | Membership of group `blit` is root: it reaches the helper socket, the staging directory and the API token -- open; since 0.3.133 (SR-2) a member can no longer choose the package, only hand over a signed release, and still reads the API token |
 | SR-4 | High | XTGETTCAP echoes the request back into the terminal's input (command injection by `cat`) -- fixed in 0.3.130 |
 | SR-5 | High | CSI HPR/VPR/VPA can make the cursor negative, and the next character is written outside the cell arrays -- fixed in 0.3.130 |
 | SR-6 | High | `session_json` can overflow the 8 KB stack buffer of `GET /v1/login` -- fixed in 0.3.132 |
 | SR-7 | High | PTY master descriptors leak into every later session child, including ones run as another user -- fixed in 0.3.130 |
 | SR-8 | High | The root API token is put into the environment of children run as another user -- fixed in 0.3.135 |
-| SR-9 | High, accepted exception | The API token is a root shell, sent over plain HTTP on 0.0.0.0, with no default command allowlist |
+| SR-9 | High, accepted exception | The API token is a root shell, sent over plain HTTP on 0.0.0.0, with no default command allowlist -- open, the accepted LAN-testing exception; since 0.3.135 (SR-8) a child run as another user no longer holds it |
 | SR-10 | Medium | The helper reads the staged package three times by path, in a group-writable directory -- fixed in 0.3.132 |
 | SR-11 | Medium | Both tokens are compared with `strcmp` -- fixed in 0.3.132 |
 | SR-12 | Medium | An install blocks the server's main loop with no timeout; the console watchdog kills it at 120 s, mid-install -- fixed in 0.3.132 |
@@ -1045,10 +1045,15 @@ downgrade and exits 0, and the helper does not check what was installed).
 - **Deploy with the way back named** (from 0.3.135, Gitea #206):
   `tools/deploy/update-live.sh --rollback-to <N-1 blit .deb> HOST <N blit
   .deb>`. It checks N-1's pair, `.sig` and manifest, and that the box runs
-  N-1, before it sends anything; when the smoke check after N fails, it
-  installs N-1 again the same way and holds it to the box as it was before
-  N. Exit 3: rolled back, the box as it was; exit 4: the rollback failed
-  too, and the items below are next.
+  N-1, before it sends anything (N-1 must be 0.3.133 or later); when the
+  smoke check after N fails, it installs N-1 again the same way and holds
+  it to the box as it was before N. Exit 0: N installed and the smoke check
+  passed; 1: the update failed (N may be installed: read the message); 2:
+  refused before anything was sent; 3: rolled back, the box as it was; 4:
+  the rollback failed too, and the items below are next. It needs the
+  update token and, on a server with an API token, the API token
+  (`BLIT_AUTH_TOKEN` or `BLIT_AUTH_TOKEN_FILE`): the upload and the smoke
+  check's reads need it.
 - **The API is up** (the smoke check failed, or the install failed): run
   `tools/deploy/update-live.sh HOST <N-1 blit .deb>` with N-1's packages,
   its `blit-release_<N-1>-1_amd64.sig` beside them, and

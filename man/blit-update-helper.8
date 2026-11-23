@@ -1,4 +1,4 @@
-.TH BLIT-UPDATE-HELPER 8 "2026-11-21" "Blit @VERSION@" "System Administration"
+.TH BLIT-UPDATE-HELPER 8 "2026-11-23" "Blit @VERSION@" "System Administration"
 .SH NAME
 blit-update-helper \- installs Blit packages uploaded through the API
 .SH SYNOPSIS
@@ -12,7 +12,8 @@ and
 .B blit-compositor
 of one version with
 .BR "PUT /v1/control/update" ,
-the update token and the release's signature; the server stores each in
+the update token, the API token when the server has one (from 0.3.133),
+and the release's signature; the server stores each in
 .I /var/lib/blit/updates/
 and asks the helper to install them.
 The server never installs packages itself, so it can run without

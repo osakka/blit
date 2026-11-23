@@ -16,7 +16,8 @@ Hibr ([Hibr integration](../docs/integration-hibr.md)).
 
 Not installed: `blit-console.hibr`, `blit-hibr-console.hibr` and
 `blit-stock-session.hibr` (the adapter's integration launchers), and the
-probes `blit-adapter-probe.hibr` and `blit-live-image-probe.hibr`.
+probe `blit-adapter-probe.hibr`. The probe `blit-live-image-probe.hibr` is
+installed apart, in `/usr/share/blit/probes`.
 
 ## console-blit
 

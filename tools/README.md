@@ -11,12 +11,15 @@ run an installed server. They are reproducible developer tooling:
   workflow](../docs/development-workflow.md)).
 - `tools/build-env/` is the Debian 13 podman environment releases are built
   in; `tools/release/` builds a release (`build-release.sh`), writes its
-  manifest (`generate-manifest.sh`) and records the gate runs
-  (`record-gates.sh`); `tools/deploy/update-live.sh` updates a running Blit
-  through its API and checks the box after, and with `--rollback-to`
-  reinstalls the previous release when that check fails.
-- `tools/fonts/` builds the icon font and the font reference;
-  `tools/build-hibr-font.py` builds Hibr's glyph font.
+  manifest (`generate-manifest.sh`), records the gate runs
+  (`record-gates.sh`), makes a release key (`keygen`) and signs a release
+  (`sign-release.sh`, through `blit-sign.c`, Ed25519 with the pinned
+  Monocypher); `tools/deploy/update-live.sh` updates a running Blit through
+  its API with the release's signature, checks the box after, and with
+  `--rollback-to` reinstalls the previous release when that check fails.
+- `tools/fonts/` builds the icon font, the font registry's header
+  (`build-font-registry.py`, from `assets/fonts/fonts.source.json`) and the
+  font reference; `tools/build-hibr-font.py` builds Hibr's glyph font.
 - `tools/probes/` contains QEMU init scripts, staging helpers, input emitters,
   and small protocol probes used by the acceptance gates.
 - `tools/tests/` contains repeatable contract and network tests.

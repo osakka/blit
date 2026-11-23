@@ -41,8 +41,11 @@ fixture input, not a valid package build target.
 The public repository is `https://github.com/osakka/blit`. Use relative paths
 for files within the repository and GitHub `blob/main` or `tree/main` links
 when publishing externally. Internal Gitea remains the engineering origin
-and backlog; do not replace the configured remote or create a parallel push
-workflow for a documentation-link change. Verify the public GitHub branch
+and backlog: since 2026-11-22 it is `git.uk.home.arpa`, organisation
+`itdlabs` (`git.home.arpa` names the same host), with one branch, `main`,
+mirrored to GitHub. Forge credentials live outside every checkout and
+are never written into one. Do not replace the configured remote or create a
+parallel push workflow for a documentation-link change. Verify the public GitHub branch
 contains the intended commit before claiming publication. Internal issue
 numbers are not automatically GitHub issue numbers: preserve their internal
 identity rather than fabricating public issue links. Internal browser-route
@@ -338,11 +341,25 @@ assertions; neither substitutes for the other.
 A release runs these steps in order. The gates run on this host, on a quiet
 machine; the packages are built in the Debian 13 build environment
 (`tools/build-env/`), which needs the exact pinned Hibr checkout inside this
-checkout; omitting it fails closed:
+checkout; omitting it fails closed.
+
+The host is shared with other projects' suites, which take turns through
+one shared suite lock (a `flock` on a lock file the sharing sessions agree
+on). Hold it only while the three suites run, with a timeout matched to
+the job (the three take about 40 minutes), and say how long it will be
+held; build outside it -- `tools/build-tcc.sh` before, `build-release.sh`'s
+podman packaging after. Small targeted runs go beside it at `nice -n 19`
+without the lock, and a gate that fails under that load is run again alone
+before it is believed. A fix after a full run still means all three suites
+again at the new commit: `record-gates.sh` takes only whole suites at the
+shipped commit. `build-release.sh` rebuilds `build/blit/` inside the
+environment, so after it the host's binaries are built again before any
+host gate:
 
 ```sh
 hibr=build/hibr-$(sed -n '1p' packaging/HIBR_VERSION)   # inside the checkout
-out=build/release
+out=build/rel-X.Y.Z    # an OUTDIR of its own for each release (below)
+prev=build/rel-W       # the previous release's, kept until this one is verified
 git commit packaging/VERSION   # the version first: the gates test the commit that ships
 tools/build-tcc.sh
 tools/build-tcc.sh build/blit/blit-update-helper helper
@@ -353,16 +370,23 @@ tools/run-gates.sh renderer-gles >build/gates-renderer-gles.txt
 BLIT_HIBR_ROOT=$hibr tools/release/build-release.sh $out   # signs last: see "Release signing"
 tools/release/record-gates.sh releases/X.Y.Z.yaml build/gates-*.txt
 tools/release/generate-manifest.sh --check $out/blit_X.Y.Z-1_amd64.deb releases/X.Y.Z.yaml
-tools/deploy/update-live.sh HOST $out/blit_X.Y.Z-1_amd64.deb   # sends $out/blit-release_X.Y.Z-1_amd64.sig
+tools/deploy/update-live.sh --rollback-to $prev/blit_W-1_amd64.deb HOST $out/blit_X.Y.Z-1_amd64.deb
+git push origin main   # the forge holds main, current after every release
 ```
 
-`update-live.sh --rollback-to <previous OUTDIR>/blit_W-1_amd64.deb HOST
-$out/blit_X.Y.Z-1_amd64.deb` also names the release the box runs now,
-with its compositor, its own `.sig` and its manifest, all checked before
-anything is sent; when the smoke check after the update fails, it installs
-that release again and checks the box against the state before the update
-(exit 3; exit 4 when that fails too). Whether every deploy names it is the
-owner's call. The previous release's `.sig` is beside its packages only
+`update-live.sh` sends `$out/blit-release_X.Y.Z-1_amd64.sig` beside the
+packages. Every release since 0.3.135 has been deployed this way.
+
+`--rollback-to <previous OUTDIR>/blit_W-1_amd64.deb` names the release
+the box runs now, with its compositor, its own `.sig` and its manifest, all
+checked before anything is sent (it must be 0.3.133 or later, and the box
+must be running it); when the smoke check after the update fails, it
+installs that release again and checks the box against the state before
+the update. Exit status: 0 installed and the smoke check passed; 1 the
+update failed; 2 refused before anything was sent; 3 the smoke check failed
+and the previous release is back and passes it; 4 the rollback failed too
+(the runbook in the [security review](security-review-2026-11.md)).
+Whether every deploy must name it is the owner's call. The previous release's `.sig` is beside its packages only
 when each release is built into an OUTDIR of its own (`build-release.sh`
 clears its OUTDIR's `.deb` and `.sig` files first, so a shared
 `build/release` keeps only the newest); `tools/release/sign-release.sh`
@@ -447,7 +471,10 @@ with its displays up and frames advancing. When the manifest is recorded in a la
 `BLIT_DOCUMENTATION_COMMIT=<build-commit>`. `generate-manifest.sh --check PACKAGE MANIFEST` compares an
 existing manifest with a package. The artifact gate and `update-live.sh`
 both refuse a package whose SHA-256 differs from the manifest's;
-`update-live.sh` also needs `BLIT_UPDATE_TOKEN` or `BLIT_UPDATE_TOKEN_FILE`.
+`update-live.sh` also needs `BLIT_UPDATE_TOKEN` or `BLIT_UPDATE_TOKEN_FILE`
+and, for a server with an API token (every packaged one), `BLIT_AUTH_TOKEN`
+or `BLIT_AUTH_TOKEN_FILE`: the update route needs the bearer token too
+(from 0.3.133), and so does the state the smoke check reads.
 
 The generator owns package/version/checksum/hash/Hibr-pin facts. Measured
 acceptance results are recorded in the verification ledger; the generator

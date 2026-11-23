@@ -12,8 +12,9 @@ Graphical programs -- Wayland ones (Firefox, GTK, Qt, Vulkan) and X11 ones
 through Xwayland (Steam, xterm) -- open in Hibr windows through
 `blit-compositor`, Blit's own Wayland compositor and X window manager,
 which turns each window into a picture Blit shows and gives it Blit's
-keyboard, pointer, input methods, Hibr's clipboard and drag and drop
-(ADR 0228, ADR 0229; [programs in windows](docs/programs-in-windows.md)).
+keyboard, pointer, input methods, Hibr's clipboard and drag and drop, at
+a program scale per display for HiDPI
+(ADR 0228, ADR 0229, ADR 0242; [programs in windows](docs/programs-in-windows.md)).
 
 Current release: see [`packaging/VERSION`](packaging/VERSION).
 Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
@@ -34,7 +35,10 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
   Spleen (pixel-exact at each of its five masters' sizes and their
   multiples) and Terminus, any size from 8 to 64 pixels, changed live. Drop
   in your own monospaced font. Under every font sits one glyph stack: Nerd
-  Fonts, colour emoji, Arabic, Unifont, and Blit's own colour icons.
+  Fonts, colour emoji, Arabic shaped as words, Unifont, and Blit's own
+  colour icons and drawn shapes (window chrome, controls, player glyphs,
+  sliders, scroll bars). Programs can look a glyph up by set and name
+  (`/v1/fonts/sets`) and ask what Blit draws with the Glyph Protocol.
 - **Input:** keyboards, mice, touchpads and gamepads, found as they are
   plugged in, each configurable: repeat rate, remapping, pointer speed,
   natural scrolling, a choice of pointer looks, shake to find the pointer,
@@ -50,8 +54,8 @@ Repository: [github.com/osakka/blit](https://github.com/osakka/blit).
   on zoomed displays.
 - **Sound and power:** sound cards' volume and mixer, backlight brightness.
 - **Safe to run:** a bearer token on every request, an allow-list of
-  commands, an unprivileged mode, updates through a separate checked
-  helper, and Ctrl+Alt+Backspace to stop it.
+  commands, an unprivileged mode, updates only of a signed release, through
+  a separate checked helper, and Ctrl+Alt+Backspace to stop it.
 
 The full list, with when each arrived and how it has been proved, is in
 [features](docs/features.md).
@@ -103,9 +107,12 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
 
 From the Hibr desktop, everything is in the Control Panel: the **Blit**
 pane (fonts, panes per monitor, the compositor, the login screen, Restart
-Blit, the Ctrl+Alt+Backspace switch), **Blit Mouse** and **Blit Effects**.
-The [pane guide](https://github.com/osakka/hibr-apps/blob/main/docs/blit.md)
-explains each control.
+Blit, the Ctrl+Alt+Backspace switch), **Blit Mouse**, **Blit Keyboard** and
+**Blit Effects**; **Blit Glyphs** shows Blit's fonts and glyph sets, read
+only. The [pane guide](https://github.com/osakka/hibr-apps/blob/main/docs/blit.md)
+explains each control, and
+[Blit Glyphs](https://github.com/osakka/hibr-apps/blob/main/docs/blit-glyphs.md)
+has its own.
 
 ## Configure
 
@@ -154,13 +161,17 @@ them.
 ```sh
 tools/build-tcc.sh                                      # build/blit/blit-server
 tools/build-tcc.sh build/blit/blit-update-helper helper
+tools/build-tcc.sh build/blit/blit-compositor compositor
 tools/run-gates.sh all                                  # the test suites
 BLIT_HIBR_ROOT=build/hibr-$(cat packaging/HIBR_VERSION) \
   packaging/build-deb.sh build/pkg                      # the .debs
 ```
 
 Releases are built by `tools/release/build-release.sh OUTDIR` in the
-Debian 13 build environment (`tools/build-env/`).
+Debian 13 build environment (`tools/build-env/`) and signed with the Blit
+release key, whose public half every package carries
+([`packaging/release-keys`](packaging/release-keys/README.md)); a host
+installs an update through the API only when that signature verifies.
 
 The package build makes two packages: `blit` and `blit-compositor` (programs
 in windows, ADR 0228), which `blit` suggests. Suites and their

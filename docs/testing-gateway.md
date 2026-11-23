@@ -36,9 +36,12 @@ cannot serve its own restart request.
 ## Supervised package updates
 
 The Debian package installs a root-owned `blit-update-helper` behind
-`/run/blit/update.sock`. The network update API does not write packages as the
-gateway user: it verifies the package name and SHA-256, then delegates
-installation to that helper and requests a supervised restart.
+`/run/blit/update.sock`. The network update API does not install packages as
+the gateway user: it verifies each staged package's name and SHA-256, then
+delegates installation to that helper, which checks its own copy of each package's name, version and SHA-256 and
+the release's signature against the release keys the installed `blit`
+holds (`/usr/lib/blit/release-keys`, security review SR-2), installs the
+pair and requests a supervised restart; see `blit-update-helper(8)`.
 
 The package includes `blit.service`, which runs the server as root with the
 `video`, `render`, `input` and `audio` supplementary groups; the unprivileged
@@ -82,7 +85,9 @@ curl --fail -H "Authorization: Bearer $TOKEN" \
 ```
 
 These report the expected server version and `state: "ready"`. The upload
-itself is authorized by the update token alone. Upload only
+is authorized by the update token and, when the server has an API token,
+the bearer token as well (from 0.3.133; before, the update token alone).
+Upload only
 packages whose SHA-256 was independently recorded (the release manifest's
 `package_sha256` and `compositor_package_sha256`).
 `tools/deploy/update-live.sh HOST blit_X.Y.Z-1_amd64.deb` does this.
@@ -94,6 +99,7 @@ helper refuses an update without it):
 ```sh
 cat blit_X.Y.Z-1_amd64.deb blit-compositor_X.Y.Z-1_amd64.deb > body
 curl --fail --request PUT \
+  --header "Authorization: Bearer $TOKEN" \
   --header 'X-Blit-Update-Token: YOUR_UPDATE_TOKEN' \
   --header "X-Blit-Packages: BLIT_BYTES:BLIT_SHA256 COMPOSITOR_BYTES:COMPOSITOR_SHA256" \
   --header "X-Blit-Signature: $(cat blit-release_X.Y.Z-1_amd64.sig)" \
@@ -120,12 +126,17 @@ version; an interrupted upload or `403` response is not an installation.
 
 For a bounded operator update with preflight checks, use the repository-only
 helper. It requires the live update credential explicitly, never substitutes
-the API bearer token, and never retries a rejected credential:
+the API bearer token for it, and never retries a rejected credential; it
+needs the API token too, for the upload and for the state its smoke check
+reads. `--rollback-to` names the release the box runs now, to be installed
+again if the smoke check fails (see the
+[development workflow](development-workflow.md)):
 
 ```sh
 BLIT_UPDATE_TOKEN_FILE=/secure/path/live-update.token \
   BLIT_AUTH_TOKEN_FILE=/secure/path/live-api.token \
-  tools/deploy/update-live.sh HOST blit_X.Y.Z-1_amd64.deb
+  tools/deploy/update-live.sh --rollback-to PREVIOUS/blit_W-1_amd64.deb \
+  HOST blit_X.Y.Z-1_amd64.deb
 ```
 
 `BLIT_UPDATE_TOKEN` may be used instead of the update-token file. `thisisatest`

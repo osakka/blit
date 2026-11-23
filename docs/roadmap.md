@@ -5,7 +5,7 @@ internal issue tracker's, not GitHub's. What already works is in
 [features](features.md); the plans and restart notes from the 0.1 and 0.2
 lines are kept in [history](history/roadmap-0.1-0.2.md).
 
-## Where we are (0.3.127, 2026-11-20)
+## Where we are (0.3.137, 2026-11-23)
 
 Blit is the display server under Hibr on the owner's machine, released
 continuously through Hibr's apt repository. SDL is gone (ADR 0184): native
@@ -36,6 +36,27 @@ Since 0.3.74:
   0.3.125).
 - **Glyphs**: player glyphs (ADR 0237, 0.3.126) and keys and big discs
   (0.3.127).
+
+Since 0.3.127:
+
+- **Text**: control strings read by character (ADR 0239, 0.3.128); Arabic
+  shaped as words in Noto Naskh Arabic (ADR 0241, 0.3.129), the one Arabic
+  path since Blit Arabic Modern was retired (ADR 0243, 0.3.131); bold that
+  keeps a cell-filling shape (ADR 0240, 0.3.129).
+- **Glyphs** (ADR 0243): one font registry (step 1, 0.3.130); Blit's icons
+  moved to U+101000, the old range still drawn (0.3.131); the Glyph
+  Protocol's support check and coverage query (step 2, 0.3.133); glyph sets
+  by set and name over HTTP (step 3's set level, 0.3.134); slider styles
+  (0.3.136) and scroll bar styles (0.3.137); Hibr's read-only Blit Glyphs
+  pane.
+- **Programs in windows**: a game's full-screen override-redirect X window
+  (#175, 0.3.129); a program scale per display, HiDPI steps 1-3 (ADR 0242,
+  #170, 0.3.130); idle inhibit (#171, 0.3.130).
+- **Security and updates**: the November 2026 security review (#112) and
+  its fixes, every finding but SR-3 and SR-9 (0.3.130-0.3.135); releases
+  signed with a Blit release key, the updater refusing anything else
+  (SR-2, 0.3.133); `update-live.sh --rollback-to` reinstalls the previous
+  release when the smoke check fails (#206, #207, 0.3.135).
 
 ## Next, in order
 
@@ -70,11 +91,18 @@ already be fixed.
   on the mock in 0.3.125; Hibr's containment fix is in Hibr 0.99.553.
 - Monitor hot-plug on real hardware (#100, #20): see "Waiting for hardware".
 
-### 4. Text
+### 4. Text and glyphs
 
 - Emoji sequences end to end in the terminal, not only in the raster
   (#110). `text_layout: "emoji"` already shapes them, opt-in, since 0.1.578.
 - A refined selectable font with explicit coverage (#107).
+- Glyph multiplexing (ADR 0243), what is left: the in-band `names`
+  capability (a draft, `docs/protocols/glyph-sets.md`), step 4's face
+  binding, and dropping the old icon range U+100000-U+100494.
+- Installable glyph sets (ADR 0245, proposed): sets from the hibr-apps
+  catalogue, signed by Blit's release key, in a root-owned store, imported
+  through each display's connection; the Blit Glyphs pane is its read-only
+  first phase.
 
 ### 5. Programs in windows (ADR 0228, ADR 0229)
 
@@ -84,9 +112,13 @@ already be fixed.
   takes pixel-sized placements (0.3.127); Hibr's sub-window views follow.
 - **A dropped file Firefox takes but doesn't open** (#161).
 - **Phase 3: full screen** scanned out directly (#174).
-- ADR 0229's remaining rows, each its own change: HiDPI output scale (outputs
-  say scale 1; no fractional scale, #170), idle inhibit (#171), portals
-  (#172), touch and tablets (#173).
+- **HiDPI, what is left** (ADR 0242, #170): X's own scale (`WINDOW
+  xscale`, XSETTINGS and `Xft.dpi`; X is told 1 today), the filtered
+  (bilinear) shrink of a picture drawn smaller than its source, each
+  display's physical size (`physical_mm`), and real programs seen at 150%
+  and 200%.
+- ADR 0229's remaining rows, each its own change: portals (#172), touch and
+  tablets (#173).
 
 ### 6. Housekeeping
 
@@ -106,9 +138,17 @@ Done: reproducible packages, releases built in the Debian 13 environment
 (0.3.80), an install-and-update rehearsal with real dpkg
 (`update_pair_gate`, 0.3.97), a security review, and a rehearsed rollback
 and recovery (`rollback_recovery_gate`), both in
-[the November 2026 security review](security-review-2026-11.md). Still to
-do: fixing the review's findings (each written as a ticket there), and an
-automatic rollback when an update leaves no API to roll back through.
+[the November 2026 security review](security-review-2026-11.md); all the
+review's findings but SR-3 and SR-9 fixed in 0.3.130-0.3.135, among them
+signed releases
+(SR-2, 0.3.133); a deploy that rolls itself back when its smoke check fails
+(`update-live.sh --rollback-to`, 0.3.135). Still to do: SR-3 (membership of
+group `blit` reaches the helper's socket, the staging directory and the API
+token; since 0.3.133 it can no longer choose the package); SR-9, the API on
+the LAN over plain HTTP, stays the accepted LAN-testing exception until a
+release outside the owner's test environment; and an automatic rollback
+when an update leaves no API to roll back through (the helper keeping the
+previous pair, which needs the owner's agreement).
 
 ## Waiting for hardware
 

@@ -1,7 +1,7 @@
 .\" Blit server manual. Source of truth for what the binary reads is src/;
 .\" tools/tests/documentation_gate.rb fails if a BLIT_ name the code reads
 .\" or exports is missing here.
-.TH BLIT 8 "2026-11-03" "Blit @VERSION@" "System Administration"
+.TH BLIT 8 "2026-11-23" "Blit @VERSION@" "System Administration"
 .SH NAME
 blit, blit-server \- API-driven native KMS display and terminal server
 .SH SYNOPSIS
@@ -149,8 +149,14 @@ Token that authorises
 .BR "PUT /v1/control/update" ,
 which installs a new Blit package.
 It is separate from the API token: the upload sends it as
-.B X-Blit-Update-Token
-and needs no API token.
+.BR X-Blit-Update-Token ,
+and, when
+.B BLIT_AUTH_TOKEN
+is set, the API token as well (from 0.3.133).
+The update helper installs only a release signed with one of the keys in
+.IR /usr/lib/blit/release-keys ;
+see
+.BR blit-update-helper (8).
 Unset means updates through the API are refused.
 .TP
 .B BLIT_UPDATE_TOKEN_FILE
@@ -528,9 +534,16 @@ The server's version.
 The API port.
 .TP
 .B BLIT_API_TOKEN
-The API token, when there is one; not given to a desktop joining a
-signed-in user's session from the login screen (ADR 0127), whose
-environment Blit clears.
+The API token, when there is one, only for a program run as the server's
+own user, and not for a desktop joining the login's session (ADR 0127).
+A program run as another user (a session's
+.BR user ,
+or a desktop started from the login screen) gets no API token, and
+.BR BLIT_AUTH_TOKEN ,
+.B BLIT_UPDATE_TOKEN
+and
+.B BLIT_UPDATE_TOKEN_FILE
+are removed from its environment.
 .TP
 .BR BLIT_SESSION_ID ", " BLIT_SESSION_TOKEN ", " BLIT_SURFACE_ID
 The session's identity, and a token for its own requests.
@@ -632,8 +645,8 @@ Used by the kernel to release and reacquire the console when switching
 virtual terminals.
 .PP
 A separate watchdog process restores the console and kills the server if
-its main loop stops for 10 seconds (120 seconds while an API update
-installs), so systemd starts it again. It is running before the displays
+its main loop stops for 10 seconds, so systemd starts it again (an API
+update installs without stopping the loop). It is running before the displays
 are opened: a GPU start that hangs is ended the same way, and the next
 start composes on the CPU so the API comes up. A start that hung opening
 the display device or setting up the outputs makes the next start serve the
@@ -687,6 +700,10 @@ Packages uploaded for installation.
 .I /run/blit/update.sock
 The update helper's socket; see
 .BR blit-update-helper (8).
+.TP
+.I /usr/lib/blit/release-keys/
+The public halves of Blit's release keys: an update is installed only when
+its signature verifies under one of them.
 .TP
 .I /usr/lib/blit/fonts/
 Bundled fonts, glyph stack, emoji and Blit icons.

@@ -66,6 +66,8 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Kitty keyboard flag 16, report associated text (with flag 8): `CSI key ; mods ; text u`, the text the key types on the device's layout (Shift, AltGr, CapsLock; a keypad operator, or its digit with NumLock on) on a press or repeat; none on a release, a Ctrl/Alt/Super chord or a functional key. With flags 2 and 8 a desktop sees a lone Super tap and still every character typed | 0.3.89 | 0059 | Tested (`kitty_keyboard_gate`) |
 | Focus reports on input hand-over: the focused session (mode 1004) gets `CSI O` when Blit releases physical input for a VT switch, after the synthetic key and button releases, and `CSI I` when it takes input back | 0.3.61 | 0225 | Tested through the `BLIT_TEST_VT_SIGNALS` hook (`kitty_keyboard_gate`); the real VT path only in the QEMU gate |
 | Hyperlinks, notifications, window titles, clipboard writes | 0.1 | — | Tested |
+| Control strings read by character (OSC, DCS, APC, SOS, PM): a 0x9C inside a UTF-8 character is data, not ST; a C1 control acts the same raw or UTF-8 encoded; CAN and SUB end a string; an over-long title is cut at a character boundary (Gitea #178, #179, #181) | 0.3.128 | 0239 | Tested (`terminal_conformance`: the 13 C1 controls both ways, a title split across reads; fails on 0.3.127) |
+| `CSI n SP A`..`D` (ECMA-48 SR, GSM, GSS, FNT) are not cursor movements: ignored until implemented | 0.3.130 | — | Tested (`terminal_conformance`) |
 | Pointer shapes set by the program (OSC 22), or hidden | 0.2.8 | — | Tested |
 | Pointer lock for games and emulators: raw mouse movement, released on focus loss | 0.2.42 | 0198 | Used |
 | Rectangle copy (DECCRA), for solid window moves in Hibr | 0.1.589 | 0175 | Tested |
@@ -97,6 +99,7 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Feature | Since | ADR | Status |
 | --- | --- | --- | --- |
 | Text fonts: Hack, IBM 3270, JetBrains Mono NL, Fira Code, IBM Plex Mono | 0.2.36 | 0195 | Tested |
+| One font registry: `assets/fonts/fonts.source.json` declares every face Blit ships, with its id, role, file, pin and licence; the raster takes its faces from a header generated from it, names no face file itself, and `GET /v1/fonts` reports it (`registry`) | 0.3.130 | 0243 | Tested (`font_registry_gate`; every font gate's output unchanged byte for byte) |
 | Pixel font: Terminus 16 (Spleen 16 retired in 0.3.68 for `spleen`) | 0.1; renamed 0.2.35 | 0145, 0194, 0227 | Used |
 | Spleen at any size, 8–64 px: one font of the five Spleen 2.2.0 masters (6x12, 8x16, 12x24, 16x32, 32x64), the largest whose height divides the cell height drawn pixel-exact, else the largest below it scaled; `GET /v1/fonts` reports `master` and `master_fit` | 0.3.68 | 0227 | Tested (`spleen_master_gate`: listed once with its masters, none as a font of its own; the master at 12, 16, 24, 32, 48, 64 px crisp and 20, 28, 40 px scaled; at every crisp size the text in the screenshot holds only its two colours, and has in-between coverage when scaled; a saved `blit-spleen16` falls back to the boot font; `outline_catalogue_gate`, `custom_icon_gate`: every Nerd icon and Blit glyph through the stack at 8–64 px) |
 | Add your own monospaced TTF/OTF to `/usr/local/lib/blit/fonts/text`: it appears without a restart | 0.2.36 | 0195 | Tested |
@@ -108,13 +111,12 @@ The complete list of escape sequences is in the [terminal reference](terminal.md
 | Arabic with shaping, positioned marks and Arabic-Indic digits (cell by cell in Blit Arabic Modern until ADR 0243; as words since, the row below) | 0.1.588 | 0174 | Tested |
 | Arabic shaped as words, as a browser does: each run of Hibr's cells is one word in Noto Naskh Arabic, joined, with its tashkeel, drawn into exactly the cells it was given, on the CPU and the GPU, outline and pixel fonts alike; the one Arabic path since ADR 0243 (no `arabic` setting), a run the face cannot shape drawn cell by cell from the glyph stack | 0.3.129 | 0241, 0243 | Tested (`arabic_word_text_gate`, `arabic_word_slice_gate`, `arabic_word_view_gate`, `arabic_backend_gate`, `gles_compose_gate`, `arabic_screen_gate`, `modern_font_api_gate`) |
 | Bold keeps a shape that fills its cell (Hack's window buttons were D-shaped): the shape narrowed by a column before the overstrike; text bold as before | 0.3.129 | 0240 | Tested (`bold_shape_gate`) |
-| A program keeping the screen awake (a video: `zwp_idle_inhibit_manager_v1`) tells the desktop, `WINDOW inhibit <id> on|off`, for its saver to honour | 0.3.130 | 0229 | Tested (`compositor_gate` inhibit part, `compositor_wire_unit`) |
 | Blit's own colour icons: Wi-Fi, battery, volume, power, pen, telephones, the hui badge | 0.1.588–0.2.45 | 0172, 0196, 0197 | Used |
 | File-manager icons: 63 kinds, folders in four colourways | 0.3.4–0.3.9 | 0201 | Used |
 | Retro Mac-style window chrome glyph sets, Chalk (one colour) and Slate (the cell's own colours since 0.3.39), one per part (title bar, frame, dialog, buttons) so they mix; SGR 51 framed labels and titles | 0.3.36–0.3.39 | 0210, 0211 | Tested |
 | Drop shadow under any cell (SGR 66/67), in the cell's underline colour or foreground | 0.3.39 | 0211 | Tested |
 | Icon catalogue for applications (`GET /v1/fonts/icons`) | 0.1.588 | 0172 | Used |
-| Blit's icons and cell geometry at U+101000-U+101494, out of the range the Glyph Protocol reserved for programs' glyphs (U+100000-U+1003FF): the whole set moved up by 0x1000, ids and catalogue shape unchanged; the old U+100000-U+100494 still draws the same glyphs during the transition (`deprecated_range` in `GET /v1/fonts/icons`) until a later release drops it | 0.3.131 | 0243 | Tested (`icon_transition_gate`) |
+| Blit's icons and cell geometry at U+101000-U+101494, out of the range the Glyph Protocol reserved for programs' glyphs (U+100000-U+1003FF): the whole set moved up by 0x1000, ids and catalogue shape unchanged; the old U+100000-U+100494 still draws the same glyphs during the transition (`deprecated_range` in `GET /v1/fonts/icons`) until a later release drops it. Glyphs added since go on from U+101495 (sliders, scroll bars) | 0.3.131 | 0243 | Tested (`icon_transition_gate`) |
 | Window frame with its line on the outer edge: one frame set (five cells) and the title bar's end cells, Chalk and Slate, whose stripes run into them; the old frame glyphs and `stripe-first`/`-last` are deprecated in the catalogue (`deprecated`, `replaced_by`) and still drawn | 0.3.41 | 0214 | Tested |
 | Pressed title-bar boxes and a grow box: close, shade and zoom pressed (also hover), and the window's resize corner, normal and pressed, Chalk and Slate (10 glyphs, U+1012BB-1012C4) | 0.3.47 | 0219 | Tested |
 | Inactive title-bar end cells: four plain title-end glyphs (the outer line, top line and rule, Slate's bevel, no stripes), Chalk and Slate, for the inactive bar beside the plain `title` cell | 0.3.44 | 0214 | Tested |
@@ -164,6 +166,9 @@ The [font reference](font-reference.md) lists every glyph and icon codepoint.
 | A dropped file reaches a program that reads only when an event comes (mpv): the compositor relays the read and ends the drag (`leave`) once the data is in the program's pipe; mpv no longer aborts on a second drop | 0.3.116 | 0229 | Tested (`compositor_gate` lazy-reader drop: two drops taken at once; fails on 0.3.115; mpv 0.40 opened two dropped files in a row) |
 | Programs that crop or scale (wp_viewporter, buffer scale) are shown that way: `WINDOW view` tells the desktop the buffer rectangle and the size, and input, subsurfaces and popups use the shown size -- mpv's video subsurface, HiDPI and scaled programs, Xwayland's resolution emulation; drag icons cropped and scaled too | 0.3.124 | 0228 | Tested (`compositor_gate` viewport part: crop+scale, buffer scale 2, back to pixels, a scaled subsurface placed at its shown size and the pointer reaching its scaled part; scaled drag icons, shm and dmabuf; with ASan/UBSan). Hibr draws it from its side (Gitea #159) |
 | `wp_viewporter` for programs: mpv (and other programs that need it) runs its own Wayland video output instead of its slow SDL fallback, and takes dropped files; a viewport its buffer's size is shown as is, one that would crop or scale is shown unscaled and said once | 0.3.115 | 0228 | Tested (`compositor_gate` viewport part with ASan/UBSan; real mpv runs vo/gpu and opened a dropped file) |
+| A program keeping the screen awake (a video: `zwp_idle_inhibit_manager_v1`) tells a desktop that offers `inhibit=1`, `WINDOW inhibit <id> on|off` while one of its windows is visible, again after a reconnect, for its saver to honour (Gitea #171) | 0.3.130 | 0229 | Tested (`compositor_gate` inhibit part, `compositor_wire_unit`) |
+| A program scale per display (HiDPI, Gitea #170): the desktop's layout gives a display a scale, 100-400% in steps of 25 (`WINDOW layout`'s seventh word; Hibr's Program Scale row); Wayland programs there are told the whole-number scale at or above it, a logical size, `wp_fractional_scale_v1` and the preferred buffer scale, and are sized and placed in its units, while every line to the desktop stays in desktop pixels; a scale that changes under a shown window (in place, or a move to a display of another scale) takes effect at the program's commit that acknowledges it, so an old frame never jumps. X programs are told 1 and real pixels: X's own scale, the filtered shrink of a picture drawn smaller than its source and each display's physical size are later steps of the ADR | 0.3.130 | 0242, 0229 | Tested (`compositor_gate` scale parts, steps 1-3; `xwayland_gate` scale200: X unchanged) |
+| A game that draws full screen in an override-redirect X window (no window manager manages it) shows as a window of its own: one covering a display or the whole X screen is `WINDOW new <id> 0`, client decor, full screen asked, with its own input route; any other stays a popup of its window, and a parentless small one stays hidden (Gitea #175). One already mapped when the compositor restarts is not adopted | 0.3.129 | 0228 | Tested (`xwayland_gate`: shown, full screen asked, a key and a click; fails on 0.3.128); not yet seen live with a game |
 | Gamepads: discovery, dead zone, inverted axes | 0.1.454 | 0013 | Hardware pending (a gamepad) |
 | Ctrl+Alt+Fn switches virtual console; the console is restored if Blit stops | 0.1.587 | 0170 | Used |
 | Ctrl+Alt+Backspace stops Blit; can be changed or turned off | 0.1.461 | — | Used |
@@ -206,7 +211,8 @@ Per pane, saved with the settings, changed live from the Blit Effects pane.
 | Signing in hands the session to the user, with their identity | 0.1.538 | 0125 | Used |
 | One Hibr desktop, joined by other displays as independent viewports | 0.1.540 | 0127 | Used |
 | Other displays started and placed from saved settings | 0.1.542 | 0128 | Used |
-| Control Panel panes **Blit**, **Blit Mouse**, **Blit Keyboard** and **Blit Effects** (shipped with Hibr's apps): zoom and effect sliders, the panel's switches, restart after update, the keyboard list | pane 0.1.0–0.1.37 | — | Used |
+| Control Panel panes **Blit**, **Blit Mouse**, **Blit Keyboard** and **Blit Effects** (shipped with Hibr's apps): zoom and effect sliders, the panel's switches, restart after update, the keyboard list | pane 0.1.0–0.1.40 | — | Used |
+| The **Blit Glyphs** pane (Hibr's apps, `blitglyphs`): Blit's text fonts, the faces it ships by role, its glyph sets a page at a time with each glyph drawn, and a set/name lookup; read-only, through the Blit pane's saved connection, saying so to a Blit older than 0.3.134 | pane 0.1.0 | 0245 | Tested (hibr-apps' `blit_glyphs_gate` against a built server and 0.3.133) |
 | Restart Blit and the Ctrl+Alt+Backspace switch from the Control Panel | pane 0.1.19 | — | Used |
 
 [Hibr integration](integration-hibr.md) explains the contract.
@@ -214,14 +220,14 @@ Per pane, saved with the settings, changed live from the Blit Effects pane.
 ## API
 
 HTTP and WebSocket, described in full by the
-[OpenAPI document](../openapi/blit-0.1.yaml) (54 paths) and the
+[OpenAPI document](../openapi/blit-0.1.yaml) (57 paths) and the
 [API guide](api.md).
 
 | Group | Endpoints |
 | --- | --- |
 | Identity | `/v1/version`, `/v1/server` |
 | Hardware | `/v1/graphics`, `/v1/displays`, `/v1/audio`, `/v1/audio/cards` |
-| Layout and fonts | `/v1/topology`, `/v1/fonts`, `/v1/fonts/icons` |
+| Layout and fonts | `/v1/topology`, `/v1/fonts`, `/v1/fonts/icons`, `/v1/fonts/sets` and a set's names |
 | Settings | `/v1/settings` — one saved document, protected by revision |
 | Sessions | `/v1/terminal-sessions` and their `input`, `graphics`, `output-capture`, `hibr-owner` |
 | Surfaces | `/v1/surfaces/{id}/cells`, `summary`, `scrollback`; `/v1/frames` |
@@ -240,10 +246,11 @@ Errors are `application/problem+json` with stable codes.
 | --- | --- | --- | --- |
 | Bearer token on every request; generated at install | 0.1 | 0065 | Used |
 | Without a token, listens on 127.0.0.1 only, and refuses the network unless told otherwise | 0.1 | 0065 | Used |
-| Separate token for installing updates | 0.1 | 0008 | Used |
+| Separate token for installing updates; since 0.3.133 an upload to a server with an API token needs the bearer token as well (security review SR-2) | 0.1; bearer 0.3.133 | 0008 | Used (`update_bearer_gate`) |
 | Allow-list of the commands sessions may run | 0.1 | 0065 | Tested |
 | Unprivileged profile: run as user `blit` with a systemd drop-in | 0.1 | 0065 | Tested |
-| Every session child gets `BLIT_API_TOKEN` (ADR 0055), except a login manager's in a Hibr join; a client sets it empty in `environment` to opt a child out. Native child shells do not inherit the optional API provider (ADR 0168) | 0.1.584 | 0055, 0168 | Tested (`network_auth_gate.sh`, `native_child_provider_gate.rb`) |
+| The November 2026 security review's server fixes (`docs/security-review-2026-11.md`): a frame edit must name its image's size (SR-1), XTGETTCAP echoes nothing (SR-4), CSI numbers saturate (SR-5), PTY masters are close-on-exec (SR-7) -- 0.3.130; `GET /v1/login` always whole JSON (SR-6), tokens compared in constant time (SR-11), a huge CHT count bounded (SR-16), HTTP headers read from the header block only and Transfer-Encoding refused (SR-19), with no token a foreign `Origin`, a non-loopback `Host` or a non-JSON body refused (SR-22) -- 0.3.132; unauthenticated connections bounded without dropping a local request while a slot is free (SR-17), JSON members read at their own level (SR-20), OSC 52 kept only as valid base64 and the version withheld before authorization (SR-23) -- 0.3.135. Open: SR-3 (group `blit`); SR-9 is the accepted LAN-testing exception | 0.3.130-0.3.135 | — | Tested (`terminal_conformance`, `token_compare_gate`, `http_header_gate`, `http_origin_gate`, `http_slots_gate`, `json_member_depth_gate`, `frame_descriptor_gate`, `login_manager_gate`) |
+| A session child run as the server's own user gets `BLIT_API_TOKEN` (ADR 0055), except a login manager's in a Hibr join; a client sets it empty in `environment` to opt a child out. A child run as another user (`user`, or a login's desktop) gets none of the server's secrets: no `BLIT_API_TOKEN`, and `BLIT_AUTH_TOKEN`, `BLIT_UPDATE_TOKEN` and `BLIT_UPDATE_TOKEN_FILE` unset before the drop (security review SR-8, 0.3.135). Native child shells do not inherit the optional API provider (ADR 0168) | 0.1.584; SR-8 0.3.135 | 0055, 0168 | Tested (`network_auth_gate.sh`, `native_child_provider_gate.rb`, `session_user_secrets_gate`) |
 
 ## Updates and packaging
 
@@ -253,6 +260,9 @@ Errors are `application/problem+json` with stable codes.
 | An API update installs blit and blit-compositor together, at one version, in one `dpkg --install`; the helper refuses blit alone where blit-compositor is installed, never adds blit-compositor where it is not, accepts only files from its staging directory, and removes them after answering (`X-Blit-Packages`) | 0.3.97 | 0232 | Tested (`update_pair_gate`: real helper and dpkg, nine cases (sixteen from 0.3.133); `update_restart_gate`: the split upload; `update_install_live_gate`: the server serves throughout an install) |
 | Only a signed release is installed through the API: releases are signed with a Blit Ed25519 key (`tools/release/keygen`, `tools/release/sign-release.sh`; Monocypher 4.0.3, pinned), `blit` installs the public keys in `/usr/lib/blit/release-keys`, and the helper verifies the signature (`X-Blit-Signature`) over each package's Version and SHA-256 before installing, refusing anything unsigned, signed by another key or for other packages, and any `blit` older than 0.3.133; keys rotate by adding the next one in a release and revoke by removing one (security review SR-2) | 0.3.133 | 0232 | Tested (`release_signature_gate`: RFC 8032 vectors and refusals, `blit-sign`, the helper's refusals; a scratch-root lab of the bootstrap and the server-to-helper chain). `update_pair_gate`'s seven signature cases and `package_artifact_gate`'s key checks first run in the 0.3.133 release build |
 | Settings, devices and the shutdown chord survive updates | 0.1.451 | 0067 | Used |
+| An install no longer blocks the server: the helper takes its own copy of each package (SR-10), the server waits for it from its main loop and answers 409 `update_installing` meanwhile (SR-12), dpkg is bounded at 600 s and a failure reports dpkg's error (SR-21); `blit` Breaks every newer `blit-compositor`, so a rollback to 0.3.132 or later cannot leave the pair split (SR-13); a retired package (`blit-gamescope`, `steamer`) is replaced, not a block on every update (Conflicts and Replaces, Gitea #209) | 0.3.132 | 0232 | Tested (`update_install_live_gate`; `update_pair_gate` and `rollback_recovery_gate` in the release build) |
+| `tools/deploy/update-live.sh --rollback-to <the previous blit .deb>`: the previous signed pair, its `.sig` and its manifest checked before anything is sent; when the smoke check after the update fails, that pair is installed again and the box held to its state before the update (exit 3; exit 4 when the rollback fails too, 2 when refused before sending). The smoke check passes a box at least as it was (Gitea #206, #207) | 0.3.135 | 0232 | Tested (`rollback_recovery_gate` smoke-fails and smoke-rollback, `update_live_rollback_gate`); used for every deploy since 0.3.135, none yet needing the rollback |
+| Packages declare the library versions their binaries need: dpkg-shlibdeps' floors merged with the build minimums (a release built on Debian 13 needs glibc 2.38); `/etc/blit/blit.env`'s advice for a host with no desktop is now one an upgrade keeps (`BLIT_EXPECT_DESKTOP=0`, not removing the line) (Gitea #165, #180) | 0.3.128 | — | Tested (`package_artifact_gate` checks the glibc floor; `update_pair_gate` keeps an operator's `BLIT_EXPECT_DESKTOP=0`) |
 | Restart in place through the API, without a reboot | 0.1.451 | — | Used |
 | After an `apt upgrade`, Blit restarts itself at the login screen when nobody is signed in (or only reports it: `server.restart_after_update`) | 0.3.27 | 0205 | Used |
 | The running Hibr's release and module ABI are checked again whenever Hibr is upgraded underneath Blit | 0.3.32 | 0094 | Used |
@@ -302,9 +312,11 @@ Gone on purpose, so nothing should rely on them:
   owner's decision: the bridge that showed games and Steam in a window
   through a headless gamescope, its package, the `INPUT eis` route to a
   compositor's EIS socket (libei, loaded at run time) and, with it,
-  `frames.input`'s `backend` and `region`. The `blit` package Breaks
-  `blit-gamescope` and `steamer` (the Steam launcher app, retired with
-  it), so an upgrade removes both. Programs in windows go through
+  `frames.input`'s `backend` and `region`. The `blit` package Conflicts
+  with and Replaces `blit-gamescope` and `steamer` (the Steam launcher app,
+  retired with it; Breaks until 0.3.132, Gitea #209), so an API update or
+  `apt full-upgrade` removes both; `apt upgrade` holds `blit` back while
+  they are installed. Programs in windows go through
   `blit-compositor` and its `INPUT sock` routes; Steam and other X11
   programs run under Xwayland since 0.3.78 (ADR 0228 phase 2).
 - **SDL renderer** (0.2.22, ADR 0184), and with it presentation trials,

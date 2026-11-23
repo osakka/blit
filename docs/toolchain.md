@@ -98,8 +98,9 @@ server|compositor` carries its include directories, `--libs` its `-lm`,
 `--ime-sources` its sources, and `--sources server` the server's sources
 besides `src/blit_server.c` (with hibr-ime's), for the build and every
 gate that compiles the server itself. To get it:
-`git clone --branch v<version> https://git.home.arpa/itdlabs/hibr-ime.git build/hibr-ime-<version>`
-(an internal host today; a public source is Gitea #177).
+`git clone --branch v<version> https://git.uk.home.arpa/itdlabs/hibr-ime.git build/hibr-ime-<version>`
+(the internal forge, which `git.home.arpa` also names; a public source is
+Gitea #177).
 
 **tcc compiles, the system linker links** (from 0.3.87): each source is
 compiled by `tcc -c` and every output -- the programs and the Hibr adapter
@@ -147,16 +148,30 @@ a container (an unprivileged LXC host cannot mount `/proc` for it), it runs
 podman through `sudo -n`.
 
 `tools/release/build-release.sh OUTDIR`, with `BLIT_HIBR_ROOT` naming the
-Hibr tree of `packaging/HIBR_VERSION` (both inside the checkout), builds a
-release there: the server, the update helper and the compositor;
+Hibr tree of `packaging/HIBR_VERSION` (both inside the checkout), first
+checks the release signing key (`tools/release/sign-release.sh --check`),
+then builds a release there: the server, the update helper and the
+compositor;
 `compositor_gate` and `xwayland_gate`, where a skip is a failure; the
 packages into OUTDIR; `releases/<version>.yaml`; and
 the packaging suite (`package_artifact_gate`, `update_restart_gate`), then
 `update_pair_gate.sh` as root in the environment (a real `dpkg --install`
 of the pair, ADR 0232), then `rollback_recovery_gate.sh` the same way (the
-rollback and recovery rehearsal of Gitea #112). The host's own Debian 12 cannot build
-`blit-compositor` (wayland-protocols 1.31, Xwayland 22.1); the environment
-is what lets this host release without another machine.
+rollback and recovery rehearsal of Gitea #112); and last, on the host and
+only after every gate has passed, signs the release
+(`blit-release_<version>-1_amd64.sig` beside the packages; the key never
+enters the environment; see the [development workflow](development-workflow.md),
+"Release signing"). It rebuilds `build/blit/` inside the environment, so
+the host's own binaries are built again before host gates. The host's own
+Debian 12 cannot build `blit-compositor` (wayland-protocols 1.31, Xwayland
+22.1); the environment is what lets this host release without another
+machine.
+
+The packages' library floors come from the system they are built on:
+`packaging/build-deb.sh` merges `dpkg-shlibdeps`' floors with the minimums
+above (Gitea #165), so a release, built on Debian 13, needs glibc 2.38
+(`libc6 (>= 2.38)`) and runs on Debian 13, Ubuntu 24.04 or newer;
+`package_artifact_gate` checks the glibc floor.
 
 ## Font dependency
 
