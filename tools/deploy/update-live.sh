@@ -212,7 +212,7 @@ print("%d %d %d %d %d" % (server["display_backend"]["ready"], server["display_co
 
 before=$(smoke_state) || {
     echo "update refused: could not read the box's state (server, topology, runtime) for the smoke check" >&2
-    exit 1
+    exit 2   # nothing was sent (Gitea #211)
 }
 # The state the smoke check holds the box to: as it was found, unless the
 # operator names the state recorded before an earlier, failed update.

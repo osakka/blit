@@ -157,7 +157,7 @@ up() {
 }
 # live [ARGS...] -> update-live.sh's exit status in $status, output in live.log
 live() {
-    if env BLIT_BASE_URL="$base" BLIT_AUTH_TOKEN="$token" BLIT_UPDATE_TOKEN="$update_token" \
+    if env BLIT_BASE_URL="$base" BLIT_AUTH_TOKEN="${live_token:-$token}" BLIT_UPDATE_TOKEN="$update_token" \
             BLIT_SMOKE_SECONDS=3 sh "$tree/tools/deploy/update-live.sh" "$@" >"$work/live.log" 2>&1; then
         status=0
     else
@@ -253,9 +253,11 @@ if want refusals; then
     expect floor 2 'older than 0.3.133'
     live --rollback-to "$(deb 0.3.201)" 127.0.0.1 "$(deb 0.3.202)"
     expect not-live 2 'names Blit 0.3.201, but the box runs 0.3.200'
+    live_token=wrong-token live 127.0.0.1 "$(deb 0.3.202)"
+    expect unreadable 2 "could not read the box's state"
     [ ! -s "$work/puts" ] || fail "refusals: something was uploaded"
-    cases=$((cases + 3))
-    echo "case no-sig, floor, not-live: refused, exit 2, nothing sent"
+    cases=$((cases + 4))
+    echo "case no-sig, floor, not-live, unreadable: refused, exit 2, nothing sent"
 fi
 
 echo "UPDATE_LIVE_ROLLBACK_PASS cases=$cases"
