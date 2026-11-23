@@ -87,11 +87,12 @@ reports. Registering a new owner token is a change to this table.
 | `emoji` | `emoji` | Unicode's `emoji-test.txt`, entries marked `fully-qualified` or `component` | section 3.3 | portable | the Emoji version, `18.0` |
 | `blit` | `blit` | Blit's icon catalogue, its `icons`, `text_glyphs` and `cell_geometry` entries, and the retired names Blit's registry carries | the entry's `id`, unchanged | terminal-local | the catalogue's revision (SHA-256 of the packaged file) |
 
-Blit's catalogue has 850 ids: 554 icons, 38 text glyphs and 258 cell
-geometry pieces (window chrome, controls, keys and the player's glyphs).
+Blit's catalogue has 898 ids: 554 icons, 38 text glyphs and 306 cell
+geometry pieces (window chrome, controls, keys, the player's glyphs and
+the scroll bars).
 They share one namespace (every id is unique across the three lists),
 Hibr already names all of them by id, and all of them are drawn, so all
-850 are in the one set `blit`. They have 850 distinct codepoints, so the
+898 are in the one set `blit`. They have 898 distinct codepoints, so the
 set has no aliases. One icon,
 `hibr-pen`, also has a monochrome text form at U+270E (its `text_alias`);
 a lookup answers its own codepoint, U+101001, and this version of the
@@ -473,8 +474,8 @@ ESC _ 25a1 ; n ; list=sets ; sets=<entry>[,<entry>]* ; more=<0|1> ESC \
 
 `entry = set-id ":" scope ":" count ":" version`, where scope is `p`
 (portable) or `t` (terminal-local) and count is the number of names
-listed for the set (deprecated names are not counted: Blit's 850 ids
-list as 828). Sets are in bytewise order of id; `after` starts
+listed for the set (deprecated names are not counted: Blit's 898 ids
+list as 876). Sets are in bytewise order of id; `after` starts
 the page after that id.
 
 **Names in a set:**
@@ -498,7 +499,7 @@ Example, the first page of the sets on Blit:
 
 ```
 ESC _ 25a1 ; n ; list=sets ESC \
-ESC _ 25a1 ; n ; list=sets ; sets=blit:t:828:<catalogue revision>,emoji:p:3972:18.0,nerd-cod:p:438:3.4.0,... ; more=0 ESC \
+ESC _ 25a1 ; n ; list=sets ; sets=blit:t:876:<catalogue revision>,emoji:p:3972:18.0,nerd-cod:p:438:3.4.0,... ; more=0 ESC \
 ```
 
 ### 7.5 Errors

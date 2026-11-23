@@ -176,3 +176,89 @@ geometry is drawn by the raster, not the font.
   disc and the groove's one solid square over the channel; each piece's
   centre line within half a pixel of the current style's; U+1014A9 draws
   nothing. Built without the styles' hook it fails.
+
+## Amended 2026-11-23 (0.3.137): scroll bar styles
+
+The owner approved three scroll bar styles (2026-11-23, from a preview
+drawn as Blit draws them at the owner's 12x24 cell, composed cell for cell
+as Hibr's `dt_scrollbar` and `dt_hscrollbar` compose a bar), for a Scroll
+Bar Style choice in Hibr's Control Panel beside the Slider Style. They are
+cell geometry like the slider styles: coverage in the cell's foreground,
+sized from the cell, no pens (`src/blit_scrollbar_glyphs.h`, drawn through
+`blit_chrome_glyph`/`blit_chrome_draw`), part `scrollbar`, `background`
+panel, `foreground` ink, `line` none.
+
+- **Classic** (U+1014A9-1014B8): a track as thick as the cell is wide,
+  two edge lines and a fine checker between them, closed by a solid line
+  at the caps; the thumb a hollow box on the edges, with three grip bars
+  across its middle where they fit (always from a 12 px wide cell). Whole
+  pixels, no antialiasing: it stays crisp at 8x16. The checker carries on
+  across cells at any length: its runs along the bar are an even number a
+  cell, so its phase turns over at every seam. They are unit-long wherever
+  the cell is a whole number of unit pairs long (8x16, 12x24 and 20x40,
+  as previewed, are unchanged). A checker of identical cells cannot be
+  perfect at any other length, so there the odd pixels go to runs toward
+  the cell's middle: at an odd length with a unit of 1 (5x9, 11x22, and
+  the vertical bar at every odd height) one run in the middle of each cell
+  is a pixel longer, and the seams look like any other step.
+- **Modern** (U+1014B9-1014C8): a capsule thumb about half the cell's
+  width (an even number of pixels, 6 at 12), round ends antialiased, on a
+  faint track (28% coverage) of the same band.
+- **Simple** (U+1014C9-1014D8): the track is the light box-drawing line,
+  **pixel for pixel Blit's U+2500 (horizontal) and U+2502 (vertical)**, so
+  a bar drawn with it looks as one drawn with box drawing, the look Hibr
+  has today; the thumb a solid rectangle centred on it.
+
+Why three: classic is the crisp, period look that matches Chalk and Slate;
+modern is the quiet overlay look most desktops use now; simple keeps
+today's unicode bar and only adds a proper thumb and ends.
+
+A style is a base codepoint and the same offsets, horizontal then
+vertical, so a program swaps the base:
+
+| style | horizontal base | vertical base |
+| --- | --- | --- |
+| classic | U+1014A9 | U+1014B1 |
+| modern | U+1014B9 | U+1014C1 |
+| simple | U+1014C9 | U+1014D1 |
+
+| offset | horizontal | vertical |
+| --- | --- | --- |
+| +0 | `cap-left` | `cap-top` |
+| +1 | `track` | `track` |
+| +2 | `thumb` (one cell) | `thumb` |
+| +3 | `thumb-start` (a long thumb's left end) | `thumb-start` (its top) |
+| +4 | `thumb-mid` | `thumb-mid` |
+| +5 | `thumb-grip` (a long thumb's middle cell) | `thumb-grip` |
+| +6 | `thumb-end` (its right end) | `thumb-end` (its bottom) |
+| +7 | `cap-right` | `cap-bottom` |
+
+The ids are `scrollbar-<style>-<h|v>-<piece>` (for example
+`scrollbar-classic-v-thumb`, `scrollbar-simple-h-cap-right`). A bar is the
+track in every cell, a cap in the first and the last, and the thumb over
+the cells where the view is: `thumb` in one cell, or `thumb-start`,
+`thumb-mid` (with `thumb-grip` in the middle cell) and `thumb-end` for a
+thumb sized to the view. **The thumb's cell holds the thumb alone**, never
+a piece of track: a program pens the thumb in a colour of its own (Hibr
+pens the track idle and the thumb active), and the thumb takes an end's
+cell at the top and the bottom of its travel. So a cap ends where the
+thumb's end does in that cell. A horizontal bar is as thick as a vertical
+one (both from the cell's width), on the row's middle.
+
+The styles take the next free codepoints after the slider styles; the next
+free is U+1014D9 (the slider amendment's U+1014A9 check moved there). They
+have no old codepoint (ADR 0243). The icon font does not change.
+
+- `scrollbar_glyph_gate` holds the 48 at every cell size from 8 to 64 px
+  tall and 12x24, through the raster: coverage, never a fallback, with
+  ink; the track and caps join edge to edge (classic: the edges equal and
+  the checker's phase turning over at every seam, no run across a seam
+  longer or shorter than one inside a cell, its first square anchored);
+  a cap's first (last) inked line is the thumb's; the thumb alone (the
+  classic box hollow but for its grip bars, the modern capsule in the
+  band and clear of the cell's ends, the simple one solid rectangle);
+  the long thumb's pieces join; simple's track equals U+2500/U+2502; a
+  horizontal bar as thick as a vertical one; U+1014D9 draws nothing.
+  Built without the hook it fails, and it catches a checker phase off by
+  one, a gap in a cap, a thumb with track in it, a short long-thumb piece
+  and a simple track a pixel off box drawing.

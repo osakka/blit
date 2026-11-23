@@ -95,7 +95,7 @@ raise 'cell_geometry entries are not typed' unless
   glyph.fetch('additionalProperties') == false &&
   glyph.dig('properties','part','enum') ==
     %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule
-       lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader key] &&
+       lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader key scrollbar] &&
   glyph.dig('properties','background','enum') == %w[bar panel wallpaper dialog-face button-face] &&
   glyph.dig('properties','foreground','enum') == %w[ink track bar] &&
   glyph.dig('properties','line','enum') == %w[none highlight box-face dialog-face button-face knob shade] &&

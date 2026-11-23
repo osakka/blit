@@ -165,8 +165,13 @@ U+1013A1–1013D0 (two columns, frames 0-7), the key ends U+1013D1–1013D4
 by two rows (`<kind>-big-<f>-r<row>c<col>`). The slider styles follow, cell
 geometry as the sliders: the circle U+101495–10149E and the groove
 U+10149F–1014A8, each a slider's five pieces and a fader's in the
-`slider-*`/`fader-*` order (`slider-circle-*`, `fader-groove-*`).
-U+1014A9 is the next free codepoint.
+`slider-*`/`fader-*` order (`slider-circle-*`, `fader-groove-*`). The
+scroll bar styles follow (0.3.137), cell geometry with part `scrollbar`:
+classic U+1014A9–1014B8, modern U+1014B9–1014C8 and simple
+U+1014C9–1014D8, each a horizontal bar's eight pieces then a vertical
+bar's (`scrollbar-<style>-<h|v>-<piece>`: cap, track, thumb, thumb-start,
+thumb-mid, thumb-grip, thumb-end, cap). U+1014D9 is the next free
+codepoint.
 
 An icon wider than a cell carries `columns` and its `column`; one taller
 than a row (the big discs) also carries `rows` and its `row`, which the
@@ -183,9 +188,9 @@ schema (`CellGeometryGlyph`):
 
 | Field | Values and meaning |
 | --- | --- |
-| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners and the player's LCD, LED, slider and fader glyphs have neither this nor `set`. |
+| `pens` | `foreground`: drawn in the cell's foreground alone (Chalk). `cell`: drawn in its foreground, underline colour (SGR 58; white if unset) and the mean of foreground and background (Slate, the capsule). The bar corners, the player's LCD, LED, slider and fader glyphs and the scroll bars have neither this nor `set`. |
 | `set` | `chalk`, `slate-light` (the window glyphs; the id prefix and set keep the name from before Slate dark was retired), `slate` (Slate's controls), `capsule`, `frame` (the one frame set, drawn in the foreground alone like Chalk, ADR 0214)., `key` (a key's ends, ADR 0237). |
-| `part` | What the glyph is a piece of: `bar-corner`, `title-bar` (stripes, title, close, shade, zoom), `note-close`, `frame`, `dialog-border`, `button-cap`, `checkbox`, `switch`, `capsule`; the player glyphs (ADR 0237): `lcd-big-top` and `lcd-big-bottom` (a big LCD digit's two rows, two cells each), `lcd-digit` (a small LCD digit, two cells), `lcd-colon`, `led` (a level meter's LEDs), `slider`, `fader`, `key` (a key's ends). |
+| `part` | What the glyph is a piece of: `bar-corner`, `title-bar` (stripes, title, close, shade, zoom), `note-close`, `frame`, `dialog-border`, `button-cap`, `checkbox`, `switch`, `capsule`; the player glyphs (ADR 0237): `lcd-big-top` and `lcd-big-bottom` (a big LCD digit's two rows, two cells each), `lcd-digit` (a small LCD digit, two cells), `lcd-colon`, `led` (a level meter's LEDs), `slider`, `fader`, `key` (a key's ends); `scrollbar` (a scroll bar's track, caps and thumb, 0.3.137). |
 | `cells` | `{span, position}`: how many cells the whole piece spans (1 to 3), written side by side, and this glyph's place in it from 0. |
 | `background` | What the cell's background should be: `bar` (the title bar's colour), `panel` (what a control or a note sits on, and the window's face, which a frame cell's background is), `wallpaper` (the default background), `dialog-face`, `button-face`. |
 | `foreground` | `ink` (lines and outlines), `track` (the capsule's track, in the colour the application chooses), `bar` (the corners' fill: the bar's colour). |

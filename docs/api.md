@@ -2103,8 +2103,9 @@ Blit draws as cell geometry: the bar corners, the 70 window-chrome glyphs
 (ADR 0214), the 10 pressed-box and grow glyphs (ADR 0219), the 4
 minimise boxes (ADR 0222) and the 10 full-screen and sticky boxes
 (ADR 0224), the 105 player glyphs (LCD digits, LED meters, sliders and
-faders), the 4 key ends and the 20 pieces of the circle and groove
-slider styles (0.3.136) (ADR 0237). Each has `colour`; the window and
+faders), the 4 key ends, the 20 pieces of the circle and groove
+slider styles (0.3.136) and the 48 pieces of the classic, modern and
+simple scroll bar styles (0.3.137) (ADR 0237). Each has `colour`; the window and
 control glyphs and the keys also carry `set` (`chalk`, `slate-light`,
 `slate`, `capsule`, `frame` or `key`) and `pens` (`foreground`, or `cell`
 for Slate, the capsule and the keys, ADR 0211); the bar corners and the
@@ -2173,7 +2174,7 @@ GET /v1/fonts/sets/{set}/{name}          one name's record
 ```
 
 **The sets.** `blit` is Blit's own icon catalogue (its `icons`,
-`text_glyphs` and `cell_geometry` ids, one namespace; 850 ids, 828 listed:
+`text_glyphs` and `cell_geometry` ids, one namespace; 898 ids, 876 listed:
 the 22 deprecated ones are not), scope `terminal-local` (its codepoints are
 Blit's, and another terminal may draw something else there), version the
 SHA-256 of the catalogue as packaged -- `GET /v1/fonts/icons`' `revision`.
@@ -2190,7 +2191,7 @@ table they come from is not in the package.
 ```json
 {"sets": [
   {"id": "blit", "owner": "blit", "scope": "terminal-local",
-   "version": "<sha-256 of icons/catalogue.json>", "count": 828, "faces": ["blit-icons"]},
+   "version": "<sha-256 of icons/catalogue.json>", "count": 876, "faces": ["blit-icons"]},
   {"id": "nerd-cod", "owner": "nerd", "scope": "portable", "version": "3.4.0",
    "count": 438, "faces": ["symbols-nerd-font-mono"]},
   ...

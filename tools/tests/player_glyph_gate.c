@@ -19,7 +19,8 @@
    and shapes are written here, not read from their header, so a build
    without the styles fails a check rather than the compile):
    - each is coverage, never a fallback, has ink, and draws as the raster
-     does; U+1014A9, after them, draws nothing;
+     does; U+1014D9, after them and the scroll bar styles of 0.3.137
+     (U+1014A9-1014D8, scrollbar_glyph_gate), draws nothing;
    - the tracks join edge to edge: cap -> filled -> filled and track ->
      track -> cap meet across the cell boundary with the same profile;
    - the knob's cell holds the knob alone: the circle's ink lies in a disc
@@ -48,7 +49,7 @@ static int draw(uint32_t cp, int w, int h)
 /* The slider styles (0.3.136): a style's base, then a slider's five pieces
    and a fader's at base + 0..4 and base + 5..9. */
 #define STYLE_FIRST 0x101495U
-#define STYLE_NEXT_FREE 0x1014A9U
+#define STYLE_NEXT_FREE 0x1014D9U   /* past the scroll bar styles, U+1014A9-1014D8 */
 #define CURRENT_SLIDER (F + 95)
 #define CURRENT_FADER (F + 100)
 enum { CAP0, TRACK, FILLED, KNOB, CAP1 };
@@ -302,7 +303,7 @@ int main(int argc, char **argv)
                 CHECK(c0 >= 0 && (fader ? x0 <= c0 && x1 >= c1 : y0 <= c0 && y1 >= c1));
             }
         }
-        /* Nothing after the styles. */
+        /* Nothing after the styles (and the scroll bar styles after them). */
         {
             BlitRasterGlyph g;
             cp = STYLE_NEXT_FREE;

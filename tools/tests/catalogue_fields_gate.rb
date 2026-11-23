@@ -37,7 +37,7 @@ ROOT = File.expand_path('../..', __dir__)
 Dir.chdir(ROOT)
 
 PARTS = %w[bar-corner title-bar note-close frame dialog-border button-cap checkbox switch capsule
-           lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader key].freeze
+           lcd-big-top lcd-big-bottom lcd-digit lcd-colon led slider fader key scrollbar].freeze
 BACKGROUNDS = %w[bar panel wallpaper dialog-face button-face].freeze
 FOREGROUNDS = %w[ink track bar].freeze
 LINES = %w[none highlight box-face dialog-face button-face knob shade].freeze

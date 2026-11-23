@@ -2435,7 +2435,7 @@ components:
         part:
           type: string
           enum: [bar-corner, title-bar, note-close, frame, dialog-border, button-cap, checkbox, switch, capsule,
-                 lcd-big-top, lcd-big-bottom, lcd-digit, lcd-colon, led, slider, fader, key]
+                 lcd-big-top, lcd-big-bottom, lcd-digit, lcd-colon, led, slider, fader, key, scrollbar]
           description: What the glyph is a piece of.
         cells:
           type: object
@@ -2785,7 +2785,7 @@ components:
           minimum: 0
           description: >-
             The names the set lists: aliases included, deprecated and
-            retired names not (blit lists 828 of its 850 ids).
+            retired names not (blit lists 876 of its 898 ids).
         faces:
           type: array
           description: The registry faces that draw the set (registry ids).

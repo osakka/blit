@@ -873,5 +873,53 @@ Drawn by the shared raster at every cell size, edge to edge, so neighbouring cel
 | `fader-groove-track-filled` | `U+1014A6` | `"\udbc5\udca6"` | foreground | Fader, groove: the channel below the thumb, solid |
 | `fader-groove-knob` | `U+1014A7` | `"\udbc5\udca7"` | foreground | Fader, groove: the thumb, a square standing proud of the channel |
 | `fader-groove-cap-bottom` | `U+1014A8` | `"\udbc5\udca8"` | foreground | Fader, groove: the bottom end: the channel solid down to the thumb's bottom edge |
+| `scrollbar-classic-h-cap-left` | `U+1014A9` | `"\udbc5\udca9"` | foreground | Scroll bar, classic, horizontal: the left end: the checker track between its edges, closed by an edge line |
+| `scrollbar-classic-h-track` | `U+1014AA` | `"\udbc5\udcaa"` | foreground | Scroll bar, classic, horizontal: the track: a fine checker between two edge lines, the cell's width thick |
+| `scrollbar-classic-h-thumb` | `U+1014AB` | `"\udbc5\udcab"` | foreground | Scroll bar, classic, horizontal: the thumb in one cell: a hollow box on the edges, grip lines across its middle where they fit |
+| `scrollbar-classic-h-thumb-start` | `U+1014AC` | `"\udbc5\udcac"` | foreground | Scroll bar, classic, horizontal: a long thumb's left end: the box's left edge and its sides |
+| `scrollbar-classic-h-thumb-mid` | `U+1014AD` | `"\udbc5\udcad"` | foreground | Scroll bar, classic, horizontal: a long thumb's middle: the box's sides |
+| `scrollbar-classic-h-thumb-grip` | `U+1014AE` | `"\udbc5\udcae"` | foreground | Scroll bar, classic, horizontal: a long thumb's middle cell: the box's sides and three grip lines across |
+| `scrollbar-classic-h-thumb-end` | `U+1014AF` | `"\udbc5\udcaf"` | foreground | Scroll bar, classic, horizontal: a long thumb's right end: the box's right edge and its sides |
+| `scrollbar-classic-h-cap-right` | `U+1014B0` | `"\udbc5\udcb0"` | foreground | Scroll bar, classic, horizontal: the right end: the checker track between its edges, closed by an edge line |
+| `scrollbar-classic-v-cap-top` | `U+1014B1` | `"\udbc5\udcb1"` | foreground | Scroll bar, classic, vertical: the top end: the checker track between its edges, closed by an edge line |
+| `scrollbar-classic-v-track` | `U+1014B2` | `"\udbc5\udcb2"` | foreground | Scroll bar, classic, vertical: the track: a fine checker between two edge lines, the cell's width thick |
+| `scrollbar-classic-v-thumb` | `U+1014B3` | `"\udbc5\udcb3"` | foreground | Scroll bar, classic, vertical: the thumb in one cell: a hollow box on the edges, grip lines across its middle where they fit |
+| `scrollbar-classic-v-thumb-start` | `U+1014B4` | `"\udbc5\udcb4"` | foreground | Scroll bar, classic, vertical: a long thumb's top end: the box's top edge and its sides |
+| `scrollbar-classic-v-thumb-mid` | `U+1014B5` | `"\udbc5\udcb5"` | foreground | Scroll bar, classic, vertical: a long thumb's middle: the box's sides |
+| `scrollbar-classic-v-thumb-grip` | `U+1014B6` | `"\udbc5\udcb6"` | foreground | Scroll bar, classic, vertical: a long thumb's middle cell: the box's sides and three grip lines across |
+| `scrollbar-classic-v-thumb-end` | `U+1014B7` | `"\udbc5\udcb7"` | foreground | Scroll bar, classic, vertical: a long thumb's bottom end: the box's bottom edge and its sides |
+| `scrollbar-classic-v-cap-bottom` | `U+1014B8` | `"\udbc5\udcb8"` | foreground | Scroll bar, classic, vertical: the bottom end: the checker track between its edges, closed by an edge line |
+| `scrollbar-modern-h-cap-left` | `U+1014B9` | `"\udbc5\udcb9"` | foreground | Scroll bar, modern, horizontal: the left end: the faint track, rounded where the thumb ends |
+| `scrollbar-modern-h-track` | `U+1014BA` | `"\udbc5\udcba"` | foreground | Scroll bar, modern, horizontal: the track: a faint band half the cell's width |
+| `scrollbar-modern-h-thumb` | `U+1014BB` | `"\udbc5\udcbb"` | foreground | Scroll bar, modern, horizontal: the thumb in one cell: a capsule half the cell's width, round ends |
+| `scrollbar-modern-h-thumb-start` | `U+1014BC` | `"\udbc5\udcbc"` | foreground | Scroll bar, modern, horizontal: a long thumb's left end: the capsule's round left end |
+| `scrollbar-modern-h-thumb-mid` | `U+1014BD` | `"\udbc5\udcbd"` | foreground | Scroll bar, modern, horizontal: a long thumb's middle: the band, solid |
+| `scrollbar-modern-h-thumb-grip` | `U+1014BE` | `"\udbc5\udcbe"` | foreground | Scroll bar, modern, horizontal: a long thumb's middle cell: the band, solid |
+| `scrollbar-modern-h-thumb-end` | `U+1014BF` | `"\udbc5\udcbf"` | foreground | Scroll bar, modern, horizontal: a long thumb's right end: the capsule's round right end |
+| `scrollbar-modern-h-cap-right` | `U+1014C0` | `"\udbc5\udcc0"` | foreground | Scroll bar, modern, horizontal: the right end: the faint track, rounded where the thumb ends |
+| `scrollbar-modern-v-cap-top` | `U+1014C1` | `"\udbc5\udcc1"` | foreground | Scroll bar, modern, vertical: the top end: the faint track, rounded where the thumb ends |
+| `scrollbar-modern-v-track` | `U+1014C2` | `"\udbc5\udcc2"` | foreground | Scroll bar, modern, vertical: the track: a faint band half the cell's width |
+| `scrollbar-modern-v-thumb` | `U+1014C3` | `"\udbc5\udcc3"` | foreground | Scroll bar, modern, vertical: the thumb in one cell: a capsule half the cell's width, round ends |
+| `scrollbar-modern-v-thumb-start` | `U+1014C4` | `"\udbc5\udcc4"` | foreground | Scroll bar, modern, vertical: a long thumb's top end: the capsule's round top end |
+| `scrollbar-modern-v-thumb-mid` | `U+1014C5` | `"\udbc5\udcc5"` | foreground | Scroll bar, modern, vertical: a long thumb's middle: the band, solid |
+| `scrollbar-modern-v-thumb-grip` | `U+1014C6` | `"\udbc5\udcc6"` | foreground | Scroll bar, modern, vertical: a long thumb's middle cell: the band, solid |
+| `scrollbar-modern-v-thumb-end` | `U+1014C7` | `"\udbc5\udcc7"` | foreground | Scroll bar, modern, vertical: a long thumb's bottom end: the capsule's round bottom end |
+| `scrollbar-modern-v-cap-bottom` | `U+1014C8` | `"\udbc5\udcc8"` | foreground | Scroll bar, modern, vertical: the bottom end: the faint track, rounded where the thumb ends |
+| `scrollbar-simple-h-cap-left` | `U+1014C9` | `"\udbc5\udcc9"` | foreground | Scroll bar, simple, horizontal: the left end: the thin line, ending where the thumb ends |
+| `scrollbar-simple-h-track` | `U+1014CA` | `"\udbc5\udcca"` | foreground | Scroll bar, simple, horizontal: the track: the light box-drawing line |
+| `scrollbar-simple-h-thumb` | `U+1014CB` | `"\udbc5\udccb"` | foreground | Scroll bar, simple, horizontal: the thumb in one cell: a solid rectangle on the line |
+| `scrollbar-simple-h-thumb-start` | `U+1014CC` | `"\udbc5\udccc"` | foreground | Scroll bar, simple, horizontal: a long thumb's left end: the rectangle, square |
+| `scrollbar-simple-h-thumb-mid` | `U+1014CD` | `"\udbc5\udccd"` | foreground | Scroll bar, simple, horizontal: a long thumb's middle: the rectangle |
+| `scrollbar-simple-h-thumb-grip` | `U+1014CE` | `"\udbc5\udcce"` | foreground | Scroll bar, simple, horizontal: a long thumb's middle cell: the rectangle |
+| `scrollbar-simple-h-thumb-end` | `U+1014CF` | `"\udbc5\udccf"` | foreground | Scroll bar, simple, horizontal: a long thumb's right end: the rectangle, square |
+| `scrollbar-simple-h-cap-right` | `U+1014D0` | `"\udbc5\udcd0"` | foreground | Scroll bar, simple, horizontal: the right end: the thin line, ending where the thumb ends |
+| `scrollbar-simple-v-cap-top` | `U+1014D1` | `"\udbc5\udcd1"` | foreground | Scroll bar, simple, vertical: the top end: the thin line, ending where the thumb ends |
+| `scrollbar-simple-v-track` | `U+1014D2` | `"\udbc5\udcd2"` | foreground | Scroll bar, simple, vertical: the track: the light box-drawing line |
+| `scrollbar-simple-v-thumb` | `U+1014D3` | `"\udbc5\udcd3"` | foreground | Scroll bar, simple, vertical: the thumb in one cell: a solid rectangle on the line |
+| `scrollbar-simple-v-thumb-start` | `U+1014D4` | `"\udbc5\udcd4"` | foreground | Scroll bar, simple, vertical: a long thumb's top end: the rectangle, square |
+| `scrollbar-simple-v-thumb-mid` | `U+1014D5` | `"\udbc5\udcd5"` | foreground | Scroll bar, simple, vertical: a long thumb's middle: the rectangle |
+| `scrollbar-simple-v-thumb-grip` | `U+1014D6` | `"\udbc5\udcd6"` | foreground | Scroll bar, simple, vertical: a long thumb's middle cell: the rectangle |
+| `scrollbar-simple-v-thumb-end` | `U+1014D7` | `"\udbc5\udcd7"` | foreground | Scroll bar, simple, vertical: a long thumb's bottom end: the rectangle, square |
+| `scrollbar-simple-v-cap-bottom` | `U+1014D8` | `"\udbc5\udcd8"` | foreground | Scroll bar, simple, vertical: the bottom end: the thin line, ending where the thumb ends |
 
 [Production-raster specimen: text fonts, Blit icons, file icons, Nerd glyphs and emoji](../images/blit-fonts.png).

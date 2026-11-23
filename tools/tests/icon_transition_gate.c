@@ -15,9 +15,9 @@
      the new one pixel for pixel on each. (GPU against CPU is
      gles_compose_gate's.)
    - past the range: nothing after U+100494 maps, so U+100495 on draws
-     nothing of Blit's, never the slider styles placed from U+101495 on
-     (ADR 0237, 0.3.136); the range once ran to U+100495, one past the
-     last glyph that moved.
+     nothing of Blit's, never the slider or scroll bar styles placed
+     from U+101495 on (ADR 0237, 0.3.136 and 0.3.137); the range once ran
+     to U+100495, one past the last glyph that moved.
    argv[1] is the number of the catalogue's glyphs that moved (U+101000-
    U+101494); each must draw at its new codepoint. Built with BLIT_ICON_OLD_RANGE_DROPPED (no
    mapping) it must fail: icon_transition_gate.sh checks that it does. */
@@ -105,8 +105,9 @@ static int raster_check(int *planes)
 
 /* Past the old range: no codepoint maps, none is Blit's in the cell tests,
    and none draws a glyph of Blit's, though some of their old + 0x1000 do
-   (the slider styles at U+101495-1014A8). Returns how many were checked
-   through the raster. */
+   (the slider and scroll bar styles at U+101495-1014D8, which the raster
+   check covers: U+100495-1004D8). Returns how many were checked through
+   the raster. */
 static int past_check(void)
 {
     BlitRaster *r = open_raster();
@@ -117,7 +118,7 @@ static int past_check(void)
         if (blit_icon_scalar(old) != old || blit_icon_codepoint(old) || blit_chrome_colour(old) ||
             blit_chrome_glyph(old))
             FAIL("U+%04X, past the old range, is taken for Blit's\n", old);
-        if (old > OLD_LAST + 0x40) continue;
+        if (old > OLD_LAST + 0x44) continue;   /* to U+1004D8, the last style's old + 0x1000 */
         memset(&g, 0, sizeof(g));
         if (blit_raster_get(r, old, 1, BLIT_RASTER_ICON_COLOUR, &g) && !g.fallback)
             FAIL("U+%04X, past the old range, draws a glyph of its own\n", old);

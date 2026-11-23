@@ -23,6 +23,7 @@
 #include "blit_window_glyphs.h"
 #include "blit_player_glyphs.h"
 #include "blit_slider_glyphs.h"
+#include "blit_scrollbar_glyphs.h"
 
 #define BLIT_CONTROL_FIRST 0x10129AU
 #define BLIT_CONTROL_COUNT 20U
@@ -129,7 +130,7 @@ static int blit_chrome_glyph(uint32_t scalar)
 {
     return blit_window_glyph(scalar) || blit_control_glyph(scalar) || blit_frame_glyph(scalar) ||
         blit_state_glyph(scalar) || blit_player_glyph(scalar) || blit_key_glyph(scalar) ||
-        blit_slider_style_glyph(scalar);
+        blit_slider_style_glyph(scalar) || blit_scrollbar_glyph(scalar);
 }
 
 static int blit_chrome_pen_index(uint32_t scalar)
@@ -333,6 +334,8 @@ static int blit_chrome_draw(uint32_t scalar, int plane, unsigned char *pixels, i
     if (blit_player_glyph(scalar)) return plane ? 1 : blit_player_draw(scalar, pixels, stride, w, h);
     if (blit_slider_style_glyph(scalar))
         return plane ? 1 : blit_slider_style_draw(scalar, pixels, stride, w, h);
+    if (blit_scrollbar_glyph(scalar))
+        return plane ? 1 : blit_scrollbar_draw(scalar, pixels, stride, w, h);
     if (!blit_control_glyph(scalar) && !blit_frame_glyph(scalar) && !blit_state_glyph(scalar) &&
         !blit_key_glyph(scalar)) return 0;
     if (w <= 0 || h <= 0 || w > 128 || h > 128) return 0;

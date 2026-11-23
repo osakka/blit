@@ -400,7 +400,7 @@ title bar beside close, minimise, shade and zoom.
 
 ADR 0212. 20 glyphs at U+10129A–1012AD draw controls out of cells, in the
 same roles as the window chrome, listed in the catalogue's `cell_geometry`
-section. The next free codepoint is U+1014A9 (the outer-edge frame, below,
+section. The next free codepoint is U+1014D9 (the outer-edge frame, below,
 is U+1012AE–1012BA, the pressed boxes and grow box U+1012BB–1012C4, the
 hui mark, a colour icon, U+1012C5–1012C6, the wiretap icons, on and
 off, U+1012C7–1012CA, their one-column forms U+1012CB–1012CC, and the
@@ -411,8 +411,8 @@ U+1012F4–101309, the full-screen and sticky boxes U+10130A–101313, and the
 player glyphs of ADR 0237: LCD digits U+101314–10135E, LED meters
 U+10135F–101372, sliders U+101373–101377, faders U+101378–10137C,
 transport U+10137D–1013A0, discs, records and cassettes U+1013A1–1013D0,
-keys U+1013D1–1013D4, the big discs U+1013D5–101494, and the slider
-styles U+101495–1014A8).
+keys U+1013D1–1013D4, the big discs U+1013D5–101494, the slider
+styles U+101495–1014A8, and the scroll bar styles U+1014A9–1014D8).
 - **Checkbox,** one cell: an 11x11 square on the text row (as the window
   boxes), in Chalk and Slate, off, on and mixed (`chalk-check-off`, `-on`,
   `-mixed`; `slate-check-*`). Chalk: a plain 1 px square, an X when checked,
@@ -462,6 +462,14 @@ the catalogue (`GET /v1/fonts/icons`) and [special additions](fonts/special.md).
   pieces in the same order: a round knob on a thin line
   (`slider-circle-*`, `fader-circle-*`) and a hollow groove with a square
   thumb (`slider-groove-*`, `fader-groove-*`).
+- **Scroll bars** (0.3.137): three styles, `scrollbar-<style>-<h|v>-<piece>`
+  (`classic`, `modern`, `simple`). Put `track` in every cell, `cap-left`
+  and `cap-right` (`cap-top`, `cap-bottom`) in the first and last, and the
+  thumb over its cells: `thumb` in one cell, or `thumb-start`,
+  `thumb-mid` (with `thumb-grip` in the middle cell) and `thumb-end`. A
+  thumb's cell holds the thumb alone, so pen it in a colour of its own;
+  a style is a base codepoint plus the same offsets, so a program swaps
+  the base ([ADR 0237](adr/0237-player-glyphs.md)).
 - **Transport**: `transport-<name>` in one cell, `transport-wide-<name>-left`
   and `-right` in two; in the text colour.
 - **Keys** (0.3.127): `key-left`, the icon cells, `key-right`, on one row.

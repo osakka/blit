@@ -280,7 +280,7 @@ are not, and nothing in band changed.
 - **A set is a table of names, not a face.** One file declares both:
   `fonts.source.json` gains `sets` (id, owner, scope, faces, names
   source, version, retired names). Set ids are derived from the names
-  sources, never listed by hand: `blit` (the catalogue's 850 ids, its
+  sources, never listed by hand: `blit` (the catalogue's 898 ids, its
   three lists, the catalogue itself unchanged), `nerd-<prefix>` (the 17
   prefixes of Nerd Fonts' `glyphnames.json`, names as Nerd spells them
   after the prefix), `emoji` (Unicode's `emoji-test.txt`, by a fixed
