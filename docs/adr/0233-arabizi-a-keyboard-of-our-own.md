@@ -2,6 +2,9 @@
 
 - Status: accepted; in use since 0.3.105
 - Note: Built in 0.3.100-0.3.101; the owner types with it (verification ledger, 0.3.105).
+- Note: Blit Arabic Modern, the face of the tashkeel check below, was
+  retired in 0.3.131 (ADR 0243); Arabic is drawn as words in Noto Naskh
+  Arabic (ADR 0241).
 - Date: 2026-11-13
 - Scope: a new keyboard kind in Blit's keyboard list (ADR 0231): an input
   method that turns Latin Arabizi typing into Arabic, with or without

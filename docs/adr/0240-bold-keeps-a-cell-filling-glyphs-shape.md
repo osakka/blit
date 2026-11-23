@@ -1,6 +1,10 @@
 # ADR 0240: Bold keeps the shape of a glyph that fills its cell
 
 - Status: accepted
+- Note: Shipped in 0.3.129. Its Arabic exception was amended by
+  [ADR 0241](0241-arabic-shaped-as-words-and-drawn-as-slices.md), in
+  the same release: an Arabic word is made bold by this overstrike
+  applied to the whole word, and its slices get none of their own.
 - Date: 2026-11-20
 - Scope: `src/blit_raster.c` (`blit_raster_get_styled`,
   `blit_raster_get_cluster_styled`), the raster hooks in `src/blit_font.h`,

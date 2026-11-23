@@ -1,6 +1,7 @@
 # ADR 0094: Use Hibr module ABI for runtime compatibility
 
 - Status: accepted
+- Supersedes: [ADR 0093](0093-package-against-the-live-hibr-release.md)
 
 ## Context
 

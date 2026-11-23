@@ -268,8 +268,8 @@ security policy, or compatibility rule requires a new ADR.
 - [0240 — Bold keeps the shape of a glyph that fills its cell](0240-bold-keeps-a-cell-filling-glyphs-shape.md)
 - [0241 — Arabic is shaped as words and drawn as slices](0241-arabic-shaped-as-words-and-drawn-as-slices.md)
 - [0242 — A program scale per display, pixels on the wire](0242-hidpi-program-scale.md)
-- [0243 — Glyph multiplexing: one registry, adopted protocols, published](0243-glyph-multiplexing.md)
-- [0245 — Installable glyph sets: a root-owned store, a ledger of codepoints, per-user views](0245-installable-glyph-sets.md)
+- [0243 — Glyph multiplexing -- one registry, adopted protocols, published](0243-glyph-multiplexing.md)
+- [0245 — Installable glyph sets -- a root-owned store, a ledger of codepoints, per-user views](0245-installable-glyph-sets.md)
 
 ## Status
 
@@ -286,9 +286,21 @@ these forms and no other:
 | `rejected` | Considered and not taken |
 
 A `- Note:` line under the status may say how a later record amended part
-of the decision. Open acceptance work belongs in the roadmap or a ticket, not
-in the status line. The status line and this index change as a decision's life moves on;
+of the decision (a `- Revised by:` line says the same), which release built
+it, and, for a decision built in steps, which steps are not built yet. Open
+acceptance work belongs in the roadmap or a ticket, not in the status line. The status line and this index change as a decision's life moves on;
 the body is the record of the decision as it was made and is not rewritten.
+
+Records from before 0.2.22 often describe an SDL backend beside native KMS.
+SDL was removed in 0.2.22 ([ADR 0184](0184-sdl-is-removed.md)). Where such
+a record's status says retired or superseded, its decision was SDL's; where
+it says accepted, the decision stands for native KMS and its SDL parts are
+history. In the same way, gamescope, `blit-gamescope` and `steamer` went in
+0.3.75 ([ADR 0228](0228-blit-is-the-compositor-for-programs.md)), and Blit
+Arabic Modern and `blit-font-sources` in 0.3.131
+([ADR 0243](0243-glyph-multiplexing.md)); Blit's icons moved from
+U+100000-U+100494 to U+101000-U+101494 in 0.3.131 (ADR 0243), so a record
+written before then names the old codepoints.
 
 ## Adding an ADR
 

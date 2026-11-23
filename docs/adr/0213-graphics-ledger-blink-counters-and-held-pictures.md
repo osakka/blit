@@ -1,6 +1,7 @@
 # ADR 0213: The graphics ledger, blink counters, and pictures held through a synchronized update
 
 - Status: accepted
+- Note: Shipped in 0.3.42.
 - Date: 2026-11-05
 - Scope: `blit_server.c` (the ledger, the blink detector, Kitty deletes,
   mode 2026, the counters and `GET /v1/diagnostics/graphics-ledger`),

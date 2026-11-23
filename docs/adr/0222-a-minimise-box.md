@@ -1,6 +1,10 @@
 # ADR 0222: A minimise box, in Chalk and Slate
 
 - Status: accepted
+- Note: Shipped in 0.3.54.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-11-06
 - Scope: `src/blit_window_glyphs.h` (the minimise geometry, beside ADR
   0219's states), `src/blit_control_glyphs.h` (two more pens in the chrome

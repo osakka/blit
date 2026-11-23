@@ -2,6 +2,9 @@
 
 - Status: accepted; in use since 0.3.17
 - Note: Blit's half in 0.3.17–0.3.19, Hibr's in 0.99.397–0.99.398 (2026-10-30). Reviewed by the Hibr maintainers; their answers and changes are folded in. Measured result under "Result".
+- Note: Its 16 images per session were superseded by
+  [ADR 0226](0226-pictures-bounded-by-memory-not-count.md) (0.3.65):
+  pictures are bounded by memory; one frame in flight per image stays.
 - Scope: moving large or frequent pictures (video, a game, a browser page)
   from a program in a Blit session to Blit without encoding them into the
   terminal stream

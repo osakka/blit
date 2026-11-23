@@ -1,6 +1,7 @@
 # ADR 0239: Control strings are read by character, C1 is one control raw or encoded, and CAN/SUB end a string
 
 - Status: accepted
+- Note: Shipped in 0.3.128.
 - Date: 2026-11-20
 - Scope: the terminal parser in `src/blit_server.c` (`terminal_consume_chunk`),
   docs/terminal.md; Gitea #178, #179, #181

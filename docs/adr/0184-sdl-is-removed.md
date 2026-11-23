@@ -1,6 +1,14 @@
 # ADR 0184: SDL is removed; native KMS is the only presentation path
 
 - Status: accepted; in use since 0.2.22
+- Note: Also retired with SDL in 0.2.22, each naming this record in its
+  status: ADRs 0015, 0024, 0032, 0040, 0146,
+  [0036](0036-external-cell-damage-and-graphics-scene-boundary.md),
+  [0042](0042-gles2-glyph-path-isolation.md),
+  [0047](0047-incremental-damage-restores-under-text-graphics.md) and
+  [0070](0070-the-scene-cache-needs-a-backend-that-preserves-render-targets.md);
+  [ADR 0148](0148-explicit-presentation-configuration-source.md) is
+  superseded by it too.
 - Date: 2026-10-25
 - Scope: presentation, startup, settings, diagnostics, gates, packaging
 - Supersedes: ADR 0129, 0137, 0138, 0152, 0153, 0155

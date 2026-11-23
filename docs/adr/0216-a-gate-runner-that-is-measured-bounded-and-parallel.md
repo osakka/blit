@@ -1,6 +1,7 @@
 # ADR 0216: A gate runner that is measured, bounded and parallel
 
 - Status: accepted
+- Note: Shipped in 0.3.47.
 - Date: 2026-11-05
 - Scope: `tools/run-gates.sh`, `tools/tests/gate_port.rb`,
   `tools/tests/gate_port.sh`, `tools/tests/gate_with_server.sh`,

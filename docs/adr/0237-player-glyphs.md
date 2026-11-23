@@ -1,6 +1,12 @@
 # ADR 0237: player glyphs -- LCD digits, LED meters, sliders, transport, discs
 
 - Status: accepted
+- Note: Shipped in 0.3.126; amended in 0.3.127 (keys, big discs), 0.3.136
+  (slider styles) and 0.3.137 (scroll bar styles), the sections below.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100314-1003D0 in the scope and decision below, and the
+  0.3.127 glyphs, are now U+101314-101494), the same layout; the
+  amendments from 0.3.136 on are placed in the new range only.
 - Date: 2026-11-19
 - Scope: Blit's private-use plane-16 glyphs U+100314-1003D0, the shared
   raster's cell geometry, the icon font

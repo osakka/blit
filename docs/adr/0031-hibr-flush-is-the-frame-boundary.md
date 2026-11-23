@@ -1,6 +1,7 @@
 # ADR 0031: Make Hibr `console flush` the atomic frame boundary
 
 - Status: accepted
+- Supersedes: [ADR 0030](0030-pty-frame-quiet-window.md)
 
 ## Context
 

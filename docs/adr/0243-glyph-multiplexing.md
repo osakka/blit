@@ -1,6 +1,7 @@
 # ADR 0243: Glyph multiplexing -- one registry, adopted protocols, published
 
-- Status: accepted as direction (the owner, 2026-11-21); both open
+- Status: accepted
+- Note: Accepted as direction by the owner, 2026-11-21; both open
   decisions made (below): the icons moved to U+101000 and Blit Arabic
   Modern retired, in 0.3.131. Step 1, the registry, built in 0.3.130: one manifest
   (`assets/fonts/fonts.source.json`, the Arabic manifest folded in), a
@@ -10,7 +11,18 @@
   `q`, built in 0.3.133 (below, "Step 2 as built"; `glyph_protocol_gate`).
   Step 3's set level, the amendment's registry `sets` and the HTTP lookup,
   built in 0.3.134 (below, "Step 3's set level as built";
-  `glyph_sets_gate`); its in-band `names` capability is still a draft
+  `glyph_sets_gate`); its in-band `names` capability (`q ; name=`, `n`) is
+  still a draft (`docs/protocols/glyph-sets.md`). Not built: step 4 (FNT
+  and SGR 10-19) and step 5 (OSC 66). The old icon range still draws
+  (`BLIT_ICON_OLD_RANGE_DROPPED` is not defined).
+- Note: "Supersedes nothing yet" in the scope below was written before
+  the two decisions. This record retired
+  [ADR 0174](0174-arabic-companion-rasterization.md) (Blit Arabic Modern)
+  and the font-source half of
+  [ADR 0217](0217-one-copy-of-the-documentation-font-sources-in-their-own-package.md)
+  in 0.3.131; it amends ADR 0195's item 7 and ADR 0241 (one Arabic face),
+  and moved the codepoints of ADR 0172's catalogue, and of every record
+  that names U+100000-U+100494, up by 0x1000.
 - Date: 2026-11-21
 - Scope: the font registry (`assets/fonts/`), the raster's stack
   (`src/blit_raster.c`, `src/blit_font.c`), `/v1/fonts`, the terminal

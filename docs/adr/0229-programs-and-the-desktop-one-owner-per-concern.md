@@ -2,6 +2,10 @@
 
 - Status: accepted
 - Note: The 0.3.74 rows shipped with Hibr 0.99.482; later rows (drag and drop, input methods, viewports) shipped through 0.3.125.
+- Note: Idle inhibit shipped in 0.3.130. The Scale row is amended by
+  [ADR 0242](0242-hidpi-program-scale.md): a program scale per display,
+  its first three steps in 0.3.130. Portals (#172) and touch and tablets
+  (#173) are tracked as open in the roadmap.
 - Date: 2026-11-10
 - Scope: everything a program in a Hibr window (Wayland now, X through
   Xwayland in ADR 0228's phase 2) shares with the desktop: what each side

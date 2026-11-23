@@ -1,6 +1,8 @@
 # ADR 0150: Modern Hibr Nerd coverage belongs in the font asset
 
 - Status: retired in 0.2.36 (ADR 0195)
+- Note: Its Font-Awesome-only repertoire was superseded by ADR 0156, and
+  its icon fit amended by ADR 0185, before ADR 0195 retired it.
 - Date: 2026-10-19
 - Tracking: Blit 107; follows ADR 0147
 

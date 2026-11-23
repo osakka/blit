@@ -1,6 +1,10 @@
 # ADR 0212: The controls glyph set, and a catalogue a client can map dynamically
 
 - Status: accepted
+- Note: Shipped in 0.3.40.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-11-05
 - Scope: `src/blit_control_glyphs.h` (new), `src/blit_sha256.h` (new),
   `blit_window_glyphs.h` (one helper), `blit_raster.c`/`.h`, both

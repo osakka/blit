@@ -1,6 +1,8 @@
 # ADR 0036: Separate external cell damage from graphics-scene invalidation
 
 - Status: retired in 0.2.22 (ADR 0184)
+- Note: It superseded [ADR 0032](0032-external-frame-full-scene-redraw.md)
+  (the full-scene redraw for external commits).
 
 ## Context
 

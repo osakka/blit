@@ -1,6 +1,7 @@
 # ADR 0221: The icon pen is a cell attribute, SGR 68
 
 - Status: accepted
+- Note: Shipped in 0.3.49.
 - Date: 2026-11-06
 - Scope: the cell attributes, the SGR parser, DECRQSS, XTGETTCAP, `GET
   /v1/server` capabilities, the cells API and OpenAPI `CellStyle`,

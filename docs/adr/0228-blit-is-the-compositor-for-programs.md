@@ -5,6 +5,13 @@
   (a game's full-screen window) is shown as a window of its own asking for
   full screen, not as a popup (Gitea #175).
 - Note: Phases 0 and 1 and phase 2's milestones A-D shipped in 0.3.71-0.3.84; the owner ran Steam and a game on 0.3.79.
+- Note: Not built: phase 2's milestone E (Steam Big Picture full screen,
+  a Proton game at the display's refresh; Gitea #169), phase 3 (a
+  full-screen window scanned out directly; #174) and the colour scheme
+  planned with phase 2 (`WINDOW scheme` and the Settings portal: neither
+  is in blit-compositor; tracked with the portals, #172). The
+  gamescope path went ahead of phase 4: the owner removed it in 0.3.75,
+  so ADR 0225 is retired and ADR 0206 (never built) superseded.
 - Date: 2026-11-09
 - Scope: a Wayland server and an X window manager inside Blit; programs and
   games in Hibr windows and full screen; supersedes the gamescope path of

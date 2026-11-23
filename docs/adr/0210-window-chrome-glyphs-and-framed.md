@@ -1,7 +1,11 @@
 # ADR 0210: Window chrome glyph sets (Chalk and Slate) are cell geometry, and SGR 51 frames button labels and titles
 
 - Status: accepted
+- Note: Shipped in 0.3.36.
 - Note: Slate's colours and the shadow revised by ADR 0211.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-11-03
 - Scope: `src/blit_window_glyphs.h` (new), `blit_raster.c`, both
   compositors (`blit_kms.c`, `blit_kms_gles.c`), the SGR parser, DECRQSS,

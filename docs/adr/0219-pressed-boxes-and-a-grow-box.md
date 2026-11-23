@@ -1,6 +1,10 @@
 # ADR 0219: Pressed boxes and a grow box, in Chalk and Slate
 
 - Status: accepted
+- Note: Shipped in 0.3.47.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-11-06
 - Scope: `src/blit_window_glyphs.h` (the state geometry),
   `src/blit_control_glyphs.h` (the chrome wrappers, one more pen group),

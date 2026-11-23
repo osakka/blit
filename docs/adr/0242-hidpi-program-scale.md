@@ -1,10 +1,17 @@
 # ADR 0242: A program scale per display, pixels on the wire
 
-- Status: accepted (the owner's decisions, 2026-11-21, through hibr);
-  landing in steps: step 1 (the layout's scale word, the outputs' scale
-  and logical size, X told 1), step 2 (sizes, units and fractional
-  scale) and step 3 (a scale that changes under a shown window, applied
-  at the program's acknowledging commit) in 0.3.130.
+- Status: accepted
+- Note: The owner's decisions, 2026-11-21, through hibr. Landing in steps:
+  step 1 (the layout's scale word, the outputs' scale and logical size, X
+  told 1), step 2 (sizes, units and fractional scale) and step 3 (a scale
+  that changes under a shown window, applied at the program's
+  acknowledging commit) shipped in 0.3.130 (commits a666ab89, a387c07f,
+  2ae2ea1b). Not built yet: the filtered (bilinear) shrink of a frame
+  picture drawn smaller than its source (pictures are still sampled
+  nearest), X's own scale (`WINDOW xscale`, `Xft.dpi`, the XSETTINGS
+  manager: X is still told 1) and each display's physical size
+  (`physical_mm`). The real-program checks its Evidence asks for are not
+  recorded either.
 - Decided: the program scale is Hibr's, a fixed "Program Scale" row per
   display (Control Panel > Displays, default 100%, set by hand, never
   derived from the cell size: a font change does not move it); X programs

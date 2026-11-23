@@ -1,6 +1,7 @@
 # ADR 0218: fonts.hinting: how text glyphs are hinted, one setting, fitted icons exempt
 
 - Status: accepted
+- Note: Shipped in 0.3.47.
 - Date: 2026-11-06
 - Scope: `src/blit_raster.c`, `src/blit_raster.h`, `src/blit_server.c`,
   `openapi/blit-0.1.yaml`, `docs/api.md`, `docs/font-reference.md`

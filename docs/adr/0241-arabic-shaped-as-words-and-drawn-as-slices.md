@@ -1,8 +1,9 @@
 # ADR 0241: Arabic is shaped as words and drawn as slices
 
-- Status: accepted, released in 0.3.129; the only Arabic path since
+- Status: accepted
+- Note: Shipped in 0.3.129; the only Arabic path since 0.3.131, when
   [ADR 0243](0243-glyph-multiplexing.md) retired Blit Arabic Modern
-  (2026-11-21): see "Amended by ADR 0243" below.
+  (decided 2026-11-21): see "Amended by ADR 0243" below.
 - Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-11-20
 - Scope: `src/blit_raster.c` (a word cache beside the glyph cache, the

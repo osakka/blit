@@ -1,6 +1,9 @@
 # ADR 0201: File-manager icons: one drawing per kind, colourways by a primary colour
 
 - Status: accepted; in use since 0.3.4
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-10-29
 - Scope: `tools/fonts/draw-file-icons.py` (new), `assets/fonts/icons`, the
   icon catalogue and its API limit, the icon gates, the package gate

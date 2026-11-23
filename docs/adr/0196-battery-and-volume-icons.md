@@ -1,6 +1,9 @@
 # ADR 0196: Battery and volume are one levelled icon per state
 
 - Status: accepted; in use since 0.2.38
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-10-27
 - Scope: `assets/fonts/icons` (catalogue and artwork), `BlitIcons-Regular.ttf`,
   the icon gates

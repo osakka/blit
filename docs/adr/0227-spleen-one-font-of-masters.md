@@ -1,6 +1,7 @@
 # ADR 0227: Spleen is one text font of five masters, the master picked per size
 
 - Status: accepted
+- Note: Shipped in 0.3.68.
 - Date: 2026-11-08
 - Scope: `src/blit_font.c` (discovery, the master rule), `src/blit_raster.c`
   (opening a font of masters, drawing a master on its grid),

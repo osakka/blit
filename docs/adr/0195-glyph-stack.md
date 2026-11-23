@@ -14,6 +14,7 @@
   font assets and their layout, packaging, the font gates, the outline
   generator (retired)
 - Supersedes: the baked-profile parts of ADRs 0156, 0191 and 0194
+- Retires: [ADR 0150](0150-modern-hibr-nerd-icons.md) (Modern's Nerd face), in 0.2.36
 - Revised by: ADR 0215 (0.3.41), the fitting step of `draw_fitted`: measured after the render, never trimmed, spanning parts unhinted
 
 ## Context

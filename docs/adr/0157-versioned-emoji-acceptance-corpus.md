@@ -1,6 +1,7 @@
 # ADR 0157: versioned emoji acceptance, separate font and terminal evidence
 
 - Status: accepted; in use since 0.1.574
+- Note: It superseded ADR 0156's colour-asset pin (candidate 574).
 - Date: 2026-10-20
 - Tracking: Blit 107/110; execution order in docs/roadmap.md
 

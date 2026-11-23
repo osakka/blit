@@ -1,6 +1,7 @@
 # ADR 0069: the Hibr adapter preserves Hibr's provider semantics
 
 - Status: accepted
+- Note: It amends ADR 0010's production-path wording.
 - Date: 2026-10-14
 - Scope: Hibr display-provider composition and event wakeups
 

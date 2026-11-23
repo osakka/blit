@@ -1,10 +1,13 @@
 # ADR 0174: Arabic companion faces and cell-local mark positioning
 
-- Status: retired by [ADR 0243](0243-glyph-multiplexing.md) (2026-11-21):
-  Blit Arabic Modern, the per-cell companion, is removed; Arabic is shaped
-  as words in Noto Naskh Arabic alone (ADR 0241). The ink-margin geometry
-  this record introduced (`blit_ink.h`) stays, for a word's row above and
-  below.
+- Status: retired in 0.3.131 (ADR 0243)
+- Note: Retired by [ADR 0243](0243-glyph-multiplexing.md) (decided
+  2026-11-21, removed in 0.3.131): Blit Arabic Modern, the per-cell
+  companion, is removed; Arabic is shaped as words in Noto Naskh Arabic
+  alone ([ADR 0241](0241-arabic-shaped-as-words-and-drawn-as-slices.md),
+  which superseded this record's per-cell drawing in 0.3.129). The
+  ink-margin geometry this record introduced (`blit_ink.h`) stays, for a
+  word's row above and below.
 - Note: The Arabic manifest, `arabic-fonts.source.json`, was folded into `assets/fonts/fonts.source.json` (its `arabic` section, every field kept), the one font registry, by [ADR 0243](0243-glyph-multiplexing.md).
 - Date: 2026-10-21
 - Tracking: Blit 119 under 118

@@ -1,6 +1,8 @@
 # ADR 0127: native client PTYs and login-owned joins
 
 - Status: accepted; in use since 0.1.540
+- Note: It also supersedes ADR 0079's input statements: each native
+  client receives input on its own PTY.
 - Date: 2026-10-17
 - Issues: Blit #96, #99; follows ADRs 0122, 0124–0126
 - Supersedes: ADR 0080's horizontal slot and primary-input projection

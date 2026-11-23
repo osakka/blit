@@ -1,6 +1,7 @@
 # ADR 0156: smooth Retro and Modern share the pinned Nerd repertoire
 
 - Status: superseded by ADR 0195
+- Note: Its icon fit was amended by ADR 0185.
 - Date: 2026-10-20
 - Tracking: [107](https://git.home.arpa/itdlabs/blit/issues/107), emoji clusters [110](https://git.home.arpa/itdlabs/blit/issues/110)
 - Colour-asset pin superseded by ADR 0157 in candidate 574; profile and shared-raster decisions unchanged.

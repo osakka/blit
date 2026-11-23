@@ -1,6 +1,7 @@
 # ADR 0230: Dependencies from the system, through pkg-config
 
 - Status: accepted
+- Note: Shipped in 0.3.76.
 - Date: 2026-11-10
 - Scope: how Blit's C build (tools/build-tcc.sh and every gate, tool and
   probe that compiles C) finds its dependencies; the minimum versions; the

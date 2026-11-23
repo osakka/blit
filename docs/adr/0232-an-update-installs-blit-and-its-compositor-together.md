@@ -2,6 +2,12 @@
 
 - Status: accepted
 - Note: Shipped in 0.3.97; the evidence below was recorded on 2026-11-13.
+- Note: Amended in 0.3.132 (the helper installs its own checked copies,
+  blit Breaks a newer blit-compositor, retired packages are replaced),
+  0.3.133 (only a signed release is installed) and 0.3.135
+  (`update-live.sh --rollback-to` reinstalls the previous signed pair):
+  the sections below. `blit-font-sources`, named under Consequences, is
+  no longer built since 0.3.131 (ADR 0243).
 - Date: 2026-11-12
 - Scope: `PUT /v1/control/update`, the root update helper
   (`blit-update-helper`), `tools/deploy/update-live.sh`, the release

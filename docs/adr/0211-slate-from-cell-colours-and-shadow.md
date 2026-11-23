@@ -1,6 +1,10 @@
 # ADR 0211: Slate takes its colours from the cell, and the drop shadow is a Blit-drawn cell attribute
 
 - Status: accepted
+- Note: Shipped in 0.3.39.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-11-05
 - Scope: `src/blit_window_glyphs.h`, `blit_raster.c`/`.h`, `blit_font.h`,
   both compositors (`blit_kms.c`, `blit_kms_gles.c`, `blit_kms.h`), the

@@ -1,6 +1,11 @@
 # ADR 0065: The privilege and authentication model
 
 - Status: accepted
+- Note: The November 2026 security review hardened it
+  ([security-review-2026-11](../security-review-2026-11.md)): since
+  0.3.133 the update route needs the bearer token too when one is set
+  (ADR 0232, amended), and since 0.3.135 a child run as another user
+  holds no root secret (ADR 0055, amended).
 - Date: 2026-10-10
 - Scope: who Blit runs as, what the session API may execute and as whom, and
   when the gateway is willing to accept a network request

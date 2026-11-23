@@ -7,6 +7,7 @@
   XTSMGRAPHICS, frame-channel input routes (ADR 0225)
 - Supersedes: ADR 0202's "16 images per session" (its one frame in flight
   per image stays)
+- Supersedes: ADR 0060's limit of 8 numbered placements per image
 
 ## Context
 

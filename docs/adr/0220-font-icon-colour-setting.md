@@ -1,9 +1,13 @@
 # ADR 0220: fonts.icon_colour: Blit's colour icons in colour, or as a monochrome shape that says state
 
 - Status: accepted
+- Note: Shipped in 0.3.48.
 - Note: the run-time setting (`fonts.icon_colour`, its plumbing and the
   global pen) is superseded by ADR 0221, in 0.3.49: the icon pen is a cell
   attribute, SGR 68. The build-time shape and its drawing stay.
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below is now U+101xxx), the same layout; the old
+  codepoints draw the same glyphs until a later release drops them.
 - Date: 2026-11-06
 - Scope: `src/blit_raster.c`, `src/blit_raster.h`, `src/blit_server.c`,
   `tools/fonts/build-blit-icons.py`, `assets/fonts/BlitIcons-Regular.ttf`,

@@ -1,6 +1,13 @@
 # ADR 0214: One frame, its line on the outer edge; the title bar's end cells
 
 - Status: accepted
+- Note: Shipped in 0.3.41. The revision below shipped in 0.3.44 (its
+  heading says 0.3.45; the verification ledger and commit b3e8e4d1 say
+  0.3.44).
+- Revised by: ADR 0243 (0.3.131): every icon codepoint moved up by
+  0x1000 (U+100xxx below, U+1002AE-U+1002BA among them, is now
+  U+101xxx), the same layout; the old codepoints draw the same glyphs
+  until a later release drops them.
 - Date: 2026-11-05
 - Scope: `src/blit_window_glyphs.h` (the frame and title-end geometry, one
   bar helper), `src/blit_control_glyphs.h` (the chrome wrappers),

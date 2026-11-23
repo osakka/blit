@@ -1,7 +1,8 @@
 # ADR 0217: Slimming the package: one copy of the documentation, font sources in their own package
 
-- Status: accepted; its font-source half retired by
-  [ADR 0243](0243-glyph-multiplexing.md) (2026-11-21). With Blit Arabic
+- Status: accepted
+- Note: Shipped in 0.3.45. Its font-source half was retired in 0.3.131 by
+  [ADR 0243](0243-glyph-multiplexing.md) (decided 2026-11-21). With Blit Arabic
   Modern gone, `blit-font-sources`, `FreeMono-SOURCE.txt`, the FreeMono
   notices and `assets/fonts/sources/` are no longer built or shipped, and
   `blit` no longer suggests the package. `blit` declares no relation to

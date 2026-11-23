@@ -1,6 +1,9 @@
 # ADR 0055: The Hibr adapter authenticates with an injected API token
 
 - Status: accepted
+- Note: Amended in 0.3.135 (security review SR-8, Gitea #190): a child
+  run as another user gets no `BLIT_API_TOKEN` and none of the server's
+  tokens; see the amendment below.
 - Date: 2026-10-09
 - Scope: network authentication, Hibr adapter, terminal session environment
 

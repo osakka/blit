@@ -7,6 +7,9 @@
   stand-in libei gates; the route model and its hold modes stay, for
   blit-compositor's `INPUT sock` routes (ADR 0228). `blit` Breaks
   `blit-gamescope` and `steamer`, retired with it
+- Note: Since 0.3.132 `blit` Conflicts with and Replaces `blit-gamescope`
+  and `steamer` instead of Breaking them (Gitea #209; ADR 0232, amended):
+  a Breaks made the updater's `dpkg --install` refuse every update.
 - Date: 2026-11-07
 - Scope: a new producer program for the frame channel (`blit-gamescope`),
   input forwarding from a Blit session to a nested compositor, gamepad
