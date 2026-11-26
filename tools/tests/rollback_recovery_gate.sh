@@ -679,7 +679,7 @@ expect_live server-dead 1 'update failed: timed out'
 expect_state server-dead "$version" "$version"
 kept server-dead
 live_status=$(live "$blit_old")
-expect_live server-dead 1 'update refused: could not read'
+expect_live server-dead 2 'update refused: could not read'   # refused before sending (Gitea #211)
 dpkg_install server-dead "$comp_old" "$blit_old"
 expect_state server-dead "$old" "$old"
 apt_clean server-dead
