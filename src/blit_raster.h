@@ -140,14 +140,13 @@ uint32_t blit_raster_blend(const BlitRasterGlyph *glyph, int x, int y,
    there that LOOKUP does not give is uncovered, never drawn from the
    stack. blit_raster_installed_changed is called whenever what the
    installed sets draw changes: every raster then forgets what it drew in
-   that block before its next lookup, and blit_raster_installed_generation
-   (which the GLES atlas compares, src/blit_kms_gles.c) moves on. */
+   that block before its next lookup, and blit_font_installed_generation
+   (src/blit_font.h, which the GLES atlas compares) moves on. */
 #define BLIT_RASTER_INSTALLED_FIRST 0x102000u
 #define BLIT_RASTER_INSTALLED_LAST 0x10fffdu
 typedef int (*BlitRasterInstalledLookup)(uint32_t scalar, void **face, unsigned *glyph_index);
 void blit_raster_set_installed_lookup(BlitRasterInstalledLookup lookup);
 void blit_raster_installed_changed(void);
-unsigned long blit_raster_installed_generation(void);
 
 int blit_raster_inspect_outline(const char *path, char *family, size_t family_size,
                                 BlitFontGrid *grid, char *reason, size_t reason_size);

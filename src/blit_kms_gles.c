@@ -501,7 +501,7 @@ static void kms_gles_font_check(KmsGlesResources *r, const BlitFont *font)
     const void *data = font != NULL ? font->data : NULL;
     int cw = font != NULL ? font->raster_cell_width : 0;
     int ch = font != NULL ? font->raster_cell_height : 0;
-    unsigned long installed = blit_raster_installed_generation();
+    unsigned long installed = blit_font_installed_generation();
     if (strcmp(r->font_path, path) == 0 && r->font_raster == raster &&
         r->font_data == data && r->font_cell_width == cw && r->font_cell_height == ch &&
         r->installed_generation == installed)

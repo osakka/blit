@@ -99,25 +99,20 @@ struct BlitRaster {
     unsigned long installed_generation;
 };
 
-/* ADR 0245: the installed sets' remap (the glyph store's), and how often
-   what they draw has changed. */
+/* ADR 0245: the installed sets' remap (the glyph store's). How often what
+   they draw has changed is counted in src/blit_font.c, which every renderer
+   links, so the GLES atlas can read it without this file. */
 static BlitRasterInstalledLookup raster_installed_lookup;
-static unsigned long raster_installed_generation = 1;
 
 void blit_raster_set_installed_lookup(BlitRasterInstalledLookup lookup)
 {
     raster_installed_lookup = lookup;
-    ++raster_installed_generation;
+    blit_font_installed_changed();
 }
 
 void blit_raster_installed_changed(void)
 {
-    ++raster_installed_generation;
-}
-
-unsigned long blit_raster_installed_generation(void)
-{
-    return raster_installed_generation;
+    blit_font_installed_changed();
 }
 
 static int installed_block(uint32_t scalar)
@@ -1960,8 +1955,9 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
 static void raster_installed_check(BlitRaster *raster)
 {
     unsigned i;
-    if (raster->installed_generation == raster_installed_generation) return;
-    raster->installed_generation = raster_installed_generation;
+    unsigned long generation = blit_font_installed_generation();
+    if (raster->installed_generation == generation) return;
+    raster->installed_generation = generation;
     for (i = 0; i < RASTER_SLOTS; ++i) {
         RasterEntry *entry = &raster->cache[i];
         if (!entry->valid || !installed_block(entry->key.scalars[0] & 0x1fffffu)) continue;

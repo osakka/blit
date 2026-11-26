@@ -811,8 +811,10 @@ static void glyph_path(char *out, size_t capacity, const char *a, const char *b,
 }
 
 /* Is every directory from / down to PATH one of root's (or the server's
-   own user's) that no one else can write? A sticky directory of root's is
-   allowed above the last component. PATH itself must also be 0700 when
+   own user's) that no one else can write? A sticky directory of root's
+   (or of the server's own user's) is allowed above the last component:
+   others may add entries there but cannot move or remove ours, and the
+   next component must itself be root's or ours. PATH itself must also be 0700 when
    PRIVATE. No component may be a link, . or .. */
 static int glyph_path_safe(const char *path, int private_leaf, char *why, size_t capacity)
 {
@@ -862,7 +864,7 @@ static int glyph_path_safe(const char *path, int private_leaf, char *why, size_t
             }
             if (leaf && private_leaf ? (status.st_mode & 077) != 0 :
                 (status.st_mode & 022) != 0 &&
-                    !(!leaf && (status.st_mode & S_ISVTX) && status.st_uid == 0)) {
+                    !(!leaf && (status.st_mode & S_ISVTX))) {
                 snprintf(why, capacity, "%s can be written by others than its owner%s", prefix,
                          leaf && private_leaf ? " (or read: it must be 0700)" : "");
                 return 0;

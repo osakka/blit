@@ -110,5 +110,10 @@ int blit_font_width(const BlitFont *font);
 int blit_font_height(const BlitFont *font);
 int blit_font_pixel(const BlitFont *font, uint32_t codepoint,
                     int row, int column);
+/* ADR 0245: how often what the installed glyph sets draw has changed.
+   src/blit_raster.c moves it on (blit_raster_installed_changed); every
+   cache of drawn glyphs -- a raster's, the GLES atlas -- compares it. */
+void blit_font_installed_changed(void);
+unsigned long blit_font_installed_generation(void);
 
 #endif

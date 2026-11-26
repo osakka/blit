@@ -875,3 +875,15 @@ int blit_font_height(const BlitFont *font)
 {
     return font != NULL && font->height > 0 ? font->height : 8;
 }
+
+static unsigned long font_installed_generation = 1;
+
+void blit_font_installed_changed(void)
+{
+    ++font_installed_generation;
+}
+
+unsigned long blit_font_installed_generation(void)
+{
+    return font_installed_generation;
+}
