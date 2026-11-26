@@ -92,6 +92,7 @@ reports. Registering a new owner token is a change to this table.
 | `nerd` | `nerd-cod`, `nerd-custom`, `nerd-dev`, `nerd-extra`, `nerd-fa`, `nerd-fae`, `nerd-iec`, `nerd-indent`, `nerd-indentation`, `nerd-linux`, `nerd-md`, `nerd-oct`, `nerd-pl`, `nerd-ple`, `nerd-pom`, `nerd-seti`, `nerd-weather` | Nerd Fonts' `glyphnames.json` for the release | the Nerd name `<prefix>-<rest>` is the address `nerd-<prefix>/<rest>`, unchanged otherwise | portable | the Nerd Fonts release, `3.4.0` |
 | `emoji` | `emoji` | Unicode's `emoji-test.txt`, entries marked `fully-qualified` or `component` | section 3.3 | portable | the Emoji version, `18.0` |
 | `blit` | `blit` | Blit's icon catalogue, its `icons`, `text_glyphs` and `cell_geometry` entries, and the retired names Blit's registry carries | the entry's `id`, unchanged | terminal-local | the catalogue's revision (SHA-256 of the packaged file) |
+| `x` | `x-<name>` | a set installed on this terminal (Blit: ADR 0245): its `blit-glyph-names` file, its codepoints the terminal's own ledger's | the file's names, unchanged | terminal-local, always | the SHA-256 of its names file and its allocation listing |
 
 Blit's catalogue has 898 ids: 554 icons, 38 text glyphs and 306 cell
 geometry pieces (window chrome, controls, keys, the player's glyphs and
@@ -601,6 +602,12 @@ register (its §4), and says nothing else puts glyphs there.
   rest of the old range: never answered by a lookup, never reused, and
   `q ; cp=` for it answers `status=` empty during the transition too,
   for the same reason.
+- **Installed sets** (owner `x`, Blit's ADR 0245) take their codepoints
+  from U+102000-U+10FFFD, allocated by the terminal from a ledger that
+  never gives a codepoint to another set or name; U+101000-U+101FFF stays
+  Blit's own set's room. They are terminal-local: a program caches them
+  only keyed by set id, set version and terminal identity (section 5),
+  and an installed set's version changes whenever its codepoints do.
 
 ## 10. Conformance
 

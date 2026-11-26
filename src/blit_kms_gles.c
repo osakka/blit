@@ -79,6 +79,9 @@ struct KmsGlesResources {
     char font_path[256];
     const void *font_raster, *font_data;
     int font_cell_width, font_cell_height;
+    /* ADR 0245: the installed glyph sets' generation the sprites were made
+       at; an import, update or removal empties the atlas. */
+    unsigned long installed_generation;
     /* Time this frame spent making sprites and uploading textures. */
     long long upload_us;
     unsigned long long partial_uploads;
@@ -498,9 +501,12 @@ static void kms_gles_font_check(KmsGlesResources *r, const BlitFont *font)
     const void *data = font != NULL ? font->data : NULL;
     int cw = font != NULL ? font->raster_cell_width : 0;
     int ch = font != NULL ? font->raster_cell_height : 0;
+    unsigned long installed = blit_raster_installed_generation();
     if (strcmp(r->font_path, path) == 0 && r->font_raster == raster &&
-        r->font_data == data && r->font_cell_width == cw && r->font_cell_height == ch)
+        r->font_data == data && r->font_cell_width == cw && r->font_cell_height == ch &&
+        r->installed_generation == installed)
         return;
+    r->installed_generation = installed;
     kms_atlas_reset(r);
     snprintf(r->font_path, sizeof(r->font_path), "%s", path);
     r->font_raster = raster;

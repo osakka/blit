@@ -481,7 +481,7 @@ status codes.
 | --- | --- | --- |
 | Identity | `GET /v1/version`, `GET /v1/server` | Compatibility and server capabilities |
 | Hardware | `GET /v1/graphics`, `GET /v1/displays`, `GET/PATCH /v1/displays/{id}`, `GET /v1/audio`, `GET/PATCH /v1/audio/{id}`, `GET /v1/audio/cards`, `GET/PATCH /v1/audio/cards/{id}` | Discover and configure the GPU, outputs, sound devices and mixers |
-| Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET /v1/fonts/sets[/{set}[/{name}]]`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, look glyphs up by set and name, place panes |
+| Fonts/topology | `GET/PUT /v1/fonts`, `GET /v1/fonts/icons`, `GET /v1/fonts/sets[/{set}[/{name}]]`, `GET /v1/fonts/glyphs`, `PUT/DELETE /v1/fonts/glyphs/system/{set}`, `GET .../licence`, `GET/PUT /v1/topology` | Select the font and cell size, discover Blit icons, look glyphs up by set and name, install glyph sets, place panes |
 | Settings | `GET/PUT/DELETE /v1/settings` | Inspect, replace, or reset API-owned server settings |
 | Login | `GET/POST/DELETE /v1/login` | Supervise one root-owned Hibr login screen and its authenticated child session |
 | Auxiliary displays | `GET /v1/auxiliary-displays`, `POST /v1/auxiliary-displays/apply` | Start and place Hibr on the other monitors |
@@ -495,7 +495,7 @@ status codes.
 | Control | `POST /v1/control/shutdown`, `/restart`, `GET/PUT /v1/control/shutdown-key` | Stop or restart the server; program the keyboard chord that stops it |
 | Updates | `PUT /v1/control/update`, `GET .../status`, `POST .../cancel`, `POST .../reset` | Upload and supervise a verified package update |
 
-The schema contains 57 path templates (`api_schema_gate.rb` checks the
+The schema contains 60 path templates (`api_schema_gate.rb` checks the
 count). Keep this table synchronized when a path is added, removed, or
 renamed; the schema remains the authoritative count.
 
@@ -520,6 +520,9 @@ GET    /v1/auxiliary-displays              Hibr on the other monitors
 POST   /v1/auxiliary-displays/apply        start and place it
 GET    /v1/fonts/icons                     Blit's icon and glyph catalogue
 GET    /v1/fonts/sets[/{set}[/{name}]]     glyph sets: list, page, look up by name
+GET    /v1/fonts/glyphs                    installed glyph sets, the ledger, the limits
+PUT    /v1/fonts/glyphs/system/{set}       import a glyph set (signed, or the administrator's own)
+DELETE /v1/fonts/glyphs/system/{set}       uninstall it
 GET    /v1/terminal-sessions               authoritative live session inventory
 POST   /v1/terminal-sessions               create a PTY-backed session
 GET/PATCH/DELETE /v1/terminal-sessions/{id} lifecycle and placement
@@ -1285,7 +1288,8 @@ example:
 
 `sets` (ADR 0243 step 3) is every glyph set this server answers for by set
 and name, the same list as `GET /v1/fonts/sets`: each `{id, owner, scope,
-version, count, faces}`. See [Glyph sets](#glyph-sets) below.
+version, count, faces, source}`, with `install` for an installed set (ADR
+0245). See [Glyph sets](#glyph-sets) below.
 
 Discover available profiles through `GET /v1/fonts`, not a version
 comparison. `colour_glyphs: true` does not imply full emoji-sequence
@@ -2190,17 +2194,27 @@ The 17 `nerd-*` sets are Nerd Fonts 3.4.0's own (`nerd-cod`, `nerd-custom`,
 `nerd-ple`, `nerd-pom`, `nerd-seti`, `nerd-weather`): the Nerd name
 `<prefix>-<rest>` is `nerd-<prefix>/<rest>`, spelled as Nerd spells it,
 scope `portable`, version `3.4.0`. Each set entry is `{id, owner, scope,
-version, count, faces}`, in bytewise order of id; `count` is the names the
-set lists (aliases included). Emoji names are not served yet: the Unicode
-table they come from is not in the package.
+version, count, faces, source}`, the shipped sets in bytewise order of id,
+then the installed ones (below); `count` is the names the set lists
+(aliases included); `source` is `shipped`, or `installed` for a set
+imported into the glyph store, which also carries `install`. Emoji names
+are not served yet: the Unicode table they come from is not in the
+package.
 
 ```json
 {"sets": [
   {"id": "blit", "owner": "blit", "scope": "terminal-local",
-   "version": "<sha-256 of icons/catalogue.json>", "count": 876, "faces": ["blit-icons"]},
+   "version": "<sha-256 of icons/catalogue.json>", "count": 876, "faces": ["blit-icons"],
+   "source": "shipped"},
   {"id": "nerd-cod", "owner": "nerd", "scope": "portable", "version": "3.4.0",
-   "count": 438, "faces": ["symbols-nerd-font-mono"]},
+   "count": 438, "faces": ["symbols-nerd-font-mono"], "source": "shipped"},
   ...
+  {"id": "x-fontawesome", "owner": "x", "scope": "terminal-local",
+   "version": "<sha-256 of its names file and allocation listing>", "count": 2052,
+   "faces": ["x-fontawesome"], "source": "installed",
+   "install": {"scope": "system", "origin": "catalogue", "via": "http", "verified": true,
+               "state": "loaded", "release": "6.7.2", "licence": "OFL-1.1", "glyphs": 2052,
+               "bytes": 501899}}
 ]}
 ```
 
@@ -2272,9 +2286,145 @@ a separator (`/ ; , = : . @`), a percent escape, a space or control byte, a
 bad or repeated `after` or `limit`, an unknown parameter, any query on a
 lookup -- is a 400 `malformed_query` whose body is always the same text,
 so nothing of the request is echoed. A set this server does not serve is a
-404 `unknown_set`; a name its set never had, a 404 `unknown_name`.
-Authentication is the same as other read endpoints; the routes are
-read-only (any other method is a 405).
+404 `unknown_set`; a name its set never had, a 404 `unknown_name`. An
+installed set that was removed answers 410 `uninstalled`, for the set and
+for its names. Authentication is the same as other read endpoints; the
+routes are read-only (any other method is a 405).
+
+### Installed glyph sets
+
+Any icon font can be installed as a glyph set of its own, named and looked
+up like the shipped ones, without colliding with Nerd, Blit or another
+install: Blit gives each of its glyphs a codepoint of its own from a ledger
+(ADR 0245). **Phase 2a** is built: the store, the ledger, signed sets and
+the administrator's own, imported over HTTP into the `system` scope (every
+session sees them). Not yet: user scope and per-session views (2b), the
+frame socket's `GLYPHS` and the system-directory rescan (2c).
+
+```text
+PUT    /v1/fonts/glyphs/system/{set}           import (a new set or an update)
+DELETE /v1/fonts/glyphs/system/{set}           uninstall
+GET    /v1/fonts/glyphs                        the store, the ledger's use, the limits, every installed set
+GET    /v1/fonts/glyphs/system/{set}/licence   the set's licence text
+```
+
+**Ids.** An installed set's id is `x-<name>`: owner `x` ("a set installed
+on this terminal", glyph sets section 3.1), 1-30 octets of the set-id
+grammar after `x-`. It is always `terminal-local`: its codepoints are this
+machine's.
+
+**Codepoints: the ledger.** Installed glyphs are drawn at codepoints Blit
+allocates in **U+102000-U+10FFFD** (57,342), never at the font's own
+codepoints (most icon fonts sit on Nerd's). A set's new names take the next
+free codepoints in bytewise name order, so a first install is one run. A
+name keeps its codepoint across updates (redrawn or not) and across
+uninstall and reinstall; a codepoint is never given to another set or
+name. A name an update drops is **retired** in that set for good (410
+`retired`); an update that brings it back is refused (409
+`glyph_retired_name`). The `system` scope may allocate 24,574 codepoints
+in the machine's life. The ledger is `/var/lib/blit/glyphs/ledger`, made
+durable before a set becomes visible. Resetting it means stopping Blit and
+removing the store, which breaks every codepoint already printed.
+
+**What is trusted.** A set from the hibr-apps catalogue is **signed by
+Blit's release key**: its `glyphs.manifest` (exactly
+`blit-glyph-set-signature 1`, `set <name> <version>`, then the SHA-256 of
+the font, the names file and the licence, one line each) and `glyphs.sig`
+(64 raw bytes, Ed25519) verify under `/usr/lib/blit/release-keys/*.pub`,
+the keys the updater uses; the manifest's first line keeps a glyph-set
+signature from passing as a release signature and the reverse.
+`tools/release/blit-sign glyphs` writes both. The **administrator's own**
+font is accepted unsigned over this (root's) token into `system` only, and
+reported `verified: false`. Every part is checked before anything is
+parsed: the signature, the manifest, each part's hash; then the names file
+(at most 8,192 glyphs), then the font with FreeType from the same bytes
+(one face, scalable, at most 65,535 glyphs, every name's `code` in its
+cmap). The glyphs are drawn through a table from each ledger codepoint to
+the font's own glyph, fitted to the cell as Nerd's icons are; the font is
+never modified. **At every start** each stored set is verified again:
+removing a key file revokes the sets it signed (they stay in the store,
+reported `state: refused` with the reason, and draw nothing).
+
+**The upload.** The body carries the parts in order, framed by one header
+as the update route frames its packages; the hashes check the transport:
+
+```text
+PUT /v1/fonts/glyphs/system/x-fontawesome
+Authorization: Bearer <token>
+Content-Length: 501899
+X-Blit-Glyph-Parts: manifest=263:<sha256> signature=64:<sha256> names=91022:<sha256>
+                    font=406412:<sha256> licence=4138:<sha256>
+  -> 201 {"set":"x-fontawesome","scope":"system","origin":"catalogue","verified":true,
+          "allocated":2052,"glyphs":2052,"version":"<sha-256>","import_us":48210}
+
+PUT /v1/fonts/glyphs/system/x-myicons          (the administrator's own: no manifest, no signature)
+X-Blit-Glyph-Parts: names=2210:<sha256> font=31840:<sha256> licence=1088:<sha256>
+  -> 201 {"set":"x-myicons","scope":"system","origin":"own","verified":false,"allocated":40,...}
+
+DELETE /v1/fonts/glyphs/system/x-myicons
+  -> 200 {"set":"x-myicons","scope":"system","removed":true}
+```
+
+The names file (`blit-glyph-names`, JSON, at most 4 MiB) maps each name to
+the font's own codepoint, with optional aliases and deprecations:
+
+```json
+{"format": "blit-glyph-names", "release": "6.7.2", "licence": "OFL-1.1",
+ "glyphs": {"house": {"code": "f015", "aliases": ["home"]},
+            "old-house": {"code": "f016", "deprecated": true, "replaced_by": ["house"]}}}
+```
+
+`release` follows the release statement's version grammar (a digit first)
+and, for a signed set, equals the manifest's version. Names follow the
+address grammar; an alias shares its glyph's codepoint.
+
+Each part is written into a root-only staging directory inside the store,
+read back once, verified, then written from memory into the set's own
+directory and renamed into place: a refusal changes nothing, and an import
+is visible, without a restart, as soon as it answers. An import runs on the
+server's loop: `import_us` says how long it took.
+
+**Errors**, each with nothing changed: 400 `malformed_query` (the id), 400
+`glyph_parts_invalid` (the header); 409 `glyph_retired_name`,
+`glyph_import_active`; 413 `glyph_too_large` (from the header, before a
+byte is staged); 422 `glyph_signature_invalid` (a bad signature, another
+key's, or no key installed), `glyph_manifest_invalid`, `glyph_part_missing`,
+`glyph_hash_mismatch` (the manifest's or the transport's),
+`glyph_names_invalid`, `glyph_font_rejected` (with its reason first:
+`not_a_font`, `collection`, `not_scalable`, `too_many_glyphs`,
+`no_unicode_cmap`, `code_unmapped`); 501 `glyph_scope_unsupported` (user
+scope, phase 2b); 503 `glyph_store_unavailable`; 507 `glyph_ledger_full`,
+`glyph_quota_exhausted`, `glyph_store_full` (64 sets in a scope, 1,024 in
+all, or 512 MiB).
+
+**The store** is `/var/lib/blit/glyphs`, `root:root 0700` (the package
+makes it); Blit uses it only when it and every directory above it belong to
+root and no one else can write them (a sticky directory of root's, such as
+`/tmp`, is allowed above it), and says why in the diagnostics log when not;
+the shipped sets are served either way. `GET /v1/fonts/glyphs` reports it:
+
+```json
+{"store": {"path": "/var/lib/blit/glyphs", "ready": true, "reason": null},
+ "ledger": {"first": "102000", "last": "10fffd", "size": 57342, "allocated": 2092,
+            "free": 55250, "system": {"allocated": 2092, "quota": 24574}},
+ "limits": {"sets_per_scope": 64, "sets": 1024, "glyphs_per_set": 8192, "names_per_set": 16384,
+            "font_bytes": 16777216, "face_glyphs": 65535, "names_bytes": 4194304,
+            "licence_bytes": 262144, "manifest_bytes": 512, "signature_bytes": 64,
+            "system_bytes": 536870912, "user_bytes": 67108864, "user_allocations": 8192,
+            "ledger": 57342},
+ "sets": [{"id": "x-fontawesome", "version": "<sha-256>", "installed": 1795689600,
+           "install": {"scope": "system", "origin": "catalogue", ..., "state": "loaded", ...}}],
+ "counters": {"names_parsed": 3, "fonts_opened": 3, "imports": 2, "refusals": 1,
+              "removals": 0, "last_import_us": 48210}}
+```
+
+A refused set has `version: null` and `install: {..., "state": "refused",
+"reason": "glyph_signature_invalid: ..."}`; it is not in `/v1/fonts/sets`.
+The Glyph Protocol's `q ; cp=` answers `status=system` for a codepoint an
+installed set draws, and `status=` empty for one it does not (never
+allocated, uninstalled or refused). `BLIT_GLYPH_STORE` and
+`BLIT_GLYPH_KEYS_DIR` name another store and keys directory, for gates
+only.
 
 ## Picture memory
 

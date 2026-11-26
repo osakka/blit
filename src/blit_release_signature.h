@@ -25,7 +25,20 @@
 
    The helper, tools/release/blit-sign.c and
    tools/tests/release_signature_gate.sh share this file: one statement,
-   one key format, one verifier. */
+   one key format, one verifier.
+
+   ADR 0245 section 7: the same keys and the same verifier sign glyph sets,
+   over a manifest of the set's three files whose first line is its own
+   label, so neither signature can pass as the other:
+
+       blit-glyph-set-signature 1
+       set <name> <version>
+       font <sha256>
+       names <sha256>
+       licence <sha256>
+
+   (blit_glyph_manifest_write, blit_glyph_manifest_parse; the server's
+   glyph store and blit-sign's glyph-set mode). */
 
 #include <dirent.h>
 #include <errno.h>
@@ -131,6 +144,120 @@ static size_t blit_release_statement(char *out, size_t capacity,
                           BLIT_RELEASE_STATEMENT_HEADER "blit %s %s\n",
                           blit_version, blit_sha256);
     return length > 0 && (size_t)length < capacity ? (size_t)length : 0;
+}
+
+/* ---- ADR 0245 section 7: the glyph-set manifest. ---- */
+
+#define BLIT_GLYPH_MANIFEST_HEADER "blit-glyph-set-signature 1\n"
+#define BLIT_GLYPH_MANIFEST_MAX 512
+#define BLIT_GLYPH_SIGNATURE_BYTES 64
+#define BLIT_GLYPH_MANIFEST_NAME_MAX 30
+
+typedef struct {
+    char name[BLIT_GLYPH_MANIFEST_NAME_MAX + 1];  /* the set's id without x- */
+    char version[128];                            /* the publisher's release */
+    char font[65], names[65], licence[65];        /* lowercase hex SHA-256 */
+} BlitGlyphManifest;
+
+/* A set's name in a manifest: 1-30 octets that make x-<name> a set id of
+   the glyph-set grammar (a-z, 0-9, single hyphens, none at either end). */
+static int blit_glyph_manifest_name_valid(const char *name, size_t length)
+{
+    size_t i;
+    if (length < 1 || length > BLIT_GLYPH_MANIFEST_NAME_MAX ||
+        name[0] == '-' || name[length - 1] == '-')
+        return 0;
+    for (i = 0; i < length; ++i) {
+        char c = name[i];
+        if (c == '-') {
+            if (name[i - 1] == '-') return 0;
+        } else if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The manifest for these fields, or 0 when one is not a field a manifest
+   carries: blit-sign writes it, never a person. */
+static size_t blit_glyph_manifest_write(char *out, size_t capacity, const char *name,
+                                        const char *version, const char *font_sha256,
+                                        const char *names_sha256, const char *licence_sha256)
+{
+    int length;
+    if (!blit_glyph_manifest_name_valid(name, strlen(name)) ||
+        !blit_release_version_valid(version) ||
+        strlen(font_sha256) != 64 || !blit_release_hex(font_sha256, 32, NULL) ||
+        strlen(names_sha256) != 64 || !blit_release_hex(names_sha256, 32, NULL) ||
+        strlen(licence_sha256) != 64 || !blit_release_hex(licence_sha256, 32, NULL))
+        return 0;
+    length = snprintf(out, capacity, BLIT_GLYPH_MANIFEST_HEADER "set %s %s\nfont %s\n"
+                      "names %s\nlicence %s\n", name, version, font_sha256,
+                      names_sha256, licence_sha256);
+    return length > 0 && (size_t)length < capacity &&
+        (size_t)length <= BLIT_GLYPH_MANIFEST_MAX ? (size_t)length : 0;
+}
+
+/* One line of a manifest at *CURSOR: KEYWORD and a space, then the rest up
+   to the line's LF, which must be there; the rest (without the LF) into
+   VALUE. */
+static int glyph_manifest_line(const char **cursor, const char *end, const char *keyword,
+                               char *value, size_t capacity)
+{
+    size_t keyword_length = strlen(keyword), length;
+    const char *line = *cursor, *lf;
+    if ((size_t)(end - line) < keyword_length + 1 ||
+        memcmp(line, keyword, keyword_length) != 0 || line[keyword_length] != ' ')
+        return 0;
+    line += keyword_length + 1;
+    lf = memchr(line, '\n', (size_t)(end - line));
+    if (lf == NULL) return 0;
+    length = (size_t)(lf - line);
+    if (length + 1 > capacity || memchr(line, '\0', length) != NULL) return 0;
+    memcpy(value, line, length);
+    value[length] = '\0';
+    *cursor = lf + 1;
+    return 1;
+}
+
+static int glyph_manifest_sha256(const char *value)
+{
+    return strlen(value) == 64 && blit_release_hex(value, 32, NULL);
+}
+
+/* The manifest's grammar, exactly: its label first, then the four lines in
+   order, each ending in one LF, nothing before or after, at most 512 bytes.
+   1 with its fields in OUT. A release statement is refused here by its
+   first line, whatever key signed it. */
+static int blit_glyph_manifest_parse(const char *text, size_t length, BlitGlyphManifest *out)
+{
+    const char *cursor = text, *end = text + length;
+    size_t header = strlen(BLIT_GLYPH_MANIFEST_HEADER);
+    char set_line[BLIT_GLYPH_MANIFEST_NAME_MAX + 1 + 128 + 1];
+    char *space;
+    memset(out, 0, sizeof(*out));
+    if (length > BLIT_GLYPH_MANIFEST_MAX || length < header ||
+        memcmp(text, BLIT_GLYPH_MANIFEST_HEADER, header) != 0)
+        return 0;
+    cursor += header;
+    if (!glyph_manifest_line(&cursor, end, "set", set_line, sizeof(set_line)))
+        return 0;
+    space = strchr(set_line, ' ');
+    if (space == NULL || strchr(space + 1, ' ') != NULL ||
+        !blit_glyph_manifest_name_valid(set_line, (size_t)(space - set_line)))
+        return 0;
+    *space = '\0';
+    if (!blit_release_version_valid(space + 1)) return 0;
+    snprintf(out->name, sizeof(out->name), "%s", set_line);
+    snprintf(out->version, sizeof(out->version), "%s", space + 1);
+    if (!glyph_manifest_line(&cursor, end, "font", out->font, sizeof(out->font)) ||
+        !glyph_manifest_sha256(out->font) ||
+        !glyph_manifest_line(&cursor, end, "names", out->names, sizeof(out->names)) ||
+        !glyph_manifest_sha256(out->names) ||
+        !glyph_manifest_line(&cursor, end, "licence", out->licence, sizeof(out->licence)) ||
+        !glyph_manifest_sha256(out->licence) || cursor != end)
+        return 0;
+    return 1;
 }
 
 /* A key file's contents: TAG, 64 lowercase hex digits, one LF, nothing

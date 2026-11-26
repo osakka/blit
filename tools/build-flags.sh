@@ -19,7 +19,8 @@
 #                                      server and the compositor
 #   build-flags.sh --sources server    the server's C sources besides
 #                                      src/blit_server.c (which a gate may
-#                                      include instead), hibr-ime's with them
+#                                      include instead), hibr-ime's and
+#                                      Monocypher (ADR 0245) with them
 #   build-flags.sh --sources helper    the update helper's C sources besides
 #                                      src/blit_update_helper.c: Monocypher
 #                                      (vendor/monocypher, Ed25519), which
@@ -235,6 +236,10 @@ case $1 in
     ime=$(ime_root) || exit 1
     for f in blit_kms.c blit_vt.c blit_font.c blit_raster.c; do echo "$here/src/$f"; done
     ls "$ime"/src/*.c "$ime"/methods/*/*.c
+    # ADR 0245: the glyph store verifies glyph sets with the release keys'
+    # Ed25519, the helper's own vendored Monocypher.
+    echo "$here/vendor/monocypher/monocypher.c"
+    echo "$here/vendor/monocypher/monocypher-ed25519.c"
     ;;
 --scanner)
     scanner=$(variable wayland-scanner wayland_scanner)

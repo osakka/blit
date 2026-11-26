@@ -95,7 +95,35 @@ struct BlitRaster {
     /* ADR 0211, 0212: each pen-drawn glyph's FG, LINE and MIX planes: Slate's
        window glyphs, then the controls'. */
     unsigned char *window_planes[BLIT_CHROME_PENS][3];
+    /* ADR 0245: the installed sets' generation this cache was drawn at. */
+    unsigned long installed_generation;
 };
+
+/* ADR 0245: the installed sets' remap (the glyph store's), and how often
+   what they draw has changed. */
+static BlitRasterInstalledLookup raster_installed_lookup;
+static unsigned long raster_installed_generation = 1;
+
+void blit_raster_set_installed_lookup(BlitRasterInstalledLookup lookup)
+{
+    raster_installed_lookup = lookup;
+    ++raster_installed_generation;
+}
+
+void blit_raster_installed_changed(void)
+{
+    ++raster_installed_generation;
+}
+
+unsigned long blit_raster_installed_generation(void)
+{
+    return raster_installed_generation;
+}
+
+static int installed_block(uint32_t scalar)
+{
+    return scalar >= BLIT_RASTER_INSTALLED_FIRST && scalar <= BLIT_RASTER_INSTALLED_LAST;
+}
 
 static int ceil_26_6(FT_Pos value) { return (int)((value + 63) / 64); }
 
@@ -1806,7 +1834,8 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
         (blit_icon_codepoint(scalar) || scalar == 0x270e) && !bar_corner(scalar) &&
         !blit_chrome_glyph(scalar) &&
         FT_Get_Char_Index(raster->icons, scalar);
-    int outline_colour = !blit_icon && key->length == 1 && !protected_geometry(scalar) &&
+    int outline_colour = !blit_icon && key->length == 1 && !installed_block(scalar) &&
+        !protected_geometry(scalar) &&
         !invisible_format(scalar) && outline_has_colour(raster->outline, scalar);
     BlitRasterIconPen icon_pen = blit_icon && pen != BLIT_RASTER_ICON_COLOUR &&
         outline_has_colour(raster->icons, scalar) ? pen : BLIT_RASTER_ICON_COLOUR;
@@ -1843,6 +1872,7 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
        fallback, and its pens come from blit_raster_get_window_plane. */
     if (key->length == 1 && blit_chrome_glyph(scalar))
         next.glyph.format = BLIT_RASTER_COVERAGE;
+    if (key->length == 1 && installed_block(scalar)) next.glyph.format = BLIT_RASTER_COVERAGE;
     if (text_selector) next.glyph.format = BLIT_RASTER_COVERAGE;
     else if (key->length > 1) {
         colour_index = colour_cluster_glyph(raster, key);
@@ -1876,6 +1906,14 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
     } else if (key->length == 1 && invisible_format(scalar)) result = 1;
     else if (blit_icon)
         result = draw_blit_icon(raster, scalar, icon_pen, &next);
+    else if (key->length == 1 && installed_block(scalar)) {
+        /* ADR 0245: an installed set's glyph, by the store's remap table,
+           fitted as a Nerd icon is; any other codepoint here is uncovered. */
+        void *face = NULL;
+        unsigned index = 0;
+        if (raster_installed_lookup && raster_installed_lookup(scalar, &face, &index))
+            result = draw_fitted_glyph(raster, (FT_Face)face, FIT_ICON, index, index, &next, 0);
+    }
     else if (next.glyph.format == BLIT_RASTER_RGBA_PREMULTIPLIED && !outline_colour)
         result = draw_colour_glyph(raster, colour_index, &next);
     else if (!protected_geometry(scalar)) {
@@ -1916,6 +1954,29 @@ static int raster_get_drawn(BlitRaster *raster, const BlitCellCluster *lookup,
     return cache_store(raster, &next, glyph);
 }
 
+/* ADR 0245: drop every cached glyph in the installed block, once per
+   change of the installed sets, before the lookup that follows it. The
+   pen and bold bits sit above the scalar's 21. */
+static void raster_installed_check(BlitRaster *raster)
+{
+    unsigned i;
+    if (raster->installed_generation == raster_installed_generation) return;
+    raster->installed_generation = raster_installed_generation;
+    for (i = 0; i < RASTER_SLOTS; ++i) {
+        RasterEntry *entry = &raster->cache[i];
+        if (!entry->valid || !installed_block(entry->key.scalars[0] & 0x1fffffu)) continue;
+        {
+            unsigned other, start = i / RASTER_WAYS * RASTER_WAYS;
+            for (other = start; other < start + RASTER_WAYS; ++other)
+                if (raster->cache[other].valid && raster->cache[other].age > entry->age)
+                    --raster->cache[other].age;
+        }
+        raster->bytes -= (size_t)entry->glyph.stride * entry->glyph.height;
+        free(entry->pixels);
+        memset(entry, 0, sizeof(*entry));
+    }
+}
+
 /* ADR 0243: every glyph lookup enters here. A cell written in the icons'
    old range (U+100000-U+100494) is drawn as its new codepoint, old + 0x1000,
    and shares its cache entry (blit_icon_codepoints.h, the transition). */
@@ -1924,6 +1985,7 @@ static int raster_get_key(BlitRaster *raster, const BlitCellCluster *lookup,
 {
     BlitCellCluster moved;
     uint32_t scalar = blit_icon_scalar(lookup->scalars[0]);
+    raster_installed_check(raster);
     if (scalar == lookup->scalars[0]) return raster_get_drawn(raster, lookup, pen, glyph);
     moved = *lookup;
     moved.scalars[0] = scalar;

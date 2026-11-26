@@ -18,7 +18,15 @@
    the JSON this build reads, or holds a name outside the grammar, a
    duplicate or a codepoint in the registration block, is not served at all
    (its sets are unknown) and the reason is kept for the diagnostics log;
-   the server starts either way. */
+   the server starts either way.
+
+   ADR 0245: installed sets (the glyph store, blit_glyph_store.h) join the
+   same table. The shipped sets are read once, into blit_glyph_shipped;
+   whenever the installed sets change, a new table is built from a copy of
+   the shipped one plus the installed sets' names (blit_glyph_table_begin,
+   blit_glyph_table_add_set, glyph_add, blit_glyph_table_commit), with the
+   same grammar, the same alias rule and the same derived ranges, and
+   swapped in whole. blit_glyph_sets is always the table in use. */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -50,10 +58,14 @@ typedef struct {
 
 typedef struct {
     const char *id, *prefix;
-    int source, loaded;
+    int source, loaded;             /* source: its names source; -1 installed */
     size_t first, end;              /* its names in the table */
     size_t listed;                  /* not deprecated, not retired */
     size_t range_first, range_count;
+    /* What the listing reports: a shipped set's from its source, an
+       installed set's from the store (ADR 0245 section 8). */
+    const char *owner, *scope, *faces, *version;
+    int installed;                  /* the store's set index; -1 shipped */
 } BlitGlyphSet;
 
 typedef struct {
@@ -65,7 +77,8 @@ typedef struct {
 
 typedef struct {
     BlitGlyphSource sources[BLIT_GLYPH_SOURCE_COUNT];
-    BlitGlyphSet sets[BLIT_GLYPH_SET_COUNT];
+    BlitGlyphSet *sets;             /* the shipped sets, then the installed */
+    int set_count, set_capacity;
     BlitGlyphName *names;
     size_t count, capacity;
     char *pool;
@@ -78,7 +91,11 @@ typedef struct {
     size_t bytes;
 } BlitGlyphSets;
 
-static BlitGlyphSets blit_glyph_sets;
+/* The shipped sets as read at start, and the table in use: the shipped
+   one until a set is installed, then the last one committed. */
+static BlitGlyphSets blit_glyph_shipped;
+static BlitGlyphSets *blit_glyph_table = &blit_glyph_shipped;
+#define blit_glyph_sets (*blit_glyph_table)
 
 /* Section 4.1: owner *( "-" id-part ), 1-32 octets, a-z and 0-9, a letter
    first. */
@@ -581,6 +598,7 @@ static int glyph_read_nerd(BlitGlyphSets *g, const BlitGlyphSource *source, int 
 }
 
 static const char *glyph_sort_pool;
+static const BlitGlyphSets *glyph_sort_table;
 
 static int glyph_order(const void *a, const void *b)
 {
@@ -591,8 +609,8 @@ static int glyph_order(const void *a, const void *b)
 
 static int glyph_codepoint_order(const void *a, const void *b)
 {
-    const BlitGlyphName *x = &blit_glyph_sets.names[*(const size_t *)a];
-    const BlitGlyphName *y = &blit_glyph_sets.names[*(const size_t *)b];
+    const BlitGlyphName *x = &glyph_sort_table->names[*(const size_t *)a];
+    const BlitGlyphName *y = &glyph_sort_table->names[*(const size_t *)b];
     if (x->set != y->set) return x->set < y->set ? -1 : 1;
     if (x->codepoint != y->codepoint) return x->codepoint < y->codepoint ? -1 : 1;
     return strcmp(glyph_sort_pool + x->name, glyph_sort_pool + y->name);
@@ -687,18 +705,21 @@ static int glyph_load_source(BlitGlyphSets *g, int index)
     return 1;
 }
 
+static void glyph_table_finish(BlitGlyphSets *g);
+
 /* Read every names source the registry declares into the one table: at
    start, once. Returns how many sources were served. */
 static int blit_glyph_sets_load(void)
 {
-    BlitGlyphSets *g = &blit_glyph_sets;
+    BlitGlyphSets *g = &blit_glyph_shipped;
     struct timespec t0, t1;
-    size_t i, *order = NULL, live = 0;
     int s, loaded = 0;
-    uint32_t *points = NULL;
 
     clock_gettime(CLOCK_MONOTONIC, &t0);
     memset(g, 0, sizeof(*g));
+    g->sets = calloc(BLIT_GLYPH_SET_COUNT, sizeof(*g->sets));
+    if (!g->sets) return 0;
+    g->set_count = g->set_capacity = BLIT_GLYPH_SET_COUNT;
     {
         int n = 0;
 #define GLYPH_SOURCE(key_, owner_, scope_, format_, file_, version_, faces_, lists_) \
@@ -710,14 +731,45 @@ static int blit_glyph_sets_load(void)
 #undef GLYPH_SOURCE
         n = 0;
 #define GLYPH_SET(id_, source_, prefix_) \
-        g->sets[n].id = id_; g->sets[n].source = source_; g->sets[n].prefix = prefix_; ++n;
+        g->sets[n].id = id_; g->sets[n].source = source_; g->sets[n].prefix = prefix_; \
+        g->sets[n].installed = -1; ++n;
         BLIT_GLYPH_SETS(GLYPH_SET)
 #undef GLYPH_SET
     }
     for (s = 0; s < BLIT_GLYPH_SOURCE_COUNT; ++s) loaded += glyph_load_source(g, s);
+    for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) {
+        const BlitGlyphSource *source = &g->sources[g->sets[s].source];
+        g->sets[s].owner = source->owner;
+        g->sets[s].scope = source->scope;
+        g->sets[s].faces = source->faces;
+        g->sets[s].version = source->version ? source->version : source->sha256;
+    }
+    glyph_table_finish(g);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    g->load_us = (long)(t1.tv_sec - t0.tv_sec) * 1000000L + (t1.tv_nsec - t0.tv_nsec) / 1000L;
+    return loaded;
+}
+
+/* The table's derived parts, from its names: sorted by set and name, each
+   set's run, the aliases (section 4.2) and the codepoint ranges. The same
+   for the shipped table and for every table built with installed sets. */
+static void glyph_table_finish(BlitGlyphSets *g)
+{
+    size_t i, *order = NULL, live = 0;
+    int s;
+    uint32_t *points = NULL;
+
+    for (s = 0; s < g->set_count; ++s) {
+        BlitGlyphSet *set = &g->sets[s];
+        set->loaded = 0;
+        set->first = set->end = set->listed = set->range_first = set->range_count = 0;
+    }
+    g->range_count = 0;
+    for (i = 0; i < g->count; ++i) g->names[i].alias = -1;
     /* Each source's names are sorted already; the whole table is too
        when the sources' sets do not interleave, as now. */
     glyph_sort_pool = g->pool;
+    glyph_sort_table = g;
     for (i = 1; i < g->count && glyph_order(&g->names[i - 1], &g->names[i]) < 0; ++i)
         ;
     if (i < g->count) qsort(g->names, g->count, sizeof(*g->names), glyph_order);
@@ -731,8 +783,8 @@ static int blit_glyph_sets_load(void)
         if (!(g->names[i].flags & (BLIT_GLYPH_FLAG_DEPRECATED | BLIT_GLYPH_FLAG_RETIRED))) ++set->listed;
         if (!(g->names[i].flags & BLIT_GLYPH_FLAG_RETIRED)) ++live;
     }
-    for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s)
-        if (!g->sources[g->sets[s].source].loaded) g->sets[s].loaded = 0;
+    for (s = 0; s < g->set_count; ++s)
+        if (g->sets[s].source >= 0 && !g->sources[g->sets[s].source].loaded) g->sets[s].loaded = 0;
     /* Section 4.2: one glyph with several names in a set has one canonical
        name, the bytewise smallest; the rest are its aliases. Two sets that
        share a codepoint are not aliases of each other (4.3). */
@@ -749,7 +801,7 @@ static int blit_glyph_sets_load(void)
                 g->names[order[run]].alias = (int32_t)order[i];
         }
         /* The codepoint ranges each set covers: derived, for the listing. */
-        for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) {
+        for (s = 0; s < g->set_count; ++s) {
             BlitGlyphSet *set = &g->sets[s];
             size_t m = 0, k;
             if (!set->loaded) continue;
@@ -784,22 +836,88 @@ static int blit_glyph_sets_load(void)
     }
     g->bytes = g->capacity * sizeof(*g->names) + g->pool_capacity +
                g->by_capacity * sizeof(*g->by) + g->range_capacity * sizeof(*g->ranges);
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    g->load_us = (long)(t1.tv_sec - t0.tv_sec) * 1000000L + (t1.tv_nsec - t0.tv_nsec) / 1000L;
-    return loaded;
+}
+
+/* ---- ADR 0245: a table with the installed sets. ---- */
+
+/* A new table: a copy of the shipped one, with room for INSTALLED sets
+   more. NULL when memory runs out. */
+static BlitGlyphSets *blit_glyph_table_begin(int installed)
+{
+    const BlitGlyphSets *shipped = &blit_glyph_shipped;
+    BlitGlyphSets *g = calloc(1, sizeof(*g));
+    if (!g) return NULL;
+    *g = *shipped;
+    g->names = NULL; g->pool = NULL; g->by = NULL; g->ranges = NULL; g->sets = NULL;
+    g->capacity = g->pool_capacity = g->by_capacity = g->range_capacity = 0;
+    g->count = g->pool_used = g->by_count = g->range_count = 0;
+    g->set_capacity = shipped->set_count + installed;
+    g->sets = calloc((size_t)(g->set_capacity ? g->set_capacity : 1), sizeof(*g->sets));
+    if (!g->sets ||
+        !glyph_grow((void **)&g->names, &g->capacity, shipped->count + 1, sizeof(*g->names)) ||
+        !glyph_grow((void **)&g->pool, &g->pool_capacity, shipped->pool_used + 1, 1) ||
+        !glyph_grow((void **)&g->by, &g->by_capacity, shipped->by_count + 1, sizeof(*g->by))) {
+        free(g->sets); free(g->names); free(g->pool); free(g->by); free(g);
+        return NULL;
+    }
+    memcpy(g->sets, shipped->sets, (size_t)shipped->set_count * sizeof(*g->sets));
+    g->set_count = shipped->set_count;
+    if (shipped->count) memcpy(g->names, shipped->names, shipped->count * sizeof(*g->names));
+    if (shipped->pool_used) memcpy(g->pool, shipped->pool, shipped->pool_used);
+    if (shipped->by_count) memcpy(g->by, shipped->by, shipped->by_count * sizeof(*g->by));
+    g->count = shipped->count;
+    g->pool_used = shipped->pool_used;
+    g->by_count = shipped->by_count;
+    return g;
+}
+
+/* An installed set's entry; its names are then added with glyph_add (and
+   glyph_add_by), its retired ones with codepoint 0. -1 when it does not
+   fit. ID, VERSION and FACES must outlive the table (the store's). */
+static int blit_glyph_table_add_set(BlitGlyphSets *g, const char *id, const char *version,
+                                    const char *faces, int installed)
+{
+    BlitGlyphSet *set;
+    if (g->set_count >= g->set_capacity || g->set_count >= 65535) return -1;
+    set = &g->sets[g->set_count];
+    memset(set, 0, sizeof(*set));
+    set->id = id;
+    set->source = -1;
+    set->owner = "x";
+    set->scope = "terminal-local";
+    set->faces = faces;
+    set->version = version;
+    set->installed = installed;
+    return g->set_count++;
+}
+
+static void glyph_table_free(BlitGlyphSets *g)
+{
+    if (!g || g == &blit_glyph_shipped) return;
+    free(g->sets); free(g->names); free(g->pool); free(g->by); free(g->ranges);
+    free(g);
+}
+
+/* Derive what the table needs and swap it in whole; the table it replaces
+   is freed. Nothing reads the table between here and the next request. */
+static void blit_glyph_table_commit(BlitGlyphSets *g)
+{
+    BlitGlyphSets *old = blit_glyph_table;
+    glyph_table_finish(g);
+    blit_glyph_table = g;
+    glyph_table_free(old);
 }
 
 static const char *blit_glyph_set_version(const BlitGlyphSet *set)
 {
-    const BlitGlyphSource *source = &blit_glyph_sets.sources[set->source];
-    return source->version ? source->version : source->sha256;
+    return set->version;
 }
 
 /* A set by id, only one that is served; the id has passed the grammar. */
 static const BlitGlyphSet *blit_glyph_set_find(const char *id, size_t n)
 {
     int s;
-    for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) {
+    for (s = 0; s < blit_glyph_sets.set_count; ++s) {
         const BlitGlyphSet *set = &blit_glyph_sets.sets[s];
         if (set->loaded && strlen(set->id) == n && memcmp(set->id, id, n) == 0) return set;
     }

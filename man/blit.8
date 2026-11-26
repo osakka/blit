@@ -268,6 +268,17 @@ Directory of the bundled fonts; default
 Directory of locally installed fonts; default
 .IR /usr/local/lib/blit/fonts .
 .TP
+.B BLIT_GLYPH_STORE
+The installed glyph sets' store (ADR 0245); default
+.IR /var/lib/blit/glyphs ,
+which must be root's, 0700, under directories only root can write.
+For gates only.
+.TP
+.B BLIT_GLYPH_KEYS_DIR
+The keys installed glyph sets are verified with; default
+.IR /usr/lib/blit/release-keys ,
+the release keys. For gates only.
+.TP
 .B BLIT_IME_DATA
 Directory of the input methods' data, one subdirectory per method
 (ADR 0233; hibr-ime); default

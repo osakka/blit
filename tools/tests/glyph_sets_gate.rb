@@ -28,7 +28,15 @@
 #     any name, `more`;
 #   - an unknown set (emoji included: it is not served yet) is 404
 #     `unknown_set`, an unknown name 404 `unknown_name`, a retired one 410
-#     `retired`; the routes are authenticated like the rest and read-only.
+#     `retired`; the routes are authenticated like the rest and read-only;
+#   - ADR 0245 phase 2a, one table across shipped and installed sets: every
+#     shipped set says `source: shipped`; a set imported into a scratch
+#     store (signed with a throwaway key) joins the same listing after them
+#     with `source: installed`, owner `x`, scope `terminal-local`, its
+#     version and `install`, and answers the same listing, lookups, aliases
+#     (the bytewise smallest name of a codepoint), deprecations and grammar;
+#     a name an update drops is 410 `retired`; removed, the set and its
+#     names are 410 `uninstalled` and the listing is the shipped one again.
 #
 # It fails on a server without the set level (no `sets`, no
 # /v1/fonts/sets).
@@ -42,6 +50,7 @@ require 'timeout'
 require 'tmpdir'
 require_relative 'gate_port'
 require_relative 'gate_server'
+require_relative 'glyph_store_fixture'
 
 ROOT = File.expand_path('../..', __dir__)
 FONTS = File.join(ROOT, 'assets/fonts')
@@ -164,7 +173,8 @@ check(expected.values.flat_map { |s| s[:names].values }.none? { |n| n[:cp] && n[
       'no name is in the registration block or the old icon range')
 expected_sets = expected.keys.sort.map do |id|
   { 'id' => id, 'owner' => expected[id]['owner'], 'scope' => expected[id]['scope'],
-    'version' => expected[id]['version'], 'count' => expected[id]['count'], 'faces' => expected[id]['faces'] }
+    'version' => expected[id]['version'], 'count' => expected[id]['count'], 'faces' => expected[id]['faces'],
+    'source' => 'shipped' }
 end
 
 # The clashes (section 1): a Blit id that is also a Nerd name, as spelled or
@@ -221,7 +231,10 @@ def page_all(id, limit: nil)
 end
 
 Dir.mktmpdir('blit-glyph-sets') do |root|
+  glyph_keys = GlyphStoreFixture.keys(root)
+  glyph_store = GlyphStoreFixture.store(root)
   env = gate_display_env(width: 640, height: 384).merge(
+    'BLIT_GLYPH_STORE' => glyph_store, 'BLIT_GLYPH_KEYS_DIR' => glyph_keys[:keys],
     'BLIT_BIND_ADDRESS' => '127.0.0.1', 'BLIT_AUTH_TOKEN' => TOKEN, 'BLIT_LOGIN_AUTOSTART' => '0',
     'BLIT_EXPECT_DESKTOP' => '0', 'BLIT_FONT_ROOT' => FONTS, 'BLIT_FONT_LOCAL_ROOT' => File.join(root, 'local'),
     'BLIT_PSF_FONT' => File.join(FONTS, 'Blit-Terminus16.psf'), 'BLIT_SETTINGS_PATH' => File.join(root, 'settings.json'))
@@ -385,8 +398,60 @@ Dir.mktmpdir('blit-glyph-sets') do |root|
           'the routes need the bearer token')
     check(raw('/v1/fonts/sets/blit', method: 'POST').first == 405 && raw('/v1/fonts/sets/blit/bluetooth', method: 'DELETE').first == 405,
           'the routes are read-only (405)')
+    # ADR 0245: an installed set in the same table.
+    fx = GlyphStoreFixture
+    codes = fx.nerd_codes('fa', 6)
+    installed = codes.to_h
+    # One glyph with an alias that sorts before it, one deprecated with its
+    # replacement.
+    house, house_code = codes[2]
+    installed[house] = { 'code' => house_code, 'aliases' => ['a-home'] }
+    old_name, old_code = codes[4]
+    installed[old_name] = { 'code' => old_code, 'deprecated' => true, 'replaced_by' => [codes[5][0]] }
+    parts = fx.make_set(File.join(root, 'gs'), name: 'x-gs', release: '2.0', glyphs: installed,
+                        secret: glyph_keys[:secret], sign: glyph_keys[:sign])
+    code, answer = fx.import(PORT, TOKEN, 'x-gs', parts)
+    check(code == 201 && answer['allocated'] == 6, "a signed set x-gs imported (#{code}, #{answer.inspect[0, 120]})")
+    glyph_cps = codes.map(&:first).sort.each_with_index.to_h { |name, i| [name, (0x102000 + i).to_s(16)] }
+    _, listing = get('/v1/fonts/sets')
+    _, fonts = get('/v1/fonts')
+    entry = listing['sets'].last
+    check(listing['sets'][0...-1] == expected_sets && entry['id'] == 'x-gs' && entry['owner'] == 'x' &&
+          entry['scope'] == 'terminal-local' && entry['source'] == 'installed' && entry['faces'] == ['x-gs'] &&
+          entry['count'] == 6 && entry['version'].match?(/\A[0-9a-f]{64}\z/) &&
+          entry['install'] == { 'scope' => 'system', 'origin' => 'catalogue', 'via' => 'http', 'verified' => true,
+                                'state' => 'loaded', 'release' => '2.0', 'licence' => 'MIT', 'glyphs' => 6,
+                                'bytes' => entry['install']['bytes'] },
+          "one listing: the #{expected_sets.size} shipped sets, then x-gs installed (#{entry.inspect[0, 300]})")
+    check(fonts['sets'] == listing['sets'], 'GET /v1/fonts lists the same sets')
+    names, = page_all('x-gs', limit: 2)
+    want = (glyph_cps.keys + ['a-home']).sort.reject { |n| n == old_name }.map do |n|
+      cp = n == 'a-home' ? glyph_cps[house] : glyph_cps[n]
+      { 'name' => n, 'codepoints' => [cp] }.tap { |e| e['alias_of'] = 'a-home' if n == house }
+    end
+    check(names == want, "x-gs paged: each name at its ledger codepoint, #{house} an alias of a-home " \
+                         "(the smaller name), the deprecated name unlisted (#{names.inspect[0, 300]})")
+    _, record = get("/v1/fonts/sets/x-gs/#{old_name}")
+    check(record && record['codepoints'] == [glyph_cps[old_name]] && record['deprecated'] == true &&
+          record['replaced_by'] == [codes[5][0]] && record['scope'] == 'terminal-local' &&
+          record['version'] == entry['version'], "x-gs/#{old_name}: deprecated, replaced_by, the set's version")
+    check(raw('/v1/fonts/sets/x-GS').first == 400 && raw("/v1/fonts/sets/x-gs/#{house.upcase}").first == 400,
+          'the same grammar for installed ids and names')
+    dropped = codes[0][0]
+    parts = fx.make_set(File.join(root, 'gs'), name: 'x-gs', release: '2.1', glyphs: installed.reject { |n, _| n == dropped },
+                        secret: glyph_keys[:secret], sign: glyph_keys[:sign])
+    fx.import(PORT, TOKEN, 'x-gs', parts)
+    code, problem = get("/v1/fonts/sets/x-gs/#{dropped}")
+    check(code == 410 && problem['code'] == 'retired' && !problem.key?('codepoints'),
+          "#{dropped}, dropped by an update, is 410 retired")
+    fx.http(PORT, TOKEN, 'DELETE', '/v1/fonts/glyphs/system/x-gs')
+    code, problem = get('/v1/fonts/sets/x-gs')
+    code2, problem2 = get("/v1/fonts/sets/x-gs/#{house}")
+    check(code == 410 && problem['code'] == 'uninstalled' && code2 == 410 && problem2['code'] == 'uninstalled',
+          'removed: the set and its names are 410 uninstalled')
+    check(get('/v1/fonts/sets')[1]['sets'] == expected_sets, 'and the listing is the shipped one again')
     $summary = "sets=#{expected.size} names=#{lookups.size} listed=#{expected.values.sum { |s| s['count'] }} " \
-               "pages=#{pages_total} clashes=#{clashes.map(&:first).uniq.size} lookups_s=#{elapsed.round(1)}"
+               "pages=#{pages_total} clashes=#{clashes.map(&:first).uniq.size} lookups_s=#{elapsed.round(1)} installed=x-gs"
   ensure
     Process.kill('TERM', pid) rescue nil
     Process.wait(pid) rescue nil

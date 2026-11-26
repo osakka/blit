@@ -459,6 +459,9 @@ suite_font() {
     run_gate font_assets_gate.rb ruby tools/tests/font_assets_gate.rb
     run_gate font_registry_gate.rb ruby tools/tests/font_registry_gate.rb
     run_gate glyph_sets_gate.rb ruby tools/tests/glyph_sets_gate.rb
+    # ADR 0245 phase 2a: installed glyph sets' signature and ledger.
+    run_gate glyph_signature_gate.rb ruby tools/tests/glyph_signature_gate.rb
+    run_gate glyph_ledger_gate.rb ruby tools/tests/glyph_ledger_gate.rb
     run_gate blit_icons_rebuild_gate.sh sh tools/tests/blit_icons_rebuild_gate.sh
     run_gate hibr_ui_glyphs_gate.sh sh tools/tests/hibr_ui_glyphs_gate.sh
     run_gate font_discovery_gate.rb ruby tools/tests/font_discovery_gate.rb
@@ -585,6 +588,8 @@ suite_renderer() {
     run_serial_gate settings_writer_gate.rb ruby tools/tests/settings_writer_gate.rb
     run_gate output_capture_gate.rb ruby tools/tests/output_capture_gate.rb
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb
+    # ADR 0245 phase 2a: an installed set drawn at its ledger codepoints.
+    run_gate glyph_install_gate.rb ruby tools/tests/glyph_install_gate.rb
     run_gate window_style_gate.rb ruby tools/tests/window_style_gate.rb
     run_gate icon_pen_gate.rb ruby tools/tests/icon_pen_gate.rb
     run_gate glyph_edge_sweep_gate.rb ruby tools/tests/glyph_edge_sweep_gate.rb

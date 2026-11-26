@@ -1,6 +1,19 @@
 # ADR 0245: Installable glyph sets -- a root-owned store, a ledger of codepoints, per-user views
 
 - Status: proposed
+- Note: Phase 2a built (not yet released): the root-owned store and the
+  ledger; the glyph-set manifest and its check in
+  `src/blit_release_signature.h`, and `blit-sign glyphs`; root loading a
+  verified set with FreeType through the remap table; `PUT`/`DELETE
+  /v1/fonts/glyphs/system/{set}` over HTTP (signed, and the administrator's
+  own); `source`/`install` in `/v1/fonts` and `/v1/fonts/sets`, `GET
+  /v1/fonts/glyphs`; the `x` owner; every stored set verified again at
+  start (`src/blit_glyph_store.h`; `glyph_signature_gate`,
+  `glyph_ledger_gate`, `glyph_install_gate`, `glyph_sets_gate`). Phase 2a
+  stops there: no user scope, views or shadowing, and
+  `/v1/fonts/glyphs/users/...` answers 501 (2b); no frame-socket `GLYPHS`,
+  `glyph_system_dirs`, rescan or `POST /v1/fonts/glyphs/rescan` (2c).
+  What building it settled is under "Phase 2a as built", below.
 - Date: 2026-11-22; revised the same day with the owner's answers to its
   three open questions (hibr's proposal, approved by the owner 2026-11-22;
   "Decided (2026-11-22)" below)
@@ -800,10 +813,60 @@ own machine's system sets, not the desktop host's; it reports the host's
 system sets missing and programs draw their fallbacks there. Hold's client
 imports nothing under the user's scope for them and spends no quota.
 
+## Phase 2a as built
+
+Building 2a settled these points the sections above left open; none
+changes a decision.
+
+- **Ownership.** "Owned by root" (section 2) is read as owned by root or
+  by the server's own user, which in the shipped service is root; a
+  sticky directory of root's is allowed above the store (no one else can
+  rename what is in it), which is how a gate's store under `/tmp` passes.
+  The leaf must be `0700`; `/var/lib/blit/glyphs` is made `root:root 0700`
+  by the postinst. `BLIT_GLYPH_KEYS_DIR`, like `BLIT_GLYPH_STORE`, is for
+  gates only.
+- **The ledger** is one file of lines, `a <codepoint> <scope> <set>
+  <name>` and `r <scope> <set> <name>` after its header: retirements live
+  in it, not in `record.json`, since that goes with an uninstalled set.
+  Allocation is one counter that only grows, so "never reused" holds by
+  construction. A torn last line (a crash during the append) is cut off at
+  start; anything else malformed keeps the store out of use.
+- **Glyphs and aliases.** A codepoint is allocated per glyph (each key of
+  the names file's `glyphs`); an alias shares its glyph's codepoint, and
+  the canonical name reported is the bytewise smallest of a codepoint's
+  names (glyph sets 4.2), which may be an alias in the file. A name the
+  ledger allocated in that scope and set and an import lacks is retired,
+  whether the import is an update or a reinstall after an uninstall.
+- **Codes.** A name's `code` is any Unicode scalar value but 0 (it is the
+  font's, never drawn). The names file's `format` member is optional and
+  must say `blit-glyph-names`; its optional `licence` (SPDX) is what
+  `install.licence` reports, since Blit never sees the catalogue entry.
+- **Which 507.** The system scope's 24,574 answers
+  `glyph_quota_exhausted`; 64 sets in a scope, 1,024 in all and 512 MiB
+  answer `glyph_store_full`; the block itself, `glyph_ledger_full`.
+- **Codes the list lacked.** 400 `glyph_parts_invalid` (the header), 404
+  `glyph_set_not_installed` (`DELETE`), 409 `glyph_import_active` (one
+  upload at a time), 501 `glyph_scope_unsupported` (user scope, until
+  2b), 503 `glyph_store_unavailable`. A part whose bytes are not the
+  header's hash is `glyph_hash_mismatch` too.
+- **What is reported.** `GET /v1/fonts/glyphs` and `/licence` are built
+  with 2a. A refused set is listed there (`state: refused`, `reason`) and
+  not in `/v1/fonts/sets`, since it draws nothing. Its counters
+  `names_parsed` and `fonts_opened` are how a gate shows a refusal parsed
+  nothing.
+- **On the loop.** An import runs on the server's loop between frames: the
+  table and the remap are built aside and swapped in whole, never while a
+  frame draws, but the loop waits for the import (hashing, FreeType's open,
+  the writes and fsyncs). `import_us` in the answer says how long.
+- **Caches.** Any change to the installed sets drops every cached glyph in
+  U+102000-U+10FFFD from every raster and empties the GLES atlas, and every
+  cell is drawn again; per set would save little.
+
 ## Evidence
 
-Nothing is built; this record is `proposed`. The gates each phase must
-add, and pass, before the record is accepted:
+Phase 2a's gates are built (the Note above); the rest is not, and this
+record stays `proposed`. The gates each phase must add, and pass, before
+the record is accepted:
 
 - `glyph_ledger_gate`: allocation in name order; a name after an update
   (redrawn or not) and after uninstall and reinstall keeps its codepoint;

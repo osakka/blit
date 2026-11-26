@@ -384,6 +384,8 @@ if [ ! -s /etc/blit/update.token ]; then
     chmod 0640 /etc/blit/update.token
 fi
 install -d -o root -g blit -m 0770 /var/lib/blit/updates
+# ADR 0245: the glyph store, root's alone; never under updates (SR-3, SR-10).
+install -d -o root -g root -m 0700 /var/lib/blit/glyphs
 # A staged update package is the helper's to remove once it has answered
 # (ADR 0232). Releases before 0.3.97 left every one behind; by the time
 # this runs, dpkg has unpacked the ones it is installing.

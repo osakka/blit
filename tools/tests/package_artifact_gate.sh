@@ -311,6 +311,31 @@ for field in Suggests Recommends Depends Breaks Conflicts Replaces; do
         exit 1
     fi
 done
+# ADR 0245 phase 2a: the glyph store is made root:root 0700 by the
+# postinst, beside the updates directory, and needs nothing new: no
+# dependency (Ed25519 is the vendored Monocypher the updater uses; no gpgv,
+# no OpenPGP), no system user (the only one is blit) and no key file
+# (release-keys is pinned above).
+glyph_control=$(mktemp -d "${TMPDIR:-/tmp}/blit-glyph-control.XXXXXX")
+dpkg-deb -e "$package" "$glyph_control"
+grep -Fx 'install -d -o root -g root -m 0700 /var/lib/blit/glyphs' "$glyph_control/postinst" >/dev/null || {
+    echo "PACKAGE_ARTIFACT_FAIL the postinst does not make /var/lib/blit/glyphs root:root 0700" >&2
+    rm -rf "$glyph_control"
+    exit 1
+}
+users=$(grep -c 'adduser --system' "$glyph_control/postinst" || true)
+grep -F -- '--disabled-password blit >' "$glyph_control/postinst" >/dev/null || users=0
+rm -rf "$glyph_control"
+[ "$users" = 1 ] || {
+    echo "PACKAGE_ARTIFACT_FAIL the postinst makes a system user other than blit" >&2
+    exit 1
+}
+for field in Depends Recommends Pre-Depends; do
+    if dpkg-deb -f "$package" "$field" | grep -Ei 'gpgv|gnupg|sequoia|monocypher|libsodium|libssl' >/dev/null; then
+        echo "PACKAGE_ARTIFACT_FAIL blit $field names a signature dependency: $(dpkg-deb -f "$package" "$field")" >&2
+        exit 1
+    fi
+done
 dpkg-deb -f "$package" Suggests | grep -F blit-compositor >/dev/null || {
     echo "PACKAGE_ARTIFACT_FAIL blit does not suggest blit-compositor" >&2
     exit 1

@@ -249,6 +249,132 @@ paths:
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
+  /v1/fonts/glyphs:
+    get:
+      tags: [terminals]
+      operationId: getGlyphStore
+      summary: The installed glyph sets, the codepoint ledger's use and the limits
+      description: >-
+        ADR 0245 phase 2a. The glyph store (/var/lib/blit/glyphs), whether
+        it is in use and why not, the ledger's block (U+102000-U+10FFFD) and
+        how much of it is allocated, the limits, every installed set in
+        every scope (loaded or refused, with its reason), and the import
+        counters (names_parsed and fonts_opened move only when a set's
+        signature and hashes have passed).
+      responses:
+        '200':
+          description: The store
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlyphStore'}
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/fonts/glyphs/system/{set_id}:
+    parameters:
+      - name: set_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/InstalledGlyphSetId'}
+    put:
+      tags: [terminals]
+      operationId: importGlyphSet
+      summary: Import a glyph set into the system scope (a new set or an update)
+      description: >-
+        ADR 0245 phase 2a. The body is the set's parts back to back, in the
+        order manifest, signature, names, font, licence; X-Blit-Glyph-Parts
+        gives each one's length and SHA-256 (the transport's check), summing
+        to Content-Length. A signed set (the hibr-apps catalogue's) carries
+        all five: glyphs.manifest (`blit-glyph-set-signature 1`) and its raw
+        64-byte Ed25519 signature by one of Blit's release keys. The
+        administrator's own set carries names, font and licence alone and
+        is reported verified false. Everything about the body is checked
+        from the headers before a byte is staged (413 `glyph_too_large`
+        then); the signature, the manifest and every part's hash are checked
+        before anything is parsed; each name is given a codepoint from the
+        ledger (a name keeps its codepoint across updates and reinstalls; a
+        dropped name is retired, and bringing it back is 409
+        `glyph_retired_name`). A refusal changes nothing. The set draws at
+        once, without a restart. User scope (/v1/fonts/glyphs/users/...) is
+        501 `glyph_scope_unsupported` until phase 2b.
+      parameters:
+        - in: header
+          name: X-Blit-Glyph-Parts
+          required: true
+          description: '`<part>=<length>:<sha256>` per part, space-separated, in body order'
+          schema:
+            type: string
+            pattern: '^(manifest=[1-9][0-9]*:[0-9a-f]{64} signature=[1-9][0-9]*:[0-9a-f]{64} )?names=[1-9][0-9]*:[0-9a-f]{64} font=[1-9][0-9]*:[0-9a-f]{64} licence=[1-9][0-9]*:[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GlyphImport'}
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '413':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+        '507':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+    delete:
+      tags: [terminals]
+      operationId: removeGlyphSet
+      summary: Uninstall a system glyph set
+      description: >-
+        The set's directory goes; the ledger keeps every allocation, so a
+        reinstall gives every name its old codepoint back. Afterwards the
+        set and its names answer 410 `uninstalled`, and cells showing its
+        codepoints draw the replacement glyph.
+      responses:
+        '200':
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [set, scope, removed]
+                properties:
+                  set: {$ref: '#/components/schemas/InstalledGlyphSetId'}
+                  scope: {type: string, const: system}
+                  removed: {type: boolean, const: true}
+                additionalProperties: false
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
+  /v1/fonts/glyphs/system/{set_id}/licence:
+    parameters:
+      - name: set_id
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/InstalledGlyphSetId'}
+    get:
+      tags: [terminals]
+      operationId: getGlyphSetLicence
+      summary: An installed set's licence text, as imported
+      responses:
+        '200':
+          description: The licence
+          content:
+            text/plain:
+              schema: {type: string}
+        '404':
+          $ref: '#/components/responses/Problem'
+        default:
+          $ref: '#/components/responses/Problem'
   /v1/fonts/sets/{set_id}:
     parameters:
       - $ref: '#/components/parameters/GlyphSetId'
@@ -266,7 +392,8 @@ paths:
         the grammar, a bad `after` or `limit`, a repeated or unknown
         parameter is a 400 `malformed_query` whose body echoes nothing of
         the request; a set this server does not serve is a 404
-        `unknown_set`.
+        `unknown_set`; an installed set that was removed, a 410
+        `uninstalled`.
       parameters:
         - name: after
           in: query
@@ -2781,7 +2908,13 @@ components:
       pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
       description: >-
         A set id (glyph sets section 4.1): its owner token (blit, nerd,
-        emoji) and hyphen-joined parts, 1-32 octets.
+        emoji, x) and hyphen-joined parts, 1-32 octets.
+    InstalledGlyphSetId:
+      type: string
+      minLength: 3
+      maxLength: 32
+      pattern: '^x-[a-z0-9]+(-[a-z0-9]+)*$'
+      description: An installed set's id (ADR 0245), x- and 1-30 octets of the set-id grammar.
     GlyphName:
       type: string
       minLength: 1
@@ -2811,12 +2944,12 @@ components:
       additionalProperties: false
     GlyphSet:
       type: object
-      required: [id, owner, scope, version, count, faces]
+      required: [id, owner, scope, version, count, faces, source]
       properties:
         id: {$ref: '#/components/schemas/GlyphSetId'}
         owner:
           type: string
-          enum: [blit, emoji, nerd]
+          enum: [blit, emoji, nerd, x]
           description: Who publishes the set's names (the draft's registered owner tokens).
         scope:
           type: string
@@ -2841,8 +2974,91 @@ components:
             retired names not (blit lists 876 of its 898 ids).
         faces:
           type: array
-          description: The registry faces that draw the set (registry ids).
+          description: The registry faces that draw the set (registry ids); an installed set's own id.
           items: {type: string}
+        source:
+          type: string
+          enum: [shipped, installed]
+          description: shipped with the package, or imported into the glyph store (ADR 0245).
+        install: {$ref: '#/components/schemas/GlyphInstall'}
+      additionalProperties: false
+    GlyphInstall:
+      type: object
+      description: >-
+        ADR 0245 section 8: an installed set's import. state refused (with
+        reason) is listed only by GET /v1/fonts/glyphs.
+      required: [scope, origin, via, verified, state]
+      properties:
+        scope: {type: string, enum: [system, user]}
+        origin: {type: string, enum: [catalogue, own]}
+        via: {type: string, enum: [http, frame, dir]}
+        verified: {type: boolean, description: Signed by one of Blit's release keys; false for the administrator's own.}
+        state: {type: string, enum: [loaded, refused]}
+        reason: {type: string}
+        release: {type: string, description: The publisher's release, from the names file.}
+        licence: {type: [string, 'null'], description: The names file's SPDX licence expression.}
+        glyphs: {type: integer, minimum: 1}
+        bytes: {type: integer, minimum: 0}
+      additionalProperties: false
+    GlyphImport:
+      type: object
+      required: [set, scope, origin, verified, allocated, glyphs, version, import_us]
+      properties:
+        set: {$ref: '#/components/schemas/InstalledGlyphSetId'}
+        scope: {type: string, const: system}
+        origin: {type: string, enum: [catalogue, own]}
+        verified: {type: boolean}
+        allocated: {type: integer, minimum: 0, description: Codepoints this import took from the ledger (new names only).}
+        glyphs: {type: integer, minimum: 1}
+        version: {type: string, pattern: '^[0-9a-f]{64}$'}
+        import_us: {type: integer, minimum: 0, description: How long the import held the server's loop.}
+      additionalProperties: false
+    GlyphStore:
+      type: object
+      required: [store, ledger, limits, sets, counters]
+      properties:
+        store:
+          type: object
+          required: [path, ready, reason]
+          properties:
+            path: {type: string}
+            ready: {type: boolean}
+            reason: {type: [string, 'null']}
+          additionalProperties: false
+        ledger:
+          type: object
+          required: [first, last, size, allocated, free, system]
+          properties:
+            first: {type: string, const: '102000'}
+            last: {type: string, const: 10fffd}
+            size: {type: integer, const: 57342}
+            allocated: {type: integer, minimum: 0}
+            free: {type: integer, minimum: 0}
+            system:
+              type: object
+              required: [allocated, quota]
+              properties:
+                allocated: {type: integer, minimum: 0}
+                quota: {type: integer, const: 24574}
+              additionalProperties: false
+          additionalProperties: false
+        limits:
+          type: object
+          additionalProperties: {type: integer}
+        sets:
+          type: array
+          items:
+            type: object
+            required: [id, version, installed, install]
+            properties:
+              id: {$ref: '#/components/schemas/InstalledGlyphSetId'}
+              version: {type: [string, 'null']}
+              installed: {type: integer, description: When it was imported, Unix seconds.}
+              install: {$ref: '#/components/schemas/GlyphInstall'}
+            additionalProperties: false
+        counters:
+          type: object
+          additionalProperties: {type: integer}
       additionalProperties: false
     GlyphSetPage:
       type: object

@@ -20,6 +20,7 @@
 #include "blit_cell_geometry.h"
 #include "blit_sha256.h"
 #include "blit_glyph_sets.h"     /* ADR 0243 step 3: glyph sets by set and name */
+#include "blit_glyph_store.h"    /* ADR 0245: installed glyph sets, the ledger */
 #include "blit_damage.h"
 #include "blit_ink.h"
 #include "blit_token.h"
@@ -622,6 +623,14 @@ typedef struct {
     /* SR-12: the upload is complete and the helper is installing it; the
        client waits for the answer, not read and not timed out as idle. */
     int update_installing;
+    /* ADR 0245: a glyph-set upload (PUT /v1/fonts/glyphs/system/{set}),
+       its parts streamed into a directory of the store's staging. */
+    int glyph_active, glyph_fd, glyph_part;
+    size_t glyph_expected, glyph_received, glyph_part_received;
+    uint64_t glyph_last_progress_us;
+    BlitGlyphUpload glyph_upload;
+    char glyph_set[BLIT_GLYPH_SET_ID_MAX + 1];
+    char glyph_directory[PATH_MAX];
     int screenshot_output_index;
     /* ADR 0189: a settings request parked until its save is durable:
        1 PUT /v1/settings, 2 DELETE /v1/settings. */
@@ -19592,26 +19601,51 @@ static void font_registry_json(char *body, size_t capacity, size_t *used)
 /* ADR 0243 step 3: a served glyph set as GET /v1/fonts and GET
    /v1/fonts/sets report it. count is the names it lists: not deprecated,
    not retired (glyph sets section 7.4); aliases are listed. */
+/* ADR 0245 section 8: an installed set's install object, as /v1/fonts,
+   /v1/fonts/sets and /v1/fonts/glyphs report it. */
+static void glyph_install_json(const BlitGlyphInstalled *set, char *body, size_t capacity, size_t *used)
+{
+    json_appendf(body, capacity, used,
+        "{\"scope\":\"%s\",\"origin\":\"%s\",\"via\":\"%s\",\"verified\":%s,\"state\":\"%s\"",
+        set->scope, set->signed_set ? "catalogue" : "own", set->via, set->signed_set ? "true" : "false",
+        set->loaded ? "loaded" : "refused");
+    if (!set->loaded) {
+        char escaped[512];
+        json_escape(set->reason, escaped, sizeof(escaped));
+        json_appendf(body, capacity, used, ",\"reason\":\"%s\"}", escaped);
+        return;
+    }
+    json_appendf(body, capacity, used, ",\"release\":\"%s\",\"licence\":", set->names.release);
+    if (set->names.licence[0]) json_appendf(body, capacity, used, "\"%s\"", set->names.licence);
+    else json_appendf(body, capacity, used, "null");
+    json_appendf(body, capacity, used, ",\"glyphs\":%lu,\"bytes\":%lu}",
+                 (unsigned long)set->names.glyphs, (unsigned long)set->bytes);
+}
+
 static void glyph_set_json(const BlitGlyphSet *set, char *body, size_t capacity, size_t *used)
 {
-    const BlitGlyphSource *source = &blit_glyph_sets.sources[set->source];
-    const char *face = source->faces;
+    const char *face = set->faces;
     json_appendf(body, capacity, used,
         "{\"id\":\"%s\",\"owner\":\"%s\",\"scope\":\"%s\",\"version\":\"%s\",\"count\":%lu,\"faces\":[",
-        set->id, source->owner, source->scope, blit_glyph_set_version(set), (unsigned long)set->listed);
+        set->id, set->owner, set->scope, blit_glyph_set_version(set), (unsigned long)set->listed);
     while (face && *face) {
         const char *comma = strchr(face, ',');
         int n = comma ? (int)(comma - face) : (int)strlen(face);
-        json_appendf(body, capacity, used, "%s\"%.*s\"", face == source->faces ? "" : ",", n, face);
+        json_appendf(body, capacity, used, "%s\"%.*s\"", face == set->faces ? "" : ",", n, face);
         face = comma ? comma + 1 : NULL;
     }
-    json_appendf(body, capacity, used, "]}");
+    json_appendf(body, capacity, used, "],\"source\":\"%s\"", set->installed >= 0 ? "installed" : "shipped");
+    if (set->installed >= 0 && set->installed < blit_glyph_store.count) {
+        json_appendf(body, capacity, used, ",\"install\":");
+        glyph_install_json(blit_glyph_store.sets[set->installed], body, capacity, used);
+    }
+    json_appendf(body, capacity, used, "}");
 }
 
 static void glyph_sets_json(char *body, size_t capacity, size_t *used)
 {
     int s, first = 1;
-    for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) {
+    for (s = 0; s < blit_glyph_sets.set_count; ++s) {
         if (!blit_glyph_sets.sets[s].loaded) continue;
         if (!first) json_appendf(body, capacity, used, ",");
         glyph_set_json(&blit_glyph_sets.sets[s], body, capacity, used);
@@ -19686,7 +19720,15 @@ static void font_sets_response(int fd, const char *rest, char *body, size_t capa
         return;
     }
     if ((set = blit_glyph_set_find(id, n)) == NULL) {
-        char detail[96];
+        char detail[160];
+        if (blit_glyph_store_uninstalled("system", id, n)) {
+            /* ADR 0245 section 9: installed here once, and removed; its
+               names answer the same. */
+            snprintf(detail, sizeof(detail),
+                     "The glyph set %.*s was uninstalled; its codepoints are kept for it if it returns.", (int)n, id);
+            send_problem(fd, 410, "Gone", "uninstalled", detail);
+            return;
+        }
         snprintf(detail, sizeof(detail), "This terminal serves no glyph set %.*s.", (int)n, id);
         send_problem(fd, 404, "Not Found", "unknown_set", detail);
         return;
@@ -19719,7 +19761,7 @@ static void font_sets_response(int fd, const char *rest, char *body, size_t capa
             return;
         }
         json_appendf(body, capacity, &used, "{\"set\":\"%s\",\"scope\":\"%s\",\"version\":\"%s\",",
-                     set->id, blit_glyph_sets.sources[set->source].scope, blit_glyph_set_version(set));
+                     set->id, set->scope, blit_glyph_set_version(set));
         glyph_name_json(record, body, capacity, &used);
         json_appendf(body, capacity, &used, "}");
         send_http(fd, 200, "OK", "application/json", body);
@@ -19783,6 +19825,127 @@ static void font_sets_response(int fd, const char *rest, char *body, size_t capa
         json_appendf(body, capacity, &used, "],\"more\":%s}", index < set->end ? "true" : "false");
         send_http(fd, 200, "OK", "application/json", body);
     }
+}
+
+static void glyph_sets_changed(BlitRuntime *runtime);
+static void glyph_send_result(int fd, const BlitGlyphResult *r);
+
+/* ADR 0245: GET /v1/fonts/glyphs -- the store, the ledger's use, the
+   limits, every installed set (loaded or refused) and the import
+   counters; GET /v1/fonts/glyphs/system/{set}/licence -- a set's licence
+   text; DELETE /v1/fonts/glyphs/system/{set} -- uninstall. REST is the path
+   after /v1/fonts/glyphs. */
+static void fonts_glyphs_response(BlitRuntime *runtime, int fd, const char *method, const char *rest,
+                                  char *body, size_t capacity)
+{
+    const BlitGlyphStore *st = &blit_glyph_store;
+    const char *prefix = "/system/";
+    size_t used = 0;
+    int s;
+    if (*rest == '\0' && strcmp(method, "GET") == 0) {
+        char escaped[PATH_MAX + 64];
+        json_escape(st->root, escaped, sizeof(escaped));
+        json_appendf(body, capacity, &used, "{\"store\":{\"path\":\"%s\",\"ready\":%s,\"reason\":",
+                     escaped, st->ready ? "true" : "false");
+        if (st->ready) json_appendf(body, capacity, &used, "null");
+        else {
+            json_escape(st->reason, escaped, sizeof(escaped));
+            json_appendf(body, capacity, &used, "\"%s\"", escaped);
+        }
+        json_appendf(body, capacity, &used,
+            "},\"ledger\":{\"first\":\"%x\",\"last\":\"%x\",\"size\":%u,\"allocated\":%lu,\"free\":%lu,"
+            "\"system\":{\"allocated\":%lu,\"quota\":%u}},"
+            "\"limits\":{\"sets_per_scope\":%d,\"sets\":%d,\"glyphs_per_set\":%d,\"names_per_set\":%d,"
+            "\"font_bytes\":%lu,\"face_glyphs\":%d,\"names_bytes\":%lu,\"licence_bytes\":%lu,"
+            "\"manifest_bytes\":%d,\"signature_bytes\":%d,\"system_bytes\":%llu,\"user_bytes\":%llu,"
+            "\"user_allocations\":%u,\"ledger\":%u},\"sets\":[",
+            BLIT_GLYPH_LEDGER_FIRST, BLIT_GLYPH_LEDGER_LAST, BLIT_GLYPH_LEDGER_SIZE,
+            (unsigned long)st->ledger.allocated, (unsigned long)(BLIT_GLYPH_LEDGER_SIZE - st->ledger.allocated),
+            (unsigned long)st->ledger.system_allocated, BLIT_GLYPH_SYSTEM_QUOTA,
+            BLIT_GLYPH_SETS_PER_SCOPE, BLIT_GLYPH_SETS_MAX, BLIT_GLYPH_SET_GLYPHS_MAX, BLIT_GLYPH_SET_NAMES_MAX,
+            (unsigned long)blit_glyph_part_max[BLIT_GLYPH_PART_FONT], BLIT_GLYPH_FACE_GLYPHS_MAX,
+            (unsigned long)blit_glyph_part_max[BLIT_GLYPH_PART_NAMES],
+            (unsigned long)blit_glyph_part_max[BLIT_GLYPH_PART_LICENCE], BLIT_GLYPH_MANIFEST_MAX,
+            BLIT_GLYPH_SIGNATURE_BYTES, BLIT_GLYPH_SYSTEM_BYTES_MAX, 64ull << 20, BLIT_GLYPH_USER_QUOTA,
+            BLIT_GLYPH_LEDGER_SIZE);
+        for (s = 0; s < st->count; ++s) {
+            const BlitGlyphInstalled *set = st->sets[s];
+            json_appendf(body, capacity, &used, "%s{\"id\":\"%s\",\"version\":", s ? "," : "", set->id);
+            if (set->loaded) json_appendf(body, capacity, &used, "\"%s\"", set->version);
+            else json_appendf(body, capacity, &used, "null");
+            json_appendf(body, capacity, &used, ",\"installed\":%lld,\"install\":", set->installed);
+            glyph_install_json(set, body, capacity, &used);
+            json_appendf(body, capacity, &used, "}");
+        }
+        json_appendf(body, capacity, &used,
+            "],\"counters\":{\"names_parsed\":%llu,\"fonts_opened\":%llu,\"imports\":%llu,\"refusals\":%llu,"
+            "\"removals\":%llu,\"last_import_us\":%ld}}",
+            st->names_parsed, st->fonts_opened, st->imports, st->refusals, st->removals, st->last_import_us);
+        send_http(fd, 200, "OK", "application/json", body);
+        return;
+    }
+    if (strncmp(rest, "/users/", 7) == 0) {
+        send_problem(fd, 501, "Not Implemented", "glyph_scope_unsupported",
+                     "User scope is not built yet (ADR 0245 phase 2b); this server holds system sets only.");
+        return;
+    }
+    if (strncmp(rest, prefix, strlen(prefix)) == 0) {
+        const char *id = rest + strlen(prefix), *slash = strchr(id, '/');
+        size_t n = slash ? (size_t)(slash - id) : strlen(id);
+        BlitGlyphResult result;
+        if (!blit_glyph_installed_id_valid(id, n) || (slash && strcmp(slash, "/licence") != 0)) {
+            glyph_query_malformed(fd);
+            return;
+        }
+        if (!slash && strcmp(method, "DELETE") == 0) {
+            char name[BLIT_GLYPH_SET_ID_MAX + 1];
+            memcpy(name, id, n);
+            name[n] = '\0';
+            if (!blit_glyph_store_remove(name, &result)) {
+                glyph_send_result(fd, &result);
+                return;
+            }
+            {
+                char detail[160];
+                snprintf(detail, sizeof(detail), "%s removed from system", name);
+                diagnostic_log(runtime, "info", "glyph_set_removed", detail);
+            }
+            glyph_sets_changed(runtime);
+            snprintf(body, capacity, "{\"set\":\"%s\",\"scope\":\"system\",\"removed\":true}", name);
+            send_http(fd, 200, "OK", "application/json", body);
+            return;
+        }
+        if (slash && strcmp(method, "GET") == 0) {
+            const BlitGlyphInstalled *set = blit_glyph_store_find("system", id, n);
+            char path[PATH_MAX];
+            unsigned char *text;
+            size_t length = 0;
+            int missing;
+            if (!set) {
+                send_problem(fd, 404, "Not Found", "glyph_set_not_installed",
+                             "That set is not installed in the system scope.");
+                return;
+            }
+            snprintf(path, sizeof(path), "%s/system/%s/licence", st->root, set->id);
+            text = glyph_read_part(path, blit_glyph_part_max[BLIT_GLYPH_PART_LICENCE], &length, &missing);
+            if (!text || length + 1 > capacity) {
+                free(text);
+                send_problem(fd, 404, "Not Found", "glyph_licence_missing", "The set's licence cannot be read.");
+                return;
+            }
+            memcpy(body, text, length);
+            body[length] = '\0';
+            free(text);
+            if (memchr(body, '\0', length)) {
+                send_problem(fd, 422, "Unprocessable Entity", "glyph_licence_binary", "The licence is not text.");
+                return;
+            }
+            send_http(fd, 200, "OK", "text/plain; charset=utf-8", body);
+            return;
+        }
+    }
+    send_problem(fd, 405, "Method Not Allowed", "method_not_allowed",
+                 "This gateway route does not support the requested method.");
 }
 
 static void fonts_json(const BlitRuntime *runtime, char *body, size_t capacity)
@@ -25979,6 +26142,10 @@ static void handle_request(int fd, BlitRuntime *runtime,
     }
     if (strcmp(path, "/v1/input/arabizi/convert") == 0 && strcmp(method, "POST") == 0) {
         arabizi_convert_response(fd, payload, body, sizeof(body));
+        return;
+    }
+    if (strncmp(path, "/v1/fonts/glyphs", 16) == 0 && (path[16] == '\0' || path[16] == '/')) {
+        fonts_glyphs_response(runtime, fd, method, path + 16, body, sizeof(body));
         return;
     }
     if (strcmp(path, "/v1/fonts") == 0 && strcmp(method, "PUT") == 0) {
@@ -32884,6 +33051,13 @@ static void remove_http_client(BlitRuntime *runtime, int index)
         close(runtime->http_clients[index].update_fd);
         update_unlink_staged(&runtime->http_clients[index]);
     }
+    if (runtime->http_clients[index].glyph_active) {
+        /* ADR 0245: an upload that did not finish leaves nothing behind. */
+        if (runtime->http_clients[index].glyph_fd >= 0)
+            close(runtime->http_clients[index].glyph_fd);
+        glyph_remove_tree(runtime->http_clients[index].glyph_directory, 0);
+        blit_glyph_store.importing = 0;
+    }
     free(runtime->http_clients[index].response_body);
     close(runtime->http_clients[index].fd);
     memset(&runtime->http_clients[index], 0,
@@ -32916,6 +33090,7 @@ static void service_http_client(BlitRuntime *runtime, int index);
 static int http_client_pending(const BlitHttpClient *client)
 {
     return client->used && !client->admitted && client->update_fd < 0 &&
+        !client->glyph_active &&
         !client->update_installing && client->response_body == NULL &&
         client->settings_wait == 0 && client->screenshot_output_index == 0;
 }
@@ -33690,6 +33865,278 @@ static void service_update_upload(BlitRuntime *runtime, BlitHttpClient *client)
         finish_update_upload(runtime, client);
 }
 
+/* ---- ADR 0245: glyph-set imports over HTTP (phase 2a: system scope). ---- */
+
+/* After any change to what installed sets draw: every raster forgets that
+   block, the GLES atlas empties, and every cell is drawn again. */
+static void glyph_sets_changed(BlitRuntime *runtime)
+{
+    int i;
+    blit_raster_installed_changed();
+    for (i = 0; i < BLIT_MAX_SESSIONS; ++i) {
+        BlitSurface *surface;
+        if (!runtime->sessions[i].used) continue;
+        if ((surface = find_surface_id(runtime, runtime->sessions[i].id)) != NULL) {
+            mark_surface_full_damage(surface);
+            ++surface->revision;
+        }
+    }
+    for (i = 0; i < runtime->output_count; ++i) runtime->outputs[i].initialized = 0;
+    runtime->render_pending = 1;
+}
+
+static void glyph_send_result(int fd, const BlitGlyphResult *r)
+{
+    const char *reason = r->status == 400 ? "Bad Request" : r->status == 403 ? "Forbidden" :
+        r->status == 404 ? "Not Found" : r->status == 409 ? "Conflict" :
+        r->status == 413 ? "Payload Too Large" : r->status == 422 ? "Unprocessable Entity" :
+        r->status == 501 ? "Not Implemented" : r->status == 503 ? "Service Unavailable" :
+        r->status == 507 ? "Insufficient Storage" : "Internal Server Error";
+    send_problem(fd, r->status, reason, r->code, r->detail);
+}
+
+/* X-Blit-Glyph-Parts: <part>=<length>:<sha256> ..., the parts in the order
+   manifest signature names font licence, each at most once, within its
+   limit, summing to Content-Length. A signed set has all five; the
+   administrator's own set names, font and licence alone. */
+static int glyph_parts_parse(const char *value, size_t content_length, BlitGlyphUpload *upload,
+                             BlitGlyphResult *r)
+{
+    const char *cursor = value;
+    size_t total = 0;
+    int last = -1, p, signed_set;
+    memset(upload, 0, sizeof(*upload));
+    while (*cursor) {
+        size_t name_length;
+        unsigned long long length;
+        char *end;
+        int part = -1, i;
+        while (*cursor == ' ') ++cursor;
+        if (!*cursor) break;
+        name_length = strcspn(cursor, "=");
+        for (p = 0; p < BLIT_GLYPH_PART_COUNT; ++p)
+            if (strlen(blit_glyph_part_names[p]) == name_length &&
+                memcmp(cursor, blit_glyph_part_names[p], name_length) == 0)
+                part = p;
+        if (part < 0 || part <= last || cursor[name_length] != '=')
+            return glyph_fail(r, 400, "glyph_parts_invalid",
+                              "X-Blit-Glyph-Parts names manifest, signature, names, font and licence, "
+                              "in that order, each at most once, as <part>=<length>:<sha256>");
+        cursor += name_length + 1;
+        if (*cursor < '1' || *cursor > '9')
+            return glyph_fail(r, 400, "glyph_parts_invalid", "a part's length is a positive whole number");
+        length = strtoull(cursor, &end, 10);
+        if (*end != ':')
+            return glyph_fail(r, 400, "glyph_parts_invalid", "a part is <length>:<sha256>");
+        if (length > blit_glyph_part_max[part])
+            return glyph_fail(r, 413, "glyph_too_large", "the %s part is over its limit of %lu bytes",
+                              blit_glyph_part_names[part], (unsigned long)blit_glyph_part_max[part]);
+        if (length > content_length)
+            return glyph_fail(r, 400, "glyph_parts_invalid", "a part's length is over Content-Length");
+        cursor = end + 1;
+        for (i = 0; i < 64; ++i)
+            if (!((cursor[i] >= '0' && cursor[i] <= '9') || (cursor[i] >= 'a' && cursor[i] <= 'f')))
+                return glyph_fail(r, 400, "glyph_parts_invalid", "a part's sha256 is 64 lowercase hex digits");
+        if (cursor[64] != '\0' && cursor[64] != ' ')
+            return glyph_fail(r, 400, "glyph_parts_invalid", "a part's sha256 is 64 lowercase hex digits");
+        upload->present[part] = 1;
+        upload->lengths[part] = (size_t)length;
+        memcpy(upload->sha256[part], cursor, 64);
+        upload->sha256[part][64] = '\0';
+        total += (size_t)length;
+        last = part;
+        cursor += 64;
+    }
+    if (total != content_length || total == 0)
+        return glyph_fail(r, 400, "glyph_parts_invalid", "the parts' lengths must sum to Content-Length");
+    signed_set = upload->present[BLIT_GLYPH_PART_MANIFEST] || upload->present[BLIT_GLYPH_PART_SIGNATURE];
+    if (signed_set && !(upload->present[BLIT_GLYPH_PART_MANIFEST] && upload->present[BLIT_GLYPH_PART_SIGNATURE]))
+        return glyph_fail(r, 422, "glyph_part_missing", "a signed set carries both its manifest and its signature");
+    for (p = BLIT_GLYPH_PART_NAMES; p < BLIT_GLYPH_PART_COUNT; ++p)
+        if (!upload->present[p])
+            return glyph_fail(r, 422, "glyph_part_missing", "the set lacks its %s part", blit_glyph_part_names[p]);
+    return 1;
+}
+
+static int glyph_open_part(BlitHttpClient *client)
+{
+    char path[PATH_MAX];
+    while (client->glyph_part < BLIT_GLYPH_PART_COUNT && !client->glyph_upload.present[client->glyph_part])
+        ++client->glyph_part;
+    if (client->glyph_part >= BLIT_GLYPH_PART_COUNT) return 0;
+    snprintf(path, sizeof(path), "%s/%s", client->glyph_directory, blit_glyph_part_names[client->glyph_part]);
+    client->glyph_fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    client->glyph_part_received = 0;
+    return client->glyph_fd >= 0;
+}
+
+static int glyph_stage_bytes(BlitHttpClient *client, const unsigned char *data, size_t length)
+{
+    while (length > 0) {
+        size_t room = client->glyph_upload.lengths[client->glyph_part] - client->glyph_part_received;
+        size_t chunk = length < room ? length : room;
+        if (write(client->glyph_fd, data, chunk) != (ssize_t)chunk) return 0;
+        data += chunk;
+        length -= chunk;
+        client->glyph_part_received += chunk;
+        client->glyph_received += chunk;
+        if (client->glyph_part_received == client->glyph_upload.lengths[client->glyph_part] &&
+            client->glyph_received < client->glyph_expected) {
+            close(client->glyph_fd);
+            client->glyph_fd = -1;
+            ++client->glyph_part;
+            if (!glyph_open_part(client)) return 0;
+        }
+    }
+    return 1;
+}
+
+/* The whole body is staged: the import, its answer, and the connection
+   closed. */
+static void glyph_upload_finish(BlitRuntime *runtime, int index)
+{
+    BlitHttpClient *client = &runtime->http_clients[index];
+    BlitGlyphResult result;
+    size_t allocated = 0;
+    char body[512];
+    if (client->glyph_fd >= 0) close(client->glyph_fd);
+    client->glyph_fd = -1;
+    if (blit_glyph_store_import(client->glyph_set, client->glyph_directory, &client->glyph_upload,
+                                &result, &allocated)) {
+        const BlitGlyphInstalled *set = blit_glyph_store_find("system", client->glyph_set,
+                                                              strlen(client->glyph_set));
+        char detail[320];
+        snprintf(body, sizeof(body),
+                 "{\"set\":\"%s\",\"scope\":\"system\",\"origin\":\"%s\",\"verified\":%s,"
+                 "\"allocated\":%lu,\"glyphs\":%lu,\"version\":\"%s\",\"import_us\":%ld}",
+                 client->glyph_set, set && set->signed_set ? "catalogue" : "own",
+                 set && set->signed_set ? "true" : "false", (unsigned long)allocated,
+                 set ? (unsigned long)set->names.glyphs : 0UL, set ? set->version : "",
+                 blit_glyph_store.last_import_us);
+        send_http(client->fd, 201, "Created", "application/json", body);
+        snprintf(detail, sizeof(detail), "%s imported into system (%s), %lu codepoints allocated, in %ld us",
+                 client->glyph_set, set && set->signed_set ? "signed" : "own, unverified",
+                 (unsigned long)allocated, blit_glyph_store.last_import_us);
+        diagnostic_log(runtime, "info", "glyph_set_imported", detail);
+        glyph_sets_changed(runtime);
+    } else {
+        glyph_send_result(client->fd, &result);
+    }
+    remove_http_client(runtime, index);
+}
+
+static void service_glyph_upload(BlitRuntime *runtime, int index)
+{
+    BlitHttpClient *client = &runtime->http_clients[index];
+    unsigned char chunk[16384];
+    size_t remaining = client->glyph_expected - client->glyph_received;
+    ssize_t received;
+    if (remaining > sizeof(chunk)) remaining = sizeof(chunk);
+    received = recv(client->fd, chunk, remaining, MSG_DONTWAIT);
+    if (received < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return;
+    if (received <= 0 || !glyph_stage_bytes(client, chunk, (size_t)received)) {
+        remove_http_client(runtime, index);
+        return;
+    }
+    client->glyph_last_progress_us = monotonic_us();
+    if (client->glyph_received == client->glyph_expected) glyph_upload_finish(runtime, index);
+}
+
+/* PUT /v1/fonts/glyphs/system/{set}: the request is authorized (its
+   header block passed the bearer token); everything about the body is
+   checked from the headers before a byte of it is staged. */
+static void glyph_upload_begin(BlitRuntime *runtime, int index, const char *headers_end)
+{
+    BlitHttpClient *client = &runtime->http_clients[index];
+    size_t header_length = (size_t)(headers_end - client->request) + 4, content_length = 0, early, id_length;
+    char parts[768];
+    const char *path = client->request + 4, *end = strchr(path, ' ');
+    const char *prefix = "/v1/fonts/glyphs/system/";
+    BlitGlyphResult result;
+    int i;
+
+    memset(&result, 0, sizeof(result));
+    early = client->length > header_length ? client->length - header_length : 0;
+    if (end == NULL || strncmp(path, prefix, strlen(prefix)) != 0) {
+        if (end != NULL && strncmp(path, "/v1/fonts/glyphs/users/", 23) == 0)
+            send_problem(client->fd, 501, "Not Implemented", "glyph_scope_unsupported",
+                         "User scope is not built yet (ADR 0245 phase 2b); this server imports into system only.");
+        else
+            send_problem(client->fd, 405, "Method Not Allowed", "method_not_allowed",
+                         "This gateway route does not support the requested method.");
+        remove_http_client(runtime, index);
+        return;
+    }
+    path += strlen(prefix);
+    id_length = (size_t)(end - path);
+    if (!blit_glyph_installed_id_valid(path, id_length)) {
+        glyph_query_malformed(client->fd);
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (request_content_length(client->request, &content_length) < 0 || content_length == 0 ||
+        !request_header(client->request, "X-Blit-Glyph-Parts:", parts, sizeof(parts)) ||
+        strlen(parts) + 1 >= sizeof(parts)) {
+        send_problem(client->fd, 400, "Bad Request", "glyph_parts_invalid",
+                     "A body with Content-Length and X-Blit-Glyph-Parts (<part>=<length>:<sha256> per part) is required.");
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (!glyph_parts_parse(parts, content_length, &client->glyph_upload, &result)) {
+        ++blit_glyph_store.refusals;
+        glyph_send_result(client->fd, &result);
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (early > content_length) {
+        send_problem(client->fd, 400, "Bad Request", "glyph_parts_invalid", "More bytes than Content-Length.");
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (!blit_glyph_store.ready) {
+        char detail[320];
+        snprintf(detail, sizeof(detail), "The glyph store is not in use: %s", blit_glyph_store.reason);
+        send_problem(client->fd, 503, "Service Unavailable", "glyph_store_unavailable", detail);
+        remove_http_client(runtime, index);
+        return;
+    }
+    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
+        if (i != index && runtime->http_clients[i].used && runtime->http_clients[i].glyph_active) {
+            send_problem(client->fd, 409, "Conflict", "glyph_import_active",
+                         "Another glyph set is being imported.");
+            remove_http_client(runtime, index);
+            return;
+        }
+    memcpy(client->glyph_set, path, id_length);
+    client->glyph_set[id_length] = '\0';
+    client->glyph_fd = -1;
+    if (!blit_glyph_store_stage(client->glyph_directory, sizeof(client->glyph_directory))) {
+        send_problem(client->fd, 507, "Insufficient Storage", "glyph_store_full",
+                     "The upload could not be staged in the glyph store.");
+        remove_http_client(runtime, index);
+        return;
+    }
+    client->glyph_active = 1;
+    blit_glyph_store.importing = 1;
+    client->glyph_part = 0;
+    client->glyph_expected = content_length;
+    client->glyph_received = 0;
+    client->glyph_last_progress_us = monotonic_us();
+    if (!glyph_open_part(client)) {
+        send_problem(client->fd, 500, "Internal Server Error", "glyph_store_failed",
+                     "The upload could not be staged in the glyph store.");
+        remove_http_client(runtime, index);
+        return;
+    }
+    send_all(client->fd, "HTTP/1.1 100 Continue\r\n\r\n", strlen("HTTP/1.1 100 Continue\r\n\r\n"));
+    if (early > 0 &&
+        !glyph_stage_bytes(client, (const unsigned char *)client->request + header_length, early)) {
+        remove_http_client(runtime, index);
+        return;
+    }
+    if (client->glyph_received == client->glyph_expected) glyph_upload_finish(runtime, index);
+}
+
 static void service_http_client(BlitRuntime *runtime, int index)
 {
     BlitHttpClient *client = &runtime->http_clients[index];
@@ -33704,6 +34151,10 @@ static void service_http_client(BlitRuntime *runtime, int index)
         return;
     if (client->update_fd >= 0) {
         service_update_upload(runtime, client);
+        return;
+    }
+    if (client->glyph_active) {
+        service_glyph_upload(runtime, index);
         return;
     }
     if (client->length + 1 >= sizeof(client->request)) {
@@ -33830,6 +34281,12 @@ static void service_http_client(BlitRuntime *runtime, int index)
             return;
         }
         client->admitted = 1;
+    }
+    /* ADR 0245: a glyph set's body is streamed into the store's staging,
+       not read into the request buffer. */
+    if (headers_end != NULL && strncmp(client->request, "PUT /v1/fonts/glyphs/", 21) == 0) {
+        glyph_upload_begin(runtime, index, headers_end);
+        return;
     }
     complete = http_request_complete(client, &required);
     if (complete < 0 || (complete == 0 &&
@@ -33985,7 +34442,7 @@ int main(int argc, char **argv)
         char detail[320];
         int s, served = 0;
         blit_glyph_sets_load();
-        for (s = 0; s < BLIT_GLYPH_SET_COUNT; ++s) served += blit_glyph_sets.sets[s].loaded;
+        for (s = 0; s < blit_glyph_sets.set_count; ++s) served += blit_glyph_sets.sets[s].loaded;
         for (s = 0; s < BLIT_GLYPH_SOURCE_COUNT; ++s)
             if (!blit_glyph_sets.sources[s].loaded) {
                 snprintf(detail, sizeof(detail), "glyph set source %s is not served: %s",
@@ -33996,6 +34453,27 @@ int main(int argc, char **argv)
                  (unsigned long)blit_glyph_sets.count, served, BLIT_GLYPH_SET_COUNT,
                  (unsigned long)blit_glyph_sets.bytes, blit_glyph_sets.load_us);
         diagnostic_log(&runtime, "info", "glyph_sets_loaded", detail);
+        /* ADR 0245: the installed sets, each verified again (a removed key
+           revokes what it signed); a store that is absent or fails its
+           checks is not used, and the shipped sets are served all the same. */
+        blit_raster_set_installed_lookup(blit_glyph_store_lookup);
+        if (blit_glyph_store_open()) {
+            int refused = 0;
+            for (s = 0; s < blit_glyph_store.count; ++s) {
+                const BlitGlyphInstalled *set = blit_glyph_store.sets[s];
+                if (set->loaded) continue;
+                ++refused;
+                snprintf(detail, sizeof(detail), "installed glyph set %s is refused: %s", set->id, set->reason);
+                diagnostic_log(&runtime, "warning", "glyph_set_refused", detail);
+            }
+            snprintf(detail, sizeof(detail), "glyph store %s: %d installed sets, %d refused, %lu of %u codepoints allocated",
+                     blit_glyph_store.root, blit_glyph_store.count, refused,
+                     (unsigned long)blit_glyph_store.ledger.allocated, BLIT_GLYPH_LEDGER_SIZE);
+            diagnostic_log(&runtime, "info", "glyph_store_loaded", detail);
+        } else {
+            snprintf(detail, sizeof(detail), "glyph store not in use: %s", blit_glyph_store.reason);
+            diagnostic_log(&runtime, "info", "glyph_store_unavailable", detail);
+        }
     }
     runtime.font_scale_tenths = BLIT_FONT_SCALE_MIN_TENTHS;
     /* With no keyboard to ask, assume every keypad types digits, which is
@@ -34499,6 +34977,14 @@ int main(int argc, char **argv)
                     finish_update_install(&runtime, 0,
                         "the root update helper did not answer within 900 s; "
                         "dpkg may still be running (see GET /v1/control/update/status)");
+                continue;
+            }
+            if (client->glyph_active) {
+                /* ADR 0245: an upload that stops is dropped, with its
+                   staging directory. */
+                if (now > client->glyph_last_progress_us &&
+                    now - client->glyph_last_progress_us > BLIT_UPDATE_IDLE_TIMEOUT_US)
+                    remove_http_client(&runtime, i);
                 continue;
             }
             if (client->update_fd >= 0) {

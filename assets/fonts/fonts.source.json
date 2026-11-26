@@ -25,7 +25,8 @@
   },
   "sets": {
     "adr": "ADR 0243 step 3, the set level (built in 0.3.134): every glyph set Blit answers for by set/name. A set is a table of names, not a face. Each entry is one names source; tools/fonts/build-font-registry.py derives the set ids from it (one set, or with split prefix one set per prefix the file has) and writes them to src/blit_font_registry.h; the server reads the names file from the fonts root once at start into one sorted table, which GET /v1/fonts, GET /v1/fonts/sets and later the in-band names capability answer from (docs/protocols/glyph-sets.md). Codepoint ranges are derived from the names, never declared. version is the set's version as reported: a release (checked against the file) or sha256, the SHA-256 of the names file as packaged. retired_names are names the set published by name (from 0.3.134) and no longer has, answered retired for good and never reused; for blit each holds a codepoint the catalogue's retired list keeps (the catalogue's shape is frozen, so they live here). Ids removed before the lookup existed are not carried (the owner, 2026-11-22).",
-    "owners": ["blit", "emoji", "nerd"],
+    "owners": ["blit", "emoji", "nerd", "x"],
+    "installed": "ADR 0245 (phase 2a): owner x is a set installed on this terminal, always terminal-local; its ids are x-<name> and it has no names source here. Installed sets are imported into the root-owned glyph store (/var/lib/blit/glyphs), verified under Blit's release keys (or the administrator's own, unverified), and given codepoints from the ledger, U+102000-U+10FFFD; src/blit_glyph_store.h adds them to the same table as these sets.",
     "scopes": {
       "portable": "codepoints fixed by the owner's published table: the same in every terminal serving that version",
       "terminal-local": "codepoints chosen by this terminal: another terminal may draw something else there"

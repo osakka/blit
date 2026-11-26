@@ -23,6 +23,9 @@
 #      reasons, and so is a truncated or malformed signature (its staged
 #      files removed all the same); a pair below the oldest release it installs is refused even
 #      signed; the signed pair passes every check and reaches the hook.
+#      ADR 0245 section 7, the other direction of glyph_signature_gate's
+#      label check: a glyph-set manifest's genuine signature by the same
+#      key, offered as the release signature, is refused.
 set -eu
 
 fail() { echo "RELEASE_SIGNATURE_GATE_FAIL $*" >&2; exit 1; }
@@ -183,6 +186,21 @@ h truncated "ERROR the signature is not 128 lowercase hex digits" \
 h below-oldest "ERROR blit 0.3.132-1 is older than 0.3.133*" \
     "$(ask "$(signed "$work/test.secret" "$blit_old" "$comp_old")" "$blit_old" "$comp_old")"
 h signed "ERROR gate hook failed" "$(ask "$sig" "$blit" "$comp")"
+# ADR 0245: a glyph manifest signed by the trusted key, its 64 raw bytes as
+# the 128 hex digits a release signature travels as.
+mkdir "$work/glyphs"
+printf 'gate licence\n' >"$work/glyphs/licence"
+printf '{"format":"blit-glyph-names","release":"0.3.133-1","glyphs":{}}\n' >"$work/glyphs/names"
+"$sign" glyphs "$work/test.secret" gate 0.3.133-1 "$blit" "$work/glyphs/names" \
+    "$work/glyphs/licence" "$work/glyphs" >/dev/null || fail "blit-sign glyphs"
+"$sign" glyphs-verify "$work/keys" "$work/glyphs/glyphs.manifest" "$work/glyphs/glyphs.sig" >/dev/null ||
+    fail "blit-sign glyphs-verify: its own glyph signature"
+glyph_sig=$(od -An -v -tx1 "$work/glyphs/glyphs.sig" | tr -d ' \n')
+[ "${#glyph_sig}" = 128 ] || fail "the glyph signature is not 64 bytes"
+h glyph-manifest-as-release "ERROR the release signature does not verify*" "$(ask "$glyph_sig" "$blit" "$comp")"
+if "$sign" glyphs-verify "$work/keys" "$work/glyphs/names" "$work/glyphs/glyphs.sig" >/dev/null 2>&1; then
+    fail "blit-sign glyphs-verify took a signature over other bytes"
+fi
 cp "$work/other/other-1.pub" "$work/keys/"
 h rotation "ERROR gate hook failed" \
     "$(ask "$(signed "$work/other.secret" "$blit" "$comp")" "$blit" "$comp")"
