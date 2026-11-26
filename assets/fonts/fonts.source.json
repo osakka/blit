@@ -565,8 +565,8 @@
   },
   "ui_coverage": {
     "file": "hibr-ui-glyphs.json",
-    "sha256": "f58afb9a8cc1796126d8ff88f4cf4bcbf50d916c3b535d47971db7102b2db0f8",
-    "scalars": 151
+    "sha256": "39c1d2ac477cebfe2ce7267fd4517ecf1ed698afa021e9d831db83a1700c86b2",
+    "scalars": 158
   },
   "icon_licenses": [
     {
