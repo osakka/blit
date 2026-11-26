@@ -2355,7 +2355,8 @@ Content-Length: 501899
 X-Blit-Glyph-Parts: manifest=263:<sha256> signature=64:<sha256> names=91022:<sha256>
                     font=406412:<sha256> licence=4138:<sha256>
   -> 201 {"set":"x-fontawesome","scope":"system","origin":"catalogue","verified":true,
-          "allocated":2052,"glyphs":2052,"version":"<sha-256>","import_us":48210}
+          "allocated":2052,"glyphs":2052,"version":"<sha-256>","import_us":48210,
+          "loop_us":70}
 
 PUT /v1/fonts/glyphs/system/x-myicons          (the administrator's own: no manifest, no signature)
 X-Blit-Glyph-Parts: names=2210:<sha256> font=31840:<sha256> licence=1088:<sha256>
@@ -2381,12 +2382,22 @@ address grammar; an alias shares its glyph's codepoint.
 Each part is written into a root-only staging directory inside the store,
 read back once, verified, then written from memory into the set's own
 directory and renamed into place: a refusal changes nothing, and an import
-is visible, without a restart, as soon as it answers. An import runs on the
-server's loop: `import_us` says how long it took.
+is visible, without a restart, as soon as it answers. The checks, the
+parsing and the writes run on a worker thread, not on the server's loop
+(Gitea #216): while an import runs, every display keeps presenting and
+other requests are answered; a second import and any `DELETE` of a set
+answer 409 `glyph_import_active` until this one has answered (the store
+takes one change at a time). The `PUT` itself is answered when the import
+is done, 201 or its error, as before. `import_us` says how long the import
+took from its whole body to its answer, `loop_us` how much of that held the
+loop (the final swap, which grows with the set's names, not its bytes: on
+the build host about 70 us for a 16 MiB font of three names, under 1 ms
+for 6,000 names or an update retiring 3,000; the 16 MiB import takes about
+0.6 s in all).
 
 **Errors**, each with nothing changed: 400 `malformed_query` (the id), 400
 `glyph_parts_invalid` (the header); 409 `glyph_retired_name`,
-`glyph_import_active`; 413 `glyph_too_large` (from the header, before a
+`glyph_import_active` (another import is under way; for `DELETE` too); 413 `glyph_too_large` (from the header, before a
 byte is staged); 422 `glyph_signature_invalid` (a bad signature, another
 key's, or no key installed), `glyph_manifest_invalid`, `glyph_part_missing`,
 `glyph_hash_mismatch` (the manifest's or the transport's),

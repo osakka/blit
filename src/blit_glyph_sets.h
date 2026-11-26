@@ -24,9 +24,12 @@
    same table. The shipped sets are read once, into blit_glyph_shipped;
    whenever the installed sets change, a new table is built from a copy of
    the shipped one plus the installed sets' names (blit_glyph_table_begin,
-   blit_glyph_table_add_set, glyph_add, blit_glyph_table_commit), with the
+   blit_glyph_table_add_set, glyph_add, blit_glyph_table_finish), with the
    same grammar, the same alias rule and the same derived ranges, and
-   swapped in whole. blit_glyph_sets is always the table in use. */
+   swapped in whole (blit_glyph_table_swap). blit_glyph_sets is always the
+   table in use. Building reads only the shipped table, which never changes
+   after start, so an import's worker thread builds a table while the loop
+   reads the one in use (Gitea #216); the swap is the loop's. */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -898,12 +901,18 @@ static void glyph_table_free(BlitGlyphSets *g)
     free(g);
 }
 
-/* Derive what the table needs and swap it in whole; the table it replaces
-   is freed. Nothing reads the table between here and the next request. */
-static void blit_glyph_table_commit(BlitGlyphSets *g)
+/* Derive what a new table needs (its sort, aliases and ranges): reads
+   only G, so an import's worker does it aside (Gitea #216). */
+static void blit_glyph_table_finish(BlitGlyphSets *g)
+{
+    glyph_table_finish(g);
+}
+
+/* Swap a finished table in whole; the table it replaces is freed. On the
+   loop only: nothing reads the table between here and the next request. */
+static void blit_glyph_table_swap(BlitGlyphSets *g)
 {
     BlitGlyphSets *old = blit_glyph_table;
-    glyph_table_finish(g);
     blit_glyph_table = g;
     glyph_table_free(old);
 }

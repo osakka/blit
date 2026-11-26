@@ -9,7 +9,9 @@
   own); `source`/`install` in `/v1/fonts` and `/v1/fonts/sets`, `GET
   /v1/fonts/glyphs`; the `x` owner; every stored set verified again at
   start (`src/blit_glyph_store.h`; `glyph_signature_gate`,
-  `glyph_ledger_gate`, `glyph_install_gate`, `glyph_sets_gate`). Phase 2a
+  `glyph_ledger_gate`, `glyph_install_gate`, `glyph_sets_gate`); an
+  import runs off the server's loop (Gitea #216,
+  `glyph_import_live_gate`). Phase 2a
   stops there: no user scope, views or shadowing, and
   `/v1/fonts/glyphs/users/...` answers 501 (2b); no frame-socket `GLYPHS`,
   `glyph_system_dirs`, rescan or `POST /v1/fonts/glyphs/rescan` (2c).
@@ -854,10 +856,35 @@ changes a decision.
   not in `/v1/fonts/sets`, since it draws nothing. Its counters
   `names_parsed` and `fonts_opened` are how a gate shows a refusal parsed
   nothing.
-- **On the loop.** An import runs on the server's loop between frames: the
-  table and the remap are built aside and swapped in whole, never while a
-  frame draws, but the loop waits for the import (hashing, FreeType's open,
-  the writes and fsyncs). `import_us` in the answer says how long.
+- **Off the loop** (Gitea #216; as built first, the loop waited for the
+  whole import: 100-130 ms for a 2.5 MB font, 0.65-0.69 s at the 16 MiB
+  limit). Once an upload's body is staged, the import runs on a thread of
+  its own, made per import, as the settings writer and the KMS monitor
+  already are (a forked child would have had to hand back the parsed
+  names, the face and the table, or the loop parse them again). The
+  thread reads the parts back, checks the transport's and the manifest's
+  hashes and the signature, parses the names, checks the font in a
+  FreeType library of its own, allocates from the ledger, builds the new
+  set table and remap aside, and writes the set's files, the ledger's
+  allocations, the rename and the retirements, in the order above. It
+  reads the store and changes none of it in memory; nothing else changes
+  what it reads, since one import runs at a time and any `DELETE` answers
+  409 `glyph_import_active` from the `PUT`'s headers to its answer. The
+  loop then, woken by a pipe, joins the thread and makes memory say what
+  the files say: the ledger's appended lines (even when a later step
+  failed), the face opened in the store's own FreeType from the verified
+  bytes (the worker's face is closed with its library; no face crosses a
+  thread), the table, remap and sets swapped in, the caches dropped, the
+  answer. That swap is `loop_us` in the answer: it grows with names and
+  retirements, not bytes (45-70 us for a 16 MiB font of three names,
+  0.7-0.8 ms for 6,000 names or an update retiring 3,000; the worker hands
+  over exactly the retirements it appended, so the loop never searches the
+  ledger). `import_us` is the whole. The `PUT` still answers 201 when the import is
+  done, so the contract is unchanged but for `loop_us` and the `DELETE`'s
+  409. Without a thread (`pthread_create` failing) the import runs on the
+  loop as before. `glyph_import_live_gate` holds it: a pane presents and
+  the API answers within 250 ms throughout an import of a 16 MiB font
+  (the loop's worst gap measured 12-46 ms against 650-690 ms before).
 - **Caches.** Any change to the installed sets drops every cached glyph in
   U+102000-U+10FFFD from every raster and empties the GLES atlas, and every
   cell is drawn again; per set would save little.

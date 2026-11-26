@@ -153,8 +153,9 @@ module GlyphStoreFixture
 
   # PUT the parts (in the body's order) with X-Blit-Glyph-Parts. SHAS
   # overrides a part's transport hash; HEADER replaces the whole header.
-  # The body is sent only after the server's 100 Continue.
-  def import(port, token, set, parts, scope: 'system', shas: {}, header: nil, lengths: {})
+  # The body is sent only after the server's 100 Continue; SENT, if given,
+  # is called once the whole body is written.
+  def import(port, token, set, parts, scope: 'system', shas: {}, header: nil, lengths: {}, sent: nil)
     order = PARTS.select { |p| parts.key?(p) }
     header ||= order.map do |p|
       "#{p}=#{lengths.fetch(p, parts[p].bytesize)}:#{shas.fetch(p, Digest::SHA256.hexdigest(parts[p]))}"
@@ -175,6 +176,7 @@ module GlyphStoreFixture
       rescue Errno::EPIPE, Errno::ECONNRESET
         nil
       end
+      sent&.call
       parse(rest + (socket.read.to_s rescue ''))
     end
   rescue EOFError, Errno::ECONNRESET => e

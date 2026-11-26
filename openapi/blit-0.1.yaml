@@ -294,7 +294,11 @@ paths:
         ledger (a name keeps its codepoint across updates and reinstalls; a
         dropped name is retired, and bringing it back is 409
         `glyph_retired_name`). A refusal changes nothing. The set draws at
-        once, without a restart. User scope (/v1/fonts/glyphs/users/...) is
+        once, without a restart. The checks, the parsing and the writes run
+        on a worker thread (Gitea #216): while an import runs the server
+        draws and serves other requests, a second import and any removal
+        answer 409 `glyph_import_active`, and this request is answered when
+        the import is done. User scope (/v1/fonts/glyphs/users/...) is
         501 `glyph_scope_unsupported` until phase 2b.
       parameters:
         - in: header
@@ -337,7 +341,9 @@ paths:
         The set's directory goes; the ledger keeps every allocation, so a
         reinstall gives every name its old codepoint back. Afterwards the
         set and its names answer 410 `uninstalled`, and cells showing its
-        codepoints draw the replacement glyph.
+        codepoints draw the replacement glyph. While an import is under way
+        (from its PUT's headers to its answer) every removal answers 409
+        `glyph_import_active`: the store takes one change at a time.
       responses:
         '200':
           description: Removed
@@ -352,6 +358,8 @@ paths:
                   removed: {type: boolean, const: true}
                 additionalProperties: false
         '404':
+          $ref: '#/components/responses/Problem'
+        '409':
           $ref: '#/components/responses/Problem'
         default:
           $ref: '#/components/responses/Problem'
@@ -3002,7 +3010,7 @@ components:
       additionalProperties: false
     GlyphImport:
       type: object
-      required: [set, scope, origin, verified, allocated, glyphs, version, import_us]
+      required: [set, scope, origin, verified, allocated, glyphs, version, import_us, loop_us]
       properties:
         set: {$ref: '#/components/schemas/InstalledGlyphSetId'}
         scope: {type: string, const: system}
@@ -3011,7 +3019,8 @@ components:
         allocated: {type: integer, minimum: 0, description: Codepoints this import took from the ledger (new names only).}
         glyphs: {type: integer, minimum: 1}
         version: {type: string, pattern: '^[0-9a-f]{64}$'}
-        import_us: {type: integer, minimum: 0, description: How long the import held the server's loop.}
+        import_us: {type: integer, minimum: 0, description: 'How long the import took, from its whole body to its answer (on a worker thread, Gitea #216).'}
+        loop_us: {type: integer, minimum: 0, description: 'How much of that held the server''s loop: the final swap alone.'}
       additionalProperties: false
     GlyphStore:
       type: object

@@ -626,6 +626,9 @@ typedef struct {
     /* ADR 0245: a glyph-set upload (PUT /v1/fonts/glyphs/system/{set}),
        its parts streamed into a directory of the store's staging. */
     int glyph_active, glyph_fd, glyph_part;
+    /* Gitea #216: the body is in and its import runs on the worker; the
+       client waits for the answer, not read and not timed out as idle. */
+    int glyph_waiting;
     size_t glyph_expected, glyph_received, glyph_part_received;
     uint64_t glyph_last_progress_us;
     BlitGlyphUpload glyph_upload;
@@ -33042,6 +33045,8 @@ static void service_native_console(BlitRuntime *runtime)
     }
 }
 
+static void glyph_import_detach(int index);
+
 static void remove_http_client(BlitRuntime *runtime, int index)
 {
     if (index < 0 || index >= BLIT_MAX_HTTP_CLIENTS ||
@@ -33058,6 +33063,9 @@ static void remove_http_client(BlitRuntime *runtime, int index)
         glyph_remove_tree(runtime->http_clients[index].glyph_directory, 0);
         blit_glyph_store.importing = 0;
     }
+    /* Gitea #216: a client that goes while its import runs leaves the
+       import to finish; its answer goes nowhere. */
+    if (runtime->http_clients[index].glyph_waiting) glyph_import_detach(index);
     free(runtime->http_clients[index].response_body);
     close(runtime->http_clients[index].fd);
     memset(&runtime->http_clients[index], 0,
@@ -33090,7 +33098,7 @@ static void service_http_client(BlitRuntime *runtime, int index);
 static int http_client_pending(const BlitHttpClient *client)
 {
     return client->used && !client->admitted && client->update_fd < 0 &&
-        !client->glyph_active &&
+        !client->glyph_active && !client->glyph_waiting &&
         !client->update_installing && client->response_body == NULL &&
         client->settings_wait == 0 && client->screenshot_output_index == 0;
 }
@@ -33991,38 +33999,124 @@ static int glyph_stage_bytes(BlitHttpClient *client, const unsigned char *data, 
     return 1;
 }
 
-/* The whole body is staged: the import, its answer, and the connection
-   closed. */
-static void glyph_upload_finish(BlitRuntime *runtime, int index)
+/* Gitea #216: the import under way, if any. Its expensive half
+   (blit_glyph_import_prepare: reading the parts back, hashes, signature,
+   names, FreeType's checks, the ledger, the set table and the remap, the
+   files and their fsyncs) runs on a thread of its own, made per import;
+   the loop keeps drawing and serving, and takes the result when the
+   thread says it is done through NOTIFY (blit_glyph_import_commit: the
+   swap and the answer). One import at a time (409 glyph_import_active),
+   and no removal meanwhile, so nothing changes what the worker reads. */
+static struct {
+    int running;                /* the worker holds JOB */
+    pthread_t thread;
+    int notify[2];              /* the worker's "done", for select */
+    int client;                 /* the waiting client; -1 once it went */
+    BlitGlyphImport job;
+} glyph_import = {.notify = {-1, -1}, .client = -1};
+
+static void glyph_import_detach(int index)
 {
-    BlitHttpClient *client = &runtime->http_clients[index];
-    BlitGlyphResult result;
-    size_t allocated = 0;
-    char body[512];
-    if (client->glyph_fd >= 0) close(client->glyph_fd);
-    client->glyph_fd = -1;
-    if (blit_glyph_store_import(client->glyph_set, client->glyph_directory, &client->glyph_upload,
-                                &result, &allocated)) {
-        const BlitGlyphInstalled *set = blit_glyph_store_find("system", client->glyph_set,
-                                                              strlen(client->glyph_set));
+    if (glyph_import.client == index) glyph_import.client = -1;
+}
+
+static void *glyph_import_worker(void *argument)
+{
+    BlitGlyphImport *job = argument;
+    ssize_t written;
+    blit_glyph_import_prepare(job);
+    /* The upload's own copy: the set's files are written from memory. */
+    glyph_remove_tree(job->upload_directory, 0);
+    do written = write(glyph_import.notify[1], "x", 1); while (written < 0 && errno == EINTR);
+    return NULL;
+}
+
+/* The import's answer, once committed on the loop, and the connection
+   closed. */
+static void glyph_import_finish(BlitRuntime *runtime)
+{
+    BlitGlyphImport *job = &glyph_import.job;
+    int index = glyph_import.client, ok;
+    char body[640];
+    ok = blit_glyph_import_commit(job);
+    glyph_import.client = -1;
+    blit_glyph_store.importing = 0;
+    if (ok) {
+        const BlitGlyphInstalled *set = blit_glyph_store_find("system", job->id, strlen(job->id));
         char detail[320];
         snprintf(body, sizeof(body),
                  "{\"set\":\"%s\",\"scope\":\"system\",\"origin\":\"%s\",\"verified\":%s,"
-                 "\"allocated\":%lu,\"glyphs\":%lu,\"version\":\"%s\",\"import_us\":%ld}",
-                 client->glyph_set, set && set->signed_set ? "catalogue" : "own",
-                 set && set->signed_set ? "true" : "false", (unsigned long)allocated,
+                 "\"allocated\":%lu,\"glyphs\":%lu,\"version\":\"%s\",\"import_us\":%ld,\"loop_us\":%ld}",
+                 job->id, set && set->signed_set ? "catalogue" : "own",
+                 set && set->signed_set ? "true" : "false", (unsigned long)job->allocated,
                  set ? (unsigned long)set->names.glyphs : 0UL, set ? set->version : "",
-                 blit_glyph_store.last_import_us);
-        send_http(client->fd, 201, "Created", "application/json", body);
-        snprintf(detail, sizeof(detail), "%s imported into system (%s), %lu codepoints allocated, in %ld us",
-                 client->glyph_set, set && set->signed_set ? "signed" : "own, unverified",
-                 (unsigned long)allocated, blit_glyph_store.last_import_us);
+                 job->import_us, job->loop_us);
+        snprintf(detail, sizeof(detail),
+                 "%s imported into system (%s), %lu codepoints allocated, in %ld us (%ld us on the loop)",
+                 job->id, set && set->signed_set ? "signed" : "own, unverified",
+                 (unsigned long)job->allocated, job->import_us, job->loop_us);
         diagnostic_log(runtime, "info", "glyph_set_imported", detail);
         glyph_sets_changed(runtime);
-    } else {
-        glyph_send_result(client->fd, &result);
     }
+    if (index < 0) return;
+    if (ok) send_http(runtime->http_clients[index].fd, 201, "Created", "application/json", body);
+    else glyph_send_result(runtime->http_clients[index].fd, &job->result);
     remove_http_client(runtime, index);
+}
+
+/* The loop's side of the worker: its "done", then the thread joined (so
+   everything it wrote is the loop's to read) and the import committed. */
+static void service_glyph_import(BlitRuntime *runtime)
+{
+    char drained[16];
+    if (!glyph_import.running) return;
+    if (read(glyph_import.notify[0], drained, sizeof(drained)) <= 0) return;
+    pthread_join(glyph_import.thread, NULL);
+    glyph_import.running = 0;
+    glyph_import_finish(runtime);
+}
+
+/* At exit: an import under way is let finish its files (they are whole
+   either way, in 2a's order, but a restart's exec would cut it off). */
+static void glyph_import_wait(void)
+{
+    if (!glyph_import.running) return;
+    pthread_join(glyph_import.thread, NULL);
+    glyph_import.running = 0;
+}
+
+/* The whole body is staged: the import is handed to its worker, and the
+   client waits for the answer. Without a thread it runs here, on the loop,
+   as it did in 2a. */
+static void glyph_upload_finish(BlitRuntime *runtime, int index)
+{
+    BlitHttpClient *client = &runtime->http_clients[index];
+    if (client->glyph_fd >= 0) close(client->glyph_fd);
+    client->glyph_fd = -1;
+    blit_glyph_import_begin(&glyph_import.job, client->glyph_set, client->glyph_directory,
+                            &client->glyph_upload);
+    /* The staged upload is the import's now, not the client's. */
+    client->glyph_active = 0;
+    client->glyph_directory[0] = '\0';
+    client->glyph_waiting = 1;
+    glyph_import.client = index;
+    if (glyph_import.notify[0] < 0 && pipe2(glyph_import.notify, O_CLOEXEC | O_NONBLOCK) != 0)
+        glyph_import.notify[0] = glyph_import.notify[1] = -1;
+    if (glyph_import.notify[0] >= 0) {
+        /* The worker takes no signal: the loop's are the loop's (as the
+           compositor's log writer, src/blit_compositor.c). */
+        sigset_t all, before;
+        sigfillset(&all);
+        pthread_sigmask(SIG_SETMASK, &all, &before);
+        glyph_import.running =
+            pthread_create(&glyph_import.thread, NULL, glyph_import_worker, &glyph_import.job) == 0;
+        pthread_sigmask(SIG_SETMASK, &before, NULL);
+        if (glyph_import.running) return;
+    }
+    fprintf(stderr, "blit: glyph import worker unavailable; this import runs on the event loop\n");
+    blit_glyph_import_prepare(&glyph_import.job);
+    glyph_remove_tree(glyph_import.job.upload_directory, 0);
+    glyph_import_finish(runtime);
 }
 
 static void service_glyph_upload(BlitRuntime *runtime, int index)
@@ -34053,7 +34147,6 @@ static void glyph_upload_begin(BlitRuntime *runtime, int index, const char *head
     const char *path = client->request + 4, *end = strchr(path, ' ');
     const char *prefix = "/v1/fonts/glyphs/system/";
     BlitGlyphResult result;
-    int i;
 
     memset(&result, 0, sizeof(result));
     early = client->length > header_length ? client->length - header_length : 0;
@@ -34100,13 +34193,12 @@ static void glyph_upload_begin(BlitRuntime *runtime, int index, const char *head
         remove_http_client(runtime, index);
         return;
     }
-    for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i)
-        if (i != index && runtime->http_clients[i].used && runtime->http_clients[i].glyph_active) {
-            send_problem(client->fd, 409, "Conflict", "glyph_import_active",
-                         "Another glyph set is being imported.");
-            remove_http_client(runtime, index);
-            return;
-        }
+    if (blit_glyph_store.importing) {
+        send_problem(client->fd, 409, "Conflict", "glyph_import_active",
+                     "Another glyph set is being imported.");
+        remove_http_client(runtime, index);
+        return;
+    }
     memcpy(client->glyph_set, path, id_length);
     client->glyph_set[id_length] = '\0';
     client->glyph_fd = -1;
@@ -34153,6 +34245,7 @@ static void service_http_client(BlitRuntime *runtime, int index)
         service_update_upload(runtime, client);
         return;
     }
+    if (client->glyph_waiting) return;
     if (client->glyph_active) {
         service_glyph_upload(runtime, index);
         return;
@@ -34979,6 +35072,8 @@ int main(int argc, char **argv)
                         "dpkg may still be running (see GET /v1/control/update/status)");
                 continue;
             }
+            /* Gitea #216: its import runs on the worker; it answers. */
+            if (client->glyph_waiting) continue;
             if (client->glyph_active) {
                 /* ADR 0245: an upload that stops is dropped, with its
                    staging directory. */
@@ -35068,11 +35163,18 @@ int main(int argc, char **argv)
             if (runtime.update_helper_fd > max_fd)
                 max_fd = runtime.update_helper_fd;
         }
+        if (glyph_import.running) {
+            FD_SET(glyph_import.notify[0], &readable);
+            if (glyph_import.notify[0] > max_fd)
+                max_fd = glyph_import.notify[0];
+        }
         for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
-            /* A client waiting for its install is not read: its request is
-               done, and its answer comes from the helper. */
+            /* A client waiting for its install or its glyph import is not
+               read: its request is done, and its answer comes from the
+               helper or the import's worker. */
             if (runtime.http_clients[i].used &&
-                !runtime.http_clients[i].update_installing) {
+                !runtime.http_clients[i].update_installing &&
+                !runtime.http_clients[i].glyph_waiting) {
                 FD_SET(runtime.http_clients[i].fd, &readable);
                 if (runtime.http_clients[i].response_body != NULL)
                     FD_SET(runtime.http_clients[i].fd, &writable);
@@ -35299,9 +35401,12 @@ int main(int argc, char **argv)
             if (runtime.update_helper_fd >= 0 &&
                 FD_ISSET(runtime.update_helper_fd, &readable))
                 service_update_helper(&runtime);
+            if (glyph_import.running && FD_ISSET(glyph_import.notify[0], &readable))
+                service_glyph_import(&runtime);
             for (i = 0; i < BLIT_MAX_HTTP_CLIENTS; ++i) {
                 if (runtime.http_clients[i].used &&
                     !runtime.http_clients[i].update_installing &&
+                    !runtime.http_clients[i].glyph_waiting &&
                     FD_ISSET(runtime.http_clients[i].fd, &readable))
                     service_http_client(&runtime, i);
             }
@@ -35423,6 +35528,7 @@ int main(int argc, char **argv)
        update install's exit and SIGTERM all return through here. A write
        accepted inside the coalescing window must still reach the disk, and a
        restart is exactly when it would not. */
+    glyph_import_wait();
     settings_flush_final(&runtime);
     destroy_outputs(&runtime);
     /* The start guard is for a crash. A start stopped in order before its

@@ -590,6 +590,9 @@ suite_renderer() {
     run_gate braille_gate.rb ruby tools/tests/braille_gate.rb
     # ADR 0245 phase 2a: an installed set drawn at its ledger codepoints.
     run_gate glyph_install_gate.rb ruby tools/tests/glyph_install_gate.rb
+    # Gitea #216: a 16 MiB import never holds the loop (frames and the API
+    # answer throughout); timed, so alone.
+    run_serial_gate glyph_import_live_gate.rb ruby tools/tests/glyph_import_live_gate.rb
     run_gate window_style_gate.rb ruby tools/tests/window_style_gate.rb
     run_gate icon_pen_gate.rb ruby tools/tests/icon_pen_gate.rb
     run_gate glyph_edge_sweep_gate.rb ruby tools/tests/glyph_edge_sweep_gate.rb

@@ -97,7 +97,11 @@ raise 'installed glyph sets contract missing' unless
   glyph_schemas.dig('GlyphSet','properties','owner','enum') == %w[blit emoji nerd x] &&
   glyph_schemas.dig('GlyphSet','properties','source','enum') == %w[shipped installed] &&
   glyph_schemas.dig('GlyphInstall','properties','state','enum') == %w[loaded refused] &&
-  glyph_schemas.dig('InstalledGlyphSetId','pattern') == '^x-[a-z0-9]+(-[a-z0-9]+)*$'
+  glyph_schemas.dig('InstalledGlyphSetId','pattern') == '^x-[a-z0-9]+(-[a-z0-9]+)*$' &&
+  # Gitea #216: the import runs off the loop; the answer says what it held,
+  # and a removal meanwhile is 409.
+  (glyph_schemas.dig('GlyphImport','required') & %w[import_us loop_us]).size == 2 &&
+  paths.dig('/v1/fonts/glyphs/system/{set_id}','delete','responses').key?('409')
 # ADR 0212: a catalogue a client can map dynamically -- every cell_geometry
 # entry typed with what it is and which pens to set, a revision, an ETag and
 # a conditional request.

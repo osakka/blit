@@ -31,7 +31,9 @@
    (FT_New_Memory_Face), which the set keeps. The parts are then written
    from memory into a new directory in staging, the ledger record is made
    durable, and the directory is renamed into system/. A failure removes
-   the staging copy and changes nothing. At every start each stored set is
+   the staging copy and changes nothing. All of that runs on a worker
+   thread of the server's (blit_glyph_import_prepare, Gitea #216); the
+   loop only swaps the result in (blit_glyph_import_commit). At every start each stored set is
    verified again the same way, so removing a key file revokes the sets it
    signed. The administrator's own unsigned set (origin own, HTTP and
    system only) is checked at start against the hashes recorded at import.
@@ -693,19 +695,21 @@ static int glyph_sync_directory(const char *path)
     return ok;
 }
 
-/* Append TEXT to the ledger and make it durable; on any failure the file
-   is cut back to its durable length, so it holds whole lines only. */
-static int glyph_ledger_append(GlyphLedger *l, const char *path, const char *directory,
-                               const char *text, size_t length)
+/* Append TEXT to the ledger file whose durable length is *SIZE and make
+   it durable; on any failure the file is cut back to *SIZE, so it holds
+   whole lines only. *SIZE is the new length on success. (An import's
+   worker appends with its own copy of the length, Gitea #216.) */
+static int glyph_ledger_append_at(off_t *size, const char *path, const char *directory,
+                                  const char *text, size_t length)
 {
-    size_t header = l->size == 0 ? strlen(BLIT_GLYPH_LEDGER_HEADER) : 0, written = 0;
+    size_t header = *size == 0 ? strlen(BLIT_GLYPH_LEDGER_HEADER) : 0, written = 0;
     char *all = malloc(header + length + 1);
-    int fd, created = l->size == 0, ok = 1;
+    int fd, created = *size == 0, ok = 1;
     if (!all) return 0;
     memcpy(all, BLIT_GLYPH_LEDGER_HEADER, header);
     memcpy(all + header, text, length);
     fd = open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
-    if (fd < 0 || fchmod(fd, 0600) < 0 || lseek(fd, l->size, SEEK_SET) != l->size) {
+    if (fd < 0 || fchmod(fd, 0600) < 0 || lseek(fd, *size, SEEK_SET) != *size) {
         if (fd >= 0) close(fd);
         free(all);
         return 0;
@@ -718,13 +722,19 @@ static int glyph_ledger_append(GlyphLedger *l, const char *path, const char *dir
     }
     if (ok && fsync(fd) < 0) ok = 0;
     if (!ok) {
-        if (ftruncate(fd, l->size) == 0) fsync(fd);
+        if (ftruncate(fd, *size) == 0) fsync(fd);
     }
     close(fd);
     free(all);
     if (ok && created && !glyph_sync_directory(directory)) ok = 0;
-    if (ok) l->size += (off_t)(header + length);
+    if (ok) *size += (off_t)(header + length);
     return ok;
+}
+
+static int glyph_ledger_append(GlyphLedger *l, const char *path, const char *directory,
+                               const char *text, size_t length)
+{
+    return glyph_ledger_append_at(&l->size, path, directory, text, length);
 }
 
 /* ---- Installed sets. ---- */
@@ -770,9 +780,12 @@ typedef struct {
     unsigned long generation;   /* changes whenever what installed sets draw changes */
     /* Diagnostics: how often the names reader ran and FreeType was handed a
        font (glyph_signature_gate holds a refusal to "nothing parsed" by
-       them), imports answered, and the last import's time on the loop. */
+       them), imports answered, and the last import's time from its whole
+       body to its answer. */
     unsigned long long names_parsed, fonts_opened, imports, refusals, removals;
     long last_import_us;
+    /* An upload is being received or imported (the server's: from the
+       PUT's headers to its answer); a second one and a removal are 409. */
     int importing;
 } BlitGlyphStore;
 
@@ -951,8 +964,13 @@ static int glyph_write_file(const char *path, const void *data, size_t length)
    given (at start), equal to the hashes recorded at import. Only then the
    names file is parsed and the font opened, from these bytes, with the
    limits of section 10. On success the set holds its names, its face (and
-   the font's bytes) and each part's hash. */
-static int glyph_set_verify(BlitGlyphStore *st, BlitGlyphInstalled *set,
+   the font's bytes) and each part's hash. LIBRARY is the FreeType the
+   face is opened in, KEYS the release keys' directory; COUNTED[0] and
+   COUNTED[1] count the names reader's runs and the fonts FreeType opened
+   (the store's counters, or an import worker's own until the loop adds
+   them, Gitea #216). Nothing else of the store is touched. */
+static int glyph_set_verify(FT_Library library, const char *keys_directory, unsigned long long counted[2],
+                            BlitGlyphInstalled *set,
                             unsigned char *parts[BLIT_GLYPH_PART_COUNT],
                             const size_t lengths[BLIT_GLYPH_PART_COUNT],
                             char expected[BLIT_GLYPH_PART_COUNT][65], BlitGlyphResult *r)
@@ -977,7 +995,7 @@ static int glyph_set_verify(BlitGlyphStore *st, BlitGlyphInstalled *set,
             lengths[BLIT_GLYPH_PART_SIGNATURE] != BLIT_GLYPH_SIGNATURE_BYTES)
             return glyph_fail(r, 422, "glyph_signature_invalid",
                               "the manifest is over 512 bytes, or the signature is not 64 bytes");
-        if (!blit_release_verify_directory(st->keys, 1, parts[BLIT_GLYPH_PART_SIGNATURE],
+        if (!blit_release_verify_directory(keys_directory, 1, parts[BLIT_GLYPH_PART_SIGNATURE],
                                            (const char *)parts[BLIT_GLYPH_PART_MANIFEST],
                                            lengths[BLIT_GLYPH_PART_MANIFEST], matched,
                                            sizeof(matched), &keys))
@@ -1012,14 +1030,14 @@ static int glyph_set_verify(BlitGlyphStore *st, BlitGlyphInstalled *set,
                                       "the %s part is not the one imported", blit_glyph_part_names[p]);
     }
     /* Only now is anything parsed. */
-    ++st->names_parsed;
+    ++counted[0];
     if (!glyph_names_parse((const char *)parts[BLIT_GLYPH_PART_NAMES], lengths[BLIT_GLYPH_PART_NAMES],
                            &set->names, r))
         return 0;
     if (set->signed_set && strcmp(set->names.release, manifest.version) != 0)
         return glyph_fail(r, 422, "glyph_names_invalid", "the names file's release is not the manifest's version");
-    ++st->fonts_opened;
-    if (FT_New_Memory_Face(st->library, parts[BLIT_GLYPH_PART_FONT], (FT_Long)lengths[BLIT_GLYPH_PART_FONT],
+    ++counted[1];
+    if (FT_New_Memory_Face(library, parts[BLIT_GLYPH_PART_FONT], (FT_Long)lengths[BLIT_GLYPH_PART_FONT],
                            -1, &probe))
         return glyph_fail(r, 422, "glyph_font_rejected", "not_a_font: FreeType does not read it as a font");
     i = (size_t)probe->num_faces;
@@ -1027,7 +1045,7 @@ static int glyph_set_verify(BlitGlyphStore *st, BlitGlyphInstalled *set,
     if (i != 1)
         return glyph_fail(r, 422, "glyph_font_rejected", "collection: the font holds %lu faces, not one",
                           (unsigned long)i);
-    if (FT_New_Memory_Face(st->library, parts[BLIT_GLYPH_PART_FONT], (FT_Long)lengths[BLIT_GLYPH_PART_FONT],
+    if (FT_New_Memory_Face(library, parts[BLIT_GLYPH_PART_FONT], (FT_Long)lengths[BLIT_GLYPH_PART_FONT],
                            0, &set->face)) {
         set->face = NULL;
         return glyph_fail(r, 422, "glyph_font_rejected", "not_a_font: FreeType does not read it as a font");
@@ -1226,26 +1244,31 @@ static int glyph_remap_order(const void *a, const void *b)
     return x < y ? -1 : x > y;
 }
 
-/* The set table with the loaded sets in it, and the raster's remap table:
-   built whole, then swapped in. */
-static int blit_glyph_store_rebuild(BlitGlyphStore *st)
+/* The set table with SETS' loaded ones in it (sorted here, by scope and
+   id), and the raster's remap table, built aside: nothing of the store is
+   read but the sets themselves, so an import's worker builds them while
+   the loop draws (Gitea #216). A set with no face yet (one the worker
+   verified, whose face the loop opens) has its remap entries' face NULL
+   until glyph_store_install fills them in. 0 when memory runs out. */
+static int glyph_store_build(BlitGlyphInstalled **sets, int count, BlitGlyphSets **table_out,
+                             BlitGlyphRemap **remap_out, size_t *remap_count_out)
 {
     BlitGlyphSets *g;
     BlitGlyphRemap *remap = NULL;
     size_t remap_count = 0, total = 0, i, k;
     int s;
-    qsort(st->sets, (size_t)st->count, sizeof(*st->sets), glyph_set_order);
-    for (s = 0; s < st->count; ++s)
-        if (st->sets[s]->loaded) total += st->sets[s]->names.glyphs;
+    qsort(sets, (size_t)count, sizeof(*sets), glyph_set_order);
+    for (s = 0; s < count; ++s)
+        if (sets[s]->loaded) total += sets[s]->names.glyphs;
     remap = malloc((total ? total : 1) * sizeof(*remap));
-    g = blit_glyph_table_begin(st->count);
+    g = blit_glyph_table_begin(count);
     if (!remap || !g) {
         free(remap);
         glyph_table_free(g);
         return 0;
     }
-    for (s = 0; s < st->count; ++s) {
-        BlitGlyphInstalled *set = st->sets[s];
+    for (s = 0; s < count; ++s) {
+        BlitGlyphInstalled *set = sets[s];
         int index;
         if (!set->loaded) continue;
         index = blit_glyph_table_add_set(g, set->id, set->version, set->id, s);
@@ -1271,11 +1294,34 @@ static int blit_glyph_store_rebuild(BlitGlyphStore *st)
             glyph_add(g, index, set->retired[k], strlen(set->retired[k]), 0, BLIT_GLYPH_FLAG_RETIRED);
     }
     qsort(remap, remap_count, sizeof(*remap), glyph_remap_order);
-    blit_glyph_table_commit(g);
+    blit_glyph_table_finish(g);
+    *table_out = g;
+    *remap_out = remap;
+    *remap_count_out = remap_count;
+    return 1;
+}
+
+/* On the loop: a table and remap built by glyph_store_build swapped in
+   whole; the ones they replace are freed. */
+static void glyph_store_install(BlitGlyphStore *st, BlitGlyphSets *table, BlitGlyphRemap *remap,
+                                size_t remap_count)
+{
+    blit_glyph_table_swap(table);
     free(st->remap);
     st->remap = remap;
     st->remap_count = remap_count;
     ++st->generation;
+}
+
+/* The table and remap from the store's sets, built and swapped in at once
+   (at start, and after a removal). */
+static int blit_glyph_store_rebuild(BlitGlyphStore *st)
+{
+    BlitGlyphSets *g;
+    BlitGlyphRemap *remap;
+    size_t remap_count;
+    if (!glyph_store_build(st->sets, st->count, &g, &remap, &remap_count)) return 0;
+    glyph_store_install(st, g, remap, remap_count);
     return 1;
 }
 
@@ -1341,7 +1387,14 @@ static BlitGlyphInstalled *glyph_store_load_set(BlitGlyphStore *st, const char *
             goto done;
         }
     }
-    if (!glyph_set_verify(st, set, parts, lengths, set->signed_set ? NULL : expected, &r)) goto done;
+    {
+        unsigned long long counted[2] = {0, 0};
+        int verified = glyph_set_verify(st->library, st->keys, counted, set, parts, lengths,
+                                        set->signed_set ? NULL : expected, &r);
+        st->names_parsed += counted[0];
+        st->fonts_opened += counted[1];
+        if (!verified) goto done;
+    }
     if (!glyph_set_codepoints(&st->ledger, set, 0, unused, &none, &r)) goto done;
     glyph_set_alias_codepoints(set);
     if (!glyph_set_version(set, parts[BLIT_GLYPH_PART_NAMES], lengths[BLIT_GLYPH_PART_NAMES])) {
@@ -1532,35 +1585,93 @@ static int blit_glyph_store_stage(char *directory, size_t capacity)
     return 1;
 }
 
-/* Section 5: an import into system from the upload's staged parts. Each
-   part is read once; the transport's hash, the signature, the manifest and
-   the parts' hashes are checked on those bytes; then the names file and
-   the font, the ledger's codepoints (507 when they cannot be had), and the
-   limits. The parts are written from memory into a new directory, the
-   ledger record made durable, and the directory renamed into place. A
-   refusal changes nothing. */
-static int blit_glyph_store_import(const char *id, const char *upload_directory,
-                                   const BlitGlyphUpload *upload, BlitGlyphResult *r,
-                                   size_t *allocated_out)
+/* ---- Section 5: an import into system, in two halves (Gitea #216). ----
+
+   blit_glyph_import_prepare is everything that takes time, and runs on a
+   worker thread while the loop draws: each staged part read back once;
+   the transport's hash, the signature, the manifest and the parts' hashes
+   checked on those bytes; then the names file and the font (in FreeType
+   of the worker's own, opened only to check it), the ledger's codepoints
+   (507 when they cannot be had) and the limits; the new set table and the
+   remap built aside; the parts written from memory into a new directory,
+   the ledger's allocations made durable, the directory renamed into
+   place, the retirements appended -- 2a's order on disk, unchanged. It
+   reads the store (its paths, the ledger, the installed sets) and changes
+   nothing of it in memory, and nothing else changes those while it runs:
+   one import at a time, a removal refused meanwhile (409
+   glyph_import_active), the ledger written only by imports.
+
+   blit_glyph_import_commit, on the loop, makes memory say what the files
+   now say: the ledger's lines as appended (even when a later step failed),
+   the face opened in the store's FreeType from the verified bytes, the
+   set, the table and the remap swapped in. A refusal changes nothing.
+   blit_glyph_store_import does both in turn. */
+
+typedef struct {
+    /* Set by blit_glyph_import_begin, on the loop. */
+    char id[BLIT_GLYPH_SET_ID_MAX + 1];
+    char upload_directory[PATH_MAX];
+    BlitGlyphUpload upload;
+    struct timespec started;
+    off_t ledger_size;              /* the ledger file's durable length */
+    /* Prepare's. */
+    int ok;
+    BlitGlyphResult result;
+    BlitGlyphInstalled *set, *old;
+    size_t *missing, missing_count; /* the names given new codepoints */
+    size_t retired_before;          /* set->retired past this: this import's drops */
+    int allocated_durable, retired_durable;
+    BlitGlyphInstalled **sets;      /* the store's sets with this one in */
+    int count;
+    BlitGlyphSets *table;
+    BlitGlyphRemap *remap;
+    size_t remap_count;
+    unsigned long long counted[2];  /* names parsed, fonts opened */
+    /* Commit's. */
+    size_t allocated;
+    long import_us, loop_us;
+} BlitGlyphImport;
+
+static void blit_glyph_import_begin(BlitGlyphImport *job, const char *id, const char *upload_directory,
+                                    const BlitGlyphUpload *upload)
 {
-    BlitGlyphStore *st = &blit_glyph_store;
-    BlitGlyphInstalled *set = NULL, *old;
+    memset(job, 0, sizeof(*job));
+    snprintf(job->id, sizeof(job->id), "%s", id);
+    snprintf(job->upload_directory, sizeof(job->upload_directory), "%s", upload_directory);
+    job->upload = *upload;
+    job->ledger_size = blit_glyph_store.ledger.size;
+    clock_gettime(CLOCK_MONOTONIC, &job->started);
+}
+
+static long glyph_elapsed_us(const struct timespec *t0)
+{
+    struct timespec t1;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    return (long)(t1.tv_sec - t0->tv_sec) * 1000000L + (t1.tv_nsec - t0->tv_nsec) / 1000L;
+}
+
+static int blit_glyph_import_prepare(BlitGlyphImport *job)
+{
+    const BlitGlyphStore *st = &blit_glyph_store;
+    const char *id = job->id;
+    const BlitGlyphUpload *upload = &job->upload;
+    BlitGlyphResult *r = &job->result;
+    BlitGlyphInstalled *set = NULL, *old = NULL;
     unsigned char *parts[BLIT_GLYPH_PART_COUNT] = {0};
     size_t lengths[BLIT_GLYPH_PART_COUNT] = {0}, *missing = NULL, missing_count = 0, i;
     char path[PATH_MAX], built[PATH_MAX], target[PATH_MAX], system_dir[PATH_MAX], ledger_path[PATH_MAX];
     char *ledger_text = NULL, *record = NULL;
-    size_t ledger_used = 0, ledger_capacity = 0, allocations_used = 0, record_length = 0, unused[1], none = 0;
+    size_t ledger_used = 0, ledger_capacity = 0, allocations_used = 0, record_length = 0;
     unsigned long long bytes = 0;
-    int p, ok = 0, missing_part, sets_in_scope, exchanged = 0;
-    struct timespec t0, t1;
+    int p, missing_part, sets_in_scope, s;
+    FT_Library library = NULL;
 
-    clock_gettime(CLOCK_MONOTONIC, &t0);
-    memset(r, 0, sizeof(*r));
-    *allocated_out = 0;
     built[0] = '\0';
+    job->ok = 0;
     if (!st->ready) return glyph_fail(r, 503, "glyph_store_unavailable", "the glyph store is not in use: %s", st->reason);
     set = calloc(1, sizeof(*set));
     if (!set) return glyph_fail(r, 500, "glyph_store_failed", "out of memory");
+    job->set = set;
     snprintf(set->id, sizeof(set->id), "%s", id);
     snprintf(set->scope, sizeof(set->scope), "system");
     snprintf(set->via, sizeof(set->via), "http");
@@ -1569,7 +1680,7 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
     for (p = 0; p < BLIT_GLYPH_PART_COUNT; ++p) {
         char transport[65];
         if (!upload->present[p]) continue;
-        glyph_path(path, sizeof(path), upload_directory, blit_glyph_part_names[p], NULL);
+        glyph_path(path, sizeof(path), job->upload_directory, blit_glyph_part_names[p], NULL);
         parts[p] = glyph_read_part(path, blit_glyph_part_max[p], &lengths[p], &missing_part);
         if (!parts[p] || lengths[p] != upload->lengths[p]) {
             glyph_fail(r, 500, "glyph_store_failed", "the staged %s part could not be read back",
@@ -1584,7 +1695,20 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
             goto done;
         }
     }
-    if (!glyph_set_verify(st, set, parts, lengths, NULL, r)) goto done;
+    /* FreeType of this thread's own: the store's is the loop's. The face
+       opened here is only checked; the loop opens the one it draws with
+       from the same bytes (glyph_store_open_face). */
+    if (FT_Init_FreeType(&library)) {
+        library = NULL;
+        glyph_fail(r, 500, "glyph_store_failed", "FreeType could not start");
+        goto done;
+    }
+    {
+        int verified = glyph_set_verify(library, st->keys, job->counted, set, parts, lengths, NULL, r);
+        if (set->face) FT_Done_Face(set->face);
+        set->face = NULL;
+        if (!verified) goto done;
+    }
     /* The ledger: retired names refused, kept names their codepoints, new
        glyph names the next ones in name order. */
     missing = malloc((set->names.glyphs ? set->names.glyphs : 1) * sizeof(*missing));
@@ -1592,6 +1716,7 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
         glyph_fail(r, 500, "glyph_store_failed", "out of memory");
         goto done;
     }
+    job->missing = missing;
     if (!glyph_set_codepoints(&st->ledger, set, 1, missing, &missing_count, r)) goto done;
     old = blit_glyph_store_find("system", id, strlen(id));
     sets_in_scope = (int)glyph_scope_sets(st, "system", &bytes, id);
@@ -1666,6 +1791,7 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
                                                 glyph_names_text(&set->names, set->names.names[missing[i]].name));
             }
             allocations_used = ledger_used;
+            job->retired_before = set->retired_count;
             for (i = 0; i < drops; ++i) {
                 char **grown;
                 ledger_used += (size_t)snprintf(ledger_text + ledger_used, ledger_capacity - ledger_used,
@@ -1685,13 +1811,28 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
             goto done;
         }
     }
+    job->missing_count = missing_count;
     glyph_set_alias_codepoints(set);
     if (!glyph_set_version(set, parts[BLIT_GLYPH_PART_NAMES], lengths[BLIT_GLYPH_PART_NAMES])) {
         glyph_fail(r, 500, "glyph_store_failed", "out of memory");
         goto done;
     }
+    /* The set table and the remap with this set in place of the one it
+       updates, built aside; nothing so far changed anything. */
+    job->sets = malloc((size_t)(st->count + 1) * sizeof(*job->sets));
+    if (!job->sets) {
+        glyph_fail(r, 500, "glyph_store_failed", "out of memory");
+        goto done;
+    }
+    for (s = 0; s < st->count; ++s) job->sets[job->count++] = st->sets[s] == old ? set : st->sets[s];
+    if (!old) job->sets[job->count++] = set;
+    set->loaded = 1;
+    if (!glyph_store_build(job->sets, job->count, &job->table, &job->remap, &job->remap_count)) {
+        glyph_fail(r, 500, "glyph_store_failed", "out of memory building the set table");
+        goto done;
+    }
     /* The verified bytes, written from memory into a set directory of
-       their own; the font's are the face's. */
+       their own; the font's are the ones the face will hold. */
     glyph_path(built, sizeof(built), st->root, "staging", "set-XXXXXX");
     if (mkdtemp(built) == NULL) {
         built[0] = '\0';
@@ -1716,22 +1857,21 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
     /* Durable before visible: the allocations first, then the rename. The
        retirements follow the rename, so a set left in place by a rename
        that did not happen never holds a name the ledger calls retired;
-       if they are lost, the next start writes them (glyph_store_repair). */
+       if they are lost, the next start writes them (glyph_store_repair).
+       The loop adds to the ledger in memory what was appended here
+       (blit_glyph_import_commit), whatever happens after. */
     glyph_path(ledger_path, sizeof(ledger_path), st->root, "ledger", NULL);
     if (allocations_used > 0) {
-        if (!glyph_ledger_append(&st->ledger, ledger_path, st->root, ledger_text, allocations_used)) {
+        if (!glyph_ledger_append_at(&job->ledger_size, ledger_path, st->root, ledger_text, allocations_used)) {
             glyph_fail(r, 507, "glyph_store_full", "the ledger could not be written");
             goto done;
         }
-        for (i = 0; i < missing_count; ++i) {
-            const char *name = glyph_names_text(&set->names, set->names.names[missing[i]].name);
-            glyph_ledger_add(&st->ledger, set->codepoints[missing[i]], "system", 6, id, strlen(id), name, strlen(name));
-        }
+        job->allocated_durable = 1;
     }
     glyph_path(system_dir, sizeof(system_dir), st->root, "system", NULL);
     glyph_path(target, sizeof(target), system_dir, id, NULL);
     if (old) {
-        exchanged = syscall(SYS_renameat2, AT_FDCWD, built, AT_FDCWD, target, RENAME_EXCHANGE) == 0;
+        int exchanged = syscall(SYS_renameat2, AT_FDCWD, built, AT_FDCWD, target, RENAME_EXCHANGE) == 0;
         if (!exchanged) {
             /* No RENAME_EXCHANGE here: the old one aside, then the new. */
             char aside[PATH_MAX];
@@ -1742,7 +1882,6 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
                 goto done;
             }
             snprintf(built, sizeof(built), "%s", aside);
-            exchanged = 1;
         }
     } else if (rename(built, target) < 0) {
         glyph_fail(r, 500, "glyph_store_failed", "the set could not be put in place");
@@ -1752,56 +1891,123 @@ static int blit_glyph_store_import(const char *id, const char *upload_directory,
     }
     glyph_sync_directory(system_dir);
     if (ledger_used > allocations_used &&
-        glyph_ledger_append(&st->ledger, ledger_path, st->root, ledger_text + allocations_used,
-                            ledger_used - allocations_used))
-        for (i = 0; i < set->retired_count; ++i) {
-            int retired = 0;
-            size_t count = 0, *selection = glyph_ledger_select(&st->ledger, "system", id, &count);
-            if (selection) glyph_ledger_lookup(&st->ledger, selection, count, set->retired[i], &retired);
-            free(selection);
-            if (!retired)
-                glyph_ledger_add(&st->ledger, 0, "system", 6, id, strlen(id), set->retired[i], strlen(set->retired[i]));
-        }
-    /* In place: the old set's directory (now at BUILT) goes, the new set
-       joins the table. */
-    if (old) {
-        int s;
-        for (s = 0; s < st->count; ++s)
-            if (st->sets[s] == old) st->sets[s] = set;
-    } else {
-        BlitGlyphInstalled **grown = realloc(st->sets, (size_t)(st->count + 1) * sizeof(*grown));
-        if (!grown) {
-            /* Installed on disk; it is served from the next start. */
-            glyph_fail(r, 500, "glyph_store_failed", "out of memory adding the set");
-            goto done;
-        }
-        st->sets = grown;
-        st->sets[st->count++] = set;
-    }
-    set->loaded = 1;
-    *allocated_out = missing_count;
-    blit_glyph_store_rebuild(st);
-    if (old) glyph_installed_free(old);
-    set = NULL;
-    ok = 1;
+        glyph_ledger_append_at(&job->ledger_size, ledger_path, st->root, ledger_text + allocations_used,
+                               ledger_used - allocations_used))
+        job->retired_durable = 1;
+    job->old = old;
+    job->ok = 1;
 done:
     for (p = 0; p < BLIT_GLYPH_PART_COUNT; ++p) free(parts[p]);
-    free(missing);
     free(ledger_text);
     free(record);
+    /* An update's old directory (exchanged out), or the new one not put
+       in place. */
     if (built[0]) glyph_remove_tree(built, 0);
-    glyph_installed_free(set);
-    (void)unused;
-    (void)none;
-    if (ok) ++st->imports;
-    else ++st->refusals;
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    st->last_import_us = (long)(t1.tv_sec - t0.tv_sec) * 1000000L + (t1.tv_nsec - t0.tv_nsec) / 1000L;
+    if (library) FT_Done_FreeType(library);
+    return job->ok;
+}
+
+/* On the loop: the face the raster draws with, in the store's FreeType,
+   from the bytes the worker verified (FreeType reads the same tables
+   again; it parses no glyph). */
+static int glyph_store_open_face(BlitGlyphStore *st, BlitGlyphInstalled *set)
+{
+    if (FT_New_Memory_Face(st->library, set->font, (FT_Long)set->font_length, 0, &set->face)) {
+        set->face = NULL;
+        return 0;
+    }
+    if (FT_Select_Charmap(set->face, FT_ENCODING_UNICODE)) {
+        FT_Done_Face(set->face);
+        set->face = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+/* On the loop, once prepare is done: memory made to say what the files
+   say, and the set swapped in (or, refused, everything of it freed).
+   Returns 1 when the set is in use. */
+static int blit_glyph_import_commit(BlitGlyphImport *job)
+{
+    BlitGlyphStore *st = &blit_glyph_store;
+    BlitGlyphInstalled *set = job->set;
+    BlitGlyphResult *r = &job->result;
+    struct timespec t0;
+    size_t i;
+    int ok = job->ok;
+
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    st->names_parsed += job->counted[0];
+    st->fonts_opened += job->counted[1];
+    st->ledger.size = job->ledger_size;
+    if (job->allocated_durable)
+        for (i = 0; i < job->missing_count; ++i) {
+            const char *name = glyph_names_text(&set->names, set->names.names[job->missing[i]].name);
+            glyph_ledger_add(&st->ledger, set->codepoints[job->missing[i]], "system", 6, job->id,
+                             strlen(job->id), name, strlen(name));
+        }
+    /* The drops alone: the worker kept only names the ledger had not
+       retired, and the set's earlier retirements are in it already, so no
+       search of the ledger on the loop. */
+    if (job->retired_durable)
+        for (i = job->retired_before; i < set->retired_count; ++i)
+            glyph_ledger_add(&st->ledger, 0, "system", 6, job->id, strlen(job->id), set->retired[i],
+                             strlen(set->retired[i]));
+    if (ok && !glyph_store_open_face(st, set)) {
+        /* Installed on disk; it is served from the next start. */
+        glyph_fail(r, 500, "glyph_store_failed", "the set is stored but its face could not be opened; "
+                   "it is served from the next start");
+        ok = 0;
+    }
+    if (ok) {
+        for (i = 0; i < job->remap_count; ++i)
+            if (!job->remap[i].face) job->remap[i].face = set->face;
+        free(st->sets);
+        st->sets = job->sets;
+        st->count = job->count;
+        glyph_store_install(st, job->table, job->remap, job->remap_count);
+        if (job->old) glyph_installed_free(job->old);
+        job->allocated = job->missing_count;
+        ++st->imports;
+    } else {
+        glyph_table_free(job->table);
+        free(job->remap);
+        free(job->sets);
+        glyph_installed_free(set);
+        ++st->refusals;
+    }
+    job->set = job->old = NULL;
+    job->sets = NULL;
+    job->table = NULL;
+    job->remap = NULL;
+    free(job->missing);
+    job->missing = NULL;
+    job->loop_us = glyph_elapsed_us(&t0);
+    job->import_us = glyph_elapsed_us(&job->started);
+    st->last_import_us = job->import_us;
+    return ok;
+}
+
+/* Both halves in turn, where waiting is fine (glyph_signature_gate, and
+   the server when no thread can be had). */
+static int blit_glyph_store_import(const char *id, const char *upload_directory,
+                                   const BlitGlyphUpload *upload, BlitGlyphResult *r,
+                                   size_t *allocated_out)
+{
+    BlitGlyphImport job;
+    int ok;
+    blit_glyph_import_begin(&job, id, upload_directory, upload);
+    blit_glyph_import_prepare(&job);
+    ok = blit_glyph_import_commit(&job);
+    *r = job.result;
+    *allocated_out = job.allocated;
     return ok;
 }
 
 /* Uninstall (section 9): the scope's copy goes; the ledger keeps every
-   allocation. */
+   allocation. Refused while an import is under way, from its first byte
+   to its answer: the store takes one change at a time, and the import's
+   worker reads the installed sets (Gitea #216). */
 static int blit_glyph_store_remove(const char *id, BlitGlyphResult *r)
 {
     BlitGlyphStore *st = &blit_glyph_store;
@@ -1810,6 +2016,10 @@ static int blit_glyph_store_remove(const char *id, BlitGlyphResult *r)
     int s;
     memset(r, 0, sizeof(*r));
     if (!st->ready) return glyph_fail(r, 503, "glyph_store_unavailable", "the glyph store is not in use: %s", st->reason);
+    if (st->importing)
+        return glyph_fail(r, 409, "glyph_import_active",
+                          "a glyph set is being imported; the store takes one change at a time; "
+                          "remove %s once the import has answered", id);
     set = blit_glyph_store_find("system", id, strlen(id));
     if (!set) return glyph_fail(r, 404, "glyph_set_not_installed", "%s is not installed in the system scope", id);
     glyph_path(system_dir, sizeof(system_dir), st->root, "system", NULL);
