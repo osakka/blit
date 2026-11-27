@@ -9,6 +9,36 @@ Linux DRM/KMS, composing frames on the GPU with OpenGL ES (Mesa, loaded at run
 time) or on the CPU, with no X11, Wayland or SDL underneath. For current facts
 read the README, `docs/architecture.md`, `docs/features.md` and `docs/api.md`.
 
+## 2026-11-27: 0.3.139 installable glyph sets (phase 2a), popups, import off the loop
+
+- **Installable glyph sets, phase 2a (ADR 0245).** The root-owned store at
+  /var/lib/blit/glyphs, the never-reused codepoint ledger
+  (U+102000-U+10FFFD) and signed system-scope imports through the API; a
+  set is drawn from its own font through the store's remap.
+- **Import off the server loop (#216).** Verifying and loading a set runs
+  on a worker thread; the loop is held 45-70 us for a 16 MiB font (was
+  0.6-0.7 s), so frames and the API keep going during an import.
+- **Popups (#215):** a WINDOW popup is placed from its parent's offset and
+  re-sent when the geometry changes; hit testing uses the same offset.
+- **update-live.sh (#211):** a refusal before anything is sent exits 2.
+- **Found by the release suites:** phase 2a had never run under
+  run-gates. The store refused a sticky scratch directory of the server's
+  own user's (now allowed, as root's was), and the KMS gates built without
+  blit_raster.c failed to link the installed-sets generation (now kept in
+  blit_font.c). Fixed in 29f235b3 before the release run.
+- **Gates:** `gates_all` 218/11, `gates_renderer` 92/1, `gates_renderer-gles`
+  70/0, all on 29f235b3, the shipped commit, the suite lock held for the
+  suites only (about 36 min). New: glyph_import_live_gate.
+- **Release environment (Debian 13):** built outside the lock;
+  update_pair_gate 16 cases and rollback_recovery_gate 12 cases passed;
+  the release was signed.
+- **Live, the mini PC:** now at 192.168.251.176 (a new network); deployed
+  with --rollback-to 0.3.137; verified, the smoke check passed (1 display
+  up, the login screen up, frames advancing 4 -> 17), no rollback needed.
+- **Published** to hibr-apt (99a4c42) under HOLD/done with hibr (longwire's
+  session was not running). 0.3.138 was never released: its build found the
+  stale rollback_recovery_gate expectation fixed in e3c6778e.
+
 ## 2026-11-23: 0.3.137 scroll bar styles
 
 - **Scroll bar styles (ADR 0237, amended).** Three scroll bar families as
