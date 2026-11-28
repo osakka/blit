@@ -1,7 +1,7 @@
 # ADR 0245: Installable glyph sets -- a root-owned store, a ledger of codepoints, per-user views
 
 - Status: proposed
-- Note: Phase 2a built (not yet released): the root-owned store and the
+- Note: Phase 2a released in Blit 0.3.139: the root-owned store and the
   ledger; the glyph-set manifest and its check in
   `src/blit_release_signature.h`, and `blit-sign glyphs`; root loading a
   verified set with FreeType through the remap table; `PUT`/`DELETE
